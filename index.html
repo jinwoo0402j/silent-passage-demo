@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Silent Passage Demo</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="stage">
+      <header class="hud">
+        <div>
+          <p class="eyebrow">Exploration Demo</p>
+          <h1>Silent Passage</h1>
+        </div>
+        <div class="status" aria-live="polite">
+          <span id="statusText">Press Enter to begin</span>
+        </div>
+      </header>
+
+      <div class="canvas-frame">
+        <canvas id="gameCanvas" width="1280" height="720" aria-label="2D exploration demo"></canvas>
+      </div>
+
+      <footer class="controls">
+        <span>Move: A / D or Arrow Keys</span>
+        <span>Jump: Space</span>
+        <span>Interact: E</span>
+        <span>Restart: R</span>
+      </footer>
+    </section>
+
+    <aside class="notes">
+      <section>
+        <h2>Goal</h2>
+        <p>Find the path forward. Follow anything that feels deliberate.</p>
+      </section>
+      <section>
+        <h2>Signals</h2>
+        <p>Lanterns mark safe curiosity. Hidden places respond when you get close or interact.</p>
+      </section>
+      <section>
+        <h2>Playtest Focus</h2>
+        <p>Does the world make you want to keep moving? Do you notice at least one optional discovery?</p>
+      </section>
+    </aside>
+  </main>
+
+  <script src="./main.js"></script>
+</body>
+</html>
