@@ -2,101 +2,15 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const statusText = document.getElementById("statusText");
 
+if (!window.LEVEL_DATA || !window.LEVEL_DATA.world || !window.LEVEL_DATA.level) {
+  throw new Error("LEVEL_DATA is missing. Load level-data.js before main.js.");
+}
+
+const { world: WORLD, level } = window.LEVEL_DATA;
+
 const VIEW = {
   width: canvas.width,
   height: canvas.height,
-};
-
-const WORLD = {
-  width: 3600,
-  height: 1080,
-  gravity: 2200,
-};
-
-const level = {
-  playerSpawn: { x: 160, y: 810 },
-  finishZone: { x: 3330, y: 550, width: 140, height: 210 },
-  platforms: [
-    { x: 0, y: 960, width: 700, height: 120, color: "#34495b" },
-    { x: 760, y: 885, width: 220, height: 38, color: "#43576d" },
-    { x: 1060, y: 825, width: 240, height: 38, color: "#4c6278" },
-    { x: 1410, y: 740, width: 260, height: 40, color: "#61788f" },
-    { x: 1710, y: 810, width: 210, height: 36, color: "#425768" },
-    { x: 1980, y: 710, width: 220, height: 36, color: "#5c7285" },
-    { x: 2270, y: 620, width: 180, height: 34, color: "#6b8297" },
-    { x: 2550, y: 700, width: 260, height: 36, color: "#51677a" },
-    { x: 2830, y: 640, width: 160, height: 34, color: "#6f899d" },
-    { x: 3010, y: 575, width: 220, height: 34, color: "#8098aa" },
-    { x: 3240, y: 690, width: 320, height: 390, color: "#31414f" },
-    { x: 420, y: 785, width: 115, height: 16, color: "#7f6548", hidden: true, revealId: "hidden-whisper" },
-    { x: 1180, y: 640, width: 120, height: 16, color: "#8a6a49" },
-    { x: 2090, y: 520, width: 130, height: 16, color: "#8e714c", hidden: true, revealId: "hidden-etching" },
-    { x: 2838, y: 490, width: 110, height: 14, color: "#977f5c" },
-  ],
-  landmarks: [
-    {
-      id: "bridge",
-      x: 910,
-      y: 805,
-      width: 44,
-      height: 78,
-      title: "Suspended beam",
-      body: "The safest route is not always the lowest one.",
-      autoRadius: 160,
-    },
-    {
-      id: "alcove",
-      x: 1240,
-      y: 570,
-      width: 62,
-      height: 68,
-      title: "Alcove",
-      body: "A narrow shelf rewards the jump you almost skip.",
-      autoRadius: 145,
-    },
-    {
-      id: "signal",
-      x: 2385,
-      y: 560,
-      width: 38,
-      height: 60,
-      title: "Signal lantern",
-      body: "Warm light means this direction matters.",
-      autoRadius: 170,
-    },
-  ],
-  interactables: [
-    {
-      id: "whisper",
-      x: 448,
-      y: 726,
-      width: 42,
-      height: 58,
-      title: "Whisper crack",
-      body: "Pressing closer reveals a foothold that should not be there.",
-      reveals: ["hidden-whisper"],
-    },
-    {
-      id: "etching",
-      x: 2105,
-      y: 450,
-      width: 48,
-      height: 68,
-      title: "Wall etching",
-      body: "The carving points up, not forward.",
-      reveals: ["hidden-etching"],
-    },
-    {
-      id: "gate",
-      x: 3090,
-      y: 507,
-      width: 52,
-      height: 68,
-      title: "Weathered gate",
-      body: "You made it to the threshold. Keep moving right to leave.",
-      reveals: [],
-    },
-  ],
 };
 
 const state = {
@@ -105,10 +19,12 @@ const state = {
   justPressed: new Set(),
   player: createPlayer(),
   cameraX: 0,
+  cameraY: 0,
   pulse: 0,
   particles: [],
   lastMessage: "Press Enter to begin",
   completionSeconds: 0,
+  debugVisible: false,
 };
 
 const discoveries = new Map();
@@ -136,9 +52,26 @@ function createPlayer() {
   };
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function syncCamera() {
+  const player = state.player;
+  const targetX = player.x - VIEW.width * 0.38;
+  const targetY = player.y - VIEW.height * 0.55;
+  state.cameraX = clamp(targetX, 0, WORLD.width - VIEW.width);
+  state.cameraY = clamp(targetY, 0, WORLD.height - VIEW.height);
+}
+
 window.addEventListener("keydown", (event) => {
-  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(event.code)) {
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "F2"].includes(event.code)) {
     event.preventDefault();
+  }
+
+  if (event.code === "F2") {
+    state.debugVisible = !state.debugVisible;
+    return;
   }
 
   if (!state.pressed.has(event.code)) {
@@ -153,7 +86,6 @@ window.addEventListener("keyup", (event) => {
 
 function resetRun() {
   state.player = createPlayer();
-  state.cameraX = 0;
   state.particles.length = 0;
   state.completionSeconds = 0;
   state.mode = "title";
@@ -162,6 +94,7 @@ function resetRun() {
   state.justPressed.clear();
   discoveries.forEach((_, key) => discoveries.set(key, false));
   revealed.clear();
+  syncCamera();
   updateStatus();
 }
 
@@ -254,7 +187,6 @@ function reveal(ids, x, y) {
 
 function resolvePlatforms(player, dt) {
   player.x += player.vx * dt;
-  let collidedHorizontally = false;
 
   for (const platform of level.platforms) {
     if (platform.hidden && !revealed.has(platform.revealId)) {
@@ -267,7 +199,6 @@ function resolvePlatforms(player, dt) {
         player.x = platform.x + platform.width;
       }
       player.vx = 0;
-      collidedHorizontally = true;
     }
   }
 
@@ -296,12 +227,7 @@ function resolvePlatforms(player, dt) {
     player.onGround = true;
   }
 
-  player.x = Math.max(0, Math.min(WORLD.width - player.width, player.x));
-  if (player.x === 0 || player.x === WORLD.width - player.width) {
-    collidedHorizontally = true;
-  }
-
-  return collidedHorizontally;
+  player.x = clamp(player.x, 0, WORLD.width - player.width);
 }
 
 function updatePlayer(dt) {
@@ -329,9 +255,12 @@ function updatePlayer(dt) {
   player.vy += WORLD.gravity * dt;
   resolvePlatforms(player, dt);
 
-  const cameraTarget = player.x - VIEW.width * 0.38;
-  state.cameraX += (cameraTarget - state.cameraX) * Math.min(1, dt * 4.2);
-  state.cameraX = Math.max(0, Math.min(WORLD.width - VIEW.width, state.cameraX));
+  const targetX = player.x - VIEW.width * 0.38;
+  const targetY = player.y - VIEW.height * 0.55;
+  state.cameraX += (targetX - state.cameraX) * Math.min(1, dt * 4.2);
+  state.cameraY += (targetY - state.cameraY) * Math.min(1, dt * 4.2);
+  state.cameraX = clamp(state.cameraX, 0, WORLD.width - VIEW.width);
+  state.cameraY = clamp(state.cameraY, 0, WORLD.height - VIEW.height);
 }
 
 function updateDiscoveries() {
@@ -423,7 +352,7 @@ function drawBackground() {
 
   for (let layer = 0; layer < 3; layer += 1) {
     const parallax = 0.12 + layer * 0.12;
-    const baseY = 470 + layer * 85;
+    const baseY = 470 + layer * 85 - state.cameraY * (0.02 + layer * 0.015);
     ctx.fillStyle = ["#122032", "#17283a", "#1d3243"][layer];
 
     ctx.beginPath();
@@ -439,11 +368,40 @@ function drawBackground() {
   }
 }
 
+function drawGrid() {
+  if (!state.debugVisible) {
+    return;
+  }
+
+  const gridSize = WORLD.gridSize || 40;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+  ctx.lineWidth = 1;
+
+  const startX = Math.floor(state.cameraX / gridSize) * gridSize;
+  const endX = state.cameraX + VIEW.width + gridSize;
+  for (let x = startX; x <= endX; x += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(x, state.cameraY);
+    ctx.lineTo(x, state.cameraY + VIEW.height);
+    ctx.stroke();
+  }
+
+  const startY = Math.floor(state.cameraY / gridSize) * gridSize;
+  const endY = state.cameraY + VIEW.height + gridSize;
+  for (let y = startY; y <= endY; y += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(state.cameraX, y);
+    ctx.lineTo(state.cameraX + VIEW.width, y);
+    ctx.stroke();
+  }
+}
+
 function drawWorld() {
   ctx.save();
-  ctx.translate(-state.cameraX, 0);
+  ctx.translate(-state.cameraX, -state.cameraY);
 
   drawGroundDecor();
+  drawGrid();
 
   for (const platform of level.platforms) {
     if (platform.hidden && !revealed.has(platform.revealId)) {
@@ -460,6 +418,7 @@ function drawWorld() {
   drawInteractables();
   drawPlayer();
   drawParticles();
+  drawDebugWorldLabels();
 
   ctx.restore();
 }
@@ -530,6 +489,12 @@ function drawPlayer() {
   ctx.fillRect(player.x + (player.facing === 1 ? 25 : 7), player.y + 15, 10, 10);
   ctx.fillStyle = "#d1b978";
   ctx.fillRect(player.x + 10, player.y + 42, 22, 8);
+
+  if (state.debugVisible) {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(player.x, player.y, player.width, player.height);
+  }
 }
 
 function drawParticles() {
@@ -541,6 +506,30 @@ function drawParticles() {
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+}
+
+function drawDebugWorldLabels() {
+  if (!state.debugVisible) {
+    return;
+  }
+
+  ctx.font = "14px Verdana";
+  ctx.fillStyle = "#f7f3df";
+
+  for (const [index, platform] of level.platforms.entries()) {
+    if (platform.hidden && !revealed.has(platform.revealId)) {
+      continue;
+    }
+    ctx.fillText(`P${index} ${platform.x},${platform.y}`, platform.x, platform.y - 8);
+  }
+
+  for (const landmark of level.landmarks) {
+    ctx.fillText(landmark.id, landmark.x, landmark.y - 8);
+  }
+
+  for (const thing of level.interactables) {
+    ctx.fillText(thing.id, thing.x, thing.y - 8);
+  }
 }
 
 function drawOverlay() {
@@ -587,11 +576,40 @@ function drawMessageBar() {
   ctx.fillText(state.lastMessage, 42, 58);
 }
 
+function drawDebugHud() {
+  if (!state.debugVisible) {
+    return;
+  }
+
+  const player = state.player;
+  const lines = [
+    "LEVEL DEBUG",
+    `player: ${Math.round(player.x)}, ${Math.round(player.y)}`,
+    `camera: ${Math.round(state.cameraX)}, ${Math.round(state.cameraY)}`,
+    `spawn: ${level.playerSpawn.x}, ${level.playerSpawn.y}`,
+    `finish: ${level.finishZone.x}, ${level.finishZone.y}`,
+    `grid: ${WORLD.gridSize || 40}`,
+    "edit level-data.js and reload",
+  ];
+
+  ctx.fillStyle = "rgba(4, 8, 12, 0.78)";
+  ctx.fillRect(24, 86, 270, 176);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.strokeRect(24, 86, 270, 176);
+  ctx.fillStyle = "#f5efe0";
+  ctx.font = "16px Verdana";
+
+  lines.forEach((line, index) => {
+    ctx.fillText(line, 42, 118 + index * 22);
+  });
+}
+
 function render() {
   drawBackground();
   drawWorld();
   drawMessageBar();
   drawOverlay();
+  drawDebugHud();
 }
 
 let previous = performance.now();
