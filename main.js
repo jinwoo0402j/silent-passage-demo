@@ -1,17 +1,40 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const statusText = document.getElementById("statusText");
+const editorToggleButton = document.getElementById("editorToggle");
+const copyLevelButton = document.getElementById("copyLevelButton");
+const resetDraftButton = document.getElementById("resetDraftButton");
+const editorTypeSelect = document.getElementById("editorType");
+const editorItemSelect = document.getElementById("editorItem");
+const editorJson = document.getElementById("editorJson");
+const applySelectionButton = document.getElementById("applySelectionButton");
+const deleteSelectionButton = document.getElementById("deleteSelectionButton");
+const addPlatformButton = document.getElementById("addPlatformButton");
+const addLandmarkButton = document.getElementById("addLandmarkButton");
+const addInteractableButton = document.getElementById("addInteractableButton");
+const editorStatus = document.getElementById("editorStatus");
 
 if (!window.LEVEL_DATA || !window.LEVEL_DATA.world || !window.LEVEL_DATA.level) {
   throw new Error("LEVEL_DATA is missing. Load level-data.js before main.js.");
 }
 
-const { world: WORLD, level } = window.LEVEL_DATA;
-
+const STORAGE_KEY = "silent-passage-level-draft-v1";
+const PLAYER_SIZE = { width: 42, height: 60 };
 const VIEW = {
   width: canvas.width,
   height: canvas.height,
 };
+const WORLD = window.LEVEL_DATA.world;
+const DEFAULT_LEVEL = deepClone(window.LEVEL_DATA.level);
+const level = loadLevelDraft();
+
+const EDITOR_TYPES = [
+  { key: "playerSpawn", label: "Player Spawn" },
+  { key: "finishZone", label: "Finish Zone" },
+  { key: "platforms", label: "Platforms" },
+  { key: "landmarks", label: "Landmarks" },
+  { key: "interactables", label: "Interactables" },
+];
 
 const state = {
   mode: "title",
@@ -25,24 +48,82 @@ const state = {
   lastMessage: "Press Enter to begin",
   completionSeconds: 0,
   debugVisible: false,
+  editorVisible: false,
+  editorDragging: false,
+  editorDragMoved: false,
+  editorDragOffsetX: 0,
+  editorDragOffsetY: 0,
+  selectedType: "platforms",
+  selectedIndex: 0,
 };
 
 const discoveries = new Map();
 const revealed = new Set();
 
-for (const landmark of level.landmarks) {
-  discoveries.set(landmark.id, false);
+function deepClone(value) {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
 }
-for (const thing of level.interactables) {
-  discoveries.set(thing.id, false);
+
+function loadLevelDraft() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return deepClone(DEFAULT_LEVEL);
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return deepClone(DEFAULT_LEVEL);
+    }
+    return {
+      playerSpawn: parsed.playerSpawn || deepClone(DEFAULT_LEVEL.playerSpawn),
+      finishZone: parsed.finishZone || deepClone(DEFAULT_LEVEL.finishZone),
+      platforms: Array.isArray(parsed.platforms) ? parsed.platforms : deepClone(DEFAULT_LEVEL.platforms),
+      landmarks: Array.isArray(parsed.landmarks) ? parsed.landmarks : deepClone(DEFAULT_LEVEL.landmarks),
+      interactables: Array.isArray(parsed.interactables) ? parsed.interactables : deepClone(DEFAULT_LEVEL.interactables),
+    };
+  } catch {
+    return deepClone(DEFAULT_LEVEL);
+  }
+}
+
+function saveLevelDraft(message) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(level, null, 2));
+    setEditorStatus(message);
+  } catch {
+    setEditorStatus("Draft could not be written to local storage.");
+  }
+}
+
+function setEditorStatus(message) {
+  editorStatus.textContent = message;
+}
+
+function resetDraftToDefault() {
+  const reset = deepClone(DEFAULT_LEVEL);
+  level.playerSpawn = reset.playerSpawn;
+  level.finishZone = reset.finishZone;
+  level.platforms = reset.platforms;
+  level.landmarks = reset.landmarks;
+  level.interactables = reset.interactables;
+  window.localStorage.removeItem(STORAGE_KEY);
+  rebuildDiscoveries();
+  state.selectedType = "platforms";
+  state.selectedIndex = 0;
+  resetRun();
+  syncEditorUI();
+  setEditorStatus("Draft reset to the committed level data.");
 }
 
 function createPlayer() {
   return {
     x: level.playerSpawn.x,
     y: level.playerSpawn.y,
-    width: 42,
-    height: 60,
+    width: PLAYER_SIZE.width,
+    height: PLAYER_SIZE.height,
     vx: 0,
     vy: 0,
     speed: 380,
@@ -52,8 +133,23 @@ function createPlayer() {
   };
 }
 
+function rebuildDiscoveries() {
+  discoveries.clear();
+  for (const landmark of level.landmarks) {
+    discoveries.set(landmark.id, false);
+  }
+  for (const thing of level.interactables) {
+    discoveries.set(thing.id, false);
+  }
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function snap(value) {
+  const grid = WORLD.gridSize || 40;
+  return Math.round(value / grid) * grid;
 }
 
 function syncCamera() {
@@ -64,13 +160,392 @@ function syncCamera() {
   state.cameraY = clamp(targetY, 0, WORLD.height - VIEW.height);
 }
 
+function getCollection(type) {
+  if (type === "platforms" || type === "landmarks" || type === "interactables") {
+    return level[type];
+  }
+  return null;
+}
+
+function getSelectedObject() {
+  const collection = getCollection(state.selectedType);
+  if (collection) {
+    return collection[state.selectedIndex] || null;
+  }
+  return level[state.selectedType];
+}
+
+function getTypeLabel(type) {
+  return EDITOR_TYPES.find((entry) => entry.key === type)?.label || type;
+}
+
+function getItemLabel(type, item, index) {
+  if (!item) {
+    return "Missing";
+  }
+  if (type === "platforms") {
+    return `P${index} (${item.x}, ${item.y})`;
+  }
+  if (type === "landmarks" || type === "interactables") {
+    return `${item.id || `${type}-${index + 1}`} (${item.x}, ${item.y})`;
+  }
+  return getTypeLabel(type);
+}
+
+function normalizeObject(type, value, index) {
+  const numberOr = (input, fallback) => {
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const stringOr = (input, fallback) => typeof input === "string" && input.length > 0 ? input : fallback;
+
+  if (type === "playerSpawn") {
+    return {
+      x: numberOr(value.x, level.playerSpawn.x),
+      y: numberOr(value.y, level.playerSpawn.y),
+    };
+  }
+
+  if (type === "finishZone") {
+    return {
+      x: numberOr(value.x, level.finishZone.x),
+      y: numberOr(value.y, level.finishZone.y),
+      width: numberOr(value.width, level.finishZone.width),
+      height: numberOr(value.height, level.finishZone.height),
+    };
+  }
+
+  if (type === "platforms") {
+    return {
+      x: numberOr(value.x, 0),
+      y: numberOr(value.y, 0),
+      width: Math.max(20, numberOr(value.width, 160)),
+      height: Math.max(10, numberOr(value.height, 24)),
+      color: stringOr(value.color, "#61788f"),
+      hidden: Boolean(value.hidden),
+      ...(value.revealId ? { revealId: String(value.revealId) } : {}),
+    };
+  }
+
+  if (type === "landmarks") {
+    return {
+      id: stringOr(value.id, `landmark-${index + 1}`),
+      x: numberOr(value.x, 0),
+      y: numberOr(value.y, 0),
+      width: Math.max(20, numberOr(value.width, 44)),
+      height: Math.max(20, numberOr(value.height, 64)),
+      title: stringOr(value.title, `Landmark ${index + 1}`),
+      body: stringOr(value.body, "A point of interest."),
+      autoRadius: Math.max(0, numberOr(value.autoRadius, 160)),
+    };
+  }
+
+  if (type === "interactables") {
+    return {
+      id: stringOr(value.id, `interactable-${index + 1}`),
+      x: numberOr(value.x, 0),
+      y: numberOr(value.y, 0),
+      width: Math.max(20, numberOr(value.width, 48)),
+      height: Math.max(20, numberOr(value.height, 64)),
+      title: stringOr(value.title, `Interactable ${index + 1}`),
+      body: stringOr(value.body, "Interactive object."),
+      reveals: Array.isArray(value.reveals) ? value.reveals.map(String) : [],
+    };
+  }
+
+  return value;
+}
+
+function setSelectedObject(nextValue) {
+  const normalized = normalizeObject(state.selectedType, nextValue, state.selectedIndex);
+  const collection = getCollection(state.selectedType);
+
+  if (collection) {
+    collection[state.selectedIndex] = normalized;
+  } else {
+    level[state.selectedType] = normalized;
+  }
+
+  rebuildDiscoveries();
+  if (state.selectedType === "playerSpawn") {
+    state.player.x = level.playerSpawn.x;
+    state.player.y = level.playerSpawn.y;
+    syncCamera();
+  }
+  syncEditorUI();
+}
+
+function syncEditorTypeOptions() {
+  editorTypeSelect.innerHTML = "";
+  EDITOR_TYPES.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.key;
+    option.textContent = entry.label;
+    editorTypeSelect.appendChild(option);
+  });
+}
+
+function syncEditorItemOptions() {
+  const type = state.selectedType;
+  const collection = getCollection(type);
+  editorItemSelect.innerHTML = "";
+
+  if (collection) {
+    collection.forEach((item, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = getItemLabel(type, item, index);
+      editorItemSelect.appendChild(option);
+    });
+    state.selectedIndex = clamp(state.selectedIndex, 0, Math.max(0, collection.length - 1));
+    editorItemSelect.disabled = collection.length === 0;
+    if (collection.length > 0) {
+      editorItemSelect.value = String(state.selectedIndex);
+    }
+  } else {
+    const option = document.createElement("option");
+    option.value = "0";
+    option.textContent = getTypeLabel(type);
+    editorItemSelect.appendChild(option);
+    editorItemSelect.disabled = true;
+    state.selectedIndex = 0;
+  }
+}
+
+function syncSelectionTextarea() {
+  const selected = getSelectedObject();
+  editorJson.value = selected ? JSON.stringify(selected, null, 2) : "";
+  deleteSelectionButton.disabled = !getCollection(state.selectedType);
+}
+
+function syncEditorUI() {
+  document.body.classList.toggle("editor-active", state.editorVisible);
+  editorToggleButton.textContent = state.editorVisible ? "Close Design Mode" : "Open Design Mode";
+  editorTypeSelect.value = state.selectedType;
+  syncEditorItemOptions();
+  syncSelectionTextarea();
+}
+
+function selectEditorTarget(type, index = 0) {
+  state.selectedType = type;
+  state.selectedIndex = index;
+  syncEditorUI();
+}
+
+function createNewObject(type) {
+  const centerX = snap(state.cameraX + VIEW.width * 0.5);
+  const centerY = snap(state.cameraY + VIEW.height * 0.6);
+
+  if (type === "platforms") {
+    return {
+      x: centerX,
+      y: centerY,
+      width: 160,
+      height: 24,
+      color: "#708596",
+      hidden: false,
+    };
+  }
+
+  if (type === "landmarks") {
+    return {
+      id: `landmark-${level.landmarks.length + 1}`,
+      x: centerX,
+      y: centerY - 80,
+      width: 44,
+      height: 72,
+      title: `Landmark ${level.landmarks.length + 1}`,
+      body: "New visual discovery point.",
+      autoRadius: 160,
+    };
+  }
+
+  return {
+    id: `interactable-${level.interactables.length + 1}`,
+    x: centerX,
+    y: centerY - 80,
+    width: 48,
+    height: 64,
+    title: `Interactable ${level.interactables.length + 1}`,
+    body: "New interaction.",
+    reveals: [],
+  };
+}
+
+function addObject(type) {
+  const collection = getCollection(type);
+  const next = normalizeObject(type, createNewObject(type), collection.length);
+  collection.push(next);
+  rebuildDiscoveries();
+  selectEditorTarget(type, collection.length - 1);
+  saveLevelDraft(`${getTypeLabel(type)} added to the draft.`);
+}
+
+function deleteSelectedObject() {
+  const collection = getCollection(state.selectedType);
+  if (!collection || collection.length === 0) {
+    return;
+  }
+  collection.splice(state.selectedIndex, 1);
+  rebuildDiscoveries();
+  state.selectedIndex = Math.max(0, state.selectedIndex - 1);
+  syncEditorUI();
+  saveLevelDraft(`${getTypeLabel(state.selectedType)} removed from the draft.`);
+}
+
+function copyFullLevel() {
+  const exportText = `window.LEVEL_DATA = ${JSON.stringify({ world: WORLD, level }, null, 2)};\n`;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(exportText)
+      .then(() => setEditorStatus("Copied the full level payload. Paste it into level-data.js if you want to commit it."))
+      .catch(() => setEditorStatus("Clipboard write failed. Copy the JSON from the browser console instead."));
+    return;
+  }
+  setEditorStatus("Clipboard API is unavailable in this browser.");
+}
+
+function toggleEditorMode(forceValue) {
+  state.editorVisible = typeof forceValue === "boolean" ? forceValue : !state.editorVisible;
+  if (state.editorVisible) {
+    state.debugVisible = true;
+    setEditorStatus("Design mode on. Drag objects in the canvas or edit the selection JSON.");
+  } else {
+    state.editorDragging = false;
+    setEditorStatus("Design mode off.");
+  }
+  syncEditorUI();
+}
+
+function getCanvasWorldPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (event.clientX - rect.left) * scaleX + state.cameraX,
+    y: (event.clientY - rect.top) * scaleY + state.cameraY,
+  };
+}
+
+function pointInRect(point, rect) {
+  return (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.width &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
+  );
+}
+
+function getEditorTargets() {
+  const targets = [];
+
+  targets.push({
+    type: "playerSpawn",
+    index: 0,
+    rect: {
+      x: level.playerSpawn.x,
+      y: level.playerSpawn.y,
+      width: PLAYER_SIZE.width,
+      height: PLAYER_SIZE.height,
+    },
+  });
+
+  targets.push({
+    type: "finishZone",
+    index: 0,
+    rect: level.finishZone,
+  });
+
+  level.platforms.forEach((platform, index) => {
+    targets.push({ type: "platforms", index, rect: platform });
+  });
+  level.landmarks.forEach((landmark, index) => {
+    targets.push({ type: "landmarks", index, rect: landmark });
+  });
+  level.interactables.forEach((item, index) => {
+    targets.push({ type: "interactables", index, rect: item });
+  });
+
+  return targets;
+}
+
+function getTargetAtPoint(point) {
+  const priority = ["interactables", "landmarks", "finishZone", "playerSpawn", "platforms"];
+  const targets = getEditorTargets().filter((target) => pointInRect(point, target.rect));
+  targets.sort((left, right) => priority.indexOf(left.type) - priority.indexOf(right.type));
+  return targets[0] || null;
+}
+
+function applyDragPosition(point) {
+  const selected = getSelectedObject();
+  if (!selected) {
+    return;
+  }
+
+  const width = selected.width || PLAYER_SIZE.width;
+  const height = selected.height || PLAYER_SIZE.height;
+  selected.x = clamp(snap(point.x - state.editorDragOffsetX), 0, WORLD.width - width);
+  selected.y = clamp(snap(point.y - state.editorDragOffsetY), 0, WORLD.height - height);
+
+  if (state.selectedType === "playerSpawn") {
+    state.player.x = selected.x;
+    state.player.y = selected.y;
+    syncCamera();
+  }
+
+  syncSelectionTextarea();
+}
+
+canvas.addEventListener("mousedown", (event) => {
+  if (!state.editorVisible) {
+    return;
+  }
+
+  const point = getCanvasWorldPoint(event);
+  const target = getTargetAtPoint(point);
+  if (!target) {
+    return;
+  }
+
+  selectEditorTarget(target.type, target.index);
+  state.editorDragging = true;
+  state.editorDragMoved = false;
+  state.editorDragOffsetX = point.x - target.rect.x;
+  state.editorDragOffsetY = point.y - target.rect.y;
+});
+
+window.addEventListener("mousemove", (event) => {
+  if (!state.editorVisible || !state.editorDragging) {
+    return;
+  }
+
+  const point = getCanvasWorldPoint(event);
+  applyDragPosition(point);
+  state.editorDragMoved = true;
+});
+
+window.addEventListener("mouseup", () => {
+  if (!state.editorDragging) {
+    return;
+  }
+
+  state.editorDragging = false;
+  if (state.editorDragMoved) {
+    saveLevelDraft(`${getTypeLabel(state.selectedType)} moved in the draft.`);
+  }
+});
+
 window.addEventListener("keydown", (event) => {
-  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "F2"].includes(event.code)) {
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "F2", "F3"].includes(event.code)) {
     event.preventDefault();
   }
 
   if (event.code === "F2") {
     state.debugVisible = !state.debugVisible;
+    return;
+  }
+
+  if (event.code === "F3") {
+    toggleEditorMode();
     return;
   }
 
@@ -84,6 +559,30 @@ window.addEventListener("keyup", (event) => {
   state.pressed.delete(event.code);
 });
 
+editorToggleButton.addEventListener("click", () => toggleEditorMode());
+copyLevelButton.addEventListener("click", () => copyFullLevel());
+resetDraftButton.addEventListener("click", () => resetDraftToDefault());
+applySelectionButton.addEventListener("click", () => {
+  try {
+    const parsed = JSON.parse(editorJson.value);
+    setSelectedObject(parsed);
+    saveLevelDraft(`${getTypeLabel(state.selectedType)} JSON applied.`);
+  } catch {
+    setEditorStatus("Selection JSON is invalid. Fix it and apply again.");
+  }
+});
+deleteSelectionButton.addEventListener("click", () => deleteSelectedObject());
+addPlatformButton.addEventListener("click", () => addObject("platforms"));
+addLandmarkButton.addEventListener("click", () => addObject("landmarks"));
+addInteractableButton.addEventListener("click", () => addObject("interactables"));
+editorTypeSelect.addEventListener("change", (event) => {
+  selectEditorTarget(event.target.value, 0);
+});
+editorItemSelect.addEventListener("change", (event) => {
+  state.selectedIndex = Number(event.target.value);
+  syncEditorUI();
+});
+
 function resetRun() {
   state.player = createPlayer();
   state.particles.length = 0;
@@ -92,7 +591,7 @@ function resetRun() {
   state.lastMessage = "Press Enter to begin";
   state.pressed.clear();
   state.justPressed.clear();
-  discoveries.forEach((_, key) => discoveries.set(key, false));
+  rebuildDiscoveries();
   revealed.clear();
   syncCamera();
   updateStatus();
@@ -328,11 +827,11 @@ function update(dt) {
     return;
   }
 
-  if (state.mode === "title" && consumePress("Enter")) {
+  if (!state.editorVisible && state.mode === "title" && consumePress("Enter")) {
     startRun();
   }
 
-  if (state.mode === "playing") {
+  if (!state.editorVisible && state.mode === "playing") {
     updatePlayer(dt);
     updateDiscoveries();
     updateFinish(dt);
@@ -396,33 +895,6 @@ function drawGrid() {
   }
 }
 
-function drawWorld() {
-  ctx.save();
-  ctx.translate(-state.cameraX, -state.cameraY);
-
-  drawGroundDecor();
-  drawGrid();
-
-  for (const platform of level.platforms) {
-    if (platform.hidden && !revealed.has(platform.revealId)) {
-      continue;
-    }
-    ctx.fillStyle = platform.color;
-    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.fillRect(platform.x, platform.y, platform.width, 6);
-  }
-
-  drawFinishZone();
-  drawLandmarks();
-  drawInteractables();
-  drawPlayer();
-  drawParticles();
-  drawDebugWorldLabels();
-
-  ctx.restore();
-}
-
 function drawGroundDecor() {
   for (let x = 40; x < WORLD.width; x += 240) {
     const screenX = x - state.cameraX;
@@ -481,6 +953,22 @@ function drawFinishZone() {
   ctx.fillRect(level.finishZone.x + 16, level.finishZone.y, 18, level.finishZone.height);
 }
 
+function drawSpawnMarker() {
+  if (!state.editorVisible) {
+    return;
+  }
+
+  ctx.strokeStyle = "#8fd0ff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(level.playerSpawn.x, level.playerSpawn.y, PLAYER_SIZE.width, PLAYER_SIZE.height);
+  ctx.beginPath();
+  ctx.moveTo(level.playerSpawn.x + PLAYER_SIZE.width / 2, level.playerSpawn.y - 12);
+  ctx.lineTo(level.playerSpawn.x + PLAYER_SIZE.width / 2, level.playerSpawn.y + PLAYER_SIZE.height + 12);
+  ctx.moveTo(level.playerSpawn.x - 12, level.playerSpawn.y + PLAYER_SIZE.height / 2);
+  ctx.lineTo(level.playerSpawn.x + PLAYER_SIZE.width + 12, level.playerSpawn.y + PLAYER_SIZE.height / 2);
+  ctx.stroke();
+}
+
 function drawPlayer() {
   const player = state.player;
   ctx.fillStyle = "#f5efe0";
@@ -490,7 +978,7 @@ function drawPlayer() {
   ctx.fillStyle = "#d1b978";
   ctx.fillRect(player.x + 10, player.y + 42, 22, 8);
 
-  if (state.debugVisible) {
+  if (state.debugVisible || state.editorVisible) {
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
     ctx.strokeRect(player.x, player.y, player.width, player.height);
@@ -530,10 +1018,59 @@ function drawDebugWorldLabels() {
   for (const thing of level.interactables) {
     ctx.fillText(thing.id, thing.x, thing.y - 8);
   }
+
+  ctx.fillText(`spawn ${level.playerSpawn.x},${level.playerSpawn.y}`, level.playerSpawn.x, level.playerSpawn.y - 8);
+  ctx.fillText(`finish ${level.finishZone.x},${level.finishZone.y}`, level.finishZone.x, level.finishZone.y - 8);
+}
+
+function drawEditorSelection() {
+  if (!state.editorVisible) {
+    return;
+  }
+
+  const selected = getSelectedObject();
+  if (!selected) {
+    return;
+  }
+
+  const width = selected.width || PLAYER_SIZE.width;
+  const height = selected.height || PLAYER_SIZE.height;
+  ctx.strokeStyle = "#f0d082";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(selected.x, selected.y, width, height);
+}
+
+function drawWorld() {
+  ctx.save();
+  ctx.translate(-state.cameraX, -state.cameraY);
+
+  drawGroundDecor();
+  drawGrid();
+
+  for (const platform of level.platforms) {
+    if (platform.hidden && !revealed.has(platform.revealId)) {
+      continue;
+    }
+    ctx.fillStyle = platform.color;
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(platform.x, platform.y, platform.width, 6);
+  }
+
+  drawFinishZone();
+  drawLandmarks();
+  drawInteractables();
+  drawSpawnMarker();
+  drawPlayer();
+  drawParticles();
+  drawEditorSelection();
+  drawDebugWorldLabels();
+
+  ctx.restore();
 }
 
 function drawOverlay() {
-  if (state.mode !== "title" && state.mode !== "completed") {
+  if (state.editorVisible || (state.mode !== "title" && state.mode !== "completed")) {
     return;
   }
 
@@ -565,7 +1102,7 @@ function drawOverlay() {
 }
 
 function drawMessageBar() {
-  if (state.mode !== "playing") {
+  if (state.mode !== "playing" && !state.editorVisible) {
     return;
   }
 
@@ -573,29 +1110,33 @@ function drawMessageBar() {
   ctx.fillRect(24, 24, VIEW.width - 48, 54);
   ctx.fillStyle = "#f2ede2";
   ctx.font = "18px Verdana";
-  ctx.fillText(state.lastMessage, 42, 58);
+  ctx.fillText(state.editorVisible ? "Design mode active. Drag, edit JSON, copy the full level when ready." : state.lastMessage, 42, 58);
 }
 
 function drawDebugHud() {
-  if (!state.debugVisible) {
+  if (!state.debugVisible && !state.editorVisible) {
     return;
   }
 
   const player = state.player;
+  const selected = getSelectedObject();
+  const selectedLine = selected
+    ? `${state.selectedType}${getCollection(state.selectedType) ? `[${state.selectedIndex}]` : ""}: ${Math.round(selected.x)}, ${Math.round(selected.y)}`
+    : "selection: none";
   const lines = [
-    "LEVEL DEBUG",
+    state.editorVisible ? "LEVEL DESIGN" : "LEVEL DEBUG",
     `player: ${Math.round(player.x)}, ${Math.round(player.y)}`,
     `camera: ${Math.round(state.cameraX)}, ${Math.round(state.cameraY)}`,
     `spawn: ${level.playerSpawn.x}, ${level.playerSpawn.y}`,
     `finish: ${level.finishZone.x}, ${level.finishZone.y}`,
     `grid: ${WORLD.gridSize || 40}`,
-    "edit level-data.js and reload",
+    selectedLine,
   ];
 
   ctx.fillStyle = "rgba(4, 8, 12, 0.78)";
-  ctx.fillRect(24, 86, 270, 176);
+  ctx.fillRect(24, 86, 340, 176);
   ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-  ctx.strokeRect(24, 86, 270, 176);
+  ctx.strokeRect(24, 86, 340, 176);
   ctx.fillStyle = "#f5efe0";
   ctx.font = "16px Verdana";
 
@@ -621,5 +1162,8 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+rebuildDiscoveries();
+syncEditorTypeOptions();
 resetRun();
+syncEditorUI();
 requestAnimationFrame(loop);

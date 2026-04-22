@@ -16,6 +16,7 @@ Fast HTML demo for validating a side-view exploration loop in the browser.
 - `E`: interact
 - `R`: restart
 - `F2`: toggle level debug overlay
+- `F3`: toggle design mode
 
 ## Local run
 
@@ -60,7 +61,16 @@ Use `F2` in the browser while testing to show:
 - a world grid
 - object labels and platform coordinates
 
-That is the intended short loop for level design right now: edit `level-data.js`, reload, test immediately.
+Use `F3` to open design mode:
+
+- click any platform, landmark, interactable, spawn, or finish zone to select it
+- drag the selected object directly in the canvas
+- edit the selected object in the JSON panel
+- add or delete level objects
+- copy the full current draft as a ready-to-paste `window.LEVEL_DATA = ...;` payload
+
+Draft edits are stored in browser local storage so you can iterate without touching the repo immediately.  
+When the layout feels right, copy the full level payload and replace the contents of `level-data.js`.
 
 ## Files
 
