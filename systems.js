@@ -1,0 +1,2377 @@
+import {
+  MOVEMENT_STATES,
+  SCENES,
+  createRunState,
+  hasUnlocked,
+  saveMetaState,
+} from "./state.js";
+import {
+  approach,
+  clamp,
+  createRect,
+  distanceBetween,
+  getCenter,
+  lerp,
+  rectsOverlap,
+  uniquePush,
+} from "./utils.js";
+
+const EPSILON = 0.01;
+const CAMERA_SCREEN_WIDTH = 1280;
+const CAMERA_SCREEN_HEIGHT = 720;
+const CAMERA_FOCUS_X = 420 / CAMERA_SCREEN_WIDTH;
+const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
+const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
+const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
+const CROUCH_KEYS = ["ArrowDown", "KeyS"];
+const JUMP_KEYS = ["KeyC", "Space"];
+const DASH_KEYS = ["KeyX"];
+const INTERACT_KEYS = ["KeyZ", "KeyE"];
+const ATTACK_KEYS = ["KeyV", "KeyF"];
+const CONFIRM_KEYS = ["KeyC", "Enter"];
+const DEBUG_KEYS = ["F3", "Backquote"];
+const RESTART_KEYS = ["KeyR"];
+
+function isMovementLab(data) {
+  return data.world.mode === "movementLab";
+}
+
+function isEntityDisabled(entity) {
+  return !entity || entity.disabled || entity.state === "disabled" || entity.dead;
+}
+
+function isPressed(state, code) {
+  return state.pressed.has(code);
+}
+
+function isEitherPressed(state, codes) {
+  return codes.some((code) => isPressed(state, code));
+}
+
+function consumePress(state, code) {
+  if (state.justPressed.has(code)) {
+    state.justPressed.delete(code);
+    return true;
+  }
+  return false;
+}
+
+function consumeEitherPress(state, codes) {
+  return codes.some((code) => consumePress(state, code));
+}
+
+function setStatus(state, message) {
+  state.statusText = message;
+}
+
+function pushNotice(run, message, duration = 3.4) {
+  run.message = message;
+  run.noticeTimer = duration;
+}
+
+function pushClue(run, key, message) {
+  if (run.clueSeen.includes(key)) {
+    return;
+  }
+  run.clueSeen.push(key);
+  run.clueLog.unshift(message);
+  run.clueLog = run.clueLog.slice(0, 6);
+}
+
+function spawnParticles(run, x, y, amount, color) {
+  for (let index = 0; index < amount; index += 1) {
+    run.particles.push({
+      x,
+      y,
+      vx: (Math.random() - 0.5) * 200,
+      vy: -Math.random() * 180 - 30,
+      life: 0.5 + Math.random() * 0.45,
+      color,
+      radius: 3 + Math.random() * 3.5,
+    });
+  }
+}
+
+function pushAfterimage(run, player) {
+  run.afterimages.push({
+    x: player.x,
+    y: player.y,
+    width: player.width,
+    height: player.height,
+    facing: player.facing,
+    life: 0.18,
+  });
+}
+
+function updateEffects(run, dt) {
+  run.attackFx = run.attackFx.filter((effect) => {
+    effect.life -= dt;
+    return effect.life > 0;
+  });
+
+  run.afterimages = run.afterimages.filter((image) => {
+    image.life -= dt;
+    return image.life > 0;
+  });
+
+  run.particles = run.particles.filter((particle) => {
+    particle.life -= dt;
+    particle.x += particle.vx * dt;
+    particle.y += particle.vy * dt;
+    particle.vy += 360 * dt;
+    return particle.life > 0;
+  });
+
+  if (run.noticeTimer > 0) {
+    run.noticeTimer = Math.max(0, run.noticeTimer - dt);
+  }
+}
+
+function getCameraConfig(data) {
+  return data.world.camera || {};
+}
+
+function isBraceCameraState(player) {
+  return Boolean(
+    player.braceHolding ||
+    player.braceReleaseTimer > 0 ||
+    player.braceActive ||
+    player.braceHoldActive
+  );
+}
+
+function getWallRunCameraDirection(player) {
+  const wallDirection = player.wallRunDirection || player.wallDirection || 0;
+  return wallDirection === 0 ? 0 : -wallDirection;
+}
+
+function getCameraLookDirection(player, run, config) {
+  if (player.dashTimer > 0 && config.dashAffectsCamera === false) {
+    return run.cameraLookDirection || player.facing || 1;
+  }
+  if (isBraceCameraState(player) && config.braceAffectsCamera === false) {
+    return run.cameraLookDirection || player.facing || 1;
+  }
+
+  if (player.wallRunActive) {
+    const wallRunCameraDirection = getWallRunCameraDirection(player);
+    if (wallRunCameraDirection !== 0) {
+      return wallRunCameraDirection;
+    }
+  }
+
+  const speedThreshold = config.directionSpeedThreshold ?? 70;
+  if (Math.abs(player.vx) > speedThreshold) {
+    return Math.sign(player.vx);
+  }
+  if (isBraceCameraState(player) && player.braceHoldLaunchDirection !== 0) {
+    return player.braceHoldLaunchDirection;
+  }
+  return run.cameraLookDirection || player.facing || 1;
+}
+
+function isSprintCameraActive(player, config) {
+  const minSpeed = config.sprintCameraMinSpeed ?? 260;
+  return (
+    Math.abs(player.vx) >= minSpeed &&
+    (
+      player.sprintActive ||
+      player.sprintCharge > 0.55 ||
+      player.sprintJumpCarryTimer > 0
+    )
+  );
+}
+
+function getCameraLookAhead(player, config) {
+  if (player.dashTimer > 0 && config.dashAffectsCamera !== false) {
+    return config.dashLookAhead ?? 0.18;
+  }
+  if (player.wallRunActive) {
+    return config.wallRunLookAhead ?? 0;
+  }
+  if (isBraceCameraState(player) && config.braceAffectsCamera !== false) {
+    return config.braceLookAhead ?? 0.14;
+  }
+  const sprintCameraActive = isSprintCameraActive(player, config);
+  if (!player.onGround && player.sprintJumpCarryTimer > 0 && sprintCameraActive) {
+    return config.sprintJumpLookAhead ?? 0.25;
+  }
+  if (sprintCameraActive) {
+    return player.onGround
+      ? (config.sprintLookAhead ?? 0.18)
+      : (config.sprintJumpLookAhead ?? 0.25);
+  }
+  if (!player.onGround && player.vy > 220) {
+    return config.fallLookAhead ?? 0.12;
+  }
+  return config.walkLookAhead ?? 0.08;
+}
+
+function getCameraVerticalFocus(player, config) {
+  const neutralFocusY = config.neutralFocusY ?? 0.5;
+  if (player.wallRunActive) {
+    return neutralFocusY + (config.wallRunUpLookAhead ?? 0.22);
+  }
+  if (player.wallRunBoostActive) {
+    return neutralFocusY + (config.upwardFocusOffset ?? 0.18);
+  }
+  if (isBraceCameraState(player)) {
+    return neutralFocusY + (config.upwardFocusOffset ?? 0.18) * 0.7;
+  }
+  if (!player.onGround && player.vy < -240) {
+    return neutralFocusY + (config.upwardFocusOffset ?? 0.18) * 0.45;
+  }
+  if (!player.onGround && player.vy > 260) {
+    return neutralFocusY + (config.fallingFocusOffset ?? -0.14);
+  }
+  return neutralFocusY;
+}
+
+function getCameraSpeed(player) {
+  const horizontalSpeed = Math.abs(player.vx);
+  const verticalSpeed = (
+    player.wallRunActive ||
+    player.wallRunBoostActive ||
+    isBraceCameraState(player) ||
+    player.sprintJumpCarryTimer > 0
+  )
+    ? Math.abs(player.vy) * 0.55
+    : 0;
+  return Math.max(horizontalSpeed, verticalSpeed);
+}
+
+function getSpeedZoomState(player, config) {
+  const baseZoom = clamp(config.zoom ?? 1, 0.5, 2.5);
+  if (
+    (player.dashTimer > 0 && config.dashAffectsCamera === false)
+    || (isBraceCameraState(player) && config.braceAffectsCamera === false)
+  ) {
+    return {
+      ratio: 0,
+      zoom: baseZoom,
+    };
+  }
+
+  const start = config.speedZoomStart ?? 260;
+  const full = Math.max(start + 1, config.speedZoomFull ?? 980);
+  const ratio = clamp((getCameraSpeed(player) - start) / (full - start), 0, 1);
+  const speedZoomMin = baseZoom * clamp(config.speedZoomMin ?? config.minZoom ?? 0.88, 0.1, 1);
+  return {
+    ratio,
+    zoom: clamp(lerp(baseZoom, speedZoomMin, ratio), 0.5, baseZoom),
+  };
+}
+
+function getCameraScaledZoom(baseZoom, value, fallback) {
+  return clamp(baseZoom * clamp(value ?? fallback, 0.1, 1), 0.5, baseZoom);
+}
+
+function getCameraTargetZoom(player, config) {
+  const baseZoom = clamp(config.zoom ?? 1, 0.5, 2.5);
+  let targetZoom = baseZoom;
+  if (player.wallRunActive || player.wallRunBoostActive) {
+    targetZoom = getCameraScaledZoom(baseZoom, config.wallRunZoom, 0.94);
+  } else if (player.dashTimer > 0 && config.dashAffectsCamera !== false) {
+    targetZoom = getCameraScaledZoom(baseZoom, config.dashZoom, 0.95);
+  } else if (isBraceCameraState(player) && config.braceAffectsCamera !== false) {
+    targetZoom = getCameraScaledZoom(baseZoom, config.braceZoom, 0.96);
+  } else if (!player.onGround && player.sprintJumpCarryTimer > 0 && isSprintCameraActive(player, config)) {
+    targetZoom = getCameraScaledZoom(baseZoom, config.sprintJumpZoom, 0.92);
+  } else if (isSprintCameraActive(player, config)) {
+    targetZoom = player.onGround
+      ? getCameraScaledZoom(baseZoom, config.sprintZoom, 0.96)
+      : getCameraScaledZoom(baseZoom, config.sprintJumpZoom, 0.92);
+  }
+
+  const speedZoom = getSpeedZoomState(player, config);
+  if (speedZoom.ratio > 0) {
+    targetZoom = Math.min(targetZoom, speedZoom.zoom);
+  }
+
+  const minZoom = baseZoom * clamp(config.minZoom ?? config.speedZoomMin ?? 0.88, 0.1, 1);
+  return clamp(targetZoom, minZoom, baseZoom);
+}
+
+function syncCamera(run, data, dt) {
+  const config = getCameraConfig(data);
+  if (!config.lookAheadEnabled) {
+    const zoom = clamp(config.zoom ?? 1, 0.5, 2.5);
+    const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
+    const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
+    const targetX = run.player.x - viewportWidth * CAMERA_FOCUS_X;
+    const targetY = run.player.y - viewportHeight * CAMERA_FOCUS_Y;
+    const maxX = Math.max(0, data.world.width - viewportWidth);
+    const maxY = Math.max(0, data.world.height - viewportHeight);
+    run.cameraZoom = zoom;
+    run.cameraFocusX = CAMERA_FOCUS_X;
+    run.cameraFocusY = CAMERA_FOCUS_Y;
+    run.cameraTargetX = targetX;
+    run.cameraTargetY = targetY;
+    run.cameraTargetZoom = zoom;
+    run.cameraLookAhead = 0;
+    run.cameraSpeedRatio = 0;
+    run.cameraX = clamp(lerp(run.cameraX, targetX, Math.min(1, dt * 4.5)), 0, maxX);
+    run.cameraY = clamp(lerp(run.cameraY, targetY, Math.min(1, dt * 4.5)), 0, maxY);
+    return;
+  }
+
+  const player = run.player;
+  const freezeActionCamera = (
+    (player.dashTimer > 0 && config.dashAffectsCamera === false)
+    || (isBraceCameraState(player) && config.braceAffectsCamera === false)
+  );
+  const targetLookDirection = freezeActionCamera
+    ? (run.cameraLookDirection || player.facing || 1)
+    : getCameraLookDirection(player, run, config);
+  const directionLerp = Math.min(1, dt * (config.directionLerp ?? 6));
+  run.cameraLookDirection = lerp(run.cameraLookDirection || targetLookDirection, targetLookDirection, directionLerp);
+  const targetLookSign = Math.sign(targetLookDirection) || Math.sign(run.cameraLookDirection) || player.facing || 1;
+
+  const lookAhead = freezeActionCamera ? (run.cameraLookAhead ?? 0) : getCameraLookAhead(player, config);
+  const targetFocusX = freezeActionCamera
+    ? clamp(run.cameraFocusX ?? (config.neutralFocusX ?? 0.5), 0.24, 0.76)
+    : clamp(
+      (config.neutralFocusX ?? 0.5) - targetLookSign * lookAhead,
+      0.24,
+      0.76,
+    );
+  const targetFocusY = freezeActionCamera
+    ? clamp(run.cameraFocusY ?? (config.neutralFocusY ?? 0.5), 0.28, 0.72)
+    : clamp(getCameraVerticalFocus(player, config), 0.28, 0.72);
+  const focusLerp = Math.min(1, dt * (config.focusLerp ?? 5.5));
+  run.cameraFocusX = lerp(run.cameraFocusX ?? targetFocusX, targetFocusX, focusLerp);
+  run.cameraFocusY = lerp(run.cameraFocusY ?? targetFocusY, targetFocusY, focusLerp);
+
+  const targetZoom = freezeActionCamera
+    ? clamp(run.cameraZoom ?? (config.zoom ?? 1), 0.5, 2.5)
+    : getCameraTargetZoom(player, config);
+  const speedZoom = freezeActionCamera
+    ? { ratio: 0, zoom: targetZoom }
+    : getSpeedZoomState(player, config);
+  const zoomLerp = Math.min(1, dt * (config.zoomLerp ?? 4.2));
+  const zoom = clamp(lerp(run.cameraZoom ?? (config.zoom ?? 1), targetZoom, zoomLerp), 0.5, 2.5);
+  run.cameraZoom = zoom;
+
+  const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
+  const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
+  const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX;
+  const targetY = player.y + player.height * 0.5 - viewportHeight * run.cameraFocusY;
+  const maxX = Math.max(0, data.world.width - viewportWidth);
+  const maxY = Math.max(0, data.world.height - viewportHeight);
+  run.cameraTargetX = targetX;
+  run.cameraTargetY = targetY;
+  run.cameraTargetZoom = targetZoom;
+  run.cameraLookAhead = lookAhead;
+  run.cameraSpeedRatio = speedZoom.ratio;
+  run.cameraX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
+  run.cameraY = clamp(lerp(run.cameraY, targetY, focusLerp), 0, maxY);
+}
+
+function getMovementConfig(data) {
+  return data.player.movement;
+}
+
+function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
+  if (
+    !runHeld ||
+    moveAxis === 0 ||
+    player.height !== player.standHeight
+  ) {
+    return config.runSpeed;
+  }
+  if (!player.onGround && player.sprintCharge <= 0) {
+    return config.runSpeed;
+  }
+  return lerp(config.runSpeed, config.sprintSpeed ?? config.runSpeed, player.sprintCharge);
+}
+
+function collidesWithPlatforms(rect, data) {
+  return data.platforms.some((platform) => rectsOverlap(rect, platform));
+}
+
+function canOccupyRect(rect, data) {
+  return (
+    rect.x >= 0 &&
+    rect.y >= 0 &&
+    rect.x + rect.width <= data.world.width &&
+    rect.y + rect.height <= data.world.height &&
+    !collidesWithPlatforms(rect, data)
+  );
+}
+
+function canResizePlayer(player, data, targetHeight) {
+  const nextRect = {
+    x: player.x,
+    y: player.y - (targetHeight - player.height),
+    width: player.width,
+    height: targetHeight,
+  };
+  return nextRect.y >= 0 && !collidesWithPlatforms(nextRect, data);
+}
+
+function getActiveBraceWall(player, data) {
+  const walls = data.braceWalls || [];
+  if (!walls.length) {
+    return null;
+  }
+  const config = getMovementConfig(data);
+  const paddingX = config.braceDetectPaddingX ?? 8;
+  const paddingY = config.braceDetectPaddingY ?? 8;
+
+  const probe = {
+    x: player.x - paddingX,
+    y: player.y - paddingY,
+    width: player.width + paddingX * 2,
+    height: player.height + paddingY * 2,
+  };
+
+  let nearest = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const wall of walls) {
+    if (!rectsOverlap(probe, wall)) {
+      continue;
+    }
+    const center = getCenter(wall);
+    const playerCenter = getCenter(player);
+    const distance = distanceBetween(center, playerCenter);
+    if (distance < nearestDistance) {
+      nearest = wall;
+      nearestDistance = distance;
+    }
+  }
+
+  return nearest;
+}
+
+function getBraceWallById(data, wallId) {
+  if (!wallId) {
+    return null;
+  }
+  return (data.braceWalls || []).find((wall) => wall.id === wallId) ?? null;
+}
+
+function setPlayerHeight(player, targetHeight) {
+  const feetY = player.y + player.height;
+  player.height = targetHeight;
+  player.y = feetY - targetHeight;
+}
+
+function tryEnterCrouch(player, data) {
+  if (player.height === player.crouchHeight || !player.onGround) {
+    return;
+  }
+  if (player.crouchHeight < player.height) {
+    setPlayerHeight(player, player.crouchHeight);
+  }
+}
+
+function tryExitCrouch(player, data) {
+  if (player.height === player.standHeight) {
+    player.crouchBlocked = false;
+    return true;
+  }
+  if (canResizePlayer(player, data, player.standHeight)) {
+    setPlayerHeight(player, player.standHeight);
+    player.crouchBlocked = false;
+    return true;
+  }
+  player.crouchBlocked = true;
+  return false;
+}
+
+function tryJumpCornerCorrection(player, data, config) {
+  const baseDirection = Math.sign(player.vx) || player.facing || 1;
+  const directions = [baseDirection, -baseDirection];
+
+  for (const direction of directions) {
+    for (let offset = 1; offset <= (config.jumpCornerCorrectionPx ?? 0); offset += 1) {
+      const candidate = {
+        x: player.x + direction * offset,
+        y: player.y,
+        width: player.width,
+        height: player.height,
+      };
+
+      if (canOccupyRect(candidate, data)) {
+        player.x = candidate.x;
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function tryDashCornerCorrection(player, data, resolvedX, direction, config) {
+  const maxLift = config.dashCornerCorrectionPx ?? 0;
+  for (let offset = 1; offset <= maxLift; offset += 1) {
+    const candidates = [
+      {
+        x: resolvedX,
+        y: player.y - offset,
+        width: player.width,
+        height: player.height,
+      },
+      {
+        x: resolvedX + direction * 2,
+        y: player.y - offset,
+        width: player.width,
+        height: player.height,
+      },
+    ];
+
+    for (const candidate of candidates) {
+      if (canOccupyRect(candidate, data)) {
+        player.x = candidate.x;
+        player.y = candidate.y;
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function resolvePlayerCollisions(player, data, dt, config) {
+  const contacts = {
+    onGround: false,
+    hitHead: false,
+    wallLeft: false,
+    wallRight: false,
+    landingSpeed: 0,
+    dashBlocked: false,
+    dashCornerCorrected: false,
+    jumpCornerCorrected: false,
+  };
+
+  const previousX = player.x;
+  player.x += player.vx * dt;
+
+  for (const platform of data.platforms) {
+    if (!rectsOverlap(player, platform)) {
+      continue;
+    }
+
+    if (previousX + player.width <= platform.x + EPSILON) {
+      const resolvedX = platform.x - player.width;
+      if (
+        player.dashTimer > 0 &&
+        tryDashCornerCorrection(player, data, resolvedX, 1, config)
+      ) {
+        contacts.dashCornerCorrected = true;
+        continue;
+      }
+      contacts.dashBlocked = true;
+      player.x = resolvedX;
+      contacts.wallRight = true;
+    } else if (previousX >= platform.x + platform.width - EPSILON) {
+      const resolvedX = platform.x + platform.width;
+      if (
+        player.dashTimer > 0 &&
+        tryDashCornerCorrection(player, data, resolvedX, -1, config)
+      ) {
+        contacts.dashCornerCorrected = true;
+        continue;
+      }
+      contacts.dashBlocked = true;
+      player.x = resolvedX;
+      contacts.wallLeft = true;
+    } else {
+      const pushLeft = player.x + player.width - platform.x;
+      const pushRight = platform.x + platform.width - player.x;
+      if (pushLeft < pushRight) {
+        const resolvedX = player.x - pushLeft;
+        if (
+          player.dashTimer > 0 &&
+          tryDashCornerCorrection(player, data, resolvedX, 1, config)
+        ) {
+          contacts.dashCornerCorrected = true;
+          continue;
+        }
+        contacts.dashBlocked = true;
+        player.x -= pushLeft;
+        contacts.wallRight = true;
+      } else {
+        const resolvedX = player.x + pushRight;
+        if (
+          player.dashTimer > 0 &&
+          tryDashCornerCorrection(player, data, resolvedX, -1, config)
+        ) {
+          contacts.dashCornerCorrected = true;
+          continue;
+        }
+        contacts.dashBlocked = true;
+        player.x += pushRight;
+        contacts.wallLeft = true;
+      }
+    }
+    player.vx = 0;
+  }
+
+  if (player.x <= 0) {
+    player.x = 0;
+    contacts.wallLeft = true;
+    contacts.dashBlocked = true;
+    player.vx = Math.max(0, player.vx);
+  }
+  if (player.x + player.width >= data.world.width) {
+    player.x = data.world.width - player.width;
+    contacts.wallRight = true;
+    contacts.dashBlocked = true;
+    player.vx = Math.min(0, player.vx);
+  }
+
+  const previousY = player.y;
+  player.y += player.vy * dt;
+  player.onGround = false;
+
+  for (const platform of data.platforms) {
+    if (!rectsOverlap(player, platform)) {
+      continue;
+    }
+
+    if (previousY + player.height <= platform.y + EPSILON) {
+      contacts.landingSpeed = player.vy;
+      player.y = platform.y - player.height;
+      player.vy = 0;
+      contacts.onGround = true;
+    } else if (previousY >= platform.y + platform.height - EPSILON) {
+      if (player.vy < 0 && tryJumpCornerCorrection(player, data, config)) {
+        contacts.jumpCornerCorrected = true;
+        continue;
+      }
+      player.y = platform.y + platform.height;
+      player.vy = 0;
+      contacts.hitHead = true;
+    } else {
+      const pushDown = player.y + player.height - platform.y;
+      const pushUp = platform.y + platform.height - player.y;
+      if (pushDown < pushUp) {
+        contacts.landingSpeed = player.vy;
+        player.y -= pushDown;
+        player.vy = 0;
+        contacts.onGround = true;
+      } else {
+        if (player.vy < 0 && tryJumpCornerCorrection(player, data, config)) {
+          contacts.jumpCornerCorrected = true;
+          continue;
+        }
+        player.y += pushUp;
+        player.vy = 0;
+        contacts.hitHead = true;
+      }
+    }
+  }
+
+  if (player.y < 0) {
+    player.y = 0;
+    player.vy = 0;
+    contacts.hitHead = true;
+  }
+  if (player.y + player.height > data.world.height) {
+    contacts.landingSpeed = player.vy;
+    player.y = data.world.height - player.height;
+    player.vy = 0;
+    contacts.onGround = true;
+  }
+
+  return contacts;
+}
+
+function damagePlayer(run, amount, direction, sourceText) {
+  if (run.player.invulnTimer > 0 || (run.player.dashTimer > 0 && run.player.dashInvulnerable)) {
+    return;
+  }
+  run.hp = clamp(run.hp - amount, 0, 100);
+  run.player.invulnTimer = 0.85;
+  run.player.vx = direction * 190;
+  run.player.vy = -260;
+  pushNotice(run, sourceText);
+  spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+}
+
+function setMovementState(player) {
+  if (player.dashTimer > 0) {
+    player.movementState = MOVEMENT_STATES.DASH;
+  } else if (player.wallJumpLockTimer > 0) {
+    player.movementState = MOVEMENT_STATES.WALL_JUMP_LOCK;
+  } else if (player.wallRunActive) {
+    player.movementState = MOVEMENT_STATES.WALL_SLIDE;
+  } else if (player.braceHolding) {
+    player.movementState = MOVEMENT_STATES.WALL_SLIDE;
+  } else if (player.onGround && player.height === player.crouchHeight && Math.abs(player.vx) > 20) {
+    player.movementState = MOVEMENT_STATES.CROUCH_WALK;
+  } else if (player.onGround && player.height === player.crouchHeight) {
+    player.movementState = MOVEMENT_STATES.CROUCH;
+  } else if (player.wallSliding) {
+    player.movementState = MOVEMENT_STATES.WALL_SLIDE;
+  } else if (!player.onGround && player.vy < 0) {
+    player.movementState = MOVEMENT_STATES.JUMP_RISE;
+  } else if (!player.onGround) {
+    player.movementState = MOVEMENT_STATES.FALL;
+  } else {
+    player.movementState = MOVEMENT_STATES.GROUNDED;
+  }
+}
+
+function clearBraceHold(player) {
+  player.braceHolding = false;
+  player.braceHoldWallId = null;
+  player.braceHoldDirection = 0;
+  player.braceHoldLaunchDirection = 0;
+  player.braceHoldSpeed = 0;
+}
+
+function clearWallRun(player) {
+  player.wallRunActive = false;
+  player.wallRunDirection = 0;
+  player.wallRunSpeed = 0;
+}
+
+function getMaxDashCount(config) {
+  return Math.max(1, Math.floor(config.maxDashCount ?? 1));
+}
+
+function syncDashCapacity(player, config) {
+  const nextMax = getMaxDashCount(config);
+  if (!Number.isFinite(player.dashMaxCount) || player.dashMaxCount <= 0) {
+    player.dashMaxCount = nextMax;
+  }
+  if (!Number.isFinite(player.dashCharges)) {
+    player.dashCharges = player.dashMaxCount;
+  }
+
+  if (nextMax !== player.dashMaxCount) {
+    const grewBy = nextMax - player.dashMaxCount;
+    player.dashMaxCount = nextMax;
+    player.dashCharges = clamp(player.dashCharges + Math.max(0, grewBy), 0, player.dashMaxCount);
+  } else {
+    player.dashCharges = clamp(player.dashCharges, 0, player.dashMaxCount);
+  }
+
+  player.dashAvailable = player.dashCharges > 0 && player.dashCooldownTimer === 0;
+}
+
+function refillDashFromGround(player, config) {
+  syncDashCapacity(player, config);
+  player.dashCharges = player.dashMaxCount;
+  player.dashAvailable = player.dashCharges > 0 && player.dashCooldownTimer === 0;
+}
+
+function refillDashFromWall(player, config) {
+  syncDashCapacity(player, config);
+  player.dashCharges = player.dashMaxCount;
+  player.dashAvailable = true;
+  player.dashCooldownTimer = 0;
+  player.dashResetActive = true;
+}
+
+function startDash(player, run, config, direction) {
+  clearBraceHold(player);
+  clearWallRun(player);
+  syncDashCapacity(player, config);
+  player.dashCharges = Math.max(0, player.dashCharges - 1);
+  player.dashAvailable = false;
+  player.dashDirection = direction;
+  player.dashTimer = config.dashDurationMs / 1000;
+  player.dashCooldownTimer = config.dashCooldownMs / 1000;
+  player.dashCarryTimer = 0;
+  player.dashCarrySpeed = 0;
+  player.speedRetentionTimer = 0;
+  player.retainedSpeed = 0;
+  player.wallJumpLockTimer = 0;
+  player.wallJumpLockDirection = 0;
+  player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * direction;
+  player.vy = 0;
+  player.facing = direction;
+  player.canInteract = false;
+  player.dashTrailTimer = 0;
+  pushAfterimage(run, player);
+  spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#d1efff");
+}
+
+function armDashCarry(player, config, speed) {
+  if (!Number.isFinite(speed) || speed === 0) {
+    return;
+  }
+  player.dashCarryTimer = (config.dashCarryWindowMs ?? 0) / 1000;
+  player.dashCarrySpeed = speed;
+}
+
+function armSpeedRetention(player, config, speed) {
+  if (Math.abs(speed) < (config.wallSpeedRetentionMinSpeed ?? 0)) {
+    return;
+  }
+  player.speedRetentionTimer = (config.wallSpeedRetentionMs ?? 0) / 1000;
+  player.retainedSpeed = speed;
+}
+
+function applyDashJumpCarry(player, config) {
+  if (player.dashCarryTimer <= 0 || player.dashCarrySpeed === 0) {
+    return false;
+  }
+
+  const carryDirection = Math.sign(player.dashCarrySpeed) || player.facing;
+  const carrySpeed = Math.max(
+    Math.abs(player.vx),
+    Math.abs(player.dashCarrySpeed),
+    config.dashJumpMinSpeed ?? 0
+  );
+  player.vx = carryDirection * carrySpeed;
+  player.facing = carryDirection;
+  player.dashCarryTimer = 0;
+  player.dashCarrySpeed = 0;
+  player.dashJumpBoostActive = true;
+  return true;
+}
+
+function armSprintJumpCarry(player, config) {
+  const carrySpeed = Math.sign(player.vx || player.facing || 1)
+    * Math.max(
+      Math.abs(player.vx),
+      config.sprintJumpMinSpeed ?? 0
+    );
+  player.sprintJumpCarryTimer = (config.sprintJumpCarryMs ?? 0) / 1000;
+  player.sprintJumpCarrySpeed = carrySpeed;
+}
+
+function applySprintJumpCarry(player) {
+  if (player.sprintJumpCarryTimer <= 0 || player.sprintJumpCarrySpeed === 0) {
+    return false;
+  }
+  const carryDirection = Math.sign(player.sprintJumpCarrySpeed) || player.facing;
+  const carrySpeed = Math.max(Math.abs(player.vx), Math.abs(player.sprintJumpCarrySpeed));
+  player.vx = carryDirection * carrySpeed;
+  player.facing = carryDirection;
+  player.sprintJumpBoostActive = true;
+  return true;
+}
+
+function performJump(player, run, velocity) {
+  clearBraceHold(player);
+  clearWallRun(player);
+  player.vy = velocity;
+  player.onGround = false;
+  player.jumpBufferTimer = 0;
+  player.coyoteTimer = 0;
+  spawnParticles(run, player.x + player.width / 2, player.y + player.height, 6, "#d8ebff");
+}
+
+function performWallJump(player, run, config, wallDirection) {
+  clearBraceHold(player);
+  clearWallRun(player);
+  const direction = -wallDirection || -player.facing;
+  player.wallJumpLockDirection = direction;
+  player.wallJumpLockTimer = config.wallJumpLockMs / 1000;
+  player.vx = direction * config.wallJumpHorizontal;
+  player.vy = -config.wallJumpVertical;
+  player.facing = direction;
+  player.jumpBufferTimer = 0;
+  player.onGround = false;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#cde9ff");
+}
+
+function enterBraceHold(player, run, config, wall, moveAxis) {
+  clearWallRun(player);
+  const playerCenterX = player.x + player.width * 0.5;
+  const wallCenterX = wall.x + wall.width * 0.5;
+  const holdDirection = playerCenterX <= wallCenterX ? 1 : -1;
+  const launchDirection = moveAxis || Math.sign(player.vx) || player.facing || holdDirection;
+
+  player.braceHolding = true;
+  player.braceHoldWallId = wall.id;
+  player.braceHoldDirection = holdDirection;
+  player.braceHoldLaunchDirection = launchDirection;
+  player.braceHoldSpeed = config.braceHoldStartSpeed ?? 0;
+  player.vx = 0;
+  player.vy = player.braceHoldSpeed;
+  player.facing = holdDirection;
+  player.onGround = false;
+  player.coyoteTimer = 0;
+  player.jumpBufferTimer = 0;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.wallJumpLockTimer = 0;
+  player.wallJumpLockDirection = 0;
+  player.canInteract = false;
+  player.braceHoldActive = true;
+  refillDashFromWall(player, config);
+  spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 6, "#8fe1ff");
+  pushNotice(run, "벽 고정");
+}
+
+function updateBraceHold(player, data, config, wall, dt, moveAxis) {
+  const targetSpeed = moveAxis * config.runSpeed * (config.braceHoldMoveMultiplier ?? 0.7);
+  const accel = config.groundAccel * config.airControlMultiplier;
+  const decel = config.groundDecel * config.airControlMultiplier;
+
+  player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : decel) * dt);
+  player.braceHoldSpeed = Math.min(
+    config.braceHoldFallSpeed ?? 0,
+    Math.max(player.braceHoldSpeed, config.braceHoldStartSpeed ?? 0) + (config.braceHoldAccel ?? 0) * dt
+  );
+  player.vy = player.braceHoldSpeed;
+  if (moveAxis !== 0) {
+    player.facing = moveAxis;
+    player.braceHoldLaunchDirection = moveAxis;
+  } else if (Math.abs(player.vx) > 12) {
+    player.braceHoldLaunchDirection = Math.sign(player.vx);
+  }
+  player.onGround = false;
+  player.canInteract = false;
+  player.braceHoldActive = true;
+}
+
+function enterWallRun(player, run, config, wallDirection) {
+  clearBraceHold(player);
+  player.wallRunActive = true;
+  player.wallRunDirection = wallDirection;
+  player.wallRunSpeed = Math.max(player.wallRunSpeed || 0, config.wallRunStartSpeed ?? 0, Math.max(0, -player.vy));
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.jumpBufferTimer = 0;
+  player.onGround = false;
+  refillDashFromWall(player, config);
+  spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.45, 4, "#b8f0ff");
+}
+
+function updateWallRun(player, config, dt) {
+  player.wallRunSpeed = Math.min(
+    (config.wallRunMaxSpeed ?? 0),
+    player.wallRunSpeed + (config.wallRunAccel ?? 0) * dt
+  );
+  player.vy = -player.wallRunSpeed;
+  player.vx = player.wallRunDirection * Math.max((config.runSpeed ?? 0) * 0.22, 88);
+  player.onGround = false;
+}
+
+function launchFromWallRun(player, run, config) {
+  const direction = player.wallRunDirection || player.wallDirection || 0;
+  const exitDirection = direction === 0 ? player.facing || 1 : -direction;
+  player.vx = exitDirection * Math.max(Math.abs(player.vx), config.wallRunExitHorizontal ?? 0);
+  player.vy = -Math.max(player.wallRunSpeed, config.wallRunExitMinBoost ?? 0);
+  player.facing = exitDirection;
+  player.jumpBufferTimer = 0;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.wallRunBoostActive = true;
+  spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#b8f0ff");
+  pushNotice(run, "벽 런 발사");
+  clearWallRun(player);
+}
+
+function performBraceVault(player, run, config, wall, moveAxis) {
+  const direction = moveAxis || player.braceHoldLaunchDirection || Math.sign(player.vx) || player.facing || 1;
+  clearBraceHold(player);
+  player.vx = direction * Math.max(Math.abs(player.vx), config.braceBoostHorizontal ?? 0);
+  player.vy = -(config.braceBoostVertical ?? Math.abs(config.jumpVelocity));
+  player.facing = direction;
+  player.onGround = false;
+  player.coyoteTimer = 0;
+  player.jumpBufferTimer = 0;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.braceReleaseTimer = 0.16;
+  player.braceActive = true;
+  spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 10, "#8fe1ff");
+  pushNotice(run, "벽 반동");
+}
+
+function updateMovementVfx(run, dt) {
+  const player = run.player;
+
+  player.wallSlideDustTimer = Math.max(0, player.wallSlideDustTimer - dt);
+  player.dashTrailTimer = Math.max(0, player.dashTrailTimer - dt);
+
+  if (player.dashTimer > 0 && player.dashTrailTimer === 0) {
+    player.dashTrailTimer = 0.03;
+    pushAfterimage(run, player);
+  }
+
+  if (player.wallSliding && player.wallSlideDustTimer === 0) {
+    player.wallSlideDustTimer = 0.08;
+    const offsetX = player.wallDirection === 1 ? player.x + player.width : player.x;
+    spawnParticles(run, offsetX, player.y + player.height - 4, 2, "#9bbad1");
+  }
+}
+
+function updatePlayer(run, data, state, dt, input) {
+  const player = run.player;
+  const config = getMovementConfig(data);
+  const attackPressed = Boolean(input?.attackPressed);
+  const interactionPressed = Boolean(input?.interactionPressed);
+  const moveLeft = isEitherPressed(state, MOVE_LEFT_KEYS);
+  const moveRight = isEitherPressed(state, MOVE_RIGHT_KEYS);
+  const moveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
+  const crouchHeld = isEitherPressed(state, CROUCH_KEYS);
+  const jumpPressed = consumeEitherPress(state, JUMP_KEYS);
+  const jumpHeld = isEitherPressed(state, JUMP_KEYS);
+  const dashPressed = consumeEitherPress(state, DASH_KEYS);
+  const dashHeld = isEitherPressed(state, DASH_KEYS);
+  const activeBraceWall = getActiveBraceWall(player, data);
+  const heldBraceWall = getBraceWallById(data, player.braceHoldWallId);
+  const wasWallSliding = player.wallSliding;
+  const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
+
+  player.wasOnGround = player.onGround;
+  player.crouchRequested = crouchHeld;
+  player.attackCooldown = Math.max(0, player.attackCooldown - dt);
+  player.attackWindow = Math.max(0, player.attackWindow - dt);
+  player.invulnTimer = Math.max(0, player.invulnTimer - dt);
+  player.jumpBufferTimer = Math.max(0, player.jumpBufferTimer - dt);
+  player.wallJumpLockTimer = Math.max(0, player.wallJumpLockTimer - dt);
+  player.dashCooldownTimer = Math.max(0, player.dashCooldownTimer - dt);
+  player.dashCarryTimer = Math.max(0, player.dashCarryTimer - dt);
+  player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
+  player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
+  player.wallSlideGraceTimer = Math.max(0, player.wallSlideGraceTimer - dt);
+  player.speedRetentionTimer = Math.max(0, player.speedRetentionTimer - dt);
+  player.braceCooldownTimer = Math.max(0, player.braceCooldownTimer - dt);
+  player.braceReleaseTimer = Math.max(0, player.braceReleaseTimer - dt);
+  player.apexGravityActive = false;
+  player.jumpCornerCorrected = false;
+  player.dashCornerCorrected = false;
+  player.dashCarryActive = false;
+  player.sprintActive = false;
+  player.sprintJumpBoostActive = false;
+  player.dashJumpBoostActive = false;
+  player.speedRetentionActive = false;
+  player.bufferedLandingJumpActive = false;
+  player.wallSlideGraceActive = false;
+  player.braceActive = false;
+  player.braceHoldActive = false;
+  player.wallRunBoostActive = false;
+  player.dashResetActive = false;
+
+  syncDashCapacity(player, config);
+
+  if (player.dashCarryTimer === 0) {
+    player.dashCarrySpeed = 0;
+  }
+  if (player.sprintJumpCarryTimer === 0) {
+    player.sprintJumpCarrySpeed = 0;
+  }
+  if (player.speedRetentionTimer === 0) {
+    player.retainedSpeed = 0;
+  }
+  if (player.attackWindow === 0) {
+    player.attackHits.clear();
+  }
+
+  if (!player.onGround && player.wallDirection !== 0) {
+    player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
+    player.wallGraceDirection = player.wallDirection;
+  } else if (player.onGround) {
+    player.wallGraceTimer = 0;
+    player.wallGraceDirection = 0;
+    player.wallSlideGraceTimer = 0;
+    player.wallSlideGraceDirection = 0;
+  }
+
+  if (player.onGround) {
+    player.coyoteTimer = config.coyoteTimeMs / 1000;
+  } else {
+    player.coyoteTimer = Math.max(0, player.coyoteTimer - dt);
+  }
+
+  if (jumpPressed) {
+    player.jumpBufferTimer = config.jumpBufferMs / 1000;
+  }
+
+  if (dashPressed) {
+    player.sprintPrimed = true;
+  }
+
+  if (jumpReleased && !player.braceHolding && player.vy < 0) {
+    player.vy *= config.jumpCutMultiplier;
+  }
+
+  if (
+    player.dashCarryTimer > 0 &&
+    moveAxis !== 0 &&
+    Math.sign(moveAxis) !== Math.sign(player.dashCarrySpeed)
+  ) {
+    player.dashCarryTimer = 0;
+    player.dashCarrySpeed = 0;
+  }
+
+  if (
+    player.sprintJumpCarryTimer > 0 &&
+    moveAxis !== 0 &&
+    Math.sign(moveAxis) !== Math.sign(player.sprintJumpCarrySpeed)
+  ) {
+    player.sprintJumpCarryTimer = 0;
+    player.sprintJumpCarrySpeed = 0;
+  }
+
+  const canBuildSprint =
+    dashHeld &&
+    player.sprintPrimed &&
+    player.onGround &&
+    player.height === player.standHeight &&
+    moveAxis !== 0;
+  const preserveAirSprint =
+    dashHeld &&
+    player.sprintPrimed &&
+    !player.onGround &&
+    player.height === player.standHeight &&
+    player.sprintCharge > 0 &&
+    (
+      moveAxis === 0 ||
+      player.sprintDirection === 0 ||
+      player.sprintDirection === moveAxis
+    );
+
+  if (canBuildSprint) {
+    if (player.sprintDirection !== 0 && player.sprintDirection !== moveAxis) {
+      player.sprintCharge = Math.max(0, player.sprintCharge - dt * 5);
+    } else {
+      player.sprintCharge = clamp(
+        player.sprintCharge + dt / Math.max(0.001, (config.sprintBuildMs ?? 1) / 1000),
+        0,
+        1
+      );
+    }
+    player.sprintDirection = moveAxis;
+  } else if (preserveAirSprint) {
+    if (moveAxis !== 0) {
+      player.sprintDirection = moveAxis;
+    }
+  } else {
+    player.sprintCharge = clamp(
+      player.sprintCharge - dt / Math.max(0.001, (config.sprintDecayMs ?? 1) / 1000),
+      0,
+      1
+    );
+    if (player.sprintCharge === 0) {
+      player.sprintDirection = 0;
+      if (!dashHeld && player.dashTimer === 0) {
+        player.sprintPrimed = false;
+      }
+    }
+  }
+
+  if (player.onGround) {
+    if (crouchHeld) {
+      tryEnterCrouch(player, data);
+    } else {
+      tryExitCrouch(player, data);
+    }
+    clearBraceHold(player);
+    clearWallRun(player);
+    refillDashFromGround(player, config);
+    player.sprintJumpCarryTimer = 0;
+    player.sprintJumpCarrySpeed = 0;
+  }
+
+  if (
+    dashPressed &&
+    player.dashAvailable &&
+    player.dashTimer === 0 &&
+    player.dashCooldownTimer === 0 &&
+    player.wallJumpLockTimer === 0 &&
+    player.height === player.standHeight
+  ) {
+    const direction = moveAxis || player.facing;
+    if (direction !== 0) {
+      startDash(player, run, config, direction);
+    }
+  }
+
+  if (player.lightActive && player.dashTimer > 0) {
+    player.lightActive = false;
+  }
+
+  if (player.dashTimer > 0) {
+    player.dashTimer = Math.max(0, player.dashTimer - dt);
+    player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * player.dashDirection;
+    player.vy = 0;
+    player.facing = player.dashDirection;
+    player.canInteract = false;
+
+    const contacts = resolvePlayerCollisions(player, data, dt, config);
+    const landed = !player.wasOnGround && contacts.onGround;
+    player.dashCornerCorrected = contacts.dashCornerCorrected;
+    if (contacts.dashBlocked) {
+      player.dashTimer = 0;
+    }
+    if (landed) {
+      refillDashFromGround(player, config);
+      player.coyoteTimer = config.coyoteTimeMs / 1000;
+    }
+    player.onGround = contacts.onGround;
+    player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+    player.wallSliding = false;
+    if (!player.onGround && player.wallDirection !== 0) {
+      player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
+      player.wallGraceDirection = player.wallDirection;
+    } else if (player.onGround) {
+      player.wallGraceTimer = 0;
+      player.wallGraceDirection = 0;
+      player.wallSlideGraceTimer = 0;
+      player.wallSlideGraceDirection = 0;
+    }
+
+    if (player.onGround) {
+      if (crouchHeld) {
+        tryEnterCrouch(player, data);
+      } else {
+        tryExitCrouch(player, data);
+      }
+    }
+
+    if (player.dashTimer === 0) {
+      player.canInteract = true;
+    }
+
+    if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && player.dashDirection !== 0) {
+      const dashSpeed = (config.dashDistance / (config.dashDurationMs / 1000))
+        * (config.dashCarrySpeedMultiplier ?? 1)
+        * player.dashDirection;
+      armDashCarry(player, config, dashSpeed);
+    }
+
+    if (landed && player.jumpBufferTimer > 0 && player.height === player.standHeight) {
+      if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
+        armSprintJumpCarry(player, config);
+      }
+      performJump(player, run, config.jumpVelocity);
+      applySprintJumpCarry(player);
+      applyDashJumpCarry(player, config);
+      player.bufferedLandingJumpActive = true;
+    }
+
+    updateMovementVfx(run, dt);
+    player.jumpHeldLastFrame = jumpHeld;
+    setMovementState(player);
+    return;
+  }
+
+  const pushingIntoWall =
+    ((player.wallDirection !== 0 ? player.wallDirection : player.wallGraceDirection) === -1 && moveAxis < 0) ||
+    ((player.wallDirection !== 0 ? player.wallDirection : player.wallGraceDirection) === 1 && moveAxis > 0);
+  const wallJumpSourceDirection =
+    player.wallDirection !== 0
+      ? player.wallDirection
+      : player.wallGraceTimer > 0
+        ? player.wallGraceDirection
+        : 0;
+  const pushingAwayFromWall =
+    wallJumpSourceDirection !== 0 &&
+    ((wallJumpSourceDirection === -1 && moveAxis >= 0) || (wallJumpSourceDirection === 1 && moveAxis <= 0));
+  const canWallRun =
+    !player.onGround &&
+    wallJumpSourceDirection !== 0 &&
+    pushingIntoWall &&
+    jumpHeld &&
+    player.height === player.standHeight &&
+    player.dashTimer === 0 &&
+    player.wallJumpLockTimer === 0 &&
+    !player.braceHolding;
+
+  const canWallJump =
+    player.jumpBufferTimer > 0 &&
+    !player.onGround &&
+    wallJumpSourceDirection !== 0 &&
+    pushingAwayFromWall &&
+    !player.wallRunActive;
+  const canGroundJump =
+    player.jumpBufferTimer > 0 &&
+    player.coyoteTimer > 0 &&
+    player.height === player.standHeight;
+  const canBrace =
+    jumpPressed &&
+    activeBraceWall &&
+    !player.onGround &&
+    player.height === player.standHeight &&
+    player.dashTimer === 0 &&
+    player.wallJumpLockTimer === 0;
+
+  if (canBrace) {
+    enterBraceHold(player, run, config, activeBraceWall, moveAxis);
+  }
+
+  if (player.braceHolding) {
+    const braceWall = getBraceWallById(data, player.braceHoldWallId) ?? activeBraceWall;
+    if (!braceWall || player.height !== player.standHeight) {
+      clearBraceHold(player);
+    } else if (jumpReleased) {
+      performBraceVault(player, run, config, braceWall, moveAxis);
+      applySprintJumpCarry(player);
+    } else if (jumpHeld) {
+      updateBraceHold(player, data, config, braceWall, dt, moveAxis);
+
+      const contacts = resolvePlayerCollisions(player, data, dt, config);
+      const landed = !player.wasOnGround && contacts.onGround;
+      player.jumpCornerCorrected = contacts.jumpCornerCorrected;
+      player.dashCornerCorrected = contacts.dashCornerCorrected;
+      player.onGround = contacts.onGround;
+      player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+      player.wallSliding = false;
+
+      if (landed) {
+        refillDashFromGround(player, config);
+        player.coyoteTimer = config.coyoteTimeMs / 1000;
+      }
+
+      if (player.onGround) {
+        clearBraceHold(player);
+        player.wallGraceTimer = 0;
+        player.wallGraceDirection = 0;
+        player.wallSlideGraceTimer = 0;
+        player.wallSlideGraceDirection = 0;
+        refillDashFromGround(player, config);
+      }
+
+      updateMovementVfx(run, dt);
+      player.jumpHeldLastFrame = jumpHeld;
+      setMovementState(player);
+      return;
+    } else {
+      clearBraceHold(player);
+    }
+  }
+
+  if (canWallRun) {
+    if (!player.wallRunActive || player.wallRunDirection !== wallJumpSourceDirection) {
+      enterWallRun(player, run, config, wallJumpSourceDirection);
+    }
+  } else if (player.wallRunActive && (!jumpHeld || !pushingIntoWall)) {
+    clearWallRun(player);
+  }
+
+  if (player.wallRunActive) {
+    updateWallRun(player, config, dt);
+  } else if (canWallJump) {
+    performWallJump(player, run, config, wallJumpSourceDirection);
+  } else if (canGroundJump) {
+    if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
+      armSprintJumpCarry(player, config);
+    }
+    performJump(player, run, config.jumpVelocity);
+    applySprintJumpCarry(player);
+    applyDashJumpCarry(player, config);
+  }
+
+  if (player.wallJumpLockTimer > 0) {
+    player.vx = player.wallJumpLockDirection * config.wallJumpHorizontal;
+    player.facing = player.wallJumpLockDirection;
+  } else if (player.wallRunActive) {
+    player.facing = player.wallRunDirection === 0 ? player.facing : player.wallRunDirection;
+  } else {
+    const baseTargetSpeed = player.height === player.crouchHeight && player.onGround
+      ? moveAxis * config.runSpeed * config.crouchSpeedMultiplier
+      : moveAxis * getSprintTargetSpeed(player, config, moveAxis, dashHeld && player.sprintPrimed);
+    const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
+      ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
+      : baseTargetSpeed;
+
+    const accel = player.onGround
+      ? config.groundAccel
+      : config.groundAccel * config.airControlMultiplier;
+    const decel = player.onGround
+      ? config.groundDecel
+      : config.groundDecel * config.airControlMultiplier;
+
+    player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : decel) * dt);
+
+    if (
+      player.onGround &&
+      player.dashCarryTimer > 0 &&
+      player.dashCarrySpeed !== 0 &&
+      (moveAxis === 0 || Math.sign(moveAxis) === Math.sign(player.dashCarrySpeed)) &&
+      Math.abs(player.vx) < Math.abs(player.dashCarrySpeed)
+    ) {
+      player.vx = approach(
+        player.vx,
+        player.dashCarrySpeed,
+        config.groundAccel * 1.2 * dt
+      );
+      player.dashCarryActive = true;
+    }
+
+    if (
+      !player.onGround &&
+      player.sprintJumpCarryTimer > 0 &&
+      player.sprintJumpCarrySpeed !== 0 &&
+      (moveAxis === 0 || Math.sign(moveAxis) === Math.sign(player.sprintJumpCarrySpeed)) &&
+      Math.abs(player.vx) < Math.abs(player.sprintJumpCarrySpeed)
+    ) {
+      player.vx = approach(
+        player.vx,
+        player.sprintJumpCarrySpeed,
+        config.groundAccel * config.airControlMultiplier * 1.25 * dt
+      );
+      player.sprintJumpBoostActive = true;
+    }
+
+    if (moveAxis !== 0) {
+      player.facing = moveAxis;
+    }
+  }
+
+  if (player.sprintCharge > 0.12 && canBuildSprint) {
+    player.sprintActive = true;
+  }
+
+  player.lightActive = isPressed(state, "KeyQ") && run.battery > 0 && player.dashTimer === 0;
+  if (player.lightActive) {
+    run.battery = Math.max(0, run.battery - data.player.lightDrainPerSecond * dt);
+    if (run.battery === 0) {
+      player.lightActive = false;
+      pushNotice(run, "배터리 소진.");
+    }
+  }
+
+  if (attackPressed && player.attackCooldown === 0 && player.height === player.standHeight) {
+    player.attackCooldown = data.player.attackCooldown;
+    player.attackWindow = 0.12;
+    player.attackHits.clear();
+    run.attackFx.push({
+      x: player.x + player.width / 2,
+      y: player.y + player.height / 2,
+      facing: player.facing,
+      life: 0.12,
+    });
+  }
+
+  const wallSlideSourceDirection =
+    player.wallDirection !== 0
+      ? player.wallDirection
+      : player.wallSlideGraceTimer > 0
+        ? player.wallSlideGraceDirection
+        : 0;
+
+  const wantsWallSlide =
+    !player.onGround &&
+    wallSlideSourceDirection !== 0 &&
+    (((wallSlideSourceDirection === -1) && moveAxis < 0) || ((wallSlideSourceDirection === 1) && moveAxis > 0)) &&
+    player.wallJumpLockTimer === 0 &&
+    player.vy > 0;
+
+  if (
+    !player.onGround &&
+    !player.wallSliding &&
+    !player.wallRunActive &&
+    jumpHeld &&
+    Math.abs(player.vy) <= (config.apexGravityThreshold ?? 0)
+  ) {
+    player.apexGravityActive = true;
+  }
+
+  const gravityMultiplier = player.apexGravityActive ? (config.apexGravityMultiplier ?? 1) : 1;
+  if (!player.wallRunActive) {
+    player.vy += data.world.gravity * gravityMultiplier * dt;
+  }
+  if (wantsWallSlide && !player.wallRunActive) {
+    player.vy = Math.min(player.vy, Math.abs(config.jumpVelocity) * config.wallSlideFallMultiplier);
+  }
+
+  const vxBeforeResolve = player.vx;
+  const contacts = resolvePlayerCollisions(player, data, dt, config);
+  const landed = !player.wasOnGround && contacts.onGround;
+  player.jumpCornerCorrected = contacts.jumpCornerCorrected;
+  player.dashCornerCorrected = contacts.dashCornerCorrected;
+
+  player.onGround = contacts.onGround;
+  player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+  player.wallSliding =
+    !player.wallRunActive &&
+    !player.onGround &&
+    player.wallDirection !== 0 &&
+    ((player.wallDirection === -1 && moveAxis < 0) || (player.wallDirection === 1 && moveAxis > 0)) &&
+    player.vy > 0 &&
+    player.wallJumpLockTimer === 0;
+
+  if (player.wallRunActive) {
+    if (player.wallDirection === 0 || player.onGround || contacts.hitHead) {
+      launchFromWallRun(player, run, config);
+    } else {
+      player.wallRunDirection = player.wallDirection;
+      player.wallSliding = false;
+    }
+  }
+
+  if (player.wallSliding && !wasWallSliding) {
+    refillDashFromWall(player, config);
+  }
+
+  if (player.wallSliding) {
+    player.wallSlideGraceTimer = (config.wallSlideGraceMs ?? 0) / 1000;
+    player.wallSlideGraceDirection = player.wallDirection;
+  } else if (
+    !player.onGround &&
+    player.wallSlideGraceTimer > 0 &&
+    player.wallSlideGraceDirection !== 0 &&
+    (((player.wallSlideGraceDirection === -1) && moveAxis < 0) || ((player.wallSlideGraceDirection === 1) && moveAxis > 0)) &&
+    player.vy > 0 &&
+    player.wallJumpLockTimer === 0
+  ) {
+    player.wallSliding = true;
+    player.wallSlideGraceActive = true;
+  }
+
+  if (
+    !player.onGround &&
+    player.wallDirection !== 0 &&
+    player.wallJumpLockTimer === 0
+  ) {
+    armSpeedRetention(player, config, vxBeforeResolve);
+  }
+
+  if (
+    player.speedRetentionTimer > 0 &&
+    player.wallDirection === 0 &&
+    player.retainedSpeed !== 0 &&
+    Math.abs(player.retainedSpeed) > Math.abs(player.vx)
+  ) {
+    player.vx = player.retainedSpeed;
+    player.speedRetentionTimer = 0;
+    player.retainedSpeed = 0;
+    player.speedRetentionActive = true;
+  }
+
+  if (landed) {
+    refillDashFromGround(player, config);
+    const burstSize = contacts.landingSpeed > 480 ? 10 : 5;
+    spawnParticles(run, player.x + player.width / 2, player.y + player.height, burstSize, "#c5d8e6");
+    if (player.jumpBufferTimer > 0 && player.height === player.standHeight) {
+      if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
+        armSprintJumpCarry(player, config);
+      }
+      performJump(player, run, config.jumpVelocity);
+      applySprintJumpCarry(player);
+      applyDashJumpCarry(player, config);
+      player.bufferedLandingJumpActive = true;
+    }
+  }
+
+  if (player.onGround) {
+    player.coyoteTimer = config.coyoteTimeMs / 1000;
+    player.wallGraceTimer = 0;
+    player.wallGraceDirection = 0;
+    player.wallSlideGraceTimer = 0;
+    player.wallSlideGraceDirection = 0;
+    clearBraceHold(player);
+    refillDashFromGround(player, config);
+    if (crouchHeld) {
+      tryEnterCrouch(player, data);
+    } else {
+      tryExitCrouch(player, data);
+    }
+  } else {
+    player.crouchBlocked = false;
+    if (player.wallDirection !== 0) {
+      player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
+      player.wallGraceDirection = player.wallDirection;
+    }
+  }
+
+  player.canInteract = true;
+  updateMovementVfx(run, dt);
+  player.jumpHeldLastFrame = jumpHeld;
+  setMovementState(player);
+}
+
+function updateTimePhase(run, data, dt) {
+  const previousPhase = run.timePhase;
+  run.time += dt;
+
+  if (run.time >= data.world.nightAt) {
+    run.timePhase = "night";
+  } else if (run.time >= data.world.duskAt) {
+    run.timePhase = "dusk";
+  } else {
+    run.timePhase = "day";
+  }
+
+  if (previousPhase !== run.timePhase) {
+    if (run.timePhase === "dusk") {
+      pushNotice(run, "황혼 진입.");
+      pushClue(run, "phase-dusk", "빛이 약해진다. Q는 시야만 보조한다.");
+    } else if (run.timePhase === "night") {
+      run.nightActive = true;
+      pushNotice(run, "야간 위협 활성.");
+      pushClue(run, "phase-night", "밤엔 귀환 비용이 커진다.");
+    }
+  }
+
+  run.sanity = clamp(
+    run.sanity - data.world.sanityDrain[run.timePhase] * dt,
+    0,
+    data.player.maxSanity
+  );
+}
+
+function getAttackRect(player) {
+  const width = 76;
+  return createRect(
+    player.facing === 1 ? player.x + player.width - 4 : player.x - width + 4,
+    player.y + 10,
+    width,
+    player.height - 12
+  );
+}
+
+function resolveHarvest(run, encounter, abilityId = "threatSense") {
+  if (encounter.outcome) {
+    return;
+  }
+  encounter.outcome = "harvested";
+  encounter.state = "dead";
+  run.materials += encounter.harvestReward;
+  run.sanity = clamp(run.sanity - encounter.harvestSanityCost, 0, 100);
+  uniquePush(run.pendingUnlocks, abilityId);
+  uniquePush(run.successfulHarvestIds, encounter.id);
+  pushNotice(run, `${encounter.label} 수확.`);
+  spawnParticles(run, encounter.x + encounter.width / 2, encounter.y + 24, 16, "#ff8e72");
+}
+
+function resolveRelease(run, encounter) {
+  if (encounter.outcome) {
+    return;
+  }
+  encounter.outcome = "released";
+  encounter.state = "released";
+  run.sanity = clamp(run.sanity + encounter.releaseSanity, 0, 100);
+  uniquePush(run.pendingStoryFlags, encounter.storyFlag);
+  uniquePush(run.successfulReleaseIds, encounter.id);
+  pushNotice(run, `${encounter.label} 구원.`);
+  spawnParticles(run, encounter.x + encounter.width / 2, encounter.y + 16, 16, "#a8f7cf");
+}
+
+function updateAttackHits(run) {
+  if (run.player.attackWindow <= 0) {
+    return;
+  }
+
+  const attackRect = getAttackRect(run.player);
+  const liveTargets = [
+    run.encounters.guard,
+    run.encounters.ritualist,
+    ...run.threats,
+  ];
+
+  for (const target of liveTargets) {
+    if (isEntityDisabled(target)) {
+      continue;
+    }
+    if (run.player.attackHits.has(target.id)) {
+      continue;
+    }
+    if (target.dead || target.state === "dead" || target.state === "released") {
+      continue;
+    }
+    if (!rectsOverlap(attackRect, target)) {
+      continue;
+    }
+
+    run.player.attackHits.add(target.id);
+    target.hp = Math.max(0, target.hp - run.player.attackDamage);
+    target.hitFlash = 0.14;
+    spawnParticles(run, target.x + target.width / 2, target.y + 22, 6, "#ffd6ba");
+
+    if (target.type === "guard" && target.state !== "dead" && target.state !== "released") {
+      target.state = "chase";
+      target.wasProvoked = true;
+      pushNotice(run, "검문 절차가 깨졌다.");
+    }
+
+    if (target.type === "ritualist" && target.state !== "dead" && target.state !== "released") {
+      target.state = "hostile";
+      target.wasProvoked = true;
+      pushNotice(run, "의식이 너를 향한다.");
+    }
+
+    if (target.id.startsWith("shade")) {
+      target.active = true;
+    }
+
+    if (target.hp === 0) {
+      if (target.type === "guard" || target.type === "ritualist") {
+        resolveHarvest(run, target);
+      } else {
+        target.dead = true;
+        spawnParticles(run, target.x + target.width / 2, target.y + 16, 12, "#9dd8ff");
+      }
+    }
+  }
+}
+
+function updateGuard(run, dt) {
+  const guard = run.encounters.guard;
+  if (isEntityDisabled(guard) || guard.state === "released") {
+    return;
+  }
+
+  guard.hitFlash = Math.max(0, guard.hitFlash - dt);
+  guard.attackCooldown = Math.max(0, guard.attackCooldown - dt);
+
+  const player = run.player;
+  const playerCenter = getCenter(player);
+  const guardCenter = getCenter(guard);
+  const distance = distanceBetween(playerCenter, guardCenter);
+  const isMoving = Math.abs(player.vx) > 24 || Math.abs(player.vy) > 90;
+  const inDetection = distance < guard.detectionRadius;
+  const inCheckpoint = rectsOverlap(player, guard.checkpointZone);
+  const canInspect = run.inventory.badge && inCheckpoint && !isMoving && !player.lightActive;
+
+  if (guard.state === "patrol") {
+    guard.x += guard.patrolDirection * guard.speed * dt;
+    if (guard.x <= guard.patrol.left) {
+      guard.x = guard.patrol.left;
+      guard.patrolDirection = 1;
+    }
+    if (guard.x >= guard.patrol.right) {
+      guard.x = guard.patrol.right;
+      guard.patrolDirection = -1;
+    }
+    guard.facing = guard.patrolDirection;
+
+    if (inDetection && (isMoving || player.lightActive)) {
+      guard.state = "warn";
+      guard.warningTimer = player.lightActive ? 0.2 : 0.8;
+      pushClue(run, "guard-motion", guard.clues.motion);
+      pushNotice(run, "정지 경고.");
+    }
+  } else if (guard.state === "warn") {
+    guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
+    guard.warningTimer = Math.max(0, guard.warningTimer - dt);
+
+    if (canInspect) {
+      guard.state = "inspect";
+      guard.inspectProgress = 0;
+      pushClue(run, "guard-still", guard.clues.still);
+      pushNotice(run, "정지 유지.");
+    } else if (guard.warningTimer === 0) {
+      if (inDetection && (isMoving || player.lightActive)) {
+        guard.state = "chase";
+        guard.wasProvoked = true;
+        pushNotice(run, "감시자가 추적한다.");
+      } else {
+        guard.state = "patrol";
+      }
+    }
+  } else if (guard.state === "chase") {
+    guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
+    const direction = playerCenter.x >= guardCenter.x ? 1 : -1;
+    guard.x += direction * guard.chaseSpeed * dt;
+
+    if (canInspect) {
+      guard.state = "inspect";
+      guard.inspectProgress = 0;
+      pushClue(run, "guard-badge", guard.clues.badge);
+      pushClue(run, "guard-still", guard.clues.still);
+      pushNotice(run, "증표 확인. 움직이지 마.");
+    }
+
+    if (!inDetection) {
+      guard.searchTimer += dt;
+      if (guard.searchTimer > 3) {
+        guard.state = "patrol";
+        guard.searchTimer = 0;
+      }
+    } else {
+      guard.searchTimer = 0;
+    }
+
+    if (distance < guard.attackRange && guard.attackCooldown === 0) {
+      guard.attackCooldown = 1;
+      damagePlayer(run, guard.damage, direction, "감시자 근접 타격.");
+    }
+  } else if (guard.state === "inspect") {
+    guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
+    if (!canInspect) {
+      guard.state = "warn";
+      guard.warningTimer = 0.45;
+      guard.inspectProgress = 0;
+      pushNotice(run, "검문 중단. 다시 멈춰라.");
+      return;
+    }
+
+    guard.inspectProgress += dt;
+    if (guard.inspectProgress >= 2.6) {
+      resolveRelease(run, guard);
+    }
+  }
+}
+
+function resetRitualPedestals(ritualist) {
+  ritualist.sequenceProgress = 0;
+  for (const pedestal of ritualist.pedestals) {
+    pedestal.active = false;
+  }
+}
+
+function upsetRitual(run, ritualist, clueKey, clueText, notice) {
+  ritualist.state = "hostile";
+  ritualist.wasProvoked = true;
+  ritualist.calmTimer = 0;
+  resetRitualPedestals(ritualist);
+  pushClue(run, clueKey, clueText);
+  pushNotice(run, notice);
+}
+
+function usePedestal(run, pedestal) {
+  const ritualist = run.encounters.ritualist;
+  if (isEntityDisabled(ritualist) || ritualist.state === "released") {
+    return;
+  }
+  if (ritualist.state === "hostile") {
+    pushNotice(run, "의식이 깨졌다. 잠시 물러서라.");
+    return;
+  }
+
+  const expectedId = ritualist.correctOrder[ritualist.sequenceProgress];
+  if (pedestal.id !== expectedId) {
+    upsetRitual(
+      run,
+      ritualist,
+      "ritual-wrong",
+      ritualist.clues.wrong,
+      "순서 오류. 의식이 뒤집힌다."
+    );
+    return;
+  }
+
+  const livePedestal = ritualist.pedestals.find((entry) => entry.id === pedestal.id);
+  if (livePedestal) {
+    livePedestal.active = true;
+  }
+  ritualist.sequenceProgress += 1;
+  spawnParticles(run, pedestal.x + pedestal.width / 2, pedestal.y + 14, 10, "#f3dfa3");
+
+  if (ritualist.sequenceProgress >= ritualist.correctOrder.length) {
+    resolveRelease(run, ritualist);
+    return;
+  }
+
+  pushNotice(run, `${pedestal.label} 반응.`);
+}
+
+function updateRitualist(run, dt) {
+  const ritualist = run.encounters.ritualist;
+  if (isEntityDisabled(ritualist) || ritualist.state === "released") {
+    return;
+  }
+
+  ritualist.hitFlash = Math.max(0, ritualist.hitFlash - dt);
+  ritualist.attackCooldown = Math.max(0, ritualist.attackCooldown - dt);
+
+  const player = run.player;
+  const playerCenter = getCenter(player);
+  const ritualCenter = getCenter(ritualist);
+  const distance = distanceBetween(playerCenter, ritualCenter);
+  const inArea = rectsOverlap(player, ritualist.ritualArea);
+
+  if (inArea) {
+    pushClue(run, "ritual-area", ritualist.clues.area);
+  }
+
+  if (ritualist.state === "ritual") {
+    const target = ritualist.patrolPoints[ritualist.patrolIndex];
+    const dx = target.x - ritualist.x;
+    if (Math.abs(dx) < 8) {
+      ritualist.patrolIndex = (ritualist.patrolIndex + 1) % ritualist.patrolPoints.length;
+    } else {
+      const direction = dx > 0 ? 1 : -1;
+      ritualist.facing = direction;
+      ritualist.x += direction * ritualist.speed * dt;
+    }
+
+    if (inArea && player.lightActive) {
+      upsetRitual(
+        run,
+        ritualist,
+        "ritual-light",
+        ritualist.clues.light,
+        "빛에 의식이 깨졌다."
+      );
+    }
+  } else if (ritualist.state === "hostile") {
+    const direction = playerCenter.x >= ritualCenter.x ? 1 : -1;
+    ritualist.facing = direction;
+    ritualist.x += direction * ritualist.chaseSpeed * dt;
+
+    if (distance < ritualist.attackRange && ritualist.attackCooldown === 0) {
+      ritualist.attackCooldown = 1.1;
+      damagePlayer(run, ritualist.damage, direction, "의식자 타격.");
+    }
+
+    if (inArea || distance < 360) {
+      ritualist.calmTimer = 0;
+    } else {
+      ritualist.calmTimer += dt;
+      if (ritualist.calmTimer > 4) {
+        ritualist.state = "ritual";
+        ritualist.calmTimer = 0;
+        resetRitualPedestals(ritualist);
+        pushNotice(run, "의식이 다시 고요해진다.");
+      }
+    }
+  }
+}
+
+function updateThreats(run, dt) {
+  for (const threat of run.threats) {
+    if (isEntityDisabled(threat)) {
+      continue;
+    }
+    threat.hitFlash = Math.max(0, threat.hitFlash - dt);
+    threat.attackCooldown = Math.max(0, threat.attackCooldown - dt);
+
+    if (!run.nightActive || threat.dead) {
+      continue;
+    }
+
+    threat.active = true;
+    const playerCenter = getCenter(run.player);
+    const threatCenter = getCenter(threat);
+    const distance = distanceBetween(playerCenter, threatCenter);
+
+    if (distance < 340) {
+      const direction = playerCenter.x >= threatCenter.x ? 1 : -1;
+      threat.facing = direction;
+      threat.x += direction * threat.chaseSpeed * dt;
+
+      if (distance < threat.attackRange && threat.attackCooldown === 0) {
+        threat.attackCooldown = 1;
+        damagePlayer(run, threat.damage, direction, "어둠 속 위협이 덮친다.");
+      }
+    } else {
+      threat.x += threat.patrolDirection * threat.speed * dt;
+      if (threat.x <= threat.patrol.left) {
+        threat.x = threat.patrol.left;
+        threat.patrolDirection = 1;
+      }
+      if (threat.x >= threat.patrol.right) {
+        threat.x = threat.patrol.right;
+        threat.patrolDirection = -1;
+      }
+      threat.facing = threat.patrolDirection;
+    }
+  }
+}
+
+function getInteractionTargets(run, data) {
+  const playerCenter = getCenter(run.player);
+  const targets = [];
+
+  const gate = data.extractionGate;
+  const gateRect = createRect(gate.x, gate.y, gate.width, gate.height);
+  if (distanceBetween(playerCenter, getCenter(gateRect)) < 110) {
+    targets.push({
+      id: "extract",
+      kind: "extract",
+      text: gate.prompt,
+      x: gate.x + gate.width / 2,
+      y: gate.y - 12,
+    });
+  }
+
+  for (const item of run.interactables) {
+    if (item.used) {
+      continue;
+    }
+    if (distanceBetween(playerCenter, getCenter(item)) < 86) {
+      targets.push({
+        id: item.id,
+        kind: item.kind,
+        text: item.prompt,
+        x: item.x + item.width / 2,
+        y: item.y - 10,
+      });
+    }
+  }
+
+  const ritualist = run.encounters.ritualist;
+  if (!isEntityDisabled(ritualist) && ritualist.state !== "released") {
+    for (const pedestal of ritualist.pedestals) {
+      if (distanceBetween(playerCenter, getCenter(pedestal)) < 86) {
+        targets.push({
+          id: pedestal.id,
+          kind: "pedestal",
+          pedestal,
+          text: `E: ${pedestal.label}`,
+          x: pedestal.x + pedestal.width / 2,
+          y: pedestal.y - 12,
+        });
+      }
+    }
+  }
+
+  targets.sort((left, right) => {
+    const leftDistance = Math.abs(left.x - playerCenter.x);
+    const rightDistance = Math.abs(right.x - playerCenter.x);
+    return leftDistance - rightDistance;
+  });
+
+  return targets[0] || null;
+}
+
+function getEncounterOutcome(encounter) {
+  if (isEntityDisabled(encounter)) {
+    return "ignored";
+  }
+  if (encounter.outcome) {
+    return encounter.outcome;
+  }
+  return encounter.wasProvoked ? "failed" : "ignored";
+}
+
+function applyExtraction(state, data) {
+  const run = state.run;
+  if (isMovementLab(data)) {
+    state.resultSummary = {
+      success: true,
+      labSession: true,
+      materials: run.materials,
+      timePhase: run.timePhase,
+    };
+    state.run = null;
+    state.scene = SCENES.RESULTS;
+    state.sceneTimer = 0;
+    setStatus(state, "실험 종료. C");
+    return;
+  }
+
+  const outcomes = {
+    guard: getEncounterOutcome(run.encounters.guard),
+    ritualist: getEncounterOutcome(run.encounters.ritualist),
+  };
+  const trustDelta =
+    Object.values(outcomes).filter((entry) => entry === "released").length -
+    Object.values(outcomes).filter((entry) => entry === "harvested").length;
+  const newUnlocks = run.pendingUnlocks.filter((abilityId) => !state.meta.unlockedAbilities.includes(abilityId));
+  const newStories = run.pendingStoryFlags.filter((storyId) => !state.meta.storyFlags.includes(storyId));
+
+  state.meta = {
+    ...state.meta,
+    trust: state.meta.trust + trustDelta,
+    bankedMaterials: state.meta.bankedMaterials + run.materials,
+    unlockedAbilities: [...state.meta.unlockedAbilities, ...newUnlocks],
+    storyFlags: [...state.meta.storyFlags, ...newStories],
+    completedRuns: state.meta.completedRuns + 1,
+    lastOutcome: {
+      outcomes,
+      trustDelta,
+      materials: run.materials,
+      nightReached: run.nightActive,
+    },
+  };
+  saveMetaState(state.meta);
+
+  state.resultSummary = {
+    success: true,
+    outcomes,
+    trustDelta,
+    materials: run.materials,
+    newUnlocks,
+    newStories: data.encounters
+      .filter((encounter) => newStories.includes(encounter.storyFlag))
+      .map((encounter) => ({
+        id: encounter.storyFlag,
+        text: encounter.storyText,
+      })),
+    nightReached: run.nightActive,
+  };
+  state.run = null;
+  state.scene = SCENES.RESULTS;
+  state.sceneTimer = 0;
+  setStatus(state, "귀환 완료. C");
+}
+
+function applyFailure(state, data, reason) {
+  if (isMovementLab(data)) {
+    state.resultSummary = {
+      success: false,
+      labSession: true,
+      reason,
+      lostMaterials: 0,
+    };
+    state.run = null;
+    state.scene = SCENES.GAME_OVER;
+    state.sceneTimer = 0;
+    setStatus(state, "실험 리셋. C");
+    return;
+  }
+
+  state.resultSummary = {
+    success: false,
+    reason,
+    lostMaterials: state.run.materials,
+  };
+  state.run = null;
+  state.scene = SCENES.GAME_OVER;
+  state.sceneTimer = 0;
+  setStatus(state, "런 실패. C");
+}
+
+function restartCurrentRun(state, data) {
+  state.run = createRunState(data, state.meta);
+  state.scene = SCENES.EXPEDITION;
+  state.sceneTimer = 0;
+  if (state.liveEdit) {
+    state.liveEdit.active = false;
+    state.liveEdit.hoverPlatformIndex = null;
+    state.liveEdit.drag = null;
+  }
+  setStatus(state, "스폰으로 복귀.");
+}
+
+function updateInteractions(state, data, interactionPressed) {
+  const run = state.run;
+  run.prompt = "";
+  run.promptWorld = null;
+
+  const player = run.player;
+  const guard = run.encounters.guard;
+  const isMoving = Math.abs(player.vx) > 24 || Math.abs(player.vy) > 90;
+
+  if (
+    !isEntityDisabled(guard) &&
+    guard.state !== "dead" &&
+    guard.state !== "released" &&
+    run.inventory.badge &&
+    rectsOverlap(player, guard.checkpointZone) &&
+    !isMoving &&
+    !player.lightActive
+  ) {
+    run.prompt = "정지 유지";
+    run.promptWorld = {
+      x: guard.checkpointZone.x + guard.checkpointZone.width / 2,
+      y: guard.checkpointZone.y - 10,
+    };
+    return;
+  }
+
+  const braceWall = getActiveBraceWall(player, data);
+  if (
+    braceWall &&
+    !player.onGround &&
+    player.height === player.standHeight &&
+    player.dashTimer === 0
+  ) {
+    run.prompt = "C: 벽 짚기";
+    run.promptWorld = {
+      x: braceWall.x + braceWall.width * 0.5,
+      y: braceWall.y - 12,
+    };
+    return;
+  }
+
+  const nearest = getInteractionTargets(run, data);
+  if (!nearest) {
+    return;
+  }
+
+  run.prompt = nearest.text;
+  run.promptWorld = { x: nearest.x, y: nearest.y };
+
+  if (!interactionPressed) {
+    return;
+  }
+
+  if (nearest.kind === "extract") {
+    applyExtraction(state, data);
+    return;
+  }
+
+  if (nearest.kind === "pedestal") {
+    usePedestal(run, nearest.pedestal);
+    return;
+  }
+
+  const item = run.interactables.find((entry) => entry.id === nearest.id);
+  if (!item) {
+    return;
+  }
+
+  item.used = true;
+  if (item.kind === "badge-locker") {
+    run.inventory.badge = true;
+    pushClue(run, "guard-badge", item.clue);
+    pushNotice(run, "통행 배지 확보.");
+    spawnParticles(run, item.x + item.width / 2, item.y + 12, 12, "#f4dda6");
+    return;
+  }
+
+  if (item.kind === "salvage") {
+    run.materials += item.materials;
+    pushClue(run, item.id, item.clue);
+    pushNotice(run, `${item.materials} 자재 확보.`);
+    spawnParticles(run, item.x + item.width / 2, item.y + 12, 10, "#8fe1ff");
+  }
+}
+
+function updateExpedition(state, data, dt) {
+  const run = state.run;
+  if (state.liveEdit?.active) {
+    run.prompt = "";
+    run.promptWorld = null;
+    updateEffects(run, dt);
+    syncCamera(run, data, dt);
+    if (state.liveEdit.saveFlashTimer > 0) {
+      state.liveEdit.saveFlashTimer = Math.max(0, state.liveEdit.saveFlashTimer - dt);
+    }
+    setStatus(state, state.liveEdit.saveFlashTimer > 0
+      ? "라이브 편집 · 저장됨 · F2/L 종료"
+      : "라이브 편집 · 블록 드래그 · F2/L 종료");
+    return;
+  }
+
+  if (consumeEitherPress(state, RESTART_KEYS)) {
+    restartCurrentRun(state, data);
+    return;
+  }
+
+  let interactionPressed = consumeEitherPress(state, INTERACT_KEYS);
+  let attackPressed = consumeEitherPress(state, ATTACK_KEYS);
+
+  updatePlayer(run, data, state, dt, {
+    attackPressed,
+    interactionPressed,
+  });
+  if (run.player.movementState === MOVEMENT_STATES.DASH) {
+    interactionPressed = false;
+    attackPressed = false;
+  }
+  updateTimePhase(run, data, dt);
+  updateGuard(run, dt);
+  updateRitualist(run, dt);
+  updateThreats(run, dt);
+  updateAttackHits(run);
+  updateInteractions(state, data, interactionPressed && run.player.canInteract);
+  if (state.scene !== SCENES.EXPEDITION) {
+    return;
+  }
+  updateEffects(run, dt);
+  syncCamera(run, data, dt);
+
+  if (run.hp <= 0) {
+    applyFailure(state, data, "hp");
+    return;
+  }
+
+  if (run.sanity <= 0) {
+    applyFailure(state, data, "sanity");
+    return;
+  }
+
+  const phaseLabel = isMovementLab(data)
+    ? "실험 중."
+    : run.timePhase === "day"
+      ? "낮 유지."
+      : run.timePhase === "dusk"
+        ? "황혼 압박."
+        : "야간 위협.";
+  const notice = run.noticeTimer > 0 ? ` ${run.message}` : "";
+  setStatus(state, `${phaseLabel}${notice}`);
+}
+
+function updateShelter(state) {
+  setStatus(state, isMovementLab(state.data) ? "대기 중. C: 출격" : "쉘터 대기. C: 출격");
+  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    state.run = createRunState(state.data, state.meta);
+    state.scene = SCENES.EXPEDITION;
+    state.sceneTimer = 0;
+    setStatus(state, "출격 중.");
+  }
+}
+
+function updateTitle(state) {
+  setStatus(state, isMovementLab(state.data) ? "C: 입장" : "C: 쉘터");
+  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    state.scene = SCENES.SHELTER;
+    state.sceneTimer = 0;
+    setStatus(state, "연결 완료.");
+  }
+}
+
+function updateResults(state) {
+  setStatus(state, isMovementLab(state.data) ? "결과 화면. C" : "귀환 결과. C");
+  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    state.scene = SCENES.SHELTER;
+    state.sceneTimer = 0;
+  }
+}
+
+function updateGameOver(state) {
+  setStatus(state, isMovementLab(state.data) ? "실패 화면. C" : "런 실패. C");
+  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    state.scene = SCENES.SHELTER;
+    state.sceneTimer = 0;
+  }
+}
+
+export function bindInput(state) {
+  window.addEventListener("keydown", (event) => {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "KeyC", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "F2", "F3", "KeyL", "Backquote"].includes(event.code)) {
+      event.preventDefault();
+    }
+    if (!state.pressed.has(event.code)) {
+      state.justPressed.add(event.code);
+    }
+    state.pressed.add(event.code);
+  });
+
+  window.addEventListener("keyup", (event) => {
+    state.pressed.delete(event.code);
+  });
+}
+
+export function updateGame(state, data, dt) {
+  state.pulse += dt;
+  state.sceneTimer += dt;
+
+  if (consumeEitherPress(state, DEBUG_KEYS)) {
+    state.debug.active = !state.debug.active;
+  }
+
+  if (
+    consumeEitherPress(state, ["F2", "KeyL"])
+    && state.scene === SCENES.EXPEDITION
+    && isMovementLab(data)
+    && state.run
+  ) {
+    state.liveEdit.active = !state.liveEdit.active;
+    state.liveEdit.hoverPlatformIndex = null;
+    state.liveEdit.drag = null;
+    if (state.liveEdit.active) {
+      state.run.player.vx = 0;
+      state.run.player.vy = 0;
+      state.run.player.attackWindow = 0;
+      state.run.player.dashTimer = 0;
+      state.run.player.lightActive = false;
+    }
+  }
+
+  if (state.scene === SCENES.TITLE) {
+    updateTitle(state);
+  } else if (state.scene === SCENES.SHELTER) {
+    updateShelter(state);
+  } else if (state.scene === SCENES.EXPEDITION) {
+    updateExpedition(state, data, dt);
+  } else if (state.scene === SCENES.RESULTS) {
+    updateResults(state);
+  } else if (state.scene === SCENES.GAME_OVER) {
+    updateGameOver(state);
+  }
+
+  state.justPressed.clear();
+}
+
+export function hasThreatSense(state) {
+  return hasUnlocked(state.meta, "threatSense");
+}

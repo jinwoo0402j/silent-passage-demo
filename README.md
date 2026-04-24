@@ -1,81 +1,74 @@
-# Silent Passage Demo
+# Rulebound Extraction
 
-Fast HTML demo for validating a side-view exploration loop in the browser.
+Browser-first vertical slice for validating a 2D side-view extraction loop built around rule-bound NPC encounters.
 
-## What this demo is testing
+The current browser build is switched to a `movement lab` layout. Expedition content is stripped out so you can tune run, jump, dash, crouch, and wall control before placing a real authored map.
 
-- Does a simple world layout create curiosity without explicit tutorial text?
-- Do players naturally follow visual signals toward the finish?
-- Do optional discoveries and a hidden route make exploration feel worthwhile?
+## What this prototype tests
+
+- Whether `Release` versus `Harvest` creates a meaningful moral and mechanical trade-off
+- Whether clue-driven rule interpretation is strong enough to carry the encounter design
+- Whether dusk and night pressure create urgency without becoming a hard fail timer
+
+## Play loop
+
+1. Open the shelter link
+2. Deploy into the quarantine yard
+3. Read the `Checkpoint Warden` and `Loop Adherent`
+4. Choose `Release`, `Harvest`, or extraction without resolution
+5. Return to shelter with materials, trust changes, and possible unlocks
 
 ## Controls
 
-- `Enter`: start
-- `A` / `D` or arrow keys: move
-- `Space`: jump
-- `E`: interact
-- `R`: restart
-- `F2`: toggle level debug overlay
-- `F3`: toggle design mode
+- `C` or `Enter`: advance title, shelter, results, and failure scenes
+- `ArrowLeft` / `ArrowRight` (`A` / `D` fallback): move
+- `C` (`Space` fallback): jump, and brace off depth walls in mid-air
+- `X`: dash, then hold to transition into sprint
+- `ArrowDown` (`S` fallback): crouch and crouch-walk
+- `Z` (`E` fallback): interact, align pedestals, extract
+- `V` (`F` fallback): attack / harvest
+- `R`: restart the current expedition from spawn
+- `Q` (hold): lamp, and `Threat Sense` once unlocked
+- `F3` or `` ` ``: toggle collision debug overlay
+
+## Current Lab Notes
+
+- Dash now has a short cooldown and still refreshes after landing.
+- Sprint is a ground-only acceleration layer that comes off the `X` button.
+- `Brace walls` are non-solid volumes you can press `C` on in mid-air for an extra climb.
+- NPC encounters, ritual logic, and night pressure are disabled in the lab map.
+- Exit from the far-right gate to leave the lab and return to shelter.
+
+## Run rules
+
+- `Release` restores sanity and unlocks story fragments
+- `Harvest` grants materials and unlocks `Threat Sense`, but reduces sanity
+- `Night` lowers visibility, drains sanity, and activates hostile dark threats
+- If `HP` or `Sanity` reaches `0`, the current run is lost and nothing from that run is banked
 
 ## Local run
 
-Because this project is fully static, you can either open `index.html` directly or serve the folder with any static server.
-
-Example:
+Use a local static server. The app now relies on ES modules.
 
 ```powershell
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`.
-
-## GitHub Pages deployment
-
-This repository includes a GitHub Actions workflow that deploys the static site to GitHub Pages from the `main` branch.
-
-After pushing to GitHub:
-
-1. Create a GitHub repository and push this folder to `main`.
-2. In GitHub, enable Pages for GitHub Actions if prompted.
-3. The site will deploy automatically on pushes to `main`.
-
-The published URL will usually be:
-
-`https://<github-username>.github.io/<repository-name>/`
-
-## Editing the level
-
-Level layout now lives in `level-data.js`, not inside the game loop.
-
-- Change `playerSpawn` to set the starting point
-- Change `platforms` to reshape the route
-- Change `landmarks` to place visual discovery signals
-- Change `interactables` to add optional discoveries or hidden reveals
-- Change `finishZone` to move the exit
-
-Use `F2` in the browser while testing to show:
-
-- player world coordinates
-- camera position
-- a world grid
-- object labels and platform coordinates
-
-Use `F3` to open design mode:
-
-- click any platform, landmark, interactable, spawn, or finish zone to select it
-- drag the selected object directly in the canvas
-- edit the selected object in the JSON panel
-- add or delete level objects
-- copy the full current draft as a ready-to-paste `window.LEVEL_DATA = ...;` payload
-
-Draft edits are stored in browser local storage so you can iterate without touching the repo immediately.  
-When the layout feels right, copy the full level payload and replace the contents of `level-data.js`.
+Then open [http://localhost:8000](http://localhost:8000).
 
 ## Files
 
-- `index.html`: app shell and canvas mount point
-- `level-data.js`: editable level layout and world values
-- `styles.css`: page layout and responsive UI framing
-- `main.js`: game loop, input, camera, collision, discoveries, and debug tools
-- `.github/workflows/deploy-pages.yml`: Pages deployment workflow
+- `index.html`: static shell and sidebar HUD
+- `main.js`: module entry and frame loop
+- `level-data.js`: world layout, encounters, interactables, and meta content
+- `state.js`: scene state, run state, and saved meta progression
+- `systems.js`: movement, combat, encounters, extraction, and progression logic
+- `render.js`: canvas rendering and sidebar updates
+- `utils.js`: shared math and formatting helpers
+- `styles.css`: layout and visual framing
+
+## Notes
+
+- Meta progression is stored in browser local storage
+- This slice is intentionally placeholder-heavy on art and audio
+- The implementation target is browser validation, not Unity parity

@@ -1,0 +1,457 @@
+:root {
+  --editor-bg-top: #060d14;
+  --editor-bg-mid: #111c28;
+  --editor-bg-bottom: #1f3240;
+  --panel-bg: rgba(10, 19, 29, 0.78);
+  --panel-line: rgba(147, 234, 255, 0.16);
+  --panel-strong: rgba(231, 244, 126, 0.52);
+  --text-main: #edf6fb;
+  --text-muted: #9fb4c5;
+  --accent: #e7f47e;
+  --accent-alt: #93eaff;
+  --danger: #ff7d93;
+  --shadow: rgba(0, 0, 0, 0.32);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at 18% 14%, rgba(147, 234, 255, 0.14), transparent 28%),
+    radial-gradient(circle at 82% 12%, rgba(231, 244, 126, 0.1), transparent 22%),
+    linear-gradient(180deg, var(--editor-bg-top), var(--editor-bg-mid) 46%, var(--editor-bg-bottom));
+  color: var(--text-main);
+  font-family: "Segoe UI", sans-serif;
+}
+
+.editor-shell {
+  min-height: 100vh;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+}
+
+.editor-sidebar {
+  min-height: 0;
+  padding: 20px 18px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(4, 10, 17, 0.72);
+  backdrop-filter: blur(14px);
+  overflow-y: auto;
+}
+
+.editor-header {
+  margin-bottom: 18px;
+}
+
+.editor-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.editor-header-actions .ghost-button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent-alt);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.editor-header h1,
+.editor-stage-bar h2 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.editor-stage-bar h2 {
+  font-size: 22px;
+}
+
+.editor-summary {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.editor-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--panel-line);
+  border-radius: 18px;
+  background: var(--panel-bg);
+  box-shadow: 0 18px 40px var(--shadow);
+  overflow: hidden;
+}
+
+.editor-panel.compact {
+  margin-bottom: 0;
+}
+
+.editor-panel.is-collapsible {
+  padding: 0;
+}
+
+.editor-panel h2 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.panel-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.panel-toggle span:first-child {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.panel-toggle::after {
+  content: "▾";
+  color: var(--accent-alt);
+  font-size: 13px;
+  transition: transform 140ms ease;
+}
+
+.editor-panel.is-collapsible:not([open]) .panel-toggle::after {
+  transform: rotate(-90deg);
+}
+
+.panel-toggle-meta {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.panel-body {
+  padding: 0 16px 16px;
+}
+
+.panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-helper {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tool-grid,
+.action-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.tool-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tool-button,
+.primary-button,
+.ghost-button,
+.link-button {
+  appearance: none;
+  border: 1px solid rgba(147, 234, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(14, 25, 38, 0.84);
+  color: var(--text-main);
+  font: inherit;
+  padding: 11px 12px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+  text-align: center;
+  text-decoration: none;
+}
+
+.tool-button:hover,
+.primary-button:hover,
+.ghost-button:hover,
+.link-button:hover {
+  background: rgba(20, 34, 50, 0.96);
+  border-color: rgba(147, 234, 255, 0.34);
+}
+
+.tool-button.is-active {
+  border-color: var(--panel-strong);
+  color: #fcffdd;
+  background: linear-gradient(180deg, rgba(53, 67, 27, 0.92), rgba(26, 37, 27, 0.92));
+}
+
+.primary-button {
+  border-color: rgba(231, 244, 126, 0.48);
+  background: linear-gradient(180deg, rgba(74, 86, 32, 0.98), rgba(34, 44, 22, 0.98));
+}
+
+.ghost-button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.scale-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scale-pill {
+  padding: 9px 12px;
+  border: 1px solid rgba(147, 234, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(8, 15, 23, 0.78);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.selection-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field.full {
+  grid-column: 1 / -1;
+}
+
+.field span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.field small {
+  color: rgba(159, 180, 197, 0.78);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  border: 1px solid rgba(147, 234, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(8, 15, 23, 0.86);
+  color: var(--text-main);
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.field input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+  transform: translateY(1px);
+}
+
+.field textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.inline-select {
+  display: grid;
+  gap: 6px;
+  min-width: 128px;
+}
+
+.inline-select span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.render-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.camera-fields {
+  margin-top: 12px;
+}
+
+.camera-field {
+  align-content: start;
+}
+
+.camera-toggle {
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+}
+
+.camera-toggle span,
+.camera-toggle small {
+  grid-column: 1 / -1;
+}
+
+.field-heading {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  color: var(--accent-alt);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.selection-label,
+.status-label {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.panel-row > .selection-label {
+  margin: 0;
+}
+
+.selection-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px dashed rgba(147, 234, 255, 0.26);
+  border-radius: 12px;
+  background: rgba(8, 15, 23, 0.7);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.status-label.is-dirty {
+  color: #ffe69a;
+}
+
+.status-label.is-error {
+  color: var(--danger);
+}
+
+.editor-tips {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.editor-stage {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 18px;
+  gap: 14px;
+  box-sizing: border-box;
+}
+
+.editor-stage-bar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 2px 0;
+}
+
+.stage-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.stage-meta span {
+  padding: 9px 12px;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  background: rgba(8, 15, 23, 0.72);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.editor-canvas-wrap {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 26px;
+  background: rgba(3, 8, 14, 0.8);
+  box-shadow: 0 28px 54px var(--shadow);
+}
+
+#editorCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  .editor-shell {
+    height: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .editor-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+}
+
+@media (max-width: 720px) {
+  .editor-sidebar,
+  .editor-stage {
+    padding: 14px;
+  }
+
+  .field-grid,
+  .selection-fields,
+  .tool-grid,
+  .render-fields {
+    grid-template-columns: 1fr;
+  }
+
+  #editorCanvas {
+    min-height: 420px;
+  }
+}

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>윤회무명2 레벨 에디터</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./editor.css">
+</head>
+<body class="editor-page">
+  <main class="editor-shell">
+    <aside class="editor-sidebar">
+      <header class="editor-header">
+        <p class="eyebrow">Level Editor</p>
+        <h1>레벨 에디터</h1>
+        <p class="editor-summary">배치, 카메라, HUD, 플레이어 렌더를 필요한 만큼만 보고 만질 수 있게 정리한 편집 화면이다.</p>
+        <div class="editor-header-actions">
+          <button type="button" class="ghost-button" id="collapseAllButton">모두 접기</button>
+          <button type="button" class="ghost-button" id="expandAllButton">모두 펼치기</button>
+        </div>
+      </header>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>도구</span>
+          <span class="panel-toggle-meta">배치</span>
+        </summary>
+        <div class="panel-body">
+          <div class="tool-grid" id="toolButtons">
+            <button type="button" class="tool-button is-active" data-tool="select">선택</button>
+            <button type="button" class="tool-button" data-tool="platform">플랫폼</button>
+            <button type="button" class="tool-button" data-tool="braceWall">벽 짚기</button>
+            <button type="button" class="tool-button" data-tool="sign">표지판</button>
+            <button type="button" class="tool-button" data-tool="lantern">랜턴</button>
+            <button type="button" class="tool-button" data-tool="spawn">스폰</button>
+            <button type="button" class="tool-button" data-tool="gate">출구</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>월드</span>
+          <span class="panel-toggle-meta">기본</span>
+        </summary>
+        <div class="panel-body">
+          <div class="field-grid">
+            <label class="field">
+              <span>가로</span>
+              <input id="worldWidthInput" type="number" min="640" step="10">
+            </label>
+            <label class="field">
+              <span>세로</span>
+              <input id="worldHeightInput" type="number" min="360" step="10">
+            </label>
+            <label class="field">
+              <span>바닥 Y</span>
+              <input id="groundYInput" type="number" min="0" step="10">
+            </label>
+            <label class="field">
+              <span>스냅</span>
+              <input id="snapInput" type="number" min="1" step="1" value="16">
+            </label>
+            <label class="field">
+              <span>카메라 줌</span>
+              <input id="cameraZoomInput" type="number" min="0.5" max="2.5" step="0.05" value="1">
+              <small>낮을수록 더 넓게 보인다. 현재 플레이 기준값이다.</small>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>카메라 튜닝</span>
+          <span class="panel-toggle-meta">시야/줌</span>
+        </summary>
+        <div class="panel-body">
+          <p class="panel-helper">줌 계열 값은 기본 줌에 곱하는 비율이다. 1은 기본, 0.9는 10% 줌아웃이다.</p>
+          <div class="field-grid camera-fields" id="cameraTuningFields"></div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible">
+        <summary class="panel-toggle">
+          <span>스케일 기준</span>
+          <span class="panel-toggle-meta">참고</span>
+        </summary>
+        <div class="panel-body">
+          <div class="panel-row">
+            <p class="panel-helper">타일 기준으로 현재 배치를 정렬한다.</p>
+            <button type="button" class="ghost-button" id="snapAllButton">전체 정렬</button>
+          </div>
+          <div class="scale-pills">
+            <span class="scale-pill" id="scaleTileLabel">1T = 32</span>
+            <span class="scale-pill" id="scaleSubTileLabel">서브 = 16</span>
+            <span class="scale-pill" id="scalePlayerLabel">캐릭터 = 1.5T x 2.5T</span>
+          </div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible">
+        <summary class="panel-toggle">
+          <span>플레이어 렌더</span>
+          <span class="panel-toggle-meta">고급</span>
+        </summary>
+        <div class="panel-body">
+          <div class="panel-row">
+            <p class="panel-helper">포즈별 스프라이트 비율과 앵커를 조정한다.</p>
+            <label class="inline-select">
+              <span>미리보기</span>
+              <select id="playerPreviewPose"></select>
+            </label>
+          </div>
+          <div class="field-grid render-fields" id="playerRenderFields"></div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible">
+        <summary class="panel-toggle">
+          <span>HUD 레이아웃</span>
+          <span class="panel-toggle-meta">고급</span>
+        </summary>
+        <div class="panel-body">
+          <div class="field-grid render-fields" id="hudLayoutFields"></div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>선택 항목</span>
+          <span class="panel-toggle-meta">편집</span>
+        </summary>
+        <div class="panel-body">
+          <div class="panel-row">
+            <p class="selection-label" id="selectionLabel">선택 없음</p>
+            <button type="button" class="ghost-button" id="deleteSelectionButton">삭제</button>
+          </div>
+          <div class="field-grid selection-fields" id="selectionFields"></div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>저장 / 불러오기</span>
+          <span class="panel-toggle-meta">파일</span>
+        </summary>
+        <div class="panel-body">
+          <div class="action-stack">
+            <button type="button" class="primary-button" id="saveButton">로컬 저장</button>
+            <button type="button" class="ghost-button" id="downloadButton">JSON 저장</button>
+            <button type="button" class="ghost-button" id="importButton">JSON 불러오기</button>
+            <button type="button" class="ghost-button" id="fitViewButton">전체 보기</button>
+            <button type="button" class="ghost-button" id="resetButton">초기화</button>
+            <a class="ghost-button link-button" href="./index.html">게임으로</a>
+            <input id="importInput" type="file" accept="application/json,.json" hidden>
+          </div>
+          <p class="status-label" id="statusLabel">저장 준비</p>
+        </div>
+      </details>
+
+      <details class="editor-panel compact is-collapsible">
+        <summary class="panel-toggle">
+          <span>단축키</span>
+          <span class="panel-toggle-meta">도움말</span>
+        </summary>
+        <div class="panel-body">
+          <ul class="editor-tips">
+            <li>클릭: 단일 선택</li>
+            <li>빈 공간 드래그: 다중 선택</li>
+            <li>선택 후 드래그: 위치 이동</li>
+            <li>휠: 확대 / 축소</li>
+            <li>Delete: 선택 삭제</li>
+            <li>Ctrl+S: 로컬 저장</li>
+          </ul>
+        </div>
+      </details>
+    </aside>
+
+    <section class="editor-stage">
+      <div class="editor-stage-bar">
+        <div>
+          <p class="eyebrow">Movement Lab</p>
+          <h2>레벨 미리보기</h2>
+        </div>
+        <div class="stage-meta">
+          <span id="toolHint">선택 후 드래그로 이동</span>
+          <span id="viewLabel">100%</span>
+        </div>
+      </div>
+
+      <div class="editor-canvas-wrap">
+        <canvas id="editorCanvas" width="1600" height="900" aria-label="레벨 에디터 캔버스"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./editor.js?v=20260424-camera-brace-1"></script>
+</body>
+</html>
