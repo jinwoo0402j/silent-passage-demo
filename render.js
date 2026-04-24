@@ -939,6 +939,21 @@ function drawEntity(ctx, entity, palette, label) {
 }
 
 function getPlayerPose(player) {
+  if (player.recoilSpinTimer > 0 && !player.onGround) {
+    return "recoilSpin";
+  }
+  if (player.recoilShotActive) {
+    return "recoilShot";
+  }
+  if (player.recoilFocusActive || (player.recoilFocusBlend ?? 0) > 0.12) {
+    if (player.recoilAimPitch === -1) {
+      return "recoilFocusUp";
+    }
+    if (player.recoilAimPitch === 1) {
+      return "recoilFocusDown";
+    }
+    return "recoilFocus";
+  }
   if (player.wallRunActive) {
     return "wallRun";
   }
@@ -954,6 +969,9 @@ function getPlayerPose(player) {
   if (player.movementState === MOVEMENT_STATES.DASH) {
     return "dash";
   }
+  if (player.movementState === MOVEMENT_STATES.SLIDE) {
+    return "slide";
+  }
   if (
     player.movementState === MOVEMENT_STATES.CROUCH ||
     player.movementState === MOVEMENT_STATES.CROUCH_WALK
@@ -962,6 +980,9 @@ function getPlayerPose(player) {
   }
   if (player.movementState === MOVEMENT_STATES.WALL_SLIDE) {
     return "wallSlide";
+  }
+  if (player.movementState === MOVEMENT_STATES.HOVER) {
+    return "hover";
   }
   if (player.movementState === MOVEMENT_STATES.FALL) {
     return "fall";
@@ -1015,6 +1036,14 @@ function getPlayerPoseConfig(data, pose) {
       heightRatio: renderConfig.fallHeightRatio ?? renderConfig.heightRatio ?? 1,
       anchorX: renderConfig.fallAnchorX ?? 0.46,
     },
+    hover: {
+      assetKey: renderConfig.hoverAssetKey || renderConfig.fallAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.hoverWidthRatio ?? renderConfig.fallWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.hoverHeightRatio ?? renderConfig.fallHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.hoverAnchorX ?? renderConfig.fallAnchorX ?? 0.44,
+      footAnchorY: renderConfig.hoverFootAnchorY ?? renderConfig.footAnchorY ?? 0.76,
+      sourceFacing: renderConfig.hoverSourceFacing ?? 1,
+    },
     dash: {
       assetKey: renderConfig.dashAssetKey || renderConfig.runAssetKey || fallbackAssetKey,
       widthRatio: renderConfig.dashWidthRatio ?? renderConfig.widthRatio ?? 1,
@@ -1026,6 +1055,46 @@ function getPlayerPoseConfig(data, pose) {
       widthRatio: renderConfig.crouchWidthRatio ?? renderConfig.widthRatio ?? 1,
       heightRatio: renderConfig.crouchHeightRatio ?? renderConfig.heightRatio ?? 1,
       anchorX: renderConfig.crouchAnchorX ?? 0.48,
+    },
+    slide: {
+      assetKey: renderConfig.slideAssetKey || renderConfig.crouchAssetKey || renderConfig.dashAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.slideWidthRatio ?? renderConfig.crouchWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.slideHeightRatio ?? renderConfig.crouchHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.slideAnchorX ?? renderConfig.crouchAnchorX ?? 0.42,
+    },
+    recoilShot: {
+      assetKey: renderConfig.recoilShotAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilShotWidthRatio ?? renderConfig.jumpWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilShotHeightRatio ?? renderConfig.jumpHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilShotAnchorX ?? renderConfig.jumpAnchorX ?? 0.38,
+    },
+    recoilSpin: {
+      assetKey: renderConfig.recoilSpinAssetKey || renderConfig.recoilShotAssetKey || renderConfig.fallAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilSpinWidthRatio ?? renderConfig.recoilShotWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilSpinHeightRatio ?? renderConfig.recoilShotHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilSpinAnchorX ?? 0.5,
+      footAnchorY: renderConfig.recoilSpinFootAnchorY ?? renderConfig.footAnchorY ?? 0.8,
+      frameCount: renderConfig.recoilSpinFrameCount ?? 4,
+      loopCount: renderConfig.recoilSpinLoopCount ?? 1,
+      sourceFacing: renderConfig.recoilSpinSourceFacing ?? 1,
+    },
+    recoilFocus: {
+      assetKey: renderConfig.recoilFocusAssetKey || renderConfig.recoilShotAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilFocusWidthRatio ?? renderConfig.recoilShotWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilFocusHeightRatio ?? renderConfig.recoilShotHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilFocusAnchorX ?? renderConfig.recoilShotAnchorX ?? 0.34,
+    },
+    recoilFocusUp: {
+      assetKey: renderConfig.recoilFocusUpAssetKey || renderConfig.recoilFocusAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilFocusUpWidthRatio ?? renderConfig.recoilFocusWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilFocusUpHeightRatio ?? renderConfig.recoilFocusHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilFocusUpAnchorX ?? renderConfig.recoilFocusAnchorX ?? 0.34,
+    },
+    recoilFocusDown: {
+      assetKey: renderConfig.recoilFocusDownAssetKey || renderConfig.recoilFocusAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilFocusDownWidthRatio ?? renderConfig.recoilFocusWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilFocusDownHeightRatio ?? renderConfig.recoilFocusHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilFocusDownAnchorX ?? renderConfig.recoilFocusAnchorX ?? 0.34,
     },
     wallJump: {
       assetKey: renderConfig.wallJumpAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
@@ -1059,9 +1128,10 @@ function getPlayerPoseConfig(data, pose) {
     },
   };
 
+  const config = poseMap[pose] || poseMap.idle;
   return {
-    ...(poseMap[pose] || poseMap.idle),
-    footAnchorY: renderConfig.footAnchorY ?? 0.978,
+    ...config,
+    footAnchorY: config.footAnchorY ?? renderConfig.footAnchorY ?? 0.978,
   };
 }
 
@@ -1077,6 +1147,11 @@ function getPlayerSpriteFrame(player, data, pose, time = 0) {
   let scaleY = 1;
   let rotation = 0;
   let yLift = 0;
+  const frameCount = Math.max(1, Math.floor(poseConfig.frameCount ?? 1));
+  const sourceWidth = image.naturalWidth / frameCount;
+  const sourceHeight = image.naturalHeight;
+  let sourceX = 0;
+  let sourceY = 0;
 
   if (pose === "idle") {
     yLift = Math.sin(time * 2.2) * 2;
@@ -1097,6 +1172,10 @@ function getPlayerSpriteFrame(player, data, pose, time = 0) {
     }
   } else if (pose === "fall") {
     yLift = 1;
+  } else if (pose === "hover") {
+    yLift = Math.sin(time * 10) * 1.5;
+    rotation = player.facing === -1 ? -0.015 : 0.015;
+    scaleY = 0.99;
   } else if (pose === "wallJump") {
     yLift = 2;
   } else if (pose === "wallSlide") {
@@ -1111,29 +1190,68 @@ function getPlayerSpriteFrame(player, data, pose, time = 0) {
     scaleX = 1.04;
     scaleY = 0.96;
     rotation = -0.025;
+  } else if (pose === "slide") {
+    yLift = -8;
+    scaleX = 1.03;
+    scaleY = 0.98;
+    rotation = 0.015;
+  } else if (pose === "recoilShot") {
+    yLift = 1;
+    const aimFacing = player.recoilAimFacing || player.facing || 1;
+    rotation = aimFacing === -1 ? 0.035 : -0.035;
+  } else if (pose === "recoilSpin") {
+    yLift = 1;
+    const duration = Math.max(0.001, player.recoilSpinDuration || 0.22);
+    const progress = Math.max(0, Math.min(0.999, 1 - (player.recoilSpinTimer / duration)));
+    const loopCount = Math.max(1, Math.floor(poseConfig.loopCount ?? 1));
+    const frameIndex = Math.floor(progress * frameCount * loopCount) % frameCount;
+    sourceX = frameIndex * sourceWidth;
+  } else if (pose === "recoilFocus") {
+    yLift = 1;
+    const aimFacing = player.recoilAimFacing || player.facing || 1;
+    rotation = aimFacing === -1 ? 0.025 : -0.025;
+  } else if (pose === "recoilFocusUp") {
+    yLift = 1;
+    const aimFacing = player.recoilAimFacing || player.facing || 1;
+    rotation = aimFacing === -1 ? -0.015 : 0.015;
+  } else if (pose === "recoilFocusDown") {
+    yLift = 1;
+    const aimFacing = player.recoilAimFacing || player.facing || 1;
+    rotation = aimFacing === -1 ? 0.015 : -0.015;
   } else if (pose === "crouch") {
     yLift = -6;
   }
 
-  const imageAspect = image.naturalWidth / image.naturalHeight;
+  const imageAspect = sourceWidth / sourceHeight;
   const drawHeight = Math.max(1, player.height * poseConfig.heightRatio);
   const drawWidth = Math.max(1, drawHeight * imageAspect * poseConfig.widthRatio);
 
   const footX = player.x + player.width * 0.5;
   const footY = player.y + player.height + yLift;
-  const anchorX = player.facing === -1 ? poseConfig.anchorX : 1 - poseConfig.anchorX;
+  const facing = (pose === "recoilFocus" || pose === "recoilFocusUp" || pose === "recoilFocusDown" || pose === "recoilShot")
+    ? (player.recoilAimFacing || player.facing || 1)
+    : pose === "recoilSpin"
+      ? (player.recoilSpinFacing || player.facing || 1)
+    : player.facing;
+  const anchorX = facing === -1 ? poseConfig.anchorX : 1 - poseConfig.anchorX;
 
   return {
     image,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
     drawWidth,
     drawHeight,
     footX,
     footY,
     anchorX,
+    facing,
     footAnchorY: poseConfig.footAnchorY,
     rotation,
     scaleX,
     scaleY,
+    sourceFacing: poseConfig.sourceFacing ?? -1,
   };
 }
 
@@ -1148,8 +1266,10 @@ function drawPlayerFrame(ctx, frame, player, options = {}) {
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(frame.footX, frame.footY);
-  ctx.rotate(frame.rotation * player.facing);
-  ctx.scale(player.facing === -1 ? 1 : -1, 1);
+  const facing = frame.facing || player.facing || 1;
+  ctx.rotate(frame.rotation * facing);
+  const sourceFacing = frame.sourceFacing ?? -1;
+  ctx.scale(facing === sourceFacing ? 1 : -1, 1);
   ctx.scale(frame.scaleX, frame.scaleY);
 
   if (glowColor && glowBlur > 0) {
@@ -1157,13 +1277,27 @@ function drawPlayerFrame(ctx, frame, player, options = {}) {
     ctx.shadowBlur = glowBlur;
   }
 
-  ctx.drawImage(
-    frame.image,
-    -frame.drawWidth * frame.anchorX,
-    -frame.drawHeight * frame.footAnchorY,
-    frame.drawWidth,
-    frame.drawHeight
-  );
+  if (Number.isFinite(frame.sourceWidth) && Number.isFinite(frame.sourceHeight)) {
+    ctx.drawImage(
+      frame.image,
+      frame.sourceX ?? 0,
+      frame.sourceY ?? 0,
+      frame.sourceWidth,
+      frame.sourceHeight,
+      -frame.drawWidth * frame.anchorX,
+      -frame.drawHeight * frame.footAnchorY,
+      frame.drawWidth,
+      frame.drawHeight
+    );
+  } else {
+    ctx.drawImage(
+      frame.image,
+      -frame.drawWidth * frame.anchorX,
+      -frame.drawHeight * frame.footAnchorY,
+      frame.drawWidth,
+      frame.drawHeight
+    );
+  }
 
   if (fillTint) {
     ctx.globalCompositeOperation = "source-atop";
@@ -1254,10 +1388,18 @@ function drawPlayerSprite(ctx, player, data, time = 0) {
   drawPlayerFrame(ctx, frame, player, {
     glowColor: player.movementState === MOVEMENT_STATES.DASH
       ? "rgba(211, 241, 255, 0.65)"
-      : player.lightActive
-        ? "rgba(231, 244, 126, 0.28)"
-        : null,
-    glowBlur: player.movementState === MOVEMENT_STATES.DASH ? 22 : player.lightActive ? 16 : 0,
+      : player.movementState === MOVEMENT_STATES.HOVER
+        ? "rgba(147, 234, 255, 0.48)"
+        : player.lightActive
+          ? "rgba(231, 244, 126, 0.28)"
+          : null,
+    glowBlur: player.movementState === MOVEMENT_STATES.DASH
+      ? 22
+      : player.movementState === MOVEMENT_STATES.HOVER
+        ? 18
+        : player.lightActive
+          ? 16
+          : 0,
     fillTint: flash
       ? "rgba(255, 209, 183, 0.44)"
       : player.movementState === MOVEMENT_STATES.DASH
@@ -1370,6 +1512,92 @@ function drawAttackFx(ctx, run) {
   });
 }
 
+function drawRecoilFx(ctx, run) {
+  run.recoilFx.forEach((effect) => {
+    const alpha = Math.max(0, effect.life / effect.duration);
+    const normalX = -effect.dirY;
+    const normalY = effect.dirX;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.lineCap = "round";
+    for (let index = -1; index <= 1; index += 1) {
+      const spread = index * 0.16;
+      const dirX = effect.dirX + normalX * spread;
+      const dirY = effect.dirY + normalY * spread;
+      const length = 130 + Math.abs(index) * 34;
+      ctx.strokeStyle = `rgba(233, 247, 255, ${0.72 * alpha})`;
+      ctx.lineWidth = index === 0 ? 5 : 2.5;
+      ctx.beginPath();
+      ctx.moveTo(effect.x, effect.y);
+      ctx.lineTo(effect.x + dirX * length, effect.y + dirY * length);
+      ctx.stroke();
+    }
+    ctx.fillStyle = `rgba(147, 234, 255, ${0.4 * alpha})`;
+    ctx.beginPath();
+    ctx.arc(effect.x, effect.y, 34 * alpha, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawRecoilAimWorld(ctx, run) {
+  const aim = run.recoilAim;
+  const blend = run.player.recoilFocusBlend ?? 0;
+  if (!aim || blend <= 0.02) {
+    return;
+  }
+
+  const alpha = Math.min(1, blend);
+  const shotLength = 180;
+  const recoilLength = 116;
+  const shotEndX = aim.originX + aim.shotDirX * shotLength;
+  const shotEndY = aim.originY + aim.shotDirY * shotLength;
+  const recoilEndX = aim.originX + aim.recoilDirX * recoilLength;
+  const recoilEndY = aim.originY + aim.recoilDirY * recoilLength;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = `rgba(233, 247, 255, ${0.58 * alpha})`;
+  ctx.lineWidth = 2.4;
+  ctx.setLineDash([10, 8]);
+  ctx.beginPath();
+  ctx.moveTo(aim.originX, aim.originY);
+  ctx.lineTo(shotEndX, shotEndY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = `rgba(231, 244, 126, ${0.82 * alpha})`;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(aim.originX, aim.originY);
+  ctx.lineTo(recoilEndX, recoilEndY);
+  ctx.stroke();
+
+  const arrowAngle = Math.atan2(aim.recoilDirY, aim.recoilDirX);
+  ctx.fillStyle = `rgba(231, 244, 126, ${0.9 * alpha})`;
+  ctx.beginPath();
+  ctx.moveTo(recoilEndX, recoilEndY);
+  ctx.lineTo(
+    recoilEndX - Math.cos(arrowAngle - 0.55) * 18,
+    recoilEndY - Math.sin(arrowAngle - 0.55) * 18,
+  );
+  ctx.lineTo(
+    recoilEndX - Math.cos(arrowAngle + 0.55) * 18,
+    recoilEndY - Math.sin(arrowAngle + 0.55) * 18,
+  );
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = `rgba(147, 234, 255, ${0.5 * alpha})`;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(shotEndX, shotEndY, 18, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawParticles(ctx, run) {
   run.particles.forEach((particle) => {
     ctx.globalAlpha = Math.max(0, particle.life);
@@ -1379,6 +1607,127 @@ function drawParticles(ctx, run) {
     ctx.fill();
   });
   ctx.globalAlpha = 1;
+}
+
+function drawRecoilFocusOverlay(ctx, run, data) {
+  const blend = run.player.recoilFocusBlend ?? 0;
+  if (blend <= 0.02) {
+    return;
+  }
+
+  const cameraZoom = getRunCameraZoom(run, data);
+  const playerX = (run.player.x - run.cameraX + run.player.width / 2) * cameraZoom;
+  const playerY = (run.player.y - run.cameraY + run.player.height * 0.48) * cameraZoom;
+  const aim = run.recoilAim;
+  const effectTime = Number.isFinite(run.time) ? run.time : 0;
+
+  ctx.save();
+
+  ctx.fillStyle = `rgba(5, 10, 8, ${0.08 * blend})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.globalCompositeOperation = "screen";
+  const pulse = 0.5 + Math.sin(effectTime * 18) * 0.5;
+  const edgeAlpha = (0.09 + pulse * 0.05) * blend;
+  const leftEdge = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.38, 0);
+  leftEdge.addColorStop(0, `rgba(231, 244, 126, ${edgeAlpha})`);
+  leftEdge.addColorStop(0.48, `rgba(147, 234, 255, ${edgeAlpha * 0.34})`);
+  leftEdge.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = leftEdge;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const rightEdge = ctx.createLinearGradient(SCREEN_WIDTH, 0, SCREEN_WIDTH * 0.62, 0);
+  rightEdge.addColorStop(0, `rgba(147, 234, 255, ${edgeAlpha * 0.88})`);
+  rightEdge.addColorStop(0.54, `rgba(231, 244, 126, ${edgeAlpha * 0.3})`);
+  rightEdge.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = rightEdge;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const auraRadius = 175 * cameraZoom;
+  const aura = ctx.createRadialGradient(
+    playerX,
+    playerY,
+    18 * cameraZoom,
+    playerX,
+    playerY,
+    auraRadius,
+  );
+  aura.addColorStop(0, `rgba(246, 255, 166, ${0.24 * blend})`);
+  aura.addColorStop(0.35, `rgba(231, 244, 126, ${0.13 * blend})`);
+  aura.addColorStop(0.74, `rgba(147, 234, 255, ${0.055 * blend})`);
+  aura.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = aura;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const facingFallback = Number.isFinite(run.player.facing) ? -run.player.facing : -1;
+  const ghostDirX = aim?.recoilDirX ?? run.player.recoilDirX ?? facingFallback;
+  const ghostDirY = aim?.recoilDirY ?? run.player.recoilDirY ?? 0;
+  const ghostColors = ["246, 255, 166", "231, 244, 126", "147, 234, 255"];
+  ctx.lineCap = "round";
+  for (let index = 0; index < 3; index += 1) {
+    const offset = (index + 1) * 18 * cameraZoom;
+    const ghostX = playerX + ghostDirX * offset;
+    const ghostY = playerY + ghostDirY * offset * 0.5;
+    ctx.strokeStyle = `rgba(${ghostColors[index]}, ${(0.26 * blend) / (index + 1)})`;
+    ctx.lineWidth = Math.max(1, (3 - index) * cameraZoom);
+    ctx.beginPath();
+    ctx.ellipse(
+      ghostX,
+      ghostY,
+      (38 + index * 10) * cameraZoom,
+      (60 + index * 9) * cameraZoom,
+      ghostDirX * -0.18,
+      0,
+      Math.PI * 2,
+    );
+    ctx.stroke();
+  }
+
+  const scanOffset = (effectTime * 520) % 22;
+  ctx.fillStyle = `rgba(246, 255, 166, ${0.026 * blend})`;
+  for (let y = -scanOffset; y < SCREEN_HEIGHT; y += 22) {
+    ctx.fillRect(0, y, SCREEN_WIDTH, 1);
+  }
+
+  ctx.strokeStyle = `rgba(231, 244, 126, ${0.1 * blend})`;
+  ctx.lineWidth = 2;
+  for (let index = 0; index < 4; index += 1) {
+    const y = ((effectTime * 180 + index * 173) % (SCREEN_HEIGHT + 80)) - 40;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.bezierCurveTo(
+      SCREEN_WIDTH * 0.28,
+      y - 18 * cameraZoom,
+      SCREEN_WIDTH * 0.62,
+      y + 24 * cameraZoom,
+      SCREEN_WIDTH,
+      y - 8 * cameraZoom,
+    );
+    ctx.stroke();
+  }
+
+  ctx.globalCompositeOperation = "screen";
+
+  if (aim) {
+    const targetX = (aim.targetX - run.cameraX) * cameraZoom;
+    const targetY = (aim.targetY - run.cameraY) * cameraZoom;
+    ctx.strokeStyle = `rgba(147, 234, 255, ${0.72 * blend})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(targetX, targetY, 15, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(targetX - 22, targetY);
+    ctx.lineTo(targetX - 8, targetY);
+    ctx.moveTo(targetX + 8, targetY);
+    ctx.lineTo(targetX + 22, targetY);
+    ctx.moveTo(targetX, targetY - 22);
+    ctx.lineTo(targetX, targetY - 8);
+    ctx.moveTo(targetX, targetY + 8);
+    ctx.lineTo(targetX, targetY + 22);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawDarknessOverlay(ctx, run, data) {
@@ -1551,6 +1900,8 @@ function drawDebugWorldOverlay(ctx, state, data) {
     player.dashCarryActive ? "DashCarry" : null,
     player.sprintActive ? "Sprint" : null,
     player.sprintJumpBoostActive ? "SprintJump" : null,
+    player.slideTimer > 0 ? "Slide" : null,
+    player.slideJumpBoostActive ? "SlideJump" : null,
     player.dashJumpBoostActive ? "DashJump" : null,
     player.speedRetentionActive ? "SpeedRet" : null,
     player.wallRunActive ? "WallRun" : null,
@@ -1843,9 +2194,9 @@ function drawActionNode(ctx, theme, x, y, type, label, keyLabel, prominent = fal
 }
 
 function drawActionCluster(ctx, theme) {
-  drawActionNode(ctx, theme, 118, 610, "move", "이동", "← →", true);
-  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "C");
-  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "X");
+  drawActionNode(ctx, theme, 118, 610, "move", "이동", "A D", true);
+  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "Space");
+  drawActionNode(ctx, theme, 186, 570, "dash", "집중", "RMB");
   drawActionNode(ctx, theme, 56, 676, "crouch", "숙이기", "↓");
   drawActionNode(ctx, theme, 184, 684, "use", "사용", "Z");
 }
@@ -1878,6 +2229,18 @@ function getDashUiState(run, data) {
         ? `대시 준비 ${countText}`
         : `대시 소모 ${countText}`,
   };
+}
+
+function getRecoilShotUiState(run, data) {
+  const maxCharges = Math.max(1, Math.floor(data.player.movement.recoilShotCharges ?? 1));
+  const currentCharges = Math.max(0, Math.min(maxCharges, run.player.recoilShotCharges ?? maxCharges));
+  const cooldownMax = Math.max(0.001, (data.player.movement.recoilShotCooldownMs ?? 0) / 1000);
+  const cooldownProgress = run.player.recoilShotCooldownTimer > 0
+    ? 1 - run.player.recoilShotCooldownTimer / cooldownMax
+    : 1;
+  return currentCharges > 0
+    ? currentCharges / maxCharges
+    : Math.max(0, Math.min(1, cooldownProgress));
 }
 
 function drawStatusBars(ctx, run, data, theme) {
@@ -1981,13 +2344,16 @@ function renderExpedition(ctx, state, data) {
 
   drawAfterimages(ctx, run, data);
   drawPlayer(ctx, run, data);
+  drawRecoilAimWorld(ctx, run);
   drawAttackFx(ctx, run);
+  drawRecoilFx(ctx, run);
   drawParticles(ctx, run);
   drawDebugWorldOverlay(ctx, state, data);
   drawLiveEditWorldOverlay(ctx, state, data);
   drawWorldPrompt(ctx, run, theme);
   ctx.restore();
 
+  drawRecoilFocusOverlay(ctx, run, data);
   drawDarknessOverlay(ctx, run, data);
   ctx.save();
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
@@ -2229,9 +2595,9 @@ function drawMiniMapV2(ctx, state, data, theme) {
 
 function drawActionClusterV2(ctx, theme) {
   const labels = [
-    { x: 46, y: 648, text: "← →" },
-    { x: 168, y: 649, text: "X" },
-    { x: 44, y: 699, text: "C" },
+    { x: 46, y: 648, text: "A D" },
+    { x: 168, y: 649, text: "RMB/LMB" },
+    { x: 44, y: 699, text: "Space" },
     { x: 126, y: 706, text: "↓" },
     { x: 210, y: 690, text: "Z" },
   ];
@@ -2555,11 +2921,11 @@ function drawObjectiveCardV3(ctx, state, data, theme, layout) {
 }
 
 function drawStatusBarsV3(ctx, run, data, theme, layout) {
-  const dashState = getDashUiState(run, data);
+  const shotValue = getRecoilShotUiState(run, data);
   const bars = [
     { value: run.hp / data.player.maxHp, color: "#fbfefe" },
     { value: run.battery / data.player.maxBattery, color: theme.accentSecondary },
-    { value: dashState.value, color: theme.accent },
+    { value: shotValue, color: run.player.recoilFocusActive ? "#e7f47e" : theme.accent },
   ];
 
   drawBeveledPanel(ctx, theme, layout.status.x - 18, layout.status.y - 20, layout.status.width + 118, 74, {
@@ -2582,9 +2948,9 @@ function drawStatusBarsV3(ctx, run, data, theme, layout) {
 
 function drawActionClusterV3(ctx, theme, layout) {
   const labels = [
-    { x: layout.actions.moveX, y: layout.actions.moveY, text: "← →" },
-    { x: layout.actions.dashX, y: layout.actions.dashY, text: "X" },
-    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "C" },
+    { x: layout.actions.moveX, y: layout.actions.moveY, text: "A D" },
+    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Shift" },
+    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "Space" },
     { x: layout.actions.crouchX, y: layout.actions.crouchY, text: "↓" },
     { x: layout.actions.useX, y: layout.actions.useY, text: "Z" },
   ];

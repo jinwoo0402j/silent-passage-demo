@@ -2,7 +2,7 @@
 
 Browser-first vertical slice for validating a 2D side-view extraction loop built around rule-bound NPC encounters.
 
-The current browser build is switched to a `movement lab` layout. Expedition content is stripped out so you can tune run, jump, dash, crouch, and wall control before placing a real authored map.
+The current browser build is switched to a `movement lab` layout. Expedition content is stripped out so you can tune run, jump, recoil shot, crouch, and wall control before placing a real authored map.
 
 ## What this prototype tests
 
@@ -21,10 +21,12 @@ The current browser build is switched to a `movement lab` layout. Expedition con
 ## Controls
 
 - `C` or `Enter`: advance title, shelter, results, and failure scenes
-- `ArrowLeft` / `ArrowRight` (`A` / `D` fallback): move
-- `C` (`Space` fallback): jump, and brace off depth walls in mid-air
-- `X`: dash, then hold to transition into sprint
-- `ArrowDown` (`S` fallback): crouch and crouch-walk
+- `A` / `D` (`ArrowLeft` / `ArrowRight` fallback): move
+- `Space` (`C` fallback): jump, wall jump, brace off depth walls, and hold-to-hover after a fresh air press
+- `Shift`: dash, keep holding to sprint, or wall-run while touching a wall
+- Right mouse (hold): focus aim / bullet time
+- Left mouse during focus: fire the recoil shot; the player is pushed opposite the muzzle direction
+- `ArrowDown` (`S` fallback): crouch, crouch-walk, or slide when pressed at run speed
 - `Z` (`E` fallback): interact, align pedestals, extract
 - `V` (`F` fallback): attack / harvest
 - `R`: restart the current expedition from spawn
@@ -33,9 +35,11 @@ The current browser build is switched to a `movement lab` layout. Expedition con
 
 ## Current Lab Notes
 
-- Dash now has a short cooldown and still refreshes after landing.
-- Sprint is a ground-only acceleration layer that comes off the `X` button.
-- `Brace walls` are non-solid volumes you can press `C` on in mid-air for an extra climb.
+- Recoil shot is a one-charge movement tool. Landing or a fresh wall contact reloads it.
+- Sprint is a ground-only acceleration layer on `Shift`.
+- Pressing crouch at run speed starts a slide. Jumping out of a slide carries the slide speed into the jump.
+- Pressing `Space` again while airborne starts a slow-fall hover; releasing it or landing cancels the hover.
+- `Brace walls` are non-solid volumes you can press `Space` on in mid-air for an extra climb.
 - NPC encounters, ritual logic, and night pressure are disabled in the lab map.
 - Exit from the far-right gate to leave the lab and return to shelter.
 

@@ -25,7 +25,8 @@ const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const CROUCH_KEYS = ["ArrowDown", "KeyS"];
 const JUMP_KEYS = ["KeyC", "Space"];
-const DASH_KEYS = ["KeyX"];
+const DASH_KEYS = ["KeyX", "ShiftLeft", "ShiftRight"];
+const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
 const INTERACT_KEYS = ["KeyZ", "KeyE"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
@@ -92,6 +93,23 @@ function spawnParticles(run, x, y, amount, color) {
   }
 }
 
+function spawnDirectedParticles(run, x, y, amount, color, directionX, directionY, speed = 360, spread = 0.42) {
+  const baseAngle = Math.atan2(directionY, directionX);
+  for (let index = 0; index < amount; index += 1) {
+    const angle = baseAngle + (Math.random() - 0.5) * spread;
+    const velocity = speed * (0.72 + Math.random() * 0.48);
+    run.particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * velocity,
+      vy: Math.sin(angle) * velocity,
+      life: 0.18 + Math.random() * 0.22,
+      color,
+      radius: 2.4 + Math.random() * 2.8,
+    });
+  }
+}
+
 function pushAfterimage(run, player) {
   run.afterimages.push({
     x: player.x,
@@ -105,6 +123,11 @@ function pushAfterimage(run, player) {
 
 function updateEffects(run, dt) {
   run.attackFx = run.attackFx.filter((effect) => {
+    effect.life -= dt;
+    return effect.life > 0;
+  });
+
+  run.recoilFx = run.recoilFx.filter((effect) => {
     effect.life -= dt;
     return effect.life > 0;
   });
@@ -143,6 +166,33 @@ function isBraceCameraState(player) {
 function getWallRunCameraDirection(player) {
   const wallDirection = player.wallRunDirection || player.wallDirection || 0;
   return wallDirection === 0 ? 0 : -wallDirection;
+}
+
+function getRecoilCameraState(run, config) {
+  const player = run.player;
+  const aim = run.recoilAim;
+  const focusActive = Boolean(aim?.active && player.recoilShotCharges > 0);
+  const firedActive = player.recoilCameraTimer > 0;
+
+  if (!focusActive && !firedActive) {
+    return null;
+  }
+
+  const directionX = firedActive ? player.recoilCameraDirX : aim.recoilDirX;
+  const directionY = firedActive ? player.recoilCameraDirY : aim.recoilDirY;
+  const horizontalLookAhead = firedActive
+    ? (config.recoilShotRecoilLookAhead ?? 0.18)
+    : (config.recoilShotAimLookAhead ?? 0.1);
+  const verticalLookAhead = firedActive
+    ? (config.recoilShotRecoilUpLookAhead ?? 0.2)
+    : (config.recoilShotAimUpLookAhead ?? 0.14);
+
+  return {
+    directionX,
+    directionY,
+    horizontalLookAhead,
+    verticalLookAhead,
+  };
 }
 
 function getCameraLookDirection(player, run, config) {
@@ -207,7 +257,96 @@ function getCameraLookAhead(player, config) {
   return config.walkLookAhead ?? 0.08;
 }
 
-function getCameraVerticalFocus(player, config) {
+function getFallCameraRatio(player, config) {
+  const start = config.fallDownSpeedStart ?? 240;
+  const full = Math.max(start + 1, config.fallDownSpeedFull ?? 1120);
+  if (player.onGround || player.vy <= start) {
+    return 0;
+  }
+  return clamp((player.vy - start) / (full - start), 0, 1);
+}
+
+function findFallLandingSurfaceY(player, data, config) {
+  if (player.vy <= 0 || !Array.isArray(data.platforms)) {
+    return null;
+  }
+
+  const footY = player.y + player.height;
+  const probeDistance = config.fallLandingProbeDistance ?? 620;
+  const maxTime = config.fallLandingProbeMaxTime ?? 0.72;
+  const centerX = player.x + player.width * 0.5;
+  let nearestY = Number.POSITIVE_INFINITY;
+
+  data.platforms.forEach((platform) => {
+    const gap = platform.y - footY;
+    if (gap <= 0 || gap > probeDistance) {
+      return;
+    }
+
+    const timeToSurface = clamp(gap / Math.max(player.vy, 1), 0, maxTime);
+    const projectedCenterX = centerX + player.vx * timeToSurface;
+    const left = projectedCenterX - player.width * 0.5;
+    const right = projectedCenterX + player.width * 0.5;
+    const margin = Math.max(24, Math.abs(player.vx) * 0.08);
+    if (right < platform.x - margin || left > platform.x + platform.width + margin) {
+      return;
+    }
+
+    nearestY = Math.min(nearestY, platform.y);
+  });
+
+  return Number.isFinite(nearestY) ? nearestY : null;
+}
+
+function getFallLandingCameraOffset(player, data, config, ratio) {
+  if (ratio <= 0) {
+    return 0;
+  }
+
+  const landingY = findFallLandingSurfaceY(player, data, config);
+  if (landingY === null) {
+    return 0;
+  }
+
+  const footY = player.y + player.height;
+  const gap = Math.max(0, landingY - footY);
+  const pull = config.fallLandingCameraPull ?? 0.22;
+  const maxOffset = config.fallLandingCameraMaxOffset ?? 150;
+  return clamp(gap * pull * ratio, 0, maxOffset);
+}
+
+function updateFallCameraState(run, player, data, config, dt) {
+  const rawRatio = getFallCameraRatio(player, config);
+  const holdDuration = Math.max(0, (config.fallReturnHoldMs ?? 240) / 1000);
+
+  if (rawRatio > 0) {
+    run.cameraFallRatio = Math.max(rawRatio, (run.cameraFallRatio ?? 0) * 0.88);
+    run.cameraFallHoldTimer = holdDuration;
+    run.cameraFallTargetYOffset = getFallLandingCameraOffset(player, data, config, run.cameraFallRatio);
+  } else {
+    run.cameraFallHoldTimer = Math.max(0, (run.cameraFallHoldTimer ?? 0) - dt);
+    if (run.cameraFallHoldTimer === 0) {
+      const returnLerp = Math.min(1, dt * (config.fallReturnLerp ?? 3.6));
+      run.cameraFallRatio = lerp(run.cameraFallRatio ?? 0, 0, returnLerp);
+      run.cameraFallTargetYOffset = lerp(run.cameraFallTargetYOffset ?? 0, 0, returnLerp);
+      if (run.cameraFallRatio < 0.01) {
+        run.cameraFallRatio = 0;
+      }
+      if (Math.abs(run.cameraFallTargetYOffset) < 0.5) {
+        run.cameraFallTargetYOffset = 0;
+      }
+    }
+  }
+
+  return {
+    active: rawRatio > 0,
+    held: rawRatio === 0 && (run.cameraFallHoldTimer ?? 0) > 0,
+    ratio: clamp(run.cameraFallRatio ?? 0, 0, 1),
+    targetYOffset: Math.max(0, run.cameraFallTargetYOffset ?? 0),
+  };
+}
+
+function getCameraVerticalFocus(player, config, fallCamera = null) {
   const neutralFocusY = config.neutralFocusY ?? 0.5;
   if (player.wallRunActive) {
     return neutralFocusY + (config.wallRunUpLookAhead ?? 0.22);
@@ -221,13 +360,17 @@ function getCameraVerticalFocus(player, config) {
   if (!player.onGround && player.vy < -240) {
     return neutralFocusY + (config.upwardFocusOffset ?? 0.18) * 0.45;
   }
-  if (!player.onGround && player.vy > 260) {
-    return neutralFocusY + (config.fallingFocusOffset ?? -0.14);
+  const fallRatio = fallCamera?.ratio ?? getFallCameraRatio(player, config);
+  if (fallRatio > 0) {
+    const legacyFallFocus = neutralFocusY + (config.fallingFocusOffset ?? -0.14);
+    const startFocusY = config.fallDownFocusStartY ?? lerp(neutralFocusY, legacyFallFocus, 0.55);
+    const fullFocusY = config.fallDownFocusFullY ?? lerp(neutralFocusY, legacyFallFocus, 1.25);
+    return lerp(startFocusY, fullFocusY, fallRatio);
   }
   return neutralFocusY;
 }
 
-function getCameraSpeed(player) {
+function getCameraSpeed(player, config = {}) {
   const horizontalSpeed = Math.abs(player.vx);
   const verticalSpeed = (
     player.wallRunActive ||
@@ -237,7 +380,10 @@ function getCameraSpeed(player) {
   )
     ? Math.abs(player.vy) * 0.55
     : 0;
-  return Math.max(horizontalSpeed, verticalSpeed);
+  const fallSpeed = !player.onGround && player.vy > (config.fallDownSpeedStart ?? 240)
+    ? Math.abs(player.vy) * (config.fallSpeedZoomMultiplier ?? 0.55)
+    : 0;
+  return Math.max(horizontalSpeed, verticalSpeed, fallSpeed);
 }
 
 function getSpeedZoomState(player, config) {
@@ -254,7 +400,7 @@ function getSpeedZoomState(player, config) {
 
   const start = config.speedZoomStart ?? 260;
   const full = Math.max(start + 1, config.speedZoomFull ?? 980);
-  const ratio = clamp((getCameraSpeed(player) - start) / (full - start), 0, 1);
+  const ratio = clamp((getCameraSpeed(player, config) - start) / (full - start), 0, 1);
   const speedZoomMin = baseZoom * clamp(config.speedZoomMin ?? config.minZoom ?? 0.88, 0.1, 1);
   return {
     ratio,
@@ -266,7 +412,7 @@ function getCameraScaledZoom(baseZoom, value, fallback) {
   return clamp(baseZoom * clamp(value ?? fallback, 0.1, 1), 0.5, baseZoom);
 }
 
-function getCameraTargetZoom(player, config) {
+function getCameraTargetZoom(player, config, fallCamera = null) {
   const baseZoom = clamp(config.zoom ?? 1, 0.5, 2.5);
   let targetZoom = baseZoom;
   if (player.wallRunActive || player.wallRunBoostActive) {
@@ -281,6 +427,12 @@ function getCameraTargetZoom(player, config) {
     targetZoom = player.onGround
       ? getCameraScaledZoom(baseZoom, config.sprintZoom, 0.96)
       : getCameraScaledZoom(baseZoom, config.sprintJumpZoom, 0.92);
+  }
+
+  const fallRatio = fallCamera?.ratio ?? 0;
+  if (fallRatio > 0) {
+    const fallZoom = baseZoom * clamp(config.fallZoom ?? 0.9, 0.1, 1);
+    targetZoom = Math.min(targetZoom, lerp(baseZoom, fallZoom, fallRatio));
   }
 
   const speedZoom = getSpeedZoomState(player, config);
@@ -320,14 +472,26 @@ function syncCamera(run, data, dt) {
     (player.dashTimer > 0 && config.dashAffectsCamera === false)
     || (isBraceCameraState(player) && config.braceAffectsCamera === false)
   );
+  const recoilCamera = freezeActionCamera ? null : getRecoilCameraState(run, config);
+  const fallCamera = updateFallCameraState(run, player, data, config, dt);
+  const applyFallCamera = !freezeActionCamera && !recoilCamera && fallCamera.ratio > 0 && (
+    fallCamera.active ||
+    player.onGround
+  );
   const targetLookDirection = freezeActionCamera
     ? (run.cameraLookDirection || player.facing || 1)
+    : recoilCamera && Math.abs(recoilCamera.directionX) > 0.08
+      ? Math.sign(recoilCamera.directionX)
     : getCameraLookDirection(player, run, config);
   const directionLerp = Math.min(1, dt * (config.directionLerp ?? 6));
   run.cameraLookDirection = lerp(run.cameraLookDirection || targetLookDirection, targetLookDirection, directionLerp);
   const targetLookSign = Math.sign(targetLookDirection) || Math.sign(run.cameraLookDirection) || player.facing || 1;
 
-  const lookAhead = freezeActionCamera ? (run.cameraLookAhead ?? 0) : getCameraLookAhead(player, config);
+  const lookAhead = freezeActionCamera
+    ? (run.cameraLookAhead ?? 0)
+    : recoilCamera
+      ? Math.abs(recoilCamera.directionX) * recoilCamera.horizontalLookAhead
+      : getCameraLookAhead(player, config);
   const targetFocusX = freezeActionCamera
     ? clamp(run.cameraFocusX ?? (config.neutralFocusX ?? 0.5), 0.24, 0.76)
     : clamp(
@@ -337,14 +501,27 @@ function syncCamera(run, data, dt) {
     );
   const targetFocusY = freezeActionCamera
     ? clamp(run.cameraFocusY ?? (config.neutralFocusY ?? 0.5), 0.28, 0.72)
-    : clamp(getCameraVerticalFocus(player, config), 0.28, 0.72);
+    : recoilCamera
+      ? clamp(
+        (config.neutralFocusY ?? 0.5) - recoilCamera.directionY * recoilCamera.verticalLookAhead,
+        0.28,
+        0.72,
+      )
+    : clamp(getCameraVerticalFocus(player, config, fallCamera), 0.28, 0.72);
   const focusLerp = Math.min(1, dt * (config.focusLerp ?? 5.5));
+  const verticalFocusLerp = Math.min(1, dt * (
+    applyFallCamera
+      ? (config.fallFocusLerp ?? 8.5)
+      : fallCamera.ratio > 0
+        ? (config.fallReturnLerp ?? 3.6)
+        : (config.focusLerp ?? 5.5)
+  ));
   run.cameraFocusX = lerp(run.cameraFocusX ?? targetFocusX, targetFocusX, focusLerp);
-  run.cameraFocusY = lerp(run.cameraFocusY ?? targetFocusY, targetFocusY, focusLerp);
+  run.cameraFocusY = lerp(run.cameraFocusY ?? targetFocusY, targetFocusY, verticalFocusLerp);
 
   const targetZoom = freezeActionCamera
     ? clamp(run.cameraZoom ?? (config.zoom ?? 1), 0.5, 2.5)
-    : getCameraTargetZoom(player, config);
+    : getCameraTargetZoom(player, config, fallCamera);
   const speedZoom = freezeActionCamera
     ? { ratio: 0, zoom: targetZoom }
     : getSpeedZoomState(player, config);
@@ -355,7 +532,8 @@ function syncCamera(run, data, dt) {
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
   const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX;
-  const targetY = player.y + player.height * 0.5 - viewportHeight * run.cameraFocusY;
+  const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
+  const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY;
   const maxX = Math.max(0, data.world.width - viewportWidth);
   const maxY = Math.max(0, data.world.height - viewportHeight);
   run.cameraTargetX = targetX;
@@ -364,7 +542,7 @@ function syncCamera(run, data, dt) {
   run.cameraLookAhead = lookAhead;
   run.cameraSpeedRatio = speedZoom.ratio;
   run.cameraX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
-  run.cameraY = clamp(lerp(run.cameraY, targetY, focusLerp), 0, maxY);
+  run.cameraY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
 }
 
 function getMovementConfig(data) {
@@ -478,6 +656,64 @@ function tryExitCrouch(player, data) {
   }
   player.crouchBlocked = true;
   return false;
+}
+
+function clearSlide(player) {
+  player.slideTimer = 0;
+  player.slideDirection = 0;
+  player.slideSpeed = 0;
+}
+
+function tryStartSlide(player, data, config, moveAxis) {
+  if (!player.onGround || player.slideTimer > 0 || player.height !== player.standHeight) {
+    return false;
+  }
+
+  const speed = Math.abs(player.vx);
+  const minSpeed = config.slideMinSpeed ?? config.runSpeed ?? 0;
+  if (speed < minSpeed) {
+    return false;
+  }
+
+  const direction = Math.sign(player.vx) || moveAxis || player.facing || 1;
+  setPlayerHeight(player, player.crouchHeight);
+  player.slideTimer = (config.slideDurationMs ?? 0) / 1000;
+  player.slideDirection = direction;
+  player.slideSpeed = Math.max(speed, minSpeed) * (config.slideSpeedMultiplier ?? 1);
+  player.vx = player.slideDirection * player.slideSpeed;
+  player.facing = player.slideDirection;
+  player.crouchBlocked = false;
+  return true;
+}
+
+function updateSlide(player, config, dt) {
+  if (player.slideTimer <= 0 || player.slideDirection === 0) {
+    return false;
+  }
+
+  player.slideSpeed = Math.max(0, player.slideSpeed - (config.slideFriction ?? 0) * dt);
+  if (player.slideSpeed <= 0) {
+    clearSlide(player);
+    return false;
+  }
+
+  player.vx = player.slideDirection * player.slideSpeed;
+  player.facing = player.slideDirection;
+  return true;
+}
+
+function armSlideJumpCarry(player, config) {
+  const direction = player.slideDirection || Math.sign(player.vx) || player.facing || 1;
+  const speed = Math.max(
+    Math.abs(player.vx),
+    Math.abs(player.slideSpeed),
+    config.slideJumpMinSpeed ?? config.sprintJumpMinSpeed ?? 0
+  ) * (config.slideJumpSpeedMultiplier ?? 1);
+
+  player.sprintJumpCarryTimer = (config.slideJumpCarryMs ?? config.sprintJumpCarryMs ?? 0) / 1000;
+  player.sprintJumpCarrySpeed = direction * speed;
+  player.slideJumpBoostActive = true;
+  clearSlide(player);
 }
 
 function tryJumpCornerCorrection(player, data, config) {
@@ -700,10 +936,14 @@ function setMovementState(player) {
     player.movementState = MOVEMENT_STATES.WALL_SLIDE;
   } else if (player.braceHolding) {
     player.movementState = MOVEMENT_STATES.WALL_SLIDE;
+  } else if (player.onGround && player.slideTimer > 0) {
+    player.movementState = MOVEMENT_STATES.SLIDE;
   } else if (player.onGround && player.height === player.crouchHeight && Math.abs(player.vx) > 20) {
     player.movementState = MOVEMENT_STATES.CROUCH_WALK;
   } else if (player.onGround && player.height === player.crouchHeight) {
     player.movementState = MOVEMENT_STATES.CROUCH;
+  } else if (player.hoverActive && !player.onGround) {
+    player.movementState = MOVEMENT_STATES.HOVER;
   } else if (player.wallSliding) {
     player.movementState = MOVEMENT_STATES.WALL_SLIDE;
   } else if (!player.onGround && player.vy < 0) {
@@ -727,6 +967,17 @@ function clearWallRun(player) {
   player.wallRunActive = false;
   player.wallRunDirection = 0;
   player.wallRunSpeed = 0;
+}
+
+function clearHover(player) {
+  player.hoverActive = false;
+  player.hoverBoostActive = false;
+  player.hoverParticleTimer = 0;
+}
+
+function clearRecoilSpin(player) {
+  player.recoilSpinTimer = 0;
+  player.recoilSpinDuration = 0;
 }
 
 function getMaxDashCount(config) {
@@ -767,9 +1018,200 @@ function refillDashFromWall(player, config) {
   player.dashResetActive = true;
 }
 
+function getMaxRecoilShotCount(config) {
+  return Math.max(1, Math.floor(config.recoilShotCharges ?? 1));
+}
+
+function syncRecoilShotCapacity(player, config) {
+  const nextMax = getMaxRecoilShotCount(config);
+  if (!Number.isFinite(player.recoilShotMaxCharges) || player.recoilShotMaxCharges <= 0) {
+    player.recoilShotMaxCharges = nextMax;
+  }
+  if (!Number.isFinite(player.recoilShotCharges)) {
+    player.recoilShotCharges = player.recoilShotMaxCharges;
+  }
+
+  if (nextMax !== player.recoilShotMaxCharges) {
+    const grewBy = nextMax - player.recoilShotMaxCharges;
+    player.recoilShotMaxCharges = nextMax;
+    player.recoilShotCharges = clamp(
+      player.recoilShotCharges + Math.max(0, grewBy),
+      0,
+      player.recoilShotMaxCharges,
+    );
+  } else {
+    player.recoilShotCharges = clamp(player.recoilShotCharges, 0, player.recoilShotMaxCharges);
+  }
+}
+
+function refillRecoilShot(player, config) {
+  syncRecoilShotCapacity(player, config);
+  player.recoilShotCharges = player.recoilShotMaxCharges;
+}
+
+function getMouseWorld(state, run) {
+  const mouse = state.mouse || {};
+  const zoom = clamp(run.cameraZoom ?? 1, 0.5, 2.5);
+  return {
+    x: (mouse.screenX ?? CAMERA_SCREEN_WIDTH / 2) / zoom + run.cameraX,
+    y: (mouse.screenY ?? CAMERA_SCREEN_HEIGHT / 2) / zoom + run.cameraY,
+  };
+}
+
+function getRecoilShotOrigin(player) {
+  return {
+    x: player.x + player.width * 0.5,
+    y: player.y + player.height * 0.48,
+  };
+}
+
+function canUseRecoilShot(player) {
+  return (
+    player.height === player.standHeight &&
+    player.dashTimer === 0 &&
+    player.recoilShotCharges > 0 &&
+    player.recoilShotCooldownTimer === 0
+  );
+}
+
+function updateRecoilAim(run, data, state, dt) {
+  const player = run.player;
+  const config = getMovementConfig(data);
+  syncRecoilShotCapacity(player, config);
+
+  const origin = getRecoilShotOrigin(player);
+  const target = getMouseWorld(state, run);
+  let dx = target.x - origin.x;
+  let dy = target.y - origin.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 18) {
+    dx = player.facing || 1;
+    dy = 0.65;
+  }
+  const safeLength = Math.max(0.001, Math.hypot(dx, dy));
+  const shotDirX = dx / safeLength;
+  const shotDirY = dy / safeLength;
+  const recoilDirX = -shotDirX;
+  const recoilDirY = -shotDirY;
+  const active = Boolean(state.mouse?.secondaryDown && canUseRecoilShot(player));
+  const aimFacing = Math.abs(shotDirX) > 0.08
+    ? Math.sign(shotDirX)
+    : (player.recoilAimFacing || player.facing || 1);
+  const verticalPoseThreshold = config.recoilAimVerticalPoseThreshold ?? 0.45;
+  const aimPitch = shotDirY < -verticalPoseThreshold
+    ? -1
+    : shotDirY > verticalPoseThreshold
+      ? 1
+      : 0;
+
+  player.recoilFocusBlend = approach(
+    player.recoilFocusBlend,
+    active ? 1 : 0,
+    dt * (active ? 7.5 : 10),
+  );
+  player.recoilFocusActive = active;
+  if (active) {
+    player.recoilAimFacing = aimFacing;
+    player.recoilAimPitch = aimPitch;
+  }
+  player.recoilAimX = shotDirX;
+  player.recoilAimY = shotDirY;
+  player.recoilDirX = recoilDirX;
+  player.recoilDirY = recoilDirY;
+
+  run.recoilAim = {
+    active,
+    focusBlend: player.recoilFocusBlend,
+    canFire: canUseRecoilShot(player),
+    originX: origin.x,
+    originY: origin.y,
+    targetX: target.x,
+    targetY: target.y,
+    aimFacing,
+    aimPitch,
+    shotDirX,
+    shotDirY,
+    recoilDirX,
+    recoilDirY,
+  };
+}
+
+function performRecoilShot(player, run, config) {
+  if (!run.recoilAim?.active || !canUseRecoilShot(player)) {
+    return false;
+  }
+
+  const aim = run.recoilAim;
+  const force = config.recoilShotForce ?? 840;
+  const maxHorizontal = config.recoilShotMaxHorizontalSpeed ?? 1180;
+  const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180);
+  const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760);
+  const recoilX = aim.recoilDirX;
+  const recoilY = aim.recoilDirY;
+  const firedAirborne = !player.onGround;
+
+  clearBraceHold(player);
+  clearWallRun(player);
+  clearSlide(player);
+  clearHover(player);
+  player.recoilShotCharges = Math.max(0, player.recoilShotCharges - 1);
+  player.recoilShotCooldownTimer = (config.recoilShotCooldownMs ?? 180) / 1000;
+  player.recoilShotTimer = 0.16;
+  player.recoilShotActive = true;
+  if (firedAirborne) {
+    const spinLoopCount = Math.max(1, Math.floor(config.recoilSpinLoopCount ?? 1));
+    player.recoilSpinDuration = ((config.recoilSpinDurationMs ?? 220) / 1000) * spinLoopCount;
+    player.recoilSpinTimer = player.recoilSpinDuration;
+    player.recoilSpinFacing = Math.abs(recoilX) > 0.08
+      ? Math.sign(recoilX)
+      : (player.facing || 1);
+  } else {
+    clearRecoilSpin(player);
+  }
+  player.recoilCameraTimer = (config.recoilShotCameraHoldMs ?? 240) / 1000;
+  player.recoilCameraDirX = recoilX;
+  player.recoilCameraDirY = recoilY;
+  player.vx = clamp(player.vx + recoilX * force, -maxHorizontal, maxHorizontal);
+  player.vy = clamp(player.vy + recoilY * force, -maxUp, maxFall);
+  player.onGround = false;
+  player.coyoteTimer = 0;
+  player.jumpBufferTimer = 0;
+  if (Math.abs(aim.shotDirX) > 0.08) {
+    player.recoilAimFacing = Math.sign(aim.shotDirX);
+    player.facing = player.recoilAimFacing;
+  }
+  player.wallJumpLockTimer = 0;
+  player.wallJumpLockDirection = 0;
+  player.wallSliding = false;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.canInteract = false;
+
+  run.recoilFx.push({
+    x: aim.originX,
+    y: aim.originY,
+    dirX: aim.shotDirX,
+    dirY: aim.shotDirY,
+    life: 0.2,
+    duration: 0.2,
+  });
+  pushAfterimage(run, player);
+  spawnDirectedParticles(run, aim.originX, aim.originY, 12, "#e9f7ff", aim.shotDirX, aim.shotDirY, 520, 0.68);
+  spawnDirectedParticles(run, aim.originX, aim.originY, 7, "#93eaff", recoilX, recoilY, 260, 0.9);
+  pushNotice(run, "반동 사격");
+  run.recoilAim.active = false;
+  player.recoilFocusActive = false;
+  return true;
+}
+
 function startDash(player, run, config, direction) {
   clearBraceHold(player);
   clearWallRun(player);
+  clearSlide(player);
+  clearHover(player);
+  clearRecoilSpin(player);
   syncDashCapacity(player, config);
   player.dashCharges = Math.max(0, player.dashCharges - 1);
   player.dashAvailable = false;
@@ -851,6 +1293,9 @@ function applySprintJumpCarry(player) {
 function performJump(player, run, velocity) {
   clearBraceHold(player);
   clearWallRun(player);
+  clearSlide(player);
+  clearHover(player);
+  clearRecoilSpin(player);
   player.vy = velocity;
   player.onGround = false;
   player.jumpBufferTimer = 0;
@@ -861,6 +1306,9 @@ function performJump(player, run, velocity) {
 function performWallJump(player, run, config, wallDirection) {
   clearBraceHold(player);
   clearWallRun(player);
+  clearSlide(player);
+  clearHover(player);
+  clearRecoilSpin(player);
   const direction = -wallDirection || -player.facing;
   player.wallJumpLockDirection = direction;
   player.wallJumpLockTimer = config.wallJumpLockMs / 1000;
@@ -876,6 +1324,9 @@ function performWallJump(player, run, config, wallDirection) {
 
 function enterBraceHold(player, run, config, wall, moveAxis) {
   clearWallRun(player);
+  clearSlide(player);
+  clearHover(player);
+  clearRecoilSpin(player);
   const playerCenterX = player.x + player.width * 0.5;
   const wallCenterX = wall.x + wall.width * 0.5;
   const holdDirection = playerCenterX <= wallCenterX ? 1 : -1;
@@ -901,6 +1352,7 @@ function enterBraceHold(player, run, config, wall, moveAxis) {
   player.canInteract = false;
   player.braceHoldActive = true;
   refillDashFromWall(player, config);
+  refillRecoilShot(player, config);
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 6, "#8fe1ff");
   pushNotice(run, "벽 고정");
 }
@@ -929,6 +1381,9 @@ function updateBraceHold(player, data, config, wall, dt, moveAxis) {
 
 function enterWallRun(player, run, config, wallDirection) {
   clearBraceHold(player);
+  clearSlide(player);
+  clearHover(player);
+  clearRecoilSpin(player);
   player.wallRunActive = true;
   player.wallRunDirection = wallDirection;
   player.wallRunSpeed = Math.max(player.wallRunSpeed || 0, config.wallRunStartSpeed ?? 0, Math.max(0, -player.vy));
@@ -939,6 +1394,7 @@ function enterWallRun(player, run, config, wallDirection) {
   player.jumpBufferTimer = 0;
   player.onGround = false;
   refillDashFromWall(player, config);
+  refillRecoilShot(player, config);
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.45, 4, "#b8f0ff");
 }
 
@@ -969,6 +1425,28 @@ function launchFromWallRun(player, run, config) {
   clearWallRun(player);
 }
 
+function startHover(player, run, config) {
+  player.hoverActive = true;
+  player.hoverBoostActive = true;
+  player.hoverParticleTimer = 0;
+  player.jumpBufferTimer = 0;
+  player.coyoteTimer = 0;
+  if (player.vy > (config.hoverStartMaxFallSpeed ?? config.hoverFallSpeed ?? 180)) {
+    player.vy = config.hoverStartMaxFallSpeed ?? config.hoverFallSpeed ?? 180;
+  }
+  spawnDirectedParticles(
+    run,
+    player.x + player.width * 0.5,
+    player.y + player.height + 4,
+    8,
+    "#93eaff",
+    0,
+    1,
+    260,
+    0.5
+  );
+}
+
 function performBraceVault(player, run, config, wall, moveAxis) {
   const direction = moveAxis || player.braceHoldLaunchDirection || Math.sign(player.vx) || player.facing || 1;
   clearBraceHold(player);
@@ -993,6 +1471,7 @@ function updateMovementVfx(run, dt) {
 
   player.wallSlideDustTimer = Math.max(0, player.wallSlideDustTimer - dt);
   player.dashTrailTimer = Math.max(0, player.dashTrailTimer - dt);
+  player.hoverParticleTimer = Math.max(0, player.hoverParticleTimer - dt);
 
   if (player.dashTimer > 0 && player.dashTrailTimer === 0) {
     player.dashTrailTimer = 0.03;
@@ -1004,6 +1483,32 @@ function updateMovementVfx(run, dt) {
     const offsetX = player.wallDirection === 1 ? player.x + player.width : player.x;
     spawnParticles(run, offsetX, player.y + player.height - 4, 2, "#9bbad1");
   }
+
+  if (player.hoverActive && !player.onGround && player.hoverParticleTimer === 0) {
+    player.hoverParticleTimer = 0.045;
+    spawnDirectedParticles(
+      run,
+      player.x + player.width * 0.42,
+      player.y + player.height + 2,
+      1,
+      "#e9f7ff",
+      -0.05,
+      1,
+      150,
+      0.28
+    );
+    spawnDirectedParticles(
+      run,
+      player.x + player.width * 0.58,
+      player.y + player.height + 2,
+      1,
+      "#93eaff",
+      0.05,
+      1,
+      150,
+      0.28
+    );
+  }
 }
 
 function updatePlayer(run, data, state, dt, input) {
@@ -1011,14 +1516,17 @@ function updatePlayer(run, data, state, dt, input) {
   const config = getMovementConfig(data);
   const attackPressed = Boolean(input?.attackPressed);
   const interactionPressed = Boolean(input?.interactionPressed);
+  const recoilShotPressed = Boolean(input?.recoilShotPressed);
   const moveLeft = isEitherPressed(state, MOVE_LEFT_KEYS);
   const moveRight = isEitherPressed(state, MOVE_RIGHT_KEYS);
   const moveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
   const crouchHeld = isEitherPressed(state, CROUCH_KEYS);
+  const crouchPressed = consumeEitherPress(state, CROUCH_KEYS);
   const jumpPressed = consumeEitherPress(state, JUMP_KEYS);
   const jumpHeld = isEitherPressed(state, JUMP_KEYS);
   const dashPressed = consumeEitherPress(state, DASH_KEYS);
-  const dashHeld = isEitherPressed(state, DASH_KEYS);
+  const sprintPressed = consumeEitherPress(state, SPRINT_KEYS);
+  const sprintHeld = isEitherPressed(state, SPRINT_KEYS);
   const activeBraceWall = getActiveBraceWall(player, data);
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId);
   const wasWallSliding = player.wallSliding;
@@ -1033,7 +1541,12 @@ function updatePlayer(run, data, state, dt, input) {
   player.wallJumpLockTimer = Math.max(0, player.wallJumpLockTimer - dt);
   player.dashCooldownTimer = Math.max(0, player.dashCooldownTimer - dt);
   player.dashCarryTimer = Math.max(0, player.dashCarryTimer - dt);
+  player.recoilShotCooldownTimer = Math.max(0, player.recoilShotCooldownTimer - dt);
+  player.recoilShotTimer = Math.max(0, player.recoilShotTimer - dt);
+  player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
+  player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
+  player.slideTimer = Math.max(0, player.slideTimer - dt);
   player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
   player.wallSlideGraceTimer = Math.max(0, player.wallSlideGraceTimer - dt);
   player.speedRetentionTimer = Math.max(0, player.speedRetentionTimer - dt);
@@ -1045,6 +1558,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.dashCarryActive = false;
   player.sprintActive = false;
   player.sprintJumpBoostActive = false;
+  player.slideJumpBoostActive = false;
   player.dashJumpBoostActive = false;
   player.speedRetentionActive = false;
   player.bufferedLandingJumpActive = false;
@@ -1053,14 +1567,21 @@ function updatePlayer(run, data, state, dt, input) {
   player.braceHoldActive = false;
   player.wallRunBoostActive = false;
   player.dashResetActive = false;
+  player.hoverBoostActive = Boolean(player.hoverActive && !player.onGround);
+  player.recoilShotActive = player.recoilShotTimer > 0;
 
   syncDashCapacity(player, config);
+  syncRecoilShotCapacity(player, config);
 
   if (player.dashCarryTimer === 0) {
     player.dashCarrySpeed = 0;
   }
   if (player.sprintJumpCarryTimer === 0) {
     player.sprintJumpCarrySpeed = 0;
+  }
+  if (player.slideTimer === 0) {
+    player.slideDirection = 0;
+    player.slideSpeed = 0;
   }
   if (player.speedRetentionTimer === 0) {
     player.retainedSpeed = 0;
@@ -1089,7 +1610,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.jumpBufferTimer = config.jumpBufferMs / 1000;
   }
 
-  if (dashPressed) {
+  if (dashPressed || sprintPressed) {
     player.sprintPrimed = true;
   }
 
@@ -1116,13 +1637,13 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   const canBuildSprint =
-    dashHeld &&
+    sprintHeld &&
     player.sprintPrimed &&
     player.onGround &&
     player.height === player.standHeight &&
     moveAxis !== 0;
   const preserveAirSprint =
-    dashHeld &&
+    sprintHeld &&
     player.sprintPrimed &&
     !player.onGround &&
     player.height === player.standHeight &&
@@ -1156,27 +1677,62 @@ function updatePlayer(run, data, state, dt, input) {
     );
     if (player.sprintCharge === 0) {
       player.sprintDirection = 0;
-      if (!dashHeld && player.dashTimer === 0) {
+      if (!sprintHeld && player.dashTimer === 0) {
         player.sprintPrimed = false;
       }
     }
   }
 
   if (player.onGround) {
-    if (crouchHeld) {
+    if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
+      // Slide startup already resized the player and preserved the incoming speed.
+    } else if (player.slideTimer > 0) {
+      player.crouchBlocked = false;
+    } else if (crouchHeld) {
       tryEnterCrouch(player, data);
     } else {
       tryExitCrouch(player, data);
     }
     clearBraceHold(player);
     clearWallRun(player);
+    clearHover(player);
+    clearRecoilSpin(player);
     refillDashFromGround(player, config);
+    refillRecoilShot(player, config);
     player.sprintJumpCarryTimer = 0;
     player.sprintJumpCarrySpeed = 0;
   }
 
+  if (recoilShotPressed) {
+    const firedRecoilShot = performRecoilShot(player, run, config);
+    if (firedRecoilShot && state.mouse) {
+      state.mouse.secondaryDown = false;
+      state.mouse.primaryDown = false;
+    }
+  }
+
+  const wallJumpSourceDirection =
+    player.wallDirection !== 0
+      ? player.wallDirection
+      : player.wallGraceTimer > 0
+        ? player.wallGraceDirection
+        : 0;
+  const holdingWallRunLine =
+    wallJumpSourceDirection !== 0 &&
+    (moveAxis === 0 || moveAxis === wallJumpSourceDirection);
+  const wantsWallRun =
+    !player.onGround &&
+    wallJumpSourceDirection !== 0 &&
+    holdingWallRunLine &&
+    sprintHeld &&
+    player.height === player.standHeight &&
+    player.dashTimer === 0 &&
+    player.wallJumpLockTimer === 0 &&
+    !player.braceHolding;
+
   if (
     dashPressed &&
+    !wantsWallRun &&
     player.dashAvailable &&
     player.dashTimer === 0 &&
     player.dashCooldownTimer === 0 &&
@@ -1208,6 +1764,9 @@ function updatePlayer(run, data, state, dt, input) {
     }
     if (landed) {
       refillDashFromGround(player, config);
+      refillRecoilShot(player, config);
+      clearHover(player);
+      clearRecoilSpin(player);
       player.coyoteTimer = config.coyoteTimeMs / 1000;
     }
     player.onGround = contacts.onGround;
@@ -1224,7 +1783,11 @@ function updatePlayer(run, data, state, dt, input) {
     }
 
     if (player.onGround) {
-      if (crouchHeld) {
+      if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
+        // Slide startup already resized the player and preserved the incoming speed.
+      } else if (player.slideTimer > 0) {
+        player.crouchBlocked = false;
+      } else if (crouchHeld) {
         tryEnterCrouch(player, data);
       } else {
         tryExitCrouch(player, data);
@@ -1258,47 +1821,28 @@ function updatePlayer(run, data, state, dt, input) {
     return;
   }
 
-  const pushingIntoWall =
-    ((player.wallDirection !== 0 ? player.wallDirection : player.wallGraceDirection) === -1 && moveAxis < 0) ||
-    ((player.wallDirection !== 0 ? player.wallDirection : player.wallGraceDirection) === 1 && moveAxis > 0);
-  const wallJumpSourceDirection =
-    player.wallDirection !== 0
-      ? player.wallDirection
-      : player.wallGraceTimer > 0
-        ? player.wallGraceDirection
-        : 0;
-  const pushingAwayFromWall =
-    wallJumpSourceDirection !== 0 &&
-    ((wallJumpSourceDirection === -1 && moveAxis >= 0) || (wallJumpSourceDirection === 1 && moveAxis <= 0));
-  const canWallRun =
-    !player.onGround &&
-    wallJumpSourceDirection !== 0 &&
-    pushingIntoWall &&
-    jumpHeld &&
-    player.height === player.standHeight &&
-    player.dashTimer === 0 &&
-    player.wallJumpLockTimer === 0 &&
-    !player.braceHolding;
-
   const canWallJump =
     player.jumpBufferTimer > 0 &&
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
-    pushingAwayFromWall &&
-    !player.wallRunActive;
+    player.height === player.standHeight;
+  const canWallRun = wantsWallRun && !canWallJump;
   const canGroundJump =
     player.jumpBufferTimer > 0 &&
     player.coyoteTimer > 0 &&
-    player.height === player.standHeight;
+    (player.height === player.standHeight || player.slideTimer > 0);
   const canBrace =
     jumpPressed &&
     activeBraceWall &&
     !player.onGround &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
-    player.wallJumpLockTimer === 0;
+    player.wallJumpLockTimer === 0 &&
+    !canWallJump;
 
-  if (canBrace) {
+  if (canWallJump) {
+    performWallJump(player, run, config, wallJumpSourceDirection);
+  } else if (canBrace) {
     enterBraceHold(player, run, config, activeBraceWall, moveAxis);
   }
 
@@ -1347,16 +1891,19 @@ function updatePlayer(run, data, state, dt, input) {
     if (!player.wallRunActive || player.wallRunDirection !== wallJumpSourceDirection) {
       enterWallRun(player, run, config, wallJumpSourceDirection);
     }
-  } else if (player.wallRunActive && (!jumpHeld || !pushingIntoWall)) {
+  } else if (player.wallRunActive && (!sprintHeld || !holdingWallRunLine)) {
     clearWallRun(player);
   }
 
   if (player.wallRunActive) {
     updateWallRun(player, config, dt);
-  } else if (canWallJump) {
-    performWallJump(player, run, config, wallJumpSourceDirection);
   } else if (canGroundJump) {
-    if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
+    const slideJumping = player.slideTimer > 0;
+    if (slideJumping) {
+      armSlideJumpCarry(player, config);
+      tryExitCrouch(player, data);
+    }
+    if (!slideJumping && player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
       armSprintJumpCarry(player, config);
     }
     performJump(player, run, config.jumpVelocity);
@@ -1364,25 +1911,47 @@ function updatePlayer(run, data, state, dt, input) {
     applyDashJumpCarry(player, config);
   }
 
+  const canStartHover =
+    jumpPressed &&
+    !player.onGround &&
+    player.height === player.standHeight &&
+    player.dashTimer === 0 &&
+    player.wallJumpLockTimer === 0 &&
+    !player.wallRunActive &&
+    !player.braceHolding &&
+    !player.wallSliding &&
+    !canWallJump &&
+    !canBrace &&
+    !canGroundJump &&
+    player.vy >= (config.hoverStartMinVy ?? -40);
+
+  if (canStartHover) {
+    startHover(player, run, config);
+  }
+
   if (player.wallJumpLockTimer > 0) {
     player.vx = player.wallJumpLockDirection * config.wallJumpHorizontal;
     player.facing = player.wallJumpLockDirection;
   } else if (player.wallRunActive) {
     player.facing = player.wallRunDirection === 0 ? player.facing : player.wallRunDirection;
+  } else if (player.slideTimer > 0 && player.onGround && updateSlide(player, config, dt)) {
+    player.crouchBlocked = false;
   } else {
     const baseTargetSpeed = player.height === player.crouchHeight && player.onGround
       ? moveAxis * config.runSpeed * config.crouchSpeedMultiplier
-      : moveAxis * getSprintTargetSpeed(player, config, moveAxis, dashHeld && player.sprintPrimed);
+      : moveAxis * getSprintTargetSpeed(player, config, moveAxis, sprintHeld && player.sprintPrimed);
     const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
       ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
       : baseTargetSpeed;
 
+    const airControl = (config.airControlMultiplier ?? 1)
+      * (player.hoverActive ? (config.hoverAirControlMultiplier ?? 1) : 1);
     const accel = player.onGround
       ? config.groundAccel
-      : config.groundAccel * config.airControlMultiplier;
+      : config.groundAccel * airControl;
     const decel = player.onGround
       ? config.groundDecel
-      : config.groundDecel * config.airControlMultiplier;
+      : config.groundDecel * airControl;
 
     player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : decel) * dt);
 
@@ -1470,9 +2039,31 @@ function updatePlayer(run, data, state, dt, input) {
     player.apexGravityActive = true;
   }
 
-  const gravityMultiplier = player.apexGravityActive ? (config.apexGravityMultiplier ?? 1) : 1;
+  if (
+    player.hoverActive &&
+    (
+      !jumpHeld ||
+      player.onGround ||
+      player.height !== player.standHeight ||
+      player.wallRunActive ||
+      player.braceHolding ||
+      player.dashTimer > 0 ||
+      player.wallJumpLockTimer > 0
+    )
+  ) {
+    clearHover(player);
+  }
+
+  const gravityMultiplier = player.hoverActive
+    ? (config.hoverGravityMultiplier ?? 0.18)
+    : player.apexGravityActive
+      ? (config.apexGravityMultiplier ?? 1)
+      : 1;
   if (!player.wallRunActive) {
     player.vy += data.world.gravity * gravityMultiplier * dt;
+  }
+  if (player.hoverActive) {
+    player.vy = Math.min(player.vy, config.hoverFallSpeed ?? 160);
   }
   if (wantsWallSlide && !player.wallRunActive) {
     player.vy = Math.min(player.vy, Math.abs(config.jumpVelocity) * config.wallSlideFallMultiplier);
@@ -1505,6 +2096,7 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.wallSliding && !wasWallSliding) {
     refillDashFromWall(player, config);
+    refillRecoilShot(player, config);
   }
 
   if (player.wallSliding) {
@@ -1544,6 +2136,9 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (landed) {
     refillDashFromGround(player, config);
+    refillRecoilShot(player, config);
+    clearHover(player);
+    clearRecoilSpin(player);
     const burstSize = contacts.landingSpeed > 480 ? 10 : 5;
     spawnParticles(run, player.x + player.width / 2, player.y + player.height, burstSize, "#c5d8e6");
     if (player.jumpBufferTimer > 0 && player.height === player.standHeight) {
@@ -1564,14 +2159,24 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallSlideGraceTimer = 0;
     player.wallSlideGraceDirection = 0;
     clearBraceHold(player);
+    clearHover(player);
+    clearRecoilSpin(player);
     refillDashFromGround(player, config);
-    if (crouchHeld) {
+    refillRecoilShot(player, config);
+    if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
+      // Slide startup already resized the player and preserved the incoming speed.
+    } else if (player.slideTimer > 0) {
+      player.crouchBlocked = false;
+    } else if (crouchHeld) {
       tryEnterCrouch(player, data);
     } else {
       tryExitCrouch(player, data);
     }
   } else {
     player.crouchBlocked = false;
+    if (player.slideTimer > 0) {
+      clearSlide(player);
+    }
     if (player.wallDirection !== 0) {
       player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
       player.wallGraceDirection = player.wallDirection;
@@ -2220,6 +2825,10 @@ function updateExpedition(state, data, dt) {
   if (state.liveEdit?.active) {
     run.prompt = "";
     run.promptWorld = null;
+    if (run.recoilAim) {
+      run.recoilAim.active = false;
+    }
+    run.player.recoilFocusActive = false;
     updateEffects(run, dt);
     syncCamera(run, data, dt);
     if (state.liveEdit.saveFlashTimer > 0) {
@@ -2236,27 +2845,37 @@ function updateExpedition(state, data, dt) {
     return;
   }
 
+  updateRecoilAim(run, data, state, dt);
+  const focusTimeScale = run.recoilAim?.active
+    ? clamp(data.player.movement.recoilShotFocusTimeScale ?? 0.22, 0.05, 1)
+    : 1;
+  const simDt = dt * focusTimeScale;
   let interactionPressed = consumeEitherPress(state, INTERACT_KEYS);
   let attackPressed = consumeEitherPress(state, ATTACK_KEYS);
+  const recoilShotPressed = Boolean(state.mouse?.primaryJustPressed);
+  if (state.mouse) {
+    state.mouse.primaryJustPressed = false;
+  }
 
-  updatePlayer(run, data, state, dt, {
+  updatePlayer(run, data, state, simDt, {
     attackPressed,
     interactionPressed,
+    recoilShotPressed,
   });
   if (run.player.movementState === MOVEMENT_STATES.DASH) {
     interactionPressed = false;
     attackPressed = false;
   }
-  updateTimePhase(run, data, dt);
-  updateGuard(run, dt);
-  updateRitualist(run, dt);
-  updateThreats(run, dt);
+  updateTimePhase(run, data, simDt);
+  updateGuard(run, simDt);
+  updateRitualist(run, simDt);
+  updateThreats(run, simDt);
   updateAttackHits(run);
   updateInteractions(state, data, interactionPressed && run.player.canInteract);
   if (state.scene !== SCENES.EXPEDITION) {
     return;
   }
-  updateEffects(run, dt);
+  updateEffects(run, simDt);
   syncCamera(run, data, dt);
 
   if (run.hp <= 0) {
@@ -2369,6 +2988,9 @@ export function updateGame(state, data, dt) {
     updateGameOver(state);
   }
 
+  if (state.mouse) {
+    state.mouse.primaryJustPressed = false;
+  }
   state.justPressed.clear();
 }
 

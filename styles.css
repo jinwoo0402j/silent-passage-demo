@@ -199,8 +199,12 @@ canvas {
   top: 206px;
   right: 18px;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
   width: 320px;
+  max-height: calc(100% - 224px);
   padding: 16px;
+  overflow: hidden;
   border: 1px solid rgba(231, 244, 126, 0.22);
   border-radius: 18px;
   background: rgba(7, 14, 20, 0.86);
@@ -213,6 +217,7 @@ canvas {
 }
 
 .movement-tuning-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -250,6 +255,7 @@ canvas {
 }
 
 .movement-tuning-note {
+  flex: 0 0 auto;
   margin: 12px 0 14px;
   color: rgba(238, 247, 251, 0.72);
   font-size: 12px;
@@ -257,9 +263,30 @@ canvas {
 }
 
 .movement-tuning-grid {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
   gap: 10px;
+  scrollbar-color: rgba(231, 244, 126, 0.42) rgba(8, 15, 23, 0.52);
+  scrollbar-width: thin;
+}
+
+.movement-tuning-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.movement-tuning-grid::-webkit-scrollbar-track {
+  background: rgba(8, 15, 23, 0.52);
+  border-radius: 999px;
+}
+
+.movement-tuning-grid::-webkit-scrollbar-thumb {
+  background: rgba(231, 244, 126, 0.42);
+  border-radius: 999px;
 }
 
 .movement-tuning-field {
@@ -283,6 +310,7 @@ canvas {
 }
 
 .movement-tuning-actions {
+  flex: 0 0 auto;
   display: flex;
   gap: 10px;
   margin-top: 14px;
@@ -425,6 +453,7 @@ canvas {
     top: 176px;
     right: 10px;
     width: min(300px, calc(100vw - 20px));
+    max-height: calc(100% - 190px);
     padding: 14px;
   }
 

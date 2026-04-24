@@ -1,9 +1,9 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-camera-brace-1";
+import { GAME_DATA } from "./level-data.js?v=20260424-recoil-22";
 import {
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-camera-brace-1";
+} from "./level-store.js?v=20260424-recoil-22";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -11,10 +11,10 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260424-camera-brace-1";
-import { renderGame } from "./render.js?v=20260424-camera-brace-1";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-camera-brace-1";
-import { bindInput, updateGame } from "./systems.js?v=20260424-camera-brace-1";
+} from "./movement-tuning.js?v=20260424-recoil-22";
+import { renderGame } from "./render.js?v=20260424-recoil-22";
+import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-22";
+import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-22";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -310,6 +310,26 @@ function syncMovementTuningToRun(currentState, data) {
   }
 
   player.dashAvailable = player.dashCharges > 0 && player.dashCooldownTimer === 0;
+
+  const nextShotMax = Math.max(1, Math.floor(data.player.movement.recoilShotCharges ?? 1));
+  if (!Number.isFinite(player.recoilShotMaxCharges) || player.recoilShotMaxCharges <= 0) {
+    player.recoilShotMaxCharges = nextShotMax;
+  }
+  if (!Number.isFinite(player.recoilShotCharges)) {
+    player.recoilShotCharges = player.recoilShotMaxCharges;
+  }
+
+  if (nextShotMax !== player.recoilShotMaxCharges) {
+    const grewBy = nextShotMax - player.recoilShotMaxCharges;
+    player.recoilShotMaxCharges = nextShotMax;
+    player.recoilShotCharges = clampValue(
+      player.recoilShotCharges + Math.max(0, grewBy),
+      0,
+      player.recoilShotMaxCharges,
+    );
+  } else {
+    player.recoilShotCharges = clampValue(player.recoilShotCharges, 0, player.recoilShotMaxCharges);
+  }
 }
 
 function syncBrowserControls(currentDom, currentState) {
@@ -360,6 +380,114 @@ function bindTouchHold(button, currentState, code) {
 
 function bindUi(currentDom, currentState, data) {
   const getWorldPoint = (event) => screenToWorld(currentState, data, getCanvasPoint(currentDom.canvas, event));
+  const isAimPointerLocked = () => document.pointerLockElement === currentDom.canvas;
+  const requestAimPointerLock = () => {
+    if (isAimPointerLocked() || !currentDom.canvas.requestPointerLock) {
+      return;
+    }
+    try {
+      const lockRequest = currentDom.canvas.requestPointerLock();
+      if (lockRequest && typeof lockRequest.catch === "function") {
+        lockRequest.catch(() => {});
+      }
+    } catch {
+      // Pointer lock is a reliability upgrade for mouse chords; normal mouse input remains as fallback.
+    }
+  };
+  const releaseAimPointerLock = () => {
+    if (isAimPointerLocked() && document.exitPointerLock) {
+      document.exitPointerLock();
+    }
+  };
+  const syncMouseFromEvent = (event) => {
+    if (isAimPointerLocked()) {
+      if (
+        (event.movementX !== 0 || event.movementY !== 0) &&
+        typeof event.movementX === "number" &&
+        typeof event.movementY === "number"
+      ) {
+        const rect = currentDom.canvas.getBoundingClientRect();
+        const scaleX = currentDom.canvas.width / Math.max(1, rect.width);
+        const scaleY = currentDom.canvas.height / Math.max(1, rect.height);
+        currentState.mouse.screenX = clampValue(
+          currentState.mouse.screenX + event.movementX * scaleX,
+          0,
+          currentDom.canvas.width
+        );
+        currentState.mouse.screenY = clampValue(
+          currentState.mouse.screenY + event.movementY * scaleY,
+          0,
+          currentDom.canvas.height
+        );
+      }
+      currentState.mouse.onCanvas = true;
+      return;
+    }
+
+    const point = getCanvasPoint(currentDom.canvas, event);
+    currentState.mouse.screenX = clampValue(point.x, 0, currentDom.canvas.width);
+    currentState.mouse.screenY = clampValue(point.y, 0, currentDom.canvas.height);
+    currentState.mouse.onCanvas = (
+      point.x >= 0 &&
+      point.x <= currentDom.canvas.width &&
+      point.y >= 0 &&
+      point.y <= currentDom.canvas.height
+    );
+  };
+  const markPrimaryMouseDown = () => {
+    if (!currentState.mouse.primaryDown) {
+      currentState.mouse.primaryJustPressed = true;
+    }
+    currentState.mouse.primaryDown = true;
+  };
+  const markSecondaryMouseDown = () => {
+    currentState.mouse.secondaryDown = true;
+  };
+  const clearMouseButtons = () => {
+    currentState.mouse.primaryDown = false;
+    currentState.mouse.secondaryDown = false;
+    currentState.mouse.primaryJustPressed = false;
+    releaseAimPointerLock();
+  };
+  const syncMouseButtonsFromEvent = (event) => {
+    if (typeof event.buttons !== "number") {
+      return;
+    }
+    if (event.buttons === 0) {
+      clearMouseButtons();
+      return;
+    }
+    if ((event.buttons & 1) !== 0) {
+      markPrimaryMouseDown();
+    }
+    if ((event.buttons & 2) !== 0) {
+      markSecondaryMouseDown();
+    }
+  };
+  const handleRecoilMouseDown = (event) => {
+    syncMouseFromEvent(event);
+
+    if (currentState.scene !== SCENES.EXPEDITION || currentState.liveEdit.active) {
+      return false;
+    }
+
+    const buttons = typeof event.buttons === "number" ? event.buttons : 0;
+    const secondaryPressed = event.button === 2 || (buttons & 2) !== 0;
+    const primaryPressed = event.button === 0 || (buttons & 1) !== 0;
+    if (!primaryPressed && !secondaryPressed) {
+      return false;
+    }
+
+    if (secondaryPressed) {
+      markSecondaryMouseDown();
+      requestAimPointerLock();
+    }
+    if (primaryPressed) {
+      markPrimaryMouseDown();
+    }
+    event.preventDefault();
+    return true;
+  };
   let flashTimer = null;
 
   renderMovementTuningFields(currentDom, data.player.movement);
@@ -441,6 +569,45 @@ function bindUi(currentDom, currentState, data) {
     }
   });
 
+  currentDom.canvas.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+
+  currentDom.canvas.addEventListener("pointermove", (event) => {
+    syncMouseFromEvent(event);
+    syncMouseButtonsFromEvent(event);
+  });
+
+  currentDom.canvas.addEventListener("pointerdown", (event) => {
+    if (handleRecoilMouseDown(event)) {
+      if (currentDom.canvas.setPointerCapture) {
+        try {
+          currentDom.canvas.setPointerCapture(event.pointerId);
+        } catch {
+          // Pointer lock can make pointer capture invalid; mouse input is already routed to the canvas.
+        }
+      }
+    }
+  });
+
+  currentDom.canvas.addEventListener("mousedown", (event) => {
+    handleRecoilMouseDown(event);
+  });
+
+  window.addEventListener("mousedown", (event) => {
+    const buttons = typeof event.buttons === "number" ? event.buttons : 0;
+    const aimingOrCombinedClick =
+      currentState.mouse.secondaryDown ||
+      event.button === 2 ||
+      (buttons & 2) !== 0 ||
+      ((buttons & 1) !== 0 && (buttons & 2) !== 0);
+    if (!aimingOrCombinedClick) {
+      return;
+    }
+
+    handleRecoilMouseDown(event);
+  }, true);
+
   currentDom.canvas.addEventListener("pointerdown", (event) => {
     if (!isLiveEditAvailable(currentState, data) || event.button !== 0 || !currentState.liveEdit.active) {
       return;
@@ -467,6 +634,11 @@ function bindUi(currentDom, currentState, data) {
   });
 
   window.addEventListener("pointermove", (event) => {
+    if (currentState.mouse.secondaryDown || currentState.mouse.primaryDown) {
+      syncMouseFromEvent(event);
+      syncMouseButtonsFromEvent(event);
+    }
+
     if (!isLiveEditAvailable(currentState, data) || !currentState.run) {
       currentDom.canvas.style.cursor = "";
       return;
@@ -503,7 +675,24 @@ function bindUi(currentDom, currentState, data) {
     currentState.liveEdit.hoverPlatformIndex = findPlatformAtPoint(data, world);
   });
 
-  window.addEventListener("pointerup", () => {
+  window.addEventListener("pointerup", (event) => {
+    const primaryReleaseDuringFocus = event.button === 0 && currentState.mouse.secondaryDown;
+    if (primaryReleaseDuringFocus && !currentState.mouse.primaryDown) {
+      markPrimaryMouseDown();
+    }
+    if (event.buttons === 0 && !primaryReleaseDuringFocus) {
+      clearMouseButtons();
+    } else if (event.buttons !== 0) {
+      syncMouseButtonsFromEvent(event);
+    }
+    if (event.button === 0) {
+      currentState.mouse.primaryDown = false;
+    }
+    if (event.button === 2) {
+      currentState.mouse.secondaryDown = false;
+      releaseAimPointerLock();
+    }
+
     if (!isLiveEditAvailable(currentState, data) || !currentState.liveEdit.active || !currentState.liveEdit.drag) {
       return;
     }
@@ -513,6 +702,43 @@ function bindUi(currentDom, currentState, data) {
     }
 
     currentState.liveEdit.drag = null;
+  });
+
+  window.addEventListener("mouseup", (event) => {
+    const primaryReleaseDuringFocus = event.button === 0 && currentState.mouse.secondaryDown;
+    if (primaryReleaseDuringFocus && !currentState.mouse.primaryDown) {
+      markPrimaryMouseDown();
+    }
+    if (event.buttons === 0 && !primaryReleaseDuringFocus) {
+      clearMouseButtons();
+      return;
+    }
+    if (event.buttons !== 0) {
+      syncMouseButtonsFromEvent(event);
+    }
+    if (event.button === 0) {
+      currentState.mouse.primaryDown = false;
+    }
+    if (event.button === 2) {
+      currentState.mouse.secondaryDown = false;
+      releaseAimPointerLock();
+    }
+  });
+
+  window.addEventListener("pointercancel", clearMouseButtons);
+
+  document.addEventListener("pointerlockchange", () => {
+    if (isAimPointerLocked()) {
+      return;
+    }
+    if (currentState.mouse.secondaryDown) {
+      currentState.mouse.secondaryDown = false;
+      currentState.mouse.primaryDown = false;
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    clearMouseButtons();
   });
 
   window.addEventListener("keydown", (event) => {
@@ -572,11 +798,26 @@ function bindUi(currentDom, currentState, data) {
   });
 }
 
+function syncAimPointerLock(currentDom, currentState) {
+  if (
+    document.pointerLockElement === currentDom.canvas &&
+    (
+      currentState.scene !== SCENES.EXPEDITION ||
+      currentState.liveEdit.active ||
+      !currentState.mouse?.secondaryDown
+    ) &&
+    document.exitPointerLock
+  ) {
+    document.exitPointerLock();
+  }
+}
+
 function frame(now) {
   const dt = Math.min(0.033, (now - lastFrame) / 1000);
   lastFrame = now;
 
   updateGame(state, runtimeData, dt);
+  syncAimPointerLock(dom, state);
   syncLiveEditButton(dom, state, runtimeData);
   syncDebugButton(dom, state);
   syncMovementTuningButton(dom);
