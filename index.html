@@ -1,86 +1,59 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Silent Passage Demo</title>
+  <title>윤회무명2</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <main class="shell">
-    <section class="stage">
-      <header class="hud">
-        <div>
-          <p class="eyebrow">Exploration Demo</p>
-          <h1>Silent Passage</h1>
-        </div>
-        <div class="status" aria-live="polite">
-          <span id="statusText">Press Enter to begin</span>
-        </div>
-      </header>
+  <main class="app-shell">
+    <div class="stage-shell">
+      <nav class="app-links" aria-label="앱 이동">
+        <a class="app-link is-current" href="./index.html">게임</a>
+        <a class="app-link" href="./editor.html">레벨 에디터</a>
+      </nav>
 
-      <div class="canvas-frame">
-        <canvas id="gameCanvas" width="1280" height="720" aria-label="2D exploration demo"></canvas>
+      <button id="liveEditButton" class="live-edit-button" type="button">라이브 편집</button>
+      <button id="debugButton" class="debug-button" type="button">디버그</button>
+      <button id="movementTuningButton" class="movement-tuning-button" type="button">질주 튜닝</button>
+
+      <section id="movementTuningPanel" class="movement-tuning-panel" hidden>
+        <div class="movement-tuning-header">
+          <div>
+            <p class="movement-tuning-eyebrow">Sprint</p>
+            <h2>질주 튜닝</h2>
+          </div>
+          <button id="movementTuningCloseButton" class="movement-tuning-close" type="button">닫기</button>
+        </div>
+        <p class="movement-tuning-note">값은 즉시 반영된다. 유지하려면 저장을 눌러라.</p>
+        <div id="movementTuningFields" class="movement-tuning-grid"></div>
+        <div class="movement-tuning-actions">
+          <button id="movementTuningSaveButton" class="movement-tuning-action is-primary" type="button">값 저장</button>
+          <button id="movementTuningResetButton" class="movement-tuning-action" type="button">기본값</button>
+        </div>
+      </section>
+
+      <button id="sceneActionButton" class="scene-action-button" type="button">입장</button>
+
+      <div id="touchControls" class="touch-controls" aria-label="브라우저 조작">
+        <div class="touch-cluster touch-cluster--move">
+          <button class="touch-button" data-code="ArrowLeft" type="button">←</button>
+          <button class="touch-button touch-button--center" data-code="ArrowDown" type="button">↓</button>
+          <button class="touch-button" data-code="ArrowRight" type="button">→</button>
+        </div>
+        <div class="touch-cluster touch-cluster--action">
+          <button class="touch-button touch-button--action" data-code="KeyZ" type="button">사용</button>
+          <button class="touch-button touch-button--action" data-code="KeyC" type="button">점프</button>
+          <button class="touch-button touch-button--action" data-code="KeyX" type="button">대시</button>
+        </div>
       </div>
 
-      <footer class="controls">
-        <span>Move: A / D or Arrow Keys</span>
-        <span>Jump: Space</span>
-        <span>Interact: E</span>
-        <span>Restart: R</span>
-        <span>Level Debug: F2</span>
-        <span>Design Mode: F3</span>
-      </footer>
-    </section>
-
-    <aside class="notes">
-      <section>
-        <h2>Goal</h2>
-        <p>Find the path forward. Follow anything that feels deliberate.</p>
-      </section>
-      <section>
-        <h2>Signals</h2>
-        <p>Lanterns mark safe curiosity. Hidden places respond when you get close or interact.</p>
-      </section>
-      <section>
-        <h2>Playtest Focus</h2>
-        <p>Does the world make you want to keep moving? Do you notice at least one optional discovery?</p>
-      </section>
-      <section class="editor-panel">
-        <h2>Level Design</h2>
-        <p>Open design mode, drag objects in the canvas, and export the current draft back into <code>level-data.js</code>.</p>
-        <div class="editor-actions">
-          <button id="editorToggle" type="button" class="tool-button">Open Design Mode</button>
-          <button id="copyLevelButton" type="button" class="tool-button">Copy Full Level</button>
-          <button id="resetDraftButton" type="button" class="tool-button danger">Reset Draft</button>
-        </div>
-        <label class="editor-field" for="editorType">
-          <span>Target Type</span>
-          <select id="editorType"></select>
-        </label>
-        <label class="editor-field" for="editorItem">
-          <span>Object</span>
-          <select id="editorItem"></select>
-        </label>
-        <label class="editor-field" for="editorJson">
-          <span>Selection JSON</span>
-          <textarea id="editorJson" spellcheck="false"></textarea>
-        </label>
-        <div class="editor-actions">
-          <button id="applySelectionButton" type="button" class="tool-button">Apply Selection</button>
-          <button id="deleteSelectionButton" type="button" class="tool-button danger">Delete Selection</button>
-        </div>
-        <div class="editor-actions">
-          <button id="addPlatformButton" type="button" class="tool-button">Add Platform</button>
-          <button id="addLandmarkButton" type="button" class="tool-button">Add Landmark</button>
-          <button id="addInteractableButton" type="button" class="tool-button">Add Interactable</button>
-        </div>
-        <p id="editorStatus" class="editor-status">Design mode off. F3 or the button opens drag-and-edit tools.</p>
-      </section>
-    </aside>
+      <canvas id="gameCanvas" width="1280" height="720" aria-label="윤회무명2 게임 화면"></canvas>
+    </div>
   </main>
 
-  <script src="./level-data.js"></script>
-  <script src="./main.js"></script>
+  <script type="module" src="./main.js?v=20260424-camera-brace-1"></script>
 </body>
 </html>
