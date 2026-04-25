@@ -1,9 +1,9 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-recoil-46";
+import { GAME_DATA } from "./level-data.js?v=20260424-recoil-47";
 import {
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-recoil-46";
+} from "./level-store.js?v=20260424-recoil-47";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -11,10 +11,10 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260424-recoil-46";
-import { renderGame } from "./render.js?v=20260424-recoil-46";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-46";
-import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-46";
+} from "./movement-tuning.js?v=20260424-recoil-47";
+import { renderGame } from "./render.js?v=20260424-recoil-47";
+import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-47";
+import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-47";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -413,8 +413,12 @@ function bindTouchHold(button, currentState, code) {
 
 function bindUi(currentDom, currentState, data) {
   const getWorldPoint = (event) => screenToWorld(currentState, data, getCanvasPoint(currentDom.canvas, event));
+  const pointerLockAimEnabled = false;
   const isAimPointerLocked = () => document.pointerLockElement === currentDom.canvas;
   const requestAimPointerLock = () => {
+    if (!pointerLockAimEnabled) {
+      return;
+    }
     if (isAimPointerLocked() || !currentDom.canvas.requestPointerLock) {
       return;
     }

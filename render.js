@@ -2511,7 +2511,6 @@ function drawRecoilFocusAfterimages(ctx, run, data) {
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
-  ctx.filter = "brightness(1.14) saturate(1.85)";
   images.forEach((image, index) => {
     const duration = Math.max(0.001, image.duration ?? 0.44);
     const lifeRatio = clamp(image.life / duration, 0, 1);
@@ -2544,10 +2543,10 @@ function drawRecoilFocusAfterimages(ctx, run, data) {
       alpha,
       fillTint: "rgba(58, 128, 255, 0.56)",
       glowColor: color,
-      glowBlur: 24 * lifeRatio,
+      glowBlur: 14 * lifeRatio,
     });
 
-    if (lifeRatio > 0.32) {
+    if (lifeRatio > 0.32 && index >= images.length - 5) {
       const chromaFrame = {
         ...shiftedFrame,
         footX: shiftedFrame.footX + (index % 2 === 0 ? 3 : -3),
@@ -2556,7 +2555,7 @@ function drawRecoilFocusAfterimages(ctx, run, data) {
         alpha: alpha * 0.32,
         fillTint: "rgba(135, 225, 255, 0.42)",
         glowColor: "rgba(135, 225, 255, 0.58)",
-        glowBlur: 14,
+        glowBlur: 8,
       });
     }
   });
