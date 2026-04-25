@@ -6,6 +6,8 @@ let spriteTintCanvas = null;
 let spriteTintContext = null;
 const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
+const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
+  && new URLSearchParams(window.location.search).get("perf") === "lite";
 const LOOT_RARITY_META = {
   common: { label: "COMMON", color: "#dce7ec", glow: "rgba(220, 231, 236, 0.16)" },
   uncommon: { label: "UNCOMMON", color: "#8ef0c2", glow: "rgba(142, 240, 194, 0.2)" },
@@ -2507,11 +2509,16 @@ function drawRecoilFocusAfterimages(ctx, run, data) {
     return;
   }
 
-  drawRecoilFocusTrailPath(ctx, run);
+  if (!LOW_PERFORMANCE_MODE) {
+    drawRecoilFocusTrailPath(ctx, run);
+  }
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
   images.forEach((image, index) => {
+    if (LOW_PERFORMANCE_MODE && index < images.length - 1 && index % 2 === 0) {
+      return;
+    }
     const duration = Math.max(0.001, image.duration ?? 0.44);
     const lifeRatio = clamp(image.life / duration, 0, 1);
     if (lifeRatio <= 0) {
@@ -2541,12 +2548,12 @@ function drawRecoilFocusAfterimages(ctx, run, data) {
 
     drawPlayerFrame(ctx, shiftedFrame, ghostPlayer, {
       alpha,
-      fillTint: "rgba(58, 128, 255, 0.56)",
+      fillTint: LOW_PERFORMANCE_MODE ? "rgba(58, 128, 255, 0.42)" : "rgba(58, 128, 255, 0.56)",
       glowColor: color,
-      glowBlur: 14 * lifeRatio,
+      glowBlur: (LOW_PERFORMANCE_MODE ? 7 : 14) * lifeRatio,
     });
 
-    if (lifeRatio > 0.32 && index >= images.length - 5) {
+    if (!LOW_PERFORMANCE_MODE && lifeRatio > 0.32 && index >= images.length - 5) {
       const chromaFrame = {
         ...shiftedFrame,
         footX: shiftedFrame.footX + (index % 2 === 0 ? 3 : -3),
@@ -2923,14 +2930,16 @@ function drawRecoilFocusOverlay(ctx, run, data) {
   }
 
   const scanOffset = (effectTime * 520) % 22;
-  ctx.fillStyle = `rgba(135, 225, 255, ${0.028 * blend})`;
-  for (let y = -scanOffset; y < SCREEN_HEIGHT; y += 22) {
-    ctx.fillRect(0, y, SCREEN_WIDTH, 1);
+  if (!LOW_PERFORMANCE_MODE) {
+    ctx.fillStyle = `rgba(135, 225, 255, ${0.028 * blend})`;
+    for (let y = -scanOffset; y < SCREEN_HEIGHT; y += 22) {
+      ctx.fillRect(0, y, SCREEN_WIDTH, 1);
+    }
   }
 
   ctx.strokeStyle = `rgba(72, 132, 255, ${0.12 * blend})`;
   ctx.lineWidth = 2;
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < (LOW_PERFORMANCE_MODE ? 2 : 4); index += 1) {
     const y = ((effectTime * 180 + index * 173) % (SCREEN_HEIGHT + 80)) - 40;
     ctx.beginPath();
     ctx.moveTo(0, y);
