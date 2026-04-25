@@ -10,102 +10,102 @@ const GATE_WIDTH = TILE_SIZE * 3;
 const GATE_HEIGHT = TILE_SIZE * 6;
 
 export const GAME_DATA = {
-  title: {
-    name: "윤회무명2",
-    subtitle: "TYPE-07A Movement Lab",
-    description: "움직임, HUD, 배치를 빠르게 검증하는 브라우저 프로토타입.",
+  "title": {
+    "name": "윤회무명2",
+    "subtitle": "TYPE-07A Movement Lab",
+    "description": "움직임, HUD, 배치를 빠르게 검증하는 브라우저 프로토타입."
   },
-  art: {
-    operatorStanding: {
-      src: "./assets/characters/type-07a-standing.png?v=20260424-2",
+  "art": {
+    "operatorStanding": {
+      "src": "./assets/characters/type-07a-standing.png?v=20260424-2"
     },
-    lootRummage: {
-      src: "./assets/ui/type07a-loot-rummage.png?v=20260425-1",
+    "lootRummage": {
+      "src": "./assets/ui/type07a-loot-rummage.png?v=20260425-1"
     },
-    playerSide: {
-      src: "./assets/characters/type-07a-player-side-sd.png?v=20260424-2",
+    "playerSide": {
+      "src": "./assets/characters/type-07a-player-side-sd.png?v=20260424-2"
     },
-    playerIdle: {
-      src: "./assets/characters/type-07a-player-idle-sd.png?v=20260424-2",
+    "playerIdle": {
+      "src": "./assets/characters/type-07a-player-idle-sd.png?v=20260424-2"
     },
-    playerRun: {
-      src: "./assets/characters/type-07a-player-run-sd.png?v=20260424-2",
+    "playerRun": {
+      "src": "./assets/characters/type-07a-player-run-sd.png?v=20260424-2"
     },
-    playerSprint: {
-      src: "./assets/characters/type-07a-player-sprint-sd.png?v=20260424-1",
+    "playerSprint": {
+      "src": "./assets/characters/type-07a-player-sprint-sd.png?v=20260424-1"
     },
-    playerJump: {
-      src: "./assets/characters/type-07a-player-jump-sd.png?v=20260424-2",
+    "playerJump": {
+      "src": "./assets/characters/type-07a-player-jump-sd.png?v=20260424-2"
     },
-    playerFall: {
-      src: "./assets/characters/type-07a-player-fall-sd.png?v=20260424-2",
+    "playerFall": {
+      "src": "./assets/characters/type-07a-player-fall-sd.png?v=20260424-2"
     },
-    playerHoverDrone: {
-      src: "./assets/characters/type-07a-player-hover-drone-sd.png?v=20260424-1",
+    "playerHoverDrone": {
+      "src": "./assets/characters/type-07a-player-hover-drone-sd.png?v=20260424-1"
     },
-    playerDash: {
-      src: "./assets/characters/type-07a-player-dash-sd.png?v=20260424-2",
+    "playerDash": {
+      "src": "./assets/characters/type-07a-player-dash-sd.png?v=20260424-2"
     },
-    playerCrouch: {
-      src: "./assets/characters/type-07a-player-crouch-sd.png?v=20260424-2",
+    "playerCrouch": {
+      "src": "./assets/characters/type-07a-player-crouch-sd.png?v=20260424-2"
     },
-    playerSlide: {
-      src: "./assets/characters/type-07a-player-slide-sd.png?v=20260424-1",
+    "playerSlide": {
+      "src": "./assets/characters/type-07a-player-slide-sd.png?v=20260424-1"
     },
-    playerRecoilFocus: {
-      src: "./assets/characters/type-07a-player-recoil-focus-sd.png?v=20260424-1",
+    "playerRecoilFocus": {
+      "src": "./assets/characters/type-07a-player-recoil-focus-sd.png?v=20260424-1"
     },
-    playerRecoilFocusUp: {
-      src: "./assets/characters/type-07a-player-recoil-focus-up-sd.png?v=20260424-1",
+    "playerRecoilFocusUp": {
+      "src": "./assets/characters/type-07a-player-recoil-focus-up-sd.png?v=20260424-1"
     },
-    playerRecoilFocusDown: {
-      src: "./assets/characters/type-07a-player-recoil-focus-down-sd.png?v=20260424-1",
+    "playerRecoilFocusDown": {
+      "src": "./assets/characters/type-07a-player-recoil-focus-down-sd.png?v=20260424-1"
     },
-    playerRecoilShot: {
-      src: "./assets/characters/type-07a-player-recoil-shot-sd.png?v=20260424-1",
+    "playerRecoilShot": {
+      "src": "./assets/characters/type-07a-player-recoil-shot-sd.png?v=20260424-1"
     },
-    playerRecoilSpin: {
-      src: "./assets/characters/type-07a-player-recoil-spin-sheet-sd.png?v=20260424-1",
+    "playerRecoilSpin": {
+      "src": "./assets/characters/type-07a-player-recoil-spin-sheet-sd.png?v=20260424-1"
     },
-    playerWallJump: {
-      src: "./assets/characters/type-07a-player-wall-jump-sd.png?v=20260424-2",
+    "playerWallJump": {
+      "src": "./assets/characters/type-07a-player-wall-jump-sd.png?v=20260424-2"
     },
-    playerWallSlide: {
-      src: "./assets/characters/type-07a-player-wall-slide-sd.png?v=20260424-2",
+    "playerWallSlide": {
+      "src": "./assets/characters/type-07a-player-wall-slide-sd.png?v=20260424-2"
     },
-    playerWallRun: {
-      src: "./assets/characters/type-07a-player-wall-run-sd.png?v=20260424-2",
+    "playerWallRun": {
+      "src": "./assets/characters/type-07a-player-wall-run-sd.png?v=20260424-2"
     },
-    playerBraceHold: {
-      src: "./assets/characters/type-07a-player-brace-hold-sd.png?v=20260424-2",
+    "playerBraceHold": {
+      "src": "./assets/characters/type-07a-player-brace-hold-sd.png?v=20260424-2"
     },
-    playerBraceRelease: {
-      src: "./assets/characters/type-07a-player-brace-release-sd.png?v=20260424-2",
+    "playerBraceRelease": {
+      "src": "./assets/characters/type-07a-player-brace-release-sd.png?v=20260424-2"
     },
-    expeditionHudOverlay: {
-      src: "./assets/ui/type07a-expedition-overlay.png",
+    "expeditionHudOverlay": {
+      "src": "./assets/ui/type07a-expedition-overlay.png"
     },
-    shelterPanel: {
-      src: "./assets/ui/type07a-shelter-panel.png",
+    "shelterPanel": {
+      "src": "./assets/ui/type07a-shelter-panel.png"
     },
-    titlePanel: {
-      src: "./assets/ui/type07a-title-panel.png",
+    "titlePanel": {
+      "src": "./assets/ui/type07a-title-panel.png"
     },
-    resultsPanel: {
-      src: "./assets/ui/type07a-results-panel.png",
+    "resultsPanel": {
+      "src": "./assets/ui/type07a-results-panel.png"
     },
-    operatorEmotionSheet: {
-      src: "./assets/ui/type07a-emotion-sheet.png?v=20260425-1",
-    },
+    "operatorEmotionSheet": {
+      "src": "./assets/ui/type07a-emotion-sheet.png?v=20260425-1"
+    }
   },
-  scale: {
-    tileSize: TILE_SIZE,
-    subTileSize: SUB_TILE_SIZE,
-    playerWidthTiles: PLAYER_WIDTH_TILES,
-    playerHeightTiles: PLAYER_HEIGHT_TILES,
-    crouchHeightTiles: PLAYER_CROUCH_HEIGHT_TILES,
+  "scale": {
+    "tileSize": 32,
+    "subTileSize": 16,
+    "playerWidthTiles": 1.5,
+    "playerHeightTiles": 2.5,
+    "crouchHeightTiles": 1.5
   },
-  ui: {
+  "ui": {
     "themeId": "ruin-haze",
     "accent": "#e7f47e",
     "accentSecondary": "#93eaff",
@@ -176,7 +176,7 @@ export const GAME_DATA = {
       }
     }
   },
-  world: {
+  "world": {
     "mode": "movementLab",
     "width": 9000,
     "height": 4270,
@@ -248,100 +248,103 @@ export const GAME_DATA = {
       "출구까지 도달"
     ]
   },
-  player: {
-    spawn: {
+  "player": {
+    "spawn": {
       "x": 688,
       "y": 1888
     },
-    size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT },
-    speed: 360,
-    jumpVelocity: -900,
-    maxHp: 100,
-    maxSanity: 100,
-    maxBattery: 100,
-    startingSanity: 100,
-    attackDamage: 34,
-    attackCooldown: 0.42,
-    lightDrainPerSecond: 10,
-    movement: {
-      runSpeed: 440,
-      sprintSpeed: 680,
-      sprintBuildMs: 520,
-      sprintDecayMs: 220,
-      sprintJumpCarryMs: 360,
-      sprintJumpMinSpeed: 760,
-      slideMinSpeed: 420,
-      slideDurationMs: 520,
-      slideFriction: 260,
-      slideSpeedMultiplier: 1.04,
-      slideJumpCarryMs: 420,
-      slideJumpMinSpeed: 780,
-      slideJumpSpeedMultiplier: 1.14,
-      hoverFallSpeed: 150,
-      hoverGravityMultiplier: 0.16,
-      hoverStartMaxFallSpeed: 220,
-      hoverStartMinVy: -60,
-      hoverAirControlMultiplier: 0.9,
-      groundAccel: 3400,
-      groundDecel: 4200,
-      airControlMultiplier: 0.75,
-      jumpVelocity: -930,
-      coyoteTimeMs: 100,
-      jumpBufferMs: 120,
-      jumpCutMultiplier: 0.45,
-      apexGravityMultiplier: 0.58,
-      apexGravityThreshold: 180,
-      jumpCornerCorrectionPx: 12,
-      dashDurationMs: 120,
-      dashDistance: 98,
-      maxDashCount: 1,
-      dashCooldownMs: 450,
-      dashCornerCorrectionPx: 12,
-      dashCarryWindowMs: 150,
-      dashCarrySpeedMultiplier: 0.68,
-      dashJumpMinSpeed: 520,
-      dashInvulnerable: true,
-      crouchHeight: PLAYER_CROUCH_HEIGHT,
-      crouchSpeedMultiplier: 0.45,
-      wallSlideFallMultiplier: 0.4,
-      wallCoyoteTimeMs: 110,
-      wallSlideGraceMs: 80,
-      wallSpeedRetentionMs: 90,
-      wallSpeedRetentionMinSpeed: 180,
-      wallRunStartSpeed: 260,
-      wallRunAccel: 1680,
-      wallRunMaxSpeed: 920,
-      wallRunExitMinBoost: 720,
-      wallRunExitHorizontal: 180,
-      wallJumpHorizontal: 506,
-      wallJumpVertical: 840,
-      wallJumpLockMs: 100,
-      braceDetectPaddingX: 24,
-      braceDetectPaddingY: 24,
-      braceHoldStartSpeed: 24,
-      braceHoldAccel: 360,
-      braceHoldFallSpeed: 220,
-      braceHoldMoveMultiplier: 0.72,
-      braceBoostHorizontal: 560,
-      braceBoostVertical: 940,
-      braceReuseMs: 180,
-      recoilShotCharges: 1,
-      recoilShotForce: 840,
-      recoilShotMaxHorizontalSpeed: 1180,
-      recoilShotMaxUpSpeed: 1180,
-      recoilShotMaxFallSpeed: 760,
-      recoilShotCooldownMs: 180,
-      recoilShotFocusTimeScale: 0.22,
-      recoilShotAimLookAhead: 0.1,
-      recoilShotAimUpLookAhead: 0.14,
-      recoilShotRecoilLookAhead: 0.18,
-      recoilShotRecoilUpLookAhead: 0.2,
-      recoilShotCameraHoldMs: 240,
-      recoilSpinDurationMs: 220,
-      recoilSpinLoopCount: 2,
-      recoilAimVerticalPoseThreshold: 0.45,
+    "size": {
+      "width": 48,
+      "height": 80
     },
-    render: {
+    "speed": 360,
+    "jumpVelocity": -900,
+    "maxHp": 100,
+    "maxSanity": 100,
+    "maxBattery": 100,
+    "startingSanity": 100,
+    "attackDamage": 34,
+    "attackCooldown": 0.42,
+    "lightDrainPerSecond": 10,
+    "movement": {
+      "runSpeed": 440,
+      "sprintSpeed": 1180,
+      "sprintBuildMs": 520,
+      "sprintDecayMs": 220,
+      "sprintJumpCarryMs": 990,
+      "sprintJumpMinSpeed": 1020,
+      "slideMinSpeed": 570,
+      "slideDurationMs": 720,
+      "slideFriction": 110,
+      "slideSpeedMultiplier": 1.21,
+      "slideJumpCarryMs": 650,
+      "slideJumpMinSpeed": 1190,
+      "slideJumpSpeedMultiplier": 0.88,
+      "hoverFallSpeed": 150,
+      "hoverGravityMultiplier": 0.16,
+      "hoverStartMaxFallSpeed": 220,
+      "hoverStartMinVy": -60,
+      "hoverAirControlMultiplier": 0.9,
+      "groundAccel": 3400,
+      "groundDecel": 4200,
+      "airControlMultiplier": 0.75,
+      "jumpVelocity": -930,
+      "coyoteTimeMs": 100,
+      "jumpBufferMs": 120,
+      "jumpCutMultiplier": 0.45,
+      "apexGravityMultiplier": 0.58,
+      "apexGravityThreshold": 180,
+      "jumpCornerCorrectionPx": 12,
+      "dashDurationMs": 120,
+      "dashDistance": 162,
+      "maxDashCount": 2,
+      "dashCooldownMs": 450,
+      "dashCornerCorrectionPx": 12,
+      "dashCarryWindowMs": 150,
+      "dashCarrySpeedMultiplier": 0.68,
+      "dashJumpMinSpeed": 520,
+      "dashInvulnerable": true,
+      "crouchHeight": 48,
+      "crouchSpeedMultiplier": 0.45,
+      "wallSlideFallMultiplier": 0.4,
+      "wallCoyoteTimeMs": 110,
+      "wallSlideGraceMs": 80,
+      "wallSpeedRetentionMs": 90,
+      "wallSpeedRetentionMinSpeed": 180,
+      "wallRunStartSpeed": 260,
+      "wallRunAccel": 1680,
+      "wallRunMaxSpeed": 920,
+      "wallRunExitMinBoost": 720,
+      "wallRunExitHorizontal": 180,
+      "wallJumpHorizontal": 506,
+      "wallJumpVertical": 840,
+      "wallJumpLockMs": 100,
+      "braceDetectPaddingX": 24,
+      "braceDetectPaddingY": 24,
+      "braceHoldStartSpeed": 24,
+      "braceHoldAccel": 840,
+      "braceHoldFallSpeed": 114,
+      "braceHoldMoveMultiplier": 0.81,
+      "braceBoostHorizontal": 560,
+      "braceBoostVertical": 940,
+      "braceReuseMs": 180,
+      "recoilShotCharges": 1,
+      "recoilShotForce": 1550,
+      "recoilShotMaxHorizontalSpeed": 3000,
+      "recoilShotMaxUpSpeed": 2000,
+      "recoilShotMaxFallSpeed": 760,
+      "recoilShotCooldownMs": 180,
+      "recoilShotFocusTimeScale": 0.05,
+      "recoilShotAimLookAhead": 0.1,
+      "recoilShotAimUpLookAhead": 0.14,
+      "recoilShotRecoilLookAhead": 0.18,
+      "recoilShotRecoilUpLookAhead": 0.2,
+      "recoilShotCameraHoldMs": 240,
+      "recoilSpinDurationMs": 220,
+      "recoilSpinLoopCount": 2,
+      "recoilAimVerticalPoseThreshold": 0.45
+    },
+    "render": {
       "idleAssetKey": "playerIdle",
       "runAssetKey": "playerRun",
       "sprintAssetKey": "playerSprint",
@@ -428,16 +431,16 @@ export const GAME_DATA = {
       "braceHoldAnchorX": 0.38,
       "braceReleaseAnchorX": 0.34,
       "footAnchorY": 0.978
-    },
+    }
   },
-  extractionGate: {
+  "extractionGate": {
     "x": 8640,
     "y": 496,
     "width": 96,
     "height": 192,
     "prompt": "E: 추출"
   },
-  platforms: [
+  "platforms": [
     {
       "x": 928,
       "y": 1840,
@@ -516,8 +519,8 @@ export const GAME_DATA = {
       "color": "#54697b"
     }
   ],
-  props: [],
-  braceWalls: [
+  "props": [],
+  "braceWalls": [
     {
       "id": "brace-1776961163785",
       "x": 272,
@@ -589,7 +592,7 @@ export const GAME_DATA = {
       "height": 272
     }
   ],
-  hostileDrones: [
+  "hostileDrones": [
     {
       "id": "crow-01",
       "type": "hostileDrone",
@@ -679,171 +682,187 @@ export const GAME_DATA = {
       }
     }
   ],
-  lootTables: {
-    streetCache: [
+  "lootTables": {
+    "streetCache": [
       {
-        id: "alloy-shards",
-        name: "합금 파편",
-        rarity: "common",
-        type: "material",
-        quantity: 12,
-        value: 24,
-        weight: 1.2,
-        lootTime: 0.35,
+        "id": "alloy-shards",
+        "name": "합금 파편",
+        "rarity": "common",
+        "type": "material",
+        "quantity": 12,
+        "value": 24,
+        "weight": 1.2,
+        "lootTime": 0.35
       },
       {
-        id: "bio-gel",
-        name: "생체 젤",
-        rarity: "uncommon",
-        type: "material",
-        quantity: 8,
-        value: 42,
-        weight: 1.8,
-        lootTime: 0.55,
+        "id": "bio-gel",
+        "name": "생체 젤",
+        "rarity": "uncommon",
+        "type": "material",
+        "quantity": 8,
+        "value": 42,
+        "weight": 1.8,
+        "lootTime": 0.55
       },
       {
-        id: "servo-core",
-        name: "서보 코어",
-        rarity: "rare",
-        type: "component",
-        quantity: 1,
-        value: 110,
-        weight: 2.6,
-        lootTime: 0.95,
-      },
+        "id": "servo-core",
+        "name": "서보 코어",
+        "rarity": "rare",
+        "type": "component",
+        "quantity": 1,
+        "value": 110,
+        "weight": 2.6,
+        "lootTime": 0.95
+      }
     ],
-    deepCache: [
+    "deepCache": [
       {
-        id: "stabilizer-coil",
-        name: "안정화 코일",
-        rarity: "uncommon",
-        type: "component",
-        quantity: 2,
-        value: 68,
-        weight: 2.2,
-        lootTime: 0.7,
+        "id": "stabilizer-coil",
+        "name": "안정화 코일",
+        "rarity": "uncommon",
+        "type": "component",
+        "quantity": 2,
+        "value": 68,
+        "weight": 2.2,
+        "lootTime": 0.7
       },
       {
-        id: "neural-prism",
-        name: "신경 프리즘",
-        rarity: "rare",
-        type: "artifact",
-        quantity: 1,
-        value: 145,
-        weight: 3.1,
-        lootTime: 1.05,
+        "id": "neural-prism",
+        "name": "신경 프리즘",
+        "rarity": "rare",
+        "type": "artifact",
+        "quantity": 1,
+        "value": 145,
+        "weight": 3.1,
+        "lootTime": 1.05
       },
       {
-        id: "blackbox-seed",
-        name: "블랙박스 시드",
-        rarity: "epic",
-        type: "artifact",
-        quantity: 1,
-        value: 260,
-        weight: 4.4,
-        lootTime: 1.55,
-      },
-    ],
+        "id": "blackbox-seed",
+        "name": "블랙박스 시드",
+        "rarity": "epic",
+        "type": "artifact",
+        "quantity": 1,
+        "value": 260,
+        "weight": 4.4,
+        "lootTime": 1.55
+      }
+    ]
   },
-  lootCrates: [
+  "lootCrates": [
     {
-      id: "crate-street-01",
-      x: 996,
-      y: 1790,
-      width: 78,
-      height: 50,
-      label: "거리 보급함",
-      prompt: "E: 상자 열기",
-      lootTable: "streetCache",
-      searchTime: 1.05,
+      "id": "crate-street-01",
+      "x": 996,
+      "y": 1790,
+      "width": 78,
+      "height": 50,
+      "label": "거리 보급함",
+      "prompt": "E: 상자 열기",
+      "lootTable": "streetCache",
+      "searchTime": 1.05
     },
     {
-      id: "crate-rooftop-01",
-      x: 7904,
-      y: 892,
-      width: 82,
-      height: 52,
-      label: "추락 보관함",
-      prompt: "E: 상자 열기",
-      lootTable: "deepCache",
-      searchTime: 1.25,
-    },
+      "id": "crate-rooftop-01",
+      "x": 7904,
+      "y": 892,
+      "width": 82,
+      "height": 52,
+      "label": "추락 보관함",
+      "prompt": "E: 상자 열기",
+      "lootTable": "deepCache",
+      "searchTime": 1.25
+    }
   ],
-  interactables: [],
-  encounters: [
+  "interactables": [],
+  "encounters": [
     {
-      id: "guard",
-      disabled: true,
-      label: "경비형",
-      identity: "규칙 감시자",
-      type: "guard",
-      x: -400,
-      y: -400,
-      width: 46,
-      height: 82,
-      patrol: { left: -400, right: -400 },
-      checkpointZone: { x: -420, y: -420, width: 10, height: 10 },
-      detectionRadius: 0,
-      speed: 0,
-      chaseSpeed: 0,
-      attackRange: 0,
-      damage: 0,
-      maxHp: 1,
-      harvestReward: 0,
-      harvestSanityCost: 0,
-      releaseSanity: 0,
-      storyFlag: "guard-ledger",
-      storyText: "",
-      clues: {
-        motion: "",
-        badge: "",
-        still: "",
+      "id": "guard",
+      "disabled": true,
+      "label": "경비형",
+      "identity": "규칙 감시자",
+      "type": "guard",
+      "x": -400,
+      "y": -400,
+      "width": 46,
+      "height": 82,
+      "patrol": {
+        "left": -400,
+        "right": -400
       },
+      "checkpointZone": {
+        "x": -420,
+        "y": -420,
+        "width": 10,
+        "height": 10
+      },
+      "detectionRadius": 0,
+      "speed": 0,
+      "chaseSpeed": 0,
+      "attackRange": 0,
+      "damage": 0,
+      "maxHp": 1,
+      "harvestReward": 0,
+      "harvestSanityCost": 0,
+      "releaseSanity": 0,
+      "storyFlag": "guard-ledger",
+      "storyText": "",
+      "clues": {
+        "motion": "",
+        "badge": "",
+        "still": ""
+      }
     },
     {
-      id: "ritualist",
-      disabled: true,
-      label: "의식형",
-      identity: "순서 집착체",
-      type: "ritualist",
-      x: -500,
-      y: -500,
-      width: 48,
-      height: 88,
-      ritualArea: { x: -520, y: -520, width: 10, height: 10 },
-      patrolPoints: [
-        { x: -500, y: -500 },
+      "id": "ritualist",
+      "disabled": true,
+      "label": "의식형",
+      "identity": "순서 집착체",
+      "type": "ritualist",
+      "x": -500,
+      "y": -500,
+      "width": 48,
+      "height": 88,
+      "ritualArea": {
+        "x": -520,
+        "y": -520,
+        "width": 10,
+        "height": 10
+      },
+      "patrolPoints": [
+        {
+          "x": -500,
+          "y": -500
+        }
       ],
-      pedestals: [],
-      correctOrder: [],
-      speed: 0,
-      chaseSpeed: 0,
-      attackRange: 0,
-      damage: 0,
-      maxHp: 1,
-      harvestReward: 0,
-      harvestSanityCost: 0,
-      releaseSanity: 0,
-      storyFlag: "ritual-map",
-      storyText: "",
-      clues: {
-        area: "",
-        wrong: "",
-        light: "",
-      },
-    },
+      "pedestals": [],
+      "correctOrder": [],
+      "speed": 0,
+      "chaseSpeed": 0,
+      "attackRange": 0,
+      "damage": 0,
+      "maxHp": 1,
+      "harvestReward": 0,
+      "harvestSanityCost": 0,
+      "releaseSanity": 0,
+      "storyFlag": "ritual-map",
+      "storyText": "",
+      "clues": {
+        "area": "",
+        "wrong": "",
+        "light": ""
+      }
+    }
   ],
-  nightThreats: [],
-  abilityDefs: {
-    threatSense: {
-      id: "threatSense",
-      name: "위협 감지",
-      description: "Q 입력 시 위협과 핵심 단서를 강조한다.",
-    },
+  "nightThreats": [],
+  "abilityDefs": {
+    "threatSense": {
+      "id": "threatSense",
+      "name": "위협 감지",
+      "description": "Q 입력 시 위협과 핵심 단서를 강조한다."
+    }
   },
-  shelterNpc: {
-    name: "Type-07A",
-    role: "오퍼레이터",
-    dialogue: "움직임과 화면 배치를 필요한 만큼만 조정한다.",
-  },
+  "shelterNpc": {
+    "name": "Type-07A",
+    "role": "오퍼레이터",
+    "dialogue": "움직임과 화면 배치를 필요한 만큼만 조정한다."
+  }
 };
