@@ -38,7 +38,10 @@ const LOOT_CLOSE_KEYS = ["Escape", "KeyQ"];
 const DEBUG_KEYS = ["F3", "Backquote"];
 const RESTART_KEYS = ["KeyR"];
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
-  && new URLSearchParams(window.location.search).get("perf") === "lite";
+  && (
+    window.__SILENT_PASSAGE_PERF === "lite" ||
+    new URLSearchParams(window.location.search).get("perf") === "lite"
+  );
 const RECOIL_FOCUS_AFTERIMAGE_INTERVAL = LOW_PERFORMANCE_MODE ? 0.14 : 0.08;
 const RECOIL_FOCUS_AFTERIMAGE_LIFE = 1;
 const RECOIL_FOCUS_AFTERIMAGE_MAX = LOW_PERFORMANCE_MODE ? 6 : 12;

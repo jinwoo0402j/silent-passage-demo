@@ -7,7 +7,10 @@ let spriteTintContext = null;
 const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
-  && new URLSearchParams(window.location.search).get("perf") === "lite";
+  && (
+    window.__SILENT_PASSAGE_PERF === "lite" ||
+    new URLSearchParams(window.location.search).get("perf") === "lite"
+  );
 const LOOT_RARITY_META = {
   common: { label: "COMMON", color: "#dce7ec", glow: "rgba(220, 231, 236, 0.16)" },
   uncommon: { label: "UNCOMMON", color: "#8ef0c2", glow: "rgba(142, 240, 194, 0.2)" },
