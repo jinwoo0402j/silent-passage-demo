@@ -1,6 +1,6 @@
 import { deepClone } from "./utils.js";
 
-export const LEVEL_OVERRIDE_KEY = "rulebound-level-override-v1";
+export const LEVEL_OVERRIDE_KEY = "rulebound-level-override-v2";
 export const LEVEL_DATA_VERSION = 1;
 
 const DEFAULT_PLATFORM_COLOR = "#4b6075";

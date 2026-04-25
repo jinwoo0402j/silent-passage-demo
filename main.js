@@ -1,9 +1,9 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-recoil-42";
+import { GAME_DATA } from "./level-data.js?v=20260424-recoil-44";
 import {
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-recoil-42";
+} from "./level-store.js?v=20260424-recoil-44";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -11,10 +11,10 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260424-recoil-42";
-import { renderGame } from "./render.js?v=20260424-recoil-42";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-42";
-import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-42";
+} from "./movement-tuning.js?v=20260424-recoil-44";
+import { renderGame } from "./render.js?v=20260424-recoil-44";
+import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-44";
+import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-44";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
