@@ -1,7 +1,7 @@
 import { deepClone } from "./utils.js";
 
 export const LEVEL_OVERRIDE_KEY = "rulebound-level-override-v2";
-export const LEVEL_DATA_VERSION = 1;
+export const LEVEL_DATA_VERSION = 2;
 
 const DEFAULT_PLATFORM_COLOR = "#4b6075";
 const DEFAULT_SIGN_TEXT = "표지";
@@ -46,6 +46,17 @@ const PLAYER_RENDER_FIELDS = [
   "braceHoldAnchorX",
   "braceReleaseAnchorX",
   "footAnchorY",
+];
+const PLAYER_CONFIG_FIELDS = [
+  "speed",
+  "jumpVelocity",
+  "maxHp",
+  "maxSanity",
+  "maxBattery",
+  "startingSanity",
+  "attackDamage",
+  "attackCooldown",
+  "lightDrainPerSecond",
 ];
 const UI_LAYOUT_FIELDS = {
   toast: ["x", "y", "width"],
@@ -151,6 +162,93 @@ function safeString(value, fallback = "") {
 
 function safeBoolean(value, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function safeArray(value, fallback = []) {
+  return Array.isArray(value) ? deepClone(value) : deepClone(fallback);
+}
+
+function safeRecord(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? deepClone(value)
+    : deepClone(fallback);
+}
+
+function extractPlayerConfig(player = {}) {
+  return Object.fromEntries(
+    PLAYER_CONFIG_FIELDS.map((field) => [field, player[field]]),
+  );
+}
+
+function sanitizePlayerConfig(player, fallbackPlayer) {
+  return Object.fromEntries(
+    PLAYER_CONFIG_FIELDS.map((field) => [
+      field,
+      safeNumber(player?.[field], fallbackPlayer?.[field]),
+    ]),
+  );
+}
+
+function extractPlayerMovement(movement = {}) {
+  return Object.fromEntries(
+    Object.entries(movement)
+      .filter(([, value]) => ["number", "boolean", "string"].includes(typeof value)),
+  );
+}
+
+function sanitizePlayerMovement(movement, baseMovement = {}) {
+  const source = movement && typeof movement === "object" ? movement : {};
+  return Object.fromEntries(
+    Object.entries(baseMovement).map(([field, fallback]) => {
+      if (typeof fallback === "boolean") {
+        return [field, safeBoolean(source[field], fallback)];
+      }
+      if (typeof fallback === "string") {
+        return [field, safeString(source[field], fallback)];
+      }
+      return [field, safeNumber(source[field], fallback)];
+    }),
+  );
+}
+
+function extractLootCrate(crate = {}) {
+  return safeRecord(crate);
+}
+
+function sanitizeLootCrate(crate, index, baseCrate = null) {
+  const fallback = baseCrate || {
+    id: `loot-crate-${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 72,
+    height: 48,
+    label: "Supply cache",
+    prompt: "E: Open cache",
+    lootTable: "streetCache",
+    searchTime: 0.75,
+  };
+  const source = crate && typeof crate === "object" ? crate : {};
+  const next = {
+    ...safeRecord(fallback),
+    ...safeRecord(source),
+    id: safeString(source.id, fallback.id || `loot-crate-${index + 1}`),
+    x: safeNumber(source.x, fallback.x),
+    y: safeNumber(source.y, fallback.y),
+    width: safeNumber(source.width, fallback.width, 24),
+    height: safeNumber(source.height, fallback.height, 24),
+    label: safeString(source.label, fallback.label || "Supply cache"),
+    prompt: safeString(source.prompt, fallback.prompt || "E: Open cache"),
+    lootTable: safeString(source.lootTable, fallback.lootTable || "streetCache"),
+    searchTime: safeNumber(source.searchTime, fallback.searchTime ?? 0.75, 0),
+  };
+  if (Array.isArray(source.items)) {
+    next.items = safeArray(source.items);
+  } else if (Array.isArray(fallback.items)) {
+    next.items = safeArray(fallback.items);
+  } else {
+    delete next.items;
+  }
+  return next;
 }
 
 function extractCamera(camera = {}) {
@@ -373,9 +471,17 @@ export function extractEditableLevelData(data) {
   return {
     version: LEVEL_DATA_VERSION,
     world: {
+      mode: data.world.mode,
       width: data.world.width,
       height: data.world.height,
+      gravity: data.world.gravity,
       groundY: data.world.groundY,
+      duskAt: data.world.duskAt,
+      nightAt: data.world.nightAt,
+      sanityDrain: data.world.sanityDrain,
+      startMessage: data.world.startMessage,
+      startClueLog: safeArray(data.world.startClueLog),
+      labObjectives: safeArray(data.world.labObjectives),
       camera: extractCamera(data.world.camera),
     },
     player: {
@@ -383,6 +489,8 @@ export function extractEditableLevelData(data) {
         x: data.player.spawn.x,
         y: data.player.spawn.y,
       },
+      ...extractPlayerConfig(data.player),
+      movement: extractPlayerMovement(data.player.movement),
       render: extractPlayerRender(data.player.render),
     },
     ui: {
@@ -415,6 +523,8 @@ export function extractEditableLevelData(data) {
       height: wall.height,
     })),
     hostileDrones: (data.hostileDrones || []).map((drone) => extractHostileDrone(drone)),
+    lootTables: safeRecord(data.lootTables),
+    lootCrates: (data.lootCrates || []).map((crate) => extractLootCrate(crate)),
   };
 }
 
@@ -425,9 +535,17 @@ export function normalizeEditableLevelData(raw, baseData) {
   return {
     version: LEVEL_DATA_VERSION,
     world: {
+      mode: safeString(source.world?.mode, fallback.world.mode),
       width: safeNumber(source.world?.width, fallback.world.width, 640),
       height: safeNumber(source.world?.height, fallback.world.height, 360),
+      gravity: safeNumber(source.world?.gravity, fallback.world.gravity, 0),
       groundY: safeNumber(source.world?.groundY, fallback.world.groundY, 0),
+      duskAt: safeNumber(source.world?.duskAt, fallback.world.duskAt, 0),
+      nightAt: safeNumber(source.world?.nightAt, fallback.world.nightAt, 0),
+      sanityDrain: safeNumber(source.world?.sanityDrain, fallback.world.sanityDrain, 0),
+      startMessage: safeString(source.world?.startMessage, fallback.world.startMessage),
+      startClueLog: safeArray(source.world?.startClueLog, fallback.world.startClueLog),
+      labObjectives: safeArray(source.world?.labObjectives, fallback.world.labObjectives),
       camera: sanitizeCamera(source.world?.camera, fallback.world.camera),
     },
     player: {
@@ -435,6 +553,8 @@ export function normalizeEditableLevelData(raw, baseData) {
         x: safeNumber(source.player?.spawn?.x, fallback.player.spawn.x),
         y: safeNumber(source.player?.spawn?.y, fallback.player.spawn.y),
       },
+      ...sanitizePlayerConfig(source.player, fallback.player),
+      movement: sanitizePlayerMovement(source.player?.movement, baseData.player.movement),
       render: sanitizePlayerRender(source.player?.render, fallback.player.render),
     },
     ui: {
@@ -461,6 +581,10 @@ export function normalizeEditableLevelData(raw, baseData) {
     hostileDrones: Array.isArray(source.hostileDrones)
       ? source.hostileDrones.map((drone, index) => sanitizeHostileDrone(drone, index, fallback.hostileDrones?.[index]))
       : (fallback.hostileDrones || []).map((drone, index) => sanitizeHostileDrone(drone, index)),
+    lootTables: safeRecord(source.lootTables, fallback.lootTables),
+    lootCrates: Array.isArray(source.lootCrates)
+      ? source.lootCrates.map((crate, index) => sanitizeLootCrate(crate, index, fallback.lootCrates?.[index]))
+      : (fallback.lootCrates || []).map((crate, index) => sanitizeLootCrate(crate, index)),
   };
 }
 
@@ -471,14 +595,29 @@ export function mergeLevelData(baseData, override) {
   }
 
   const normalized = normalizeEditableLevelData(override, baseData);
+  next.world.mode = normalized.world.mode;
   next.world.width = normalized.world.width;
   next.world.height = normalized.world.height;
+  next.world.gravity = normalized.world.gravity;
   next.world.groundY = normalized.world.groundY;
+  next.world.duskAt = normalized.world.duskAt;
+  next.world.nightAt = normalized.world.nightAt;
+  next.world.sanityDrain = normalized.world.sanityDrain;
+  next.world.startMessage = normalized.world.startMessage;
+  next.world.startClueLog = normalized.world.startClueLog;
+  next.world.labObjectives = normalized.world.labObjectives;
   next.world.camera = {
     ...next.world.camera,
     ...normalized.world.camera,
   };
   next.player.spawn = normalized.player.spawn;
+  PLAYER_CONFIG_FIELDS.forEach((field) => {
+    next.player[field] = normalized.player[field];
+  });
+  next.player.movement = {
+    ...next.player.movement,
+    ...normalized.player.movement,
+  };
   next.player.render = {
     ...next.player.render,
     ...normalized.player.render,
@@ -498,6 +637,8 @@ export function mergeLevelData(baseData, override) {
   next.props = normalized.props;
   next.braceWalls = normalized.braceWalls;
   next.hostileDrones = normalized.hostileDrones;
+  next.lootTables = normalized.lootTables;
+  next.lootCrates = normalized.lootCrates;
 
   return next;
 }

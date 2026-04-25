@@ -1,9 +1,9 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-recoil-44";
+import { GAME_DATA } from "./level-data.js?v=20260424-recoil-45";
 import {
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-recoil-44";
+} from "./level-store.js?v=20260424-recoil-45";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -11,10 +11,10 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260424-recoil-44";
-import { renderGame } from "./render.js?v=20260424-recoil-44";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-44";
-import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-44";
+} from "./movement-tuning.js?v=20260424-recoil-45";
+import { renderGame } from "./render.js?v=20260424-recoil-45";
+import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-45";
+import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-45";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -56,11 +56,11 @@ const dom = {
 };
 
 const runtimeData = createRuntimeGameData(GAME_DATA);
-const baseSprintTuning = extractSprintTuning(GAME_DATA.player.movement);
+const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
 applySprintTuning(
   runtimeData.player.movement,
-  loadSprintTuning(GAME_DATA.player.movement),
-  GAME_DATA.player.movement,
+  loadSprintTuning(runtimeData.player.movement),
+  runtimeData.player.movement,
 );
 
 const state = createInitialState(runtimeData);

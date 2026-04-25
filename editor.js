@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-recoil-44";
+import { GAME_DATA } from "./level-data.js?v=20260424-recoil-45";
 import {
   clearLevelOverride,
   createRuntimeGameData,
@@ -6,7 +6,7 @@ import {
   mergeLevelData,
   normalizeEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-recoil-44";
+} from "./level-store.js?v=20260424-recoil-45";
 import { clamp, deepClone } from "./utils.js";
 
 const TOOL_IDS = {
