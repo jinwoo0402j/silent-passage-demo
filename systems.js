@@ -30,8 +30,23 @@ const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
 const INTERACT_KEYS = ["KeyZ", "KeyE"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
+const LOOT_PREV_KEYS = ["ArrowUp", "KeyW"];
+const LOOT_NEXT_KEYS = ["ArrowDown", "KeyS"];
+const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyA"];
+const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyD"];
+const LOOT_CLOSE_KEYS = ["Escape", "KeyQ"];
 const DEBUG_KEYS = ["F3", "Backquote"];
 const RESTART_KEYS = ["KeyR"];
+const RECOIL_FOCUS_AFTERIMAGE_INTERVAL = 0.045;
+const RECOIL_FOCUS_AFTERIMAGE_LIFE = 1;
+const RECOIL_FOCUS_AFTERIMAGE_MAX = 28;
+const LOOT_RARITY_RANKS = {
+  common: 0,
+  uncommon: 1,
+  rare: 2,
+  epic: 3,
+  relic: 4,
+};
 
 function isMovementLab(data) {
   return data.world.mode === "movementLab";
@@ -121,7 +136,88 @@ function pushAfterimage(run, player) {
   });
 }
 
-function updateEffects(run, dt) {
+function pushRecoilFocusAfterimage(run, player, options = {}) {
+  if (!run.recoilFocusAfterimages) {
+    run.recoilFocusAfterimages = [];
+  }
+
+  const life = options.life ?? RECOIL_FOCUS_AFTERIMAGE_LIFE;
+  run.recoilFocusAfterimageSerial = (run.recoilFocusAfterimageSerial ?? 0) + 1;
+  run.recoilFocusAfterimages.push({
+    x: player.x + (options.offsetX ?? 0),
+    y: player.y + (options.offsetY ?? 0),
+    width: player.width,
+    height: player.height,
+    standHeight: player.standHeight,
+    crouchHeight: player.crouchHeight,
+    vx: player.vx,
+    vy: player.vy,
+    facing: player.facing,
+    onGround: player.onGround,
+    movementState: player.movementState,
+    wallDirection: player.wallDirection,
+    wallSliding: player.wallSliding,
+    wallRunActive: player.wallRunActive,
+    braceHolding: player.braceHolding,
+    braceReleaseTimer: player.braceReleaseTimer,
+    dashTimer: player.dashTimer,
+    dashDirection: player.dashDirection,
+    sprintActive: player.sprintActive,
+    slideTimer: player.slideTimer,
+    hoverActive: player.hoverActive,
+    wallJumpLockTimer: player.wallJumpLockTimer,
+    lightActive: player.lightActive,
+    invulnTimer: 0,
+    recoilShotActive: player.recoilShotActive,
+    recoilSpinTimer: player.recoilSpinTimer,
+    recoilSpinDuration: player.recoilSpinDuration,
+    recoilSpinFacing: player.recoilSpinFacing,
+    recoilFocusActive: player.recoilFocusActive,
+    recoilFocusBlend: player.recoilFocusBlend,
+    recoilAimFacing: player.recoilAimFacing,
+    recoilAimPitch: player.recoilAimPitch,
+    recoilAimX: player.recoilAimX,
+    recoilAimY: player.recoilAimY,
+    recoilDirX: player.recoilDirX,
+    recoilDirY: player.recoilDirY,
+    life,
+    duration: life,
+    time: run.time ?? 0,
+    serial: run.recoilFocusAfterimageSerial,
+  });
+  if (run.recoilFocusAfterimages.length > RECOIL_FOCUS_AFTERIMAGE_MAX) {
+    run.recoilFocusAfterimages = run.recoilFocusAfterimages.slice(-RECOIL_FOCUS_AFTERIMAGE_MAX);
+  }
+}
+
+function updateRecoilFocusAfterimages(run, dt) {
+  if (!run.recoilFocusAfterimages) {
+    run.recoilFocusAfterimages = [];
+  }
+
+  run.recoilFocusAfterimages = run.recoilFocusAfterimages.filter((image) => {
+    image.life -= dt;
+    return image.life > 0;
+  });
+
+  const player = run.player;
+  const focusBlend = player.recoilFocusBlend ?? 0;
+  const focusVisible = Boolean(run.recoilAim?.active || focusBlend > 0.18 || player.recoilShotActive);
+  if (!focusVisible) {
+    run.recoilFocusAfterimageTimer = 0;
+    return;
+  }
+
+  run.recoilFocusAfterimageTimer = (run.recoilFocusAfterimageTimer ?? 0) - dt;
+  if (run.recoilFocusAfterimageTimer > 0) {
+    return;
+  }
+
+  pushRecoilFocusAfterimage(run, player);
+  run.recoilFocusAfterimageTimer += RECOIL_FOCUS_AFTERIMAGE_INTERVAL;
+}
+
+function updateEffects(run, dt, visualDt = dt) {
   run.attackFx = run.attackFx.filter((effect) => {
     effect.life -= dt;
     return effect.life > 0;
@@ -137,6 +233,8 @@ function updateEffects(run, dt) {
     return image.life > 0;
   });
 
+  updateRecoilFocusAfterimages(run, visualDt);
+
   run.particles = run.particles.filter((particle) => {
     particle.life -= dt;
     particle.x += particle.vx * dt;
@@ -148,6 +246,14 @@ function updateEffects(run, dt) {
   if (run.noticeTimer > 0) {
     run.noticeTimer = Math.max(0, run.noticeTimer - dt);
   }
+  if (run.loot?.rareSignalTimer > 0) {
+    run.loot.rareSignalTimer = Math.max(0, run.loot.rareSignalTimer - dt);
+  }
+  (run.lootCrates || []).forEach((crate) => {
+    if (crate.rareSignalTimer > 0) {
+      crate.rareSignalTimer = Math.max(0, crate.rareSignalTimer - dt);
+    }
+  });
 }
 
 function getCameraConfig(data) {
@@ -563,17 +669,88 @@ function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
   return lerp(config.runSpeed, config.sprintSpeed ?? config.runSpeed, player.sprintCharge);
 }
 
-function collidesWithPlatforms(rect, data) {
-  return data.platforms.some((platform) => rectsOverlap(rect, platform));
+function getHostileAirborneSolidRect(entity) {
+  if (
+    isEntityDisabled(entity) ||
+    entity.dead ||
+    entity.solid === false ||
+    entity.physicsSolid === false ||
+    entity.diveTimer > 0
+  ) {
+    return null;
+  }
+
+  const insetX = entity.solidInsetX ?? 5;
+  const insetY = entity.solidInsetY ?? 4;
+  return {
+    id: entity.id,
+    type: "airborneSolid",
+    x: entity.x + insetX,
+    y: entity.y + insetY,
+    width: Math.max(12, entity.width - insetX * 2),
+    height: Math.max(12, entity.height - insetY * 2),
+    dynamicEntityId: entity.id,
+    dynamicEntity: entity,
+    dynamicBraceTarget: entity.braceTarget !== false,
+    backCatchPaddingX: entity.backCatchPaddingX ?? 0,
+    backCatchForgivenessY: entity.backCatchForgivenessY ?? 0,
+  };
 }
 
-function canOccupyRect(rect, data) {
+function getDynamicCollisionSolids(run) {
+  if (!run?.hostileDrones?.length) {
+    return [];
+  }
+  return run.hostileDrones
+    .map((entity) => getHostileAirborneSolidRect(entity))
+    .filter(Boolean);
+}
+
+function getCollisionPlatforms(data, run = null) {
+  if (!run) {
+    return data.platforms;
+  }
+  return [...data.platforms, ...getDynamicCollisionSolids(run)];
+}
+
+function collidesWithPlatforms(rect, data, run = null) {
+  return getCollisionPlatforms(data, run).some((platform) => rectsOverlap(rect, platform));
+}
+
+function canOccupyRect(rect, data, run = null) {
   return (
     rect.x >= 0 &&
     rect.y >= 0 &&
     rect.x + rect.width <= data.world.width &&
     rect.y + rect.height <= data.world.height &&
-    !collidesWithPlatforms(rect, data)
+    !collidesWithPlatforms(rect, data, run)
+  );
+}
+
+function hasHorizontalOverlapWithPadding(rect, platform, paddingX = 0) {
+  return (
+    rect.x < platform.x + platform.width + paddingX &&
+    rect.x + rect.width > platform.x - paddingX
+  );
+}
+
+function shouldCatchDynamicTop(player, platform, previousY) {
+  if (!platform.dynamicEntityId || player.vy < -EPSILON) {
+    return false;
+  }
+
+  const paddingX = platform.backCatchPaddingX ?? 0;
+  const forgivenessY = platform.backCatchForgivenessY ?? 0;
+  if (paddingX <= 0 && forgivenessY <= 0) {
+    return false;
+  }
+
+  const previousFootY = previousY + player.height;
+  const currentFootY = player.y + player.height;
+  return (
+    hasHorizontalOverlapWithPadding(player, platform, paddingX) &&
+    previousFootY <= platform.y + forgivenessY &&
+    currentFootY >= platform.y - forgivenessY
   );
 }
 
@@ -587,8 +764,11 @@ function canResizePlayer(player, data, targetHeight) {
   return nextRect.y >= 0 && !collidesWithPlatforms(nextRect, data);
 }
 
-function getActiveBraceWall(player, data) {
-  const walls = data.braceWalls || [];
+function getActiveBraceWall(player, data, run = null) {
+  const walls = [
+    ...(data.braceWalls || []),
+    ...getDynamicCollisionSolids(run).filter((solid) => solid.dynamicBraceTarget),
+  ];
   if (!walls.length) {
     return null;
   }
@@ -622,11 +802,15 @@ function getActiveBraceWall(player, data) {
   return nearest;
 }
 
-function getBraceWallById(data, wallId) {
+function getBraceWallById(data, wallId, run = null) {
   if (!wallId) {
     return null;
   }
-  return (data.braceWalls || []).find((wall) => wall.id === wallId) ?? null;
+  return (
+    (data.braceWalls || []).find((wall) => wall.id === wallId) ??
+    getDynamicCollisionSolids(run).find((wall) => wall.id === wallId) ??
+    null
+  );
 }
 
 function setPlayerHeight(player, targetHeight) {
@@ -716,7 +900,7 @@ function armSlideJumpCarry(player, config) {
   clearSlide(player);
 }
 
-function tryJumpCornerCorrection(player, data, config) {
+function tryJumpCornerCorrection(player, data, config, run = null) {
   const baseDirection = Math.sign(player.vx) || player.facing || 1;
   const directions = [baseDirection, -baseDirection];
 
@@ -729,7 +913,7 @@ function tryJumpCornerCorrection(player, data, config) {
         height: player.height,
       };
 
-      if (canOccupyRect(candidate, data)) {
+      if (canOccupyRect(candidate, data, run)) {
         player.x = candidate.x;
         return true;
       }
@@ -739,7 +923,7 @@ function tryJumpCornerCorrection(player, data, config) {
   return false;
 }
 
-function tryDashCornerCorrection(player, data, resolvedX, direction, config) {
+function tryDashCornerCorrection(player, data, resolvedX, direction, config, run = null) {
   const maxLift = config.dashCornerCorrectionPx ?? 0;
   for (let offset = 1; offset <= maxLift; offset += 1) {
     const candidates = [
@@ -758,7 +942,7 @@ function tryDashCornerCorrection(player, data, resolvedX, direction, config) {
     ];
 
     for (const candidate of candidates) {
-      if (canOccupyRect(candidate, data)) {
+      if (canOccupyRect(candidate, data, run)) {
         player.x = candidate.x;
         player.y = candidate.y;
         return true;
@@ -769,12 +953,14 @@ function tryDashCornerCorrection(player, data, resolvedX, direction, config) {
   return false;
 }
 
-function resolvePlayerCollisions(player, data, dt, config) {
+function resolvePlayerCollisions(player, data, dt, config, run = null) {
   const contacts = {
     onGround: false,
     hitHead: false,
     wallLeft: false,
     wallRight: false,
+    groundEntityId: null,
+    wallEntityId: null,
     landingSpeed: 0,
     dashBlocked: false,
     dashCornerCorrected: false,
@@ -784,7 +970,7 @@ function resolvePlayerCollisions(player, data, dt, config) {
   const previousX = player.x;
   player.x += player.vx * dt;
 
-  for (const platform of data.platforms) {
+  for (const platform of getCollisionPlatforms(data, run)) {
     if (!rectsOverlap(player, platform)) {
       continue;
     }
@@ -793,7 +979,7 @@ function resolvePlayerCollisions(player, data, dt, config) {
       const resolvedX = platform.x - player.width;
       if (
         player.dashTimer > 0 &&
-        tryDashCornerCorrection(player, data, resolvedX, 1, config)
+        tryDashCornerCorrection(player, data, resolvedX, 1, config, run)
       ) {
         contacts.dashCornerCorrected = true;
         continue;
@@ -801,11 +987,12 @@ function resolvePlayerCollisions(player, data, dt, config) {
       contacts.dashBlocked = true;
       player.x = resolvedX;
       contacts.wallRight = true;
+      contacts.wallEntityId = platform.dynamicEntityId ?? null;
     } else if (previousX >= platform.x + platform.width - EPSILON) {
       const resolvedX = platform.x + platform.width;
       if (
         player.dashTimer > 0 &&
-        tryDashCornerCorrection(player, data, resolvedX, -1, config)
+        tryDashCornerCorrection(player, data, resolvedX, -1, config, run)
       ) {
         contacts.dashCornerCorrected = true;
         continue;
@@ -813,6 +1000,7 @@ function resolvePlayerCollisions(player, data, dt, config) {
       contacts.dashBlocked = true;
       player.x = resolvedX;
       contacts.wallLeft = true;
+      contacts.wallEntityId = platform.dynamicEntityId ?? null;
     } else {
       const pushLeft = player.x + player.width - platform.x;
       const pushRight = platform.x + platform.width - player.x;
@@ -820,7 +1008,7 @@ function resolvePlayerCollisions(player, data, dt, config) {
         const resolvedX = player.x - pushLeft;
         if (
           player.dashTimer > 0 &&
-          tryDashCornerCorrection(player, data, resolvedX, 1, config)
+          tryDashCornerCorrection(player, data, resolvedX, 1, config, run)
         ) {
           contacts.dashCornerCorrected = true;
           continue;
@@ -828,11 +1016,12 @@ function resolvePlayerCollisions(player, data, dt, config) {
         contacts.dashBlocked = true;
         player.x -= pushLeft;
         contacts.wallRight = true;
+        contacts.wallEntityId = platform.dynamicEntityId ?? null;
       } else {
         const resolvedX = player.x + pushRight;
         if (
           player.dashTimer > 0 &&
-          tryDashCornerCorrection(player, data, resolvedX, -1, config)
+          tryDashCornerCorrection(player, data, resolvedX, -1, config, run)
         ) {
           contacts.dashCornerCorrected = true;
           continue;
@@ -840,6 +1029,7 @@ function resolvePlayerCollisions(player, data, dt, config) {
         contacts.dashBlocked = true;
         player.x += pushRight;
         contacts.wallLeft = true;
+        contacts.wallEntityId = platform.dynamicEntityId ?? null;
       }
     }
     player.vx = 0;
@@ -862,18 +1052,20 @@ function resolvePlayerCollisions(player, data, dt, config) {
   player.y += player.vy * dt;
   player.onGround = false;
 
-  for (const platform of data.platforms) {
-    if (!rectsOverlap(player, platform)) {
+  for (const platform of getCollisionPlatforms(data, run)) {
+    const catchDynamicTop = shouldCatchDynamicTop(player, platform, previousY);
+    if (!catchDynamicTop && !rectsOverlap(player, platform)) {
       continue;
     }
 
-    if (previousY + player.height <= platform.y + EPSILON) {
+    if (catchDynamicTop || previousY + player.height <= platform.y + EPSILON) {
       contacts.landingSpeed = player.vy;
       player.y = platform.y - player.height;
       player.vy = 0;
       contacts.onGround = true;
+      contacts.groundEntityId = platform.dynamicEntityId ?? null;
     } else if (previousY >= platform.y + platform.height - EPSILON) {
-      if (player.vy < 0 && tryJumpCornerCorrection(player, data, config)) {
+      if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
         contacts.jumpCornerCorrected = true;
         continue;
       }
@@ -888,8 +1080,9 @@ function resolvePlayerCollisions(player, data, dt, config) {
         player.y -= pushDown;
         player.vy = 0;
         contacts.onGround = true;
+        contacts.groundEntityId = platform.dynamicEntityId ?? null;
       } else {
-        if (player.vy < 0 && tryJumpCornerCorrection(player, data, config)) {
+        if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
           contacts.jumpCornerCorrected = true;
           continue;
         }
@@ -919,12 +1112,27 @@ function damagePlayer(run, amount, direction, sourceText) {
   if (run.player.invulnTimer > 0 || (run.player.dashTimer > 0 && run.player.dashInvulnerable)) {
     return;
   }
+  if (run.loot?.active) {
+    closeLootCrate(run);
+  }
   run.hp = clamp(run.hp - amount, 0, 100);
   run.player.invulnTimer = 0.85;
   run.player.vx = direction * 190;
   run.player.vy = -260;
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+}
+
+function destroyHostileDrone(run, drone) {
+  if (drone.dead) {
+    return;
+  }
+  drone.dead = true;
+  drone.active = false;
+  drone.vx = 0;
+  drone.vy = 0;
+  spawnParticles(run, drone.x + drone.width / 2, drone.y + drone.height / 2, 18, "#87e1ff");
+  spawnParticles(run, drone.x + drone.width / 2, drone.y + drone.height / 2, 8, "#ffd6ba");
 }
 
 function setMovementState(player) {
@@ -1074,6 +1282,57 @@ function canUseRecoilShot(player) {
   );
 }
 
+function distanceFromPointToSegment(pointX, pointY, startX, startY, endX, endY) {
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq <= EPSILON) {
+    return Math.hypot(pointX - startX, pointY - startY);
+  }
+  const t = clamp(((pointX - startX) * dx + (pointY - startY) * dy) / lengthSq, 0, 1);
+  const nearestX = startX + dx * t;
+  const nearestY = startY + dy * t;
+  return Math.hypot(pointX - nearestX, pointY - nearestY);
+}
+
+function applyRecoilShotDamage(run, config, aim) {
+  const drones = run.hostileDrones || [];
+  if (!drones.length) {
+    return;
+  }
+
+  const shotLength = config.recoilShotHitRange ?? 520;
+  const hitRadius = config.recoilShotHitRadius ?? 42;
+  const damage = config.recoilShotDamage ?? 2;
+  const startX = aim.originX;
+  const startY = aim.originY;
+  const endX = startX + aim.shotDirX * shotLength;
+  const endY = startY + aim.shotDirY * shotLength;
+
+  drones.forEach((drone) => {
+    if (isEntityDisabled(drone) || drone.dead) {
+      return;
+    }
+
+    const centerX = drone.x + drone.width * 0.5;
+    const centerY = drone.y + drone.height * 0.5;
+    const distance = distanceFromPointToSegment(centerX, centerY, startX, startY, endX, endY);
+    if (distance > hitRadius + Math.max(drone.width, drone.height) * 0.35) {
+      return;
+    }
+
+    drone.active = true;
+    drone.hp = Math.max(0, drone.hp - damage);
+    drone.hitFlash = 0.16;
+    drone.vx += aim.shotDirX * 180;
+    drone.vy += aim.shotDirY * 100;
+    spawnDirectedParticles(run, centerX, centerY, 9, "#87e1ff", aim.shotDirX, aim.shotDirY, 340, 0.76);
+    if (drone.hp === 0) {
+      destroyHostileDrone(run, drone);
+    }
+  });
+}
+
 function updateRecoilAim(run, data, state, dt) {
   const player = run.player;
   const config = getMovementConfig(data);
@@ -1197,7 +1456,16 @@ function performRecoilShot(player, run, config) {
     life: 0.2,
     duration: 0.2,
   });
+  applyRecoilShotDamage(run, config, aim);
   pushAfterimage(run, player);
+  for (let index = 0; index < 4; index += 1) {
+    const distance = index * 18;
+    pushRecoilFocusAfterimage(run, player, {
+      offsetX: -recoilX * distance,
+      offsetY: -recoilY * distance * 0.72,
+      life: RECOIL_FOCUS_AFTERIMAGE_LIFE + index * 0.035,
+    });
+  }
   spawnDirectedParticles(run, aim.originX, aim.originY, 12, "#e9f7ff", aim.shotDirX, aim.shotDirY, 520, 0.68);
   spawnDirectedParticles(run, aim.originX, aim.originY, 7, "#93eaff", recoilX, recoilY, 260, 0.9);
   pushNotice(run, "반동 사격");
@@ -1527,8 +1795,8 @@ function updatePlayer(run, data, state, dt, input) {
   const dashPressed = consumeEitherPress(state, DASH_KEYS);
   const sprintPressed = consumeEitherPress(state, SPRINT_KEYS);
   const sprintHeld = isEitherPressed(state, SPRINT_KEYS);
-  const activeBraceWall = getActiveBraceWall(player, data);
-  const heldBraceWall = getBraceWallById(data, player.braceHoldWallId);
+  const activeBraceWall = getActiveBraceWall(player, data, run);
+  const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
   const wasWallSliding = player.wallSliding;
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
 
@@ -1756,7 +2024,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.facing = player.dashDirection;
     player.canInteract = false;
 
-    const contacts = resolvePlayerCollisions(player, data, dt, config);
+    const contacts = resolvePlayerCollisions(player, data, dt, config, run);
     const landed = !player.wasOnGround && contacts.onGround;
     player.dashCornerCorrected = contacts.dashCornerCorrected;
     if (contacts.dashBlocked) {
@@ -1770,6 +2038,7 @@ function updatePlayer(run, data, state, dt, input) {
       player.coyoteTimer = config.coyoteTimeMs / 1000;
     }
     player.onGround = contacts.onGround;
+    player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
     player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
     player.wallSliding = false;
     if (!player.onGround && player.wallDirection !== 0) {
@@ -1847,7 +2116,7 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   if (player.braceHolding) {
-    const braceWall = getBraceWallById(data, player.braceHoldWallId) ?? activeBraceWall;
+    const braceWall = getBraceWallById(data, player.braceHoldWallId, run) ?? activeBraceWall;
     if (!braceWall || player.height !== player.standHeight) {
       clearBraceHold(player);
     } else if (jumpReleased) {
@@ -1856,11 +2125,12 @@ function updatePlayer(run, data, state, dt, input) {
     } else if (jumpHeld) {
       updateBraceHold(player, data, config, braceWall, dt, moveAxis);
 
-      const contacts = resolvePlayerCollisions(player, data, dt, config);
+      const contacts = resolvePlayerCollisions(player, data, dt, config, run);
       const landed = !player.wasOnGround && contacts.onGround;
       player.jumpCornerCorrected = contacts.jumpCornerCorrected;
       player.dashCornerCorrected = contacts.dashCornerCorrected;
       player.onGround = contacts.onGround;
+      player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
       player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
       player.wallSliding = false;
 
@@ -2070,12 +2340,13 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   const vxBeforeResolve = player.vx;
-  const contacts = resolvePlayerCollisions(player, data, dt, config);
+  const contacts = resolvePlayerCollisions(player, data, dt, config, run);
   const landed = !player.wasOnGround && contacts.onGround;
   player.jumpCornerCorrected = contacts.jumpCornerCorrected;
   player.dashCornerCorrected = contacts.dashCornerCorrected;
 
   player.onGround = contacts.onGround;
+  player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
   player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
   player.wallSliding =
     !player.wallRunActive &&
@@ -2266,6 +2537,7 @@ function updateAttackHits(run) {
     run.encounters.guard,
     run.encounters.ritualist,
     ...run.threats,
+    ...(run.hostileDrones || []),
   ];
 
   for (const target of liveTargets) {
@@ -2304,7 +2576,9 @@ function updateAttackHits(run) {
     }
 
     if (target.hp === 0) {
-      if (target.type === "guard" || target.type === "ritualist") {
+      if (target.type === "hostileDrone") {
+        destroyHostileDrone(run, target);
+      } else if (target.type === "guard" || target.type === "ritualist") {
         resolveHarvest(run, target);
       } else {
         target.dead = true;
@@ -2569,6 +2843,720 @@ function updateThreats(run, dt) {
   }
 }
 
+function hydrateHostileDroneState(drone) {
+  const center = getCenter(drone);
+  if (!Number.isFinite(drone.hp)) {
+    drone.hp = drone.maxHp ?? 1;
+  }
+  if (!Number.isFinite(drone.vx)) {
+    drone.vx = 0;
+  }
+  if (!Number.isFinite(drone.vy)) {
+    drone.vy = 0;
+  }
+  if (!Number.isFinite(drone.aimTimer)) {
+    drone.aimTimer = 0;
+  }
+  if (!Number.isFinite(drone.aimDuration)) {
+    drone.aimDuration = 0;
+  }
+  if (!Number.isFinite(drone.aimDirX) || !Number.isFinite(drone.aimDirY)) {
+    drone.aimDirX = drone.facing || -1;
+    drone.aimDirY = 0;
+  }
+  if (!Number.isFinite(drone.aimLength)) {
+    drone.aimLength = drone.beamLength ?? drone.fireRange ?? 760;
+  }
+  if (!Number.isFinite(drone.aimStartX) || !Number.isFinite(drone.aimStartY)) {
+    drone.aimStartX = center.x;
+    drone.aimStartY = center.y;
+  }
+  if (!Number.isFinite(drone.aimEndX) || !Number.isFinite(drone.aimEndY)) {
+    drone.aimEndX = center.x + drone.aimDirX * drone.aimLength;
+    drone.aimEndY = center.y + drone.aimDirY * drone.aimLength;
+  }
+  if (!Number.isFinite(drone.attackCooldown)) {
+    drone.attackCooldown = drone.initialCooldown ?? 0.8;
+  }
+  if (!Number.isFinite(drone.recoverTimer)) {
+    drone.recoverTimer = 0;
+  }
+  if (!Number.isFinite(drone.diveTimer)) {
+    drone.diveTimer = 0;
+  }
+  if (!Number.isFinite(drone.diveDuration)) {
+    drone.diveDuration = 0;
+  }
+  if (!Number.isFinite(drone.diveElapsed)) {
+    drone.diveElapsed = 0;
+  }
+}
+
+function createRuntimeHostileDrone(definition) {
+  return {
+    ...definition,
+    hp: definition.maxHp ?? 1,
+    vx: 0,
+    vy: 0,
+    active: false,
+    dead: Boolean(definition.disabled),
+    facing: -1,
+    patrolDirection: 1,
+    attackCooldown: definition.initialCooldown ?? 0.8,
+    recoverTimer: 0,
+    diveTimer: 0,
+    diveDuration: 0,
+    diveElapsed: 0,
+    diveStartX: definition.x,
+    diveStartY: definition.y,
+    diveEndX: definition.x,
+    diveEndY: definition.y,
+    diveHasHit: false,
+    aimTimer: 0,
+    aimDuration: 0,
+    aimDirX: -1,
+    aimDirY: 0,
+    aimStartX: definition.x + definition.width * 0.5,
+    aimStartY: definition.y + definition.height * 0.5,
+    aimEndX: definition.x,
+    aimEndY: definition.y,
+    aimLength: definition.beamLength ?? definition.fireRange ?? 760,
+    hitFlash: 0,
+    bobSeed: definition.bobSeed ?? Math.random() * Math.PI * 2,
+  };
+}
+
+function ensureHostileDrones(run, data) {
+  if (!Array.isArray(run.enemyShots)) {
+    run.enemyShots = [];
+  }
+  if (!Array.isArray(run.hostileDrones)) {
+    run.hostileDrones = [];
+  }
+  if (!run.hostileDrones.length && data.hostileDrones?.length) {
+    run.hostileDrones = data.hostileDrones.map((drone) => createRuntimeHostileDrone(drone));
+  }
+}
+
+function updateDroneAimLine(drone, center) {
+  const length = drone.aimLength ?? drone.beamLength ?? drone.fireRange ?? 760;
+  drone.aimStartX = center.x;
+  drone.aimStartY = center.y;
+  drone.aimEndX = center.x + (drone.aimDirX || 1) * length;
+  drone.aimEndY = center.y + (drone.aimDirY || 0) * length;
+}
+
+function beginDroneTelegraph(run, drone, playerCenter, droneCenter) {
+  const dx = playerCenter.x - droneCenter.x;
+  const dy = playerCenter.y - droneCenter.y;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  const dirX = dx / length;
+  const dirY = dy / length;
+  const telegraphDuration = drone.telegraphDuration ?? 0.58;
+
+  drone.aimTimer = telegraphDuration;
+  drone.aimDuration = telegraphDuration;
+  drone.aimDirX = dirX;
+  drone.aimDirY = dirY;
+  drone.aimLength = drone.beamLength ?? drone.fireRange ?? 760;
+  updateDroneAimLine(drone, droneCenter);
+  drone.attackCooldown = telegraphDuration + (drone.fireCooldown ?? 1.25);
+  spawnDirectedParticles(run, droneCenter.x, droneCenter.y, 3, "#87e1ff", dirX, dirY, 220, 0.3);
+}
+
+function fireDroneBeam(run, drone) {
+  const duration = drone.beamLife ?? 0.12;
+  run.enemyShots.push({
+    id: `${drone.id}-beam-${Math.round((run.time ?? 0) * 1000)}-${run.enemyShots.length}`,
+    type: "beam",
+    startX: drone.aimStartX,
+    startY: drone.aimStartY,
+    endX: drone.aimEndX,
+    endY: drone.aimEndY,
+    dirX: drone.aimDirX || 1,
+    dirY: drone.aimDirY || 0,
+    radius: drone.beamRadius ?? 18,
+    damage: drone.damage ?? 10,
+    life: duration,
+    duration,
+    hasHit: false,
+  });
+  spawnDirectedParticles(run, drone.aimStartX, drone.aimStartY, 7, "#87e1ff", drone.aimDirX || 1, drone.aimDirY || 0, 420, 0.22);
+}
+
+function startCrowDive(drone) {
+  const length = Math.max(1, Math.hypot(drone.aimEndX - drone.aimStartX, drone.aimEndY - drone.aimStartY));
+  const speed = drone.diveSpeed ?? 1320;
+  const duration = clamp(length / Math.max(1, speed), 0.18, drone.diveMaxDuration ?? 0.72);
+
+  drone.diveDuration = duration;
+  drone.diveTimer = duration;
+  drone.diveElapsed = 0;
+  drone.diveHasHit = false;
+  drone.diveStartX = drone.aimStartX - drone.width * 0.5;
+  drone.diveStartY = drone.aimStartY - drone.height * 0.5;
+  drone.diveEndX = drone.aimEndX - drone.width * 0.5;
+  drone.diveEndY = drone.aimEndY - drone.height * 0.5;
+  drone.x = drone.diveStartX;
+  drone.y = drone.diveStartY;
+  drone.vx = (drone.aimDirX || 1) * speed;
+  drone.vy = (drone.aimDirY || 0) * speed;
+  drone.facing = Math.sign(drone.aimDirX) || drone.facing || 1;
+}
+
+function getHostileBodyDamageRect(entity) {
+  const insetX = entity.damageInsetX ?? 4;
+  const insetY = entity.damageInsetY ?? 4;
+  return createRect(
+    entity.x + insetX,
+    entity.y + insetY,
+    Math.max(10, entity.width - insetX * 2),
+    Math.max(10, entity.height - insetY * 2)
+  );
+}
+
+function carryPlayerOnDynamicSolid(run, entity, previousX, previousY, data) {
+  const player = run.player;
+  if (player.standingOnDynamicId !== entity.id || entity.diveTimer > 0) {
+    return;
+  }
+  const dx = entity.x - previousX;
+  const dy = entity.y - previousY;
+  if (Math.abs(dx) <= EPSILON && Math.abs(dy) <= EPSILON) {
+    return;
+  }
+  player.x = clamp(player.x + dx, 0, data.world.width - player.width);
+  player.y = clamp(player.y + dy, 0, data.world.height - player.height);
+}
+
+function updateCrowDive(run, data, drone, dt) {
+  const previousX = drone.x;
+  const previousY = drone.y;
+  const duration = Math.max(0.001, drone.diveDuration || 0.24);
+  drone.diveTimer = Math.max(0, drone.diveTimer - dt);
+  drone.diveElapsed = Math.min(duration, drone.diveElapsed + dt);
+  const progress = clamp(drone.diveElapsed / duration, 0, 1);
+  const eased = 1 - Math.pow(1 - progress, 2.6);
+
+  drone.x = lerp(drone.diveStartX, drone.diveEndX, eased);
+  drone.y = lerp(drone.diveStartY, drone.diveEndY, eased);
+  drone.x = clamp(drone.x, 0, data.world.width - drone.width);
+  drone.y = clamp(drone.y, 40, data.world.height - drone.height - 40);
+  drone.vx = (drone.x - previousX) / Math.max(dt, 0.001);
+  drone.vy = (drone.y - previousY) / Math.max(dt, 0.001);
+  drone.facing = Math.sign(drone.vx) || drone.facing || 1;
+
+  if (!drone.diveHasHit && rectsOverlap(getHostileBodyDamageRect(drone), run.player)) {
+    drone.diveHasHit = true;
+    damagePlayer(run, drone.diveDamage ?? drone.damage ?? 10, Math.sign(drone.vx) || drone.facing || 1, "Crow dive hit.");
+    spawnParticles(run, run.player.x + run.player.width * 0.5, run.player.y + run.player.height * 0.5, 12, "#87e1ff");
+  }
+
+  if (drone.diveTimer === 0) {
+    drone.recoverTimer = drone.diveRecoverTime ?? 0.34;
+    drone.vx *= 0.32;
+    drone.vy *= 0.18;
+  }
+}
+
+function lineIntersectsRect(startX, startY, endX, endY, rect, padding = 0) {
+  const left = rect.x - padding;
+  const right = rect.x + rect.width + padding;
+  const top = rect.y - padding;
+  const bottom = rect.y + rect.height + padding;
+  const dx = endX - startX;
+  const dy = endY - startY;
+  let tMin = 0;
+  let tMax = 1;
+
+  const tests = [
+    [-dx, startX - left],
+    [dx, right - startX],
+    [-dy, startY - top],
+    [dy, bottom - startY],
+  ];
+
+  for (const [p, q] of tests) {
+    if (Math.abs(p) <= EPSILON) {
+      if (q < 0) {
+        return false;
+      }
+      continue;
+    }
+    const ratio = q / p;
+    if (p < 0) {
+      if (ratio > tMax) {
+        return false;
+      }
+      tMin = Math.max(tMin, ratio);
+    } else {
+      if (ratio < tMin) {
+        return false;
+      }
+      tMax = Math.min(tMax, ratio);
+    }
+  }
+
+  return true;
+}
+
+function updateHostileDrones(run, data, dt) {
+  ensureHostileDrones(run, data);
+  const drones = run.hostileDrones || [];
+  if (!drones.length) {
+    return;
+  }
+
+  const player = run.player;
+  const playerCenter = getCenter(player);
+  for (const drone of drones) {
+    if (isEntityDisabled(drone) || drone.dead) {
+      if (drone) {
+        drone.aimTimer = 0;
+      }
+      continue;
+    }
+    hydrateHostileDroneState(drone);
+
+    drone.hitFlash = Math.max(0, drone.hitFlash - dt);
+    drone.attackCooldown = Math.max(0, drone.attackCooldown - dt);
+    drone.recoverTimer = Math.max(0, drone.recoverTimer - dt);
+    const previousAimTimer = drone.aimTimer;
+    drone.aimTimer = Math.max(0, drone.aimTimer - dt);
+    const previousX = drone.x;
+    const previousY = drone.y;
+
+    if (drone.diveTimer > 0) {
+      updateCrowDive(run, data, drone, dt);
+      continue;
+    }
+
+    const droneCenter = getCenter(drone);
+    const distance = distanceBetween(playerCenter, droneCenter);
+    const activationRadius = drone.activationRadius ?? 720;
+    if (distance < activationRadius) {
+      drone.active = true;
+    } else if (distance > activationRadius * 1.35) {
+      drone.active = false;
+    }
+    if (!drone.active) {
+      drone.aimTimer = 0;
+    }
+
+    let targetX;
+    let targetY;
+    if (drone.active) {
+      const side = playerCenter.x >= droneCenter.x ? 1 : -1;
+      drone.facing = side;
+      const flapBob = Math.sin((run.time ?? 0) * (drone.flapRate ?? 13) + drone.bobSeed) * (drone.flapAmplitude ?? 16);
+      targetX = playerCenter.x - side * (drone.preferredRange ?? 280) - drone.width * 0.5;
+      targetY = playerCenter.y - (drone.hoverOffsetY ?? 120) - drone.height * 0.5 + flapBob;
+    } else {
+      drone.x += (drone.patrolDirection || 1) * (drone.patrolSpeed ?? drone.speed ?? 120) * dt;
+      if (drone.patrol) {
+        if (drone.x <= drone.patrol.left) {
+          drone.x = drone.patrol.left;
+          drone.patrolDirection = 1;
+        }
+        if (drone.x >= drone.patrol.right) {
+          drone.x = drone.patrol.right;
+          drone.patrolDirection = -1;
+        }
+      }
+      drone.facing = drone.patrolDirection || 1;
+      const flapBob = Math.sin((run.time ?? 0) * (drone.flapRate ?? 12) + drone.bobSeed) * (drone.flapAmplitude ?? 18);
+      targetX = drone.x;
+      targetY = drone.y + flapBob;
+    }
+
+    targetX = clamp(targetX, 0, data.world.width - drone.width);
+    targetY = clamp(targetY, 80, data.world.height - drone.height - 80);
+
+    const accel = drone.acceleration ?? 7;
+    const maxSpeed = drone.speed ?? 170;
+    const desiredVx = clamp((targetX - drone.x) * accel, -maxSpeed, maxSpeed);
+    const desiredVy = clamp((targetY - drone.y) * accel, -maxSpeed, maxSpeed);
+    drone.vx = lerp(drone.vx ?? 0, desiredVx, Math.min(1, dt * 7));
+    drone.vy = lerp(drone.vy ?? 0, desiredVy, Math.min(1, dt * 7));
+    drone.x += drone.vx * dt;
+    drone.y += drone.vy * dt + Math.sin((run.time ?? 0) * 7 + drone.bobSeed) * 9 * dt;
+    drone.x = clamp(drone.x, 0, data.world.width - drone.width);
+    drone.y = clamp(drone.y, 80, data.world.height - drone.height - 80);
+    carryPlayerOnDynamicSolid(run, drone, previousX, previousY, data);
+
+    const nextCenter = getCenter(drone);
+    if (drone.aimTimer > 0) {
+      updateDroneAimLine(drone, nextCenter);
+    }
+    if (previousAimTimer > 0 && drone.aimTimer === 0 && drone.active) {
+      updateDroneAimLine(drone, nextCenter);
+      fireDroneBeam(run, drone);
+      if (drone.diveAttack !== false) {
+        startCrowDive(drone);
+      }
+    }
+
+    const nextDistance = distanceBetween(playerCenter, nextCenter);
+    if (
+      drone.active &&
+      nextDistance < (drone.fireRange ?? 620) &&
+      drone.attackCooldown === 0 &&
+      drone.aimTimer === 0 &&
+      drone.recoverTimer === 0
+    ) {
+      beginDroneTelegraph(run, drone, playerCenter, nextCenter);
+    }
+  }
+}
+
+function updateEnemyShots(run, data, dt) {
+  const player = run.player;
+  run.enemyShots = (run.enemyShots || []).filter((shot) => {
+    if (shot.type === "beam") {
+      shot.life -= dt;
+      if (!shot.hasHit) {
+        shot.hasHit = true;
+        if (lineIntersectsRect(shot.startX, shot.startY, shot.endX, shot.endY, player, shot.radius ?? 0)) {
+          damagePlayer(run, shot.damage, Math.sign(shot.dirX) || 1, "Crow line hit.");
+          spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.5, 10, "#87e1ff");
+        }
+      }
+      return shot.life > 0;
+    }
+
+    shot.life -= dt;
+    shot.x += shot.vx * dt;
+    shot.y += shot.vy * dt;
+
+    if (
+      shot.life <= 0 ||
+      shot.x < -80 ||
+      shot.y < -80 ||
+      shot.x > data.world.width + 80 ||
+      shot.y > data.world.height + 80
+    ) {
+      return false;
+    }
+
+    const shotRect = createRect(
+      shot.x - shot.radius,
+      shot.y - shot.radius,
+      shot.radius * 2,
+      shot.radius * 2
+    );
+    if (collidesWithPlatforms(shotRect, data)) {
+      spawnParticles(run, shot.x, shot.y, 4, "#87e1ff");
+      return false;
+    }
+
+    if (rectsOverlap(shotRect, player)) {
+      damagePlayer(run, shot.damage, Math.sign(shot.vx) || 1, "Crow shot hit.");
+      spawnParticles(run, shot.x, shot.y, 8, "#ff9fb4");
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function getLootRarityRank(rarity) {
+  return LOOT_RARITY_RANKS[rarity] ?? 0;
+}
+
+function isSelectableLootItem(item) {
+  return Boolean(item && item.revealed && !item.looted);
+}
+
+function getActiveLootCrate(run) {
+  if (!run.loot?.active || !run.loot.crateId) {
+    return null;
+  }
+  return (run.lootCrates || []).find((crate) => crate.id === run.loot.crateId) || null;
+}
+
+function findNextLootIndex(crate, startIndex = 0, direction = 1) {
+  const items = crate?.items || [];
+  if (!items.length || items.every((item) => !isSelectableLootItem(item))) {
+    return -1;
+  }
+
+  const count = items.length;
+  const step = direction >= 0 ? 1 : -1;
+  for (let offset = 0; offset < count; offset += 1) {
+    const index = (startIndex + offset * step + count * 4) % count;
+    if (isSelectableLootItem(items[index])) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function getSelectedLootItem(crate, loot) {
+  const items = crate?.items || [];
+  if (!items.length) {
+    return null;
+  }
+  const index = clamp(Math.floor(loot.selectedIndex ?? 0), 0, items.length - 1);
+  loot.selectedIndex = index;
+  return items[index] || null;
+}
+
+function selectLootItem(crate, loot, direction) {
+  const items = crate?.items || [];
+  if (!items.length) {
+    loot.selectedIndex = 0;
+    return;
+  }
+  const startIndex = (Math.floor(loot.selectedIndex ?? 0) + direction + items.length) % items.length;
+  const nextIndex = findNextLootIndex(crate, startIndex, direction);
+  if (nextIndex >= 0) {
+    loot.selectedIndex = nextIndex;
+    loot.holdItemId = null;
+    loot.holdProgress = 0;
+  }
+}
+
+function closeLootCrate(run) {
+  if (!run.loot) {
+    return;
+  }
+  run.loot.active = false;
+  run.loot.crateId = null;
+  run.loot.selectedIndex = 0;
+  run.loot.holdItemId = null;
+  run.loot.holdProgress = 0;
+}
+
+function openLootCrate(run, crate) {
+  if (!crate || crate.searched) {
+    return;
+  }
+  const selectedIndex = findNextLootIndex(crate, 0, 1);
+  crate.opened = true;
+  crate.scanComplete = crate.scanComplete || crate.items.every((item) => item.revealed || item.looted);
+  run.loot.active = true;
+  run.loot.crateId = crate.id;
+  run.loot.selectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+  run.loot.holdItemId = null;
+  run.loot.holdProgress = 0;
+  run.loot.lastRarity = null;
+  pushNotice(run, `${crate.label} 개봉.`);
+  spawnParticles(run, crate.x + crate.width / 2, crate.y + 8, 8, "#93eaff");
+}
+
+function moveLootSelection(crate, loot, delta) {
+  const items = crate?.items || [];
+  if (!items.length) {
+    loot.selectedIndex = 0;
+    return;
+  }
+  const startIndex = (Math.floor(loot.selectedIndex ?? 0) + delta + items.length * 4) % items.length;
+  const direction = delta >= 0 ? 1 : -1;
+  const nextIndex = findNextLootIndex(crate, startIndex, direction);
+  if (nextIndex >= 0) {
+    loot.selectedIndex = nextIndex;
+    loot.holdItemId = null;
+    loot.holdProgress = 0;
+  }
+}
+
+function updateLootDiscovery(crate, loot, dt) {
+  if (!crate || crate.scanComplete) {
+    return;
+  }
+
+  crate.searchProgress = Math.min(crate.searchTime, (crate.searchProgress ?? 0) + dt);
+  let firstRevealedIndex = -1;
+  crate.items.forEach((item, index) => {
+    if (!item.revealed && crate.searchProgress >= (item.revealDelay ?? 0)) {
+      item.revealed = true;
+      item.revealFlash = 0.48;
+      if (firstRevealedIndex < 0) {
+        firstRevealedIndex = index;
+      }
+    }
+  });
+
+  if (crate.searchProgress >= crate.searchTime) {
+    crate.scanComplete = true;
+    crate.items.forEach((item, index) => {
+      if (!item.revealed) {
+        item.revealed = true;
+        item.revealFlash = 0.38;
+        if (firstRevealedIndex < 0) {
+          firstRevealedIndex = index;
+        }
+      }
+    });
+  }
+
+  if (firstRevealedIndex >= 0 && !isSelectableLootItem(crate.items[loot.selectedIndex])) {
+    loot.selectedIndex = firstRevealedIndex;
+  }
+}
+
+function updateLootItemTimers(crate, dt) {
+  (crate?.items || []).forEach((item) => {
+    item.revealFlash = Math.max(0, (item.revealFlash ?? 0) - dt);
+    item.blockedTimer = Math.max(0, (item.blockedTimer ?? 0) - dt);
+  });
+}
+
+function collectLootItem(run, crate, item) {
+  if (!item || item.looted) {
+    return false;
+  }
+
+  const value = Math.max(0, Number(item.value ?? 0));
+  const quantity = Math.max(1, Math.floor(Number(item.quantity ?? 1)));
+  const weight = Math.max(0.1, Number(item.weight ?? 1));
+  const capacity = Math.max(1, Number(run.lootCapacity ?? 16));
+  if ((run.lootWeight ?? 0) + weight > capacity) {
+    item.blockedTimer = 0.75;
+    item.transferProgress = 0;
+    item.lootProgress = 0;
+    pushNotice(run, "가방 공간 부족.");
+    return false;
+  }
+
+  const rarityRank = getLootRarityRank(item.rarity);
+  item.looted = true;
+  item.lootProgress = item.lootTime;
+  item.transferProgress = item.lootTime;
+  item.acquiredAt = run.time ?? 0;
+
+  const acquired = {
+    crateId: crate.id,
+    id: item.id,
+    name: item.name,
+    rarity: item.rarity,
+    type: item.type || "item",
+    quantity,
+    value,
+    weight,
+    acquiredAt: item.acquiredAt,
+  };
+  run.lootInventory.push(acquired);
+  run.inventory.items.push(acquired);
+  run.materials += value;
+  run.lootWeight = Math.min(capacity, (run.lootWeight ?? 0) + weight);
+
+  if (rarityRank >= 2) {
+    run.loot.rareSignalTimer = 1.15;
+    run.loot.lastRarity = item.rarity;
+    crate.rareSignalTimer = 1.15;
+    pushNotice(run, `${item.name} 확보. 희귀 반응 감지.`);
+    spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 18, "#87e1ff");
+    spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 8, "#f6e98a");
+  } else {
+    pushNotice(run, `${item.name} 확보.`);
+    spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 10, "#93eaff");
+  }
+
+  crate.searched = crate.items.every((entry) => entry.looted);
+  if (crate.searched) {
+    pushNotice(run, `${crate.label} 수색 완료.`);
+  }
+  return true;
+}
+
+function updateLootLockedPlayer(run, dt) {
+  const player = run.player;
+  player.attackCooldown = Math.max(0, player.attackCooldown - dt);
+  player.attackWindow = Math.max(0, player.attackWindow - dt);
+  player.invulnTimer = Math.max(0, player.invulnTimer - dt);
+  player.dashCooldownTimer = Math.max(0, player.dashCooldownTimer - dt);
+  player.recoilShotCooldownTimer = Math.max(0, player.recoilShotCooldownTimer - dt);
+  player.recoilShotTimer = Math.max(0, player.recoilShotTimer - dt);
+  player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
+  player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
+  player.slideTimer = Math.max(0, player.slideTimer - dt);
+  player.vx = approach(player.vx, 0, 2400 * dt);
+  player.vy = approach(player.vy, 0, 2600 * dt);
+  player.crouchRequested = false;
+  player.attackWindow = 0;
+  player.canInteract = false;
+  setMovementState(player);
+}
+
+function updateLootInteraction(state, data, dt) {
+  const run = state.run;
+  const loot = run.loot;
+  if (!loot?.active) {
+    return false;
+  }
+
+  const crate = getActiveLootCrate(run);
+  if (!crate) {
+    closeLootCrate(run);
+    return false;
+  }
+
+  updateLootDiscovery(crate, loot, dt);
+  updateLootItemTimers(crate, dt);
+
+  run.prompt = "";
+  run.promptWorld = null;
+
+  if (consumeEitherPress(state, LOOT_CLOSE_KEYS)) {
+    closeLootCrate(run);
+    return false;
+  }
+
+  if (!crate.scanComplete) {
+    updateLootLockedPlayer(run, dt);
+    return true;
+  }
+
+  if (!isSelectableLootItem(crate.items[loot.selectedIndex])) {
+    const nextIndex = findNextLootIndex(crate, 0, 1);
+    if (nextIndex >= 0) {
+      loot.selectedIndex = nextIndex;
+    }
+  }
+
+  if (consumeEitherPress(state, LOOT_LEFT_KEYS)) {
+    moveLootSelection(crate, loot, -1);
+  }
+  if (consumeEitherPress(state, LOOT_RIGHT_KEYS)) {
+    moveLootSelection(crate, loot, 1);
+  }
+  if (consumeEitherPress(state, LOOT_PREV_KEYS)) {
+    moveLootSelection(crate, loot, -3);
+  }
+  if (consumeEitherPress(state, LOOT_NEXT_KEYS)) {
+    moveLootSelection(crate, loot, 3);
+  }
+
+  const item = getSelectedLootItem(crate, loot);
+  if (isSelectableLootItem(item) && isEitherPressed(state, INTERACT_KEYS)) {
+    if (loot.holdItemId !== item.id) {
+      loot.holdItemId = item.id;
+      loot.holdProgress = item.transferProgress;
+    }
+    item.transferProgress = Math.min(item.lootTime, item.transferProgress + dt);
+    item.lootProgress = item.transferProgress;
+    loot.holdProgress = item.transferProgress;
+
+    if (item.transferProgress >= item.lootTime) {
+      if (collectLootItem(run, crate, item)) {
+        const nextIndex = findNextLootIndex(crate, loot.selectedIndex + 1, 1);
+        if (nextIndex >= 0) {
+          loot.selectedIndex = nextIndex;
+        }
+      }
+      loot.holdItemId = null;
+      loot.holdProgress = 0;
+    }
+  } else {
+    loot.holdItemId = null;
+    loot.holdProgress = 0;
+  }
+
+  updateLootLockedPlayer(run, dt);
+  return true;
+}
+
 function getInteractionTargets(run, data) {
   const playerCenter = getCenter(run.player);
   const targets = [];
@@ -2596,6 +3584,22 @@ function getInteractionTargets(run, data) {
         text: item.prompt,
         x: item.x + item.width / 2,
         y: item.y - 10,
+      });
+    }
+  }
+
+  for (const crate of run.lootCrates || []) {
+    if (crate.searched) {
+      continue;
+    }
+    if (distanceBetween(playerCenter, getCenter(crate)) < 104) {
+      targets.push({
+        id: crate.id,
+        kind: "lootCrate",
+        crate,
+        text: crate.opened ? "E: 상자 확인" : crate.prompt,
+        x: crate.x + crate.width / 2,
+        y: crate.y - 12,
       });
     }
   }
@@ -2761,7 +3765,7 @@ function updateInteractions(state, data, interactionPressed) {
     return;
   }
 
-  const braceWall = getActiveBraceWall(player, data);
+  const braceWall = getActiveBraceWall(player, data, run);
   if (
     braceWall &&
     !player.onGround &&
@@ -2795,6 +3799,11 @@ function updateInteractions(state, data, interactionPressed) {
 
   if (nearest.kind === "pedestal") {
     usePedestal(run, nearest.pedestal);
+    return;
+  }
+
+  if (nearest.kind === "lootCrate") {
+    openLootCrate(run, nearest.crate);
     return;
   }
 
@@ -2845,37 +3854,58 @@ function updateExpedition(state, data, dt) {
     return;
   }
 
-  updateRecoilAim(run, data, state, dt);
+  const lootWasActive = Boolean(run.loot?.active);
+  if (lootWasActive) {
+    if (run.recoilAim) {
+      run.recoilAim.active = false;
+    }
+    run.player.recoilFocusActive = false;
+  } else {
+    updateRecoilAim(run, data, state, dt);
+  }
   const focusTimeScale = run.recoilAim?.active
     ? clamp(data.player.movement.recoilShotFocusTimeScale ?? 0.22, 0.05, 1)
     : 1;
   const simDt = dt * focusTimeScale;
   let interactionPressed = consumeEitherPress(state, INTERACT_KEYS);
-  let attackPressed = consumeEitherPress(state, ATTACK_KEYS);
-  const recoilShotPressed = Boolean(state.mouse?.primaryJustPressed);
+  let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
+  const recoilShotPressed = !lootWasActive && Boolean(state.mouse?.primaryJustPressed);
   if (state.mouse) {
     state.mouse.primaryJustPressed = false;
   }
 
-  updatePlayer(run, data, state, simDt, {
-    attackPressed,
-    interactionPressed,
-    recoilShotPressed,
-  });
-  if (run.player.movementState === MOVEMENT_STATES.DASH) {
+  const lootActive = lootWasActive ? updateLootInteraction(state, data, simDt) : false;
+  if (lootWasActive) {
     interactionPressed = false;
     attackPressed = false;
+  } else {
+    updatePlayer(run, data, state, simDt, {
+      attackPressed,
+      interactionPressed,
+      recoilShotPressed,
+    });
+    if (run.player.movementState === MOVEMENT_STATES.DASH) {
+      interactionPressed = false;
+      attackPressed = false;
+    }
   }
   updateTimePhase(run, data, simDt);
   updateGuard(run, simDt);
   updateRitualist(run, simDt);
   updateThreats(run, simDt);
+  updateHostileDrones(run, data, simDt);
+  updateEnemyShots(run, data, simDt);
   updateAttackHits(run);
-  updateInteractions(state, data, interactionPressed && run.player.canInteract);
+  if (lootActive) {
+    run.prompt = "";
+    run.promptWorld = null;
+  } else {
+    updateInteractions(state, data, interactionPressed && run.player.canInteract);
+  }
   if (state.scene !== SCENES.EXPEDITION) {
     return;
   }
-  updateEffects(run, simDt);
+  updateEffects(run, simDt, dt);
   syncCamera(run, data, dt);
 
   if (run.hp <= 0) {
@@ -2936,7 +3966,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "KeyC", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "F2", "F3", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "KeyC", "KeyE", "KeyQ", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (!state.pressed.has(event.code)) {

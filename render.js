@@ -2,8 +2,17 @@ import { MOVEMENT_STATES, SCENES, hasUnlocked } from "./state.js";
 import { clamp, formatOutcome } from "./utils.js";
 
 const imageCache = new Map();
+let spriteTintCanvas = null;
+let spriteTintContext = null;
 const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
+const LOOT_RARITY_META = {
+  common: { label: "COMMON", color: "#dce7ec", glow: "rgba(220, 231, 236, 0.16)" },
+  uncommon: { label: "UNCOMMON", color: "#8ef0c2", glow: "rgba(142, 240, 194, 0.2)" },
+  rare: { label: "RARE", color: "#87e1ff", glow: "rgba(135, 225, 255, 0.28)" },
+  epic: { label: "EPIC", color: "#b79cff", glow: "rgba(183, 156, 255, 0.3)" },
+  relic: { label: "RELIC", color: "#f6e98a", glow: "rgba(246, 233, 138, 0.34)" },
+};
 
 function isMovementLab(data) {
   return data.world.mode === "movementLab";
@@ -54,6 +63,75 @@ function getImageAsset(src) {
     imageCache.set(src, image);
   }
   return imageCache.get(src);
+}
+
+function getSpriteTintSurface(width, height) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  if (!spriteTintCanvas) {
+    spriteTintCanvas = document.createElement("canvas");
+    spriteTintContext = spriteTintCanvas.getContext("2d");
+  }
+  if (!spriteTintContext) {
+    return null;
+  }
+  if (spriteTintCanvas.width !== width || spriteTintCanvas.height !== height) {
+    spriteTintCanvas.width = width;
+    spriteTintCanvas.height = height;
+  }
+  spriteTintContext.setTransform(1, 0, 0, 1, 0, 0);
+  spriteTintContext.globalAlpha = 1;
+  spriteTintContext.globalCompositeOperation = "source-over";
+  spriteTintContext.filter = "none";
+  spriteTintContext.shadowBlur = 0;
+  spriteTintContext.clearRect(0, 0, width, height);
+  return {
+    canvas: spriteTintCanvas,
+    context: spriteTintContext,
+  };
+}
+
+function drawSpriteTint(ctx, frame, fillTint) {
+  const sourceWidth = Number.isFinite(frame.sourceWidth) ? frame.sourceWidth : frame.image.naturalWidth;
+  const sourceHeight = Number.isFinite(frame.sourceHeight) ? frame.sourceHeight : frame.image.naturalHeight;
+  const sourceX = Number.isFinite(frame.sourceWidth) ? (frame.sourceX ?? 0) : 0;
+  const sourceY = Number.isFinite(frame.sourceHeight) ? (frame.sourceY ?? 0) : 0;
+  const tintWidth = Math.max(1, Math.ceil(sourceWidth));
+  const tintHeight = Math.max(1, Math.ceil(sourceHeight));
+  const surface = getSpriteTintSurface(tintWidth, tintHeight);
+  if (!surface) {
+    return;
+  }
+
+  const tintCtx = surface.context;
+  tintCtx.drawImage(
+    frame.image,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    tintWidth,
+    tintHeight
+  );
+  tintCtx.globalCompositeOperation = "source-atop";
+  tintCtx.fillStyle = fillTint;
+  tintCtx.fillRect(0, 0, tintWidth, tintHeight);
+  tintCtx.globalCompositeOperation = "source-over";
+
+  ctx.drawImage(
+    surface.canvas,
+    0,
+    0,
+    tintWidth,
+    tintHeight,
+    -frame.drawWidth * frame.anchorX,
+    -frame.drawHeight * frame.footAnchorY,
+    frame.drawWidth,
+    frame.drawHeight
+  );
 }
 
 function beveledPath(ctx, x, y, width, height, cut = 18) {
@@ -920,6 +998,747 @@ function drawProps(ctx, data, pulse, theme) {
   });
 }
 
+function getLootRarityMeta(rarity) {
+  return LOOT_RARITY_META[rarity] || LOOT_RARITY_META.common;
+}
+
+function getActiveLootCrate(run) {
+  if (!run.loot?.active || !run.loot.crateId) {
+    return null;
+  }
+  return (run.lootCrates || []).find((crate) => crate.id === run.loot.crateId) || null;
+}
+
+function drawLootCrates(ctx, run, theme) {
+  (run.lootCrates || []).forEach((crate) => {
+    const x = crate.x;
+    const y = crate.y;
+    const width = crate.width;
+    const height = crate.height;
+    const rarePulse = clamp(crate.rareSignalTimer ?? 0, 0, 1);
+    const active = run.loot?.crateId === crate.id;
+    const alpha = crate.searched ? 0.42 : 1;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    if (active || rarePulse > 0) {
+      ctx.shadowColor = rarePulse > 0 ? "#f6e98a" : theme.accentSecondary;
+      ctx.shadowBlur = 24 + rarePulse * 18;
+    }
+
+    drawBeveledPanel(ctx, theme, x, y, width, height, {
+      cut: 8,
+      fill: crate.opened ? "rgba(18, 30, 39, 0.82)" : "rgba(10, 17, 24, 0.9)",
+      stroke: active ? "rgba(147, 234, 255, 0.86)" : "rgba(255, 255, 255, 0.2)",
+      innerLines: false,
+    });
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = crate.opened ? "rgba(135, 225, 255, 0.18)" : "rgba(231, 244, 126, 0.16)";
+    ctx.fillRect(x + 8, y + 8, width - 16, 5);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+    ctx.fillRect(x + width * 0.5 - 2, y + 8, 4, height - 14);
+    ctx.strokeStyle = crate.searched ? "rgba(255,255,255,0.12)" : "rgba(147, 234, 255, 0.42)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 12, y + height * 0.56);
+    ctx.lineTo(x + width - 12, y + height * 0.56);
+    ctx.stroke();
+
+    if (!crate.searched) {
+      const blink = 0.35 + Math.sin((run.time ?? 0) * 4 + x * 0.03) * 0.18;
+      ctx.fillStyle = `rgba(147, 234, 255, ${blink})`;
+      ctx.fillRect(x + width - 18, y + 12, 8, 8);
+    }
+
+    ctx.restore();
+  });
+}
+
+function drawLootLeftArt(ctx, state, data, theme, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 18,
+    fill: "rgba(5, 11, 17, 0.72)",
+    stroke: "rgba(255,255,255,0.14)",
+    glow: true,
+  });
+
+  ctx.save();
+  beveledPath(ctx, x, y, width, height, 18);
+  ctx.clip();
+
+  const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+  gradient.addColorStop(0, "rgba(38, 70, 86, 0.52)");
+  gradient.addColorStop(0.55, "rgba(9, 17, 26, 0.16)");
+  gradient.addColorStop(1, "rgba(135, 225, 255, 0.12)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, width, height);
+
+  drawStandingArt(ctx, data, "operatorStanding", x + 30, y + 34, width * 0.86, height * 0.94, 0.92);
+
+  const crateX = x + 56;
+  const crateY = y + height - 138;
+  drawBeveledPanel(ctx, theme, crateX, crateY, width - 112, 82, {
+    cut: 12,
+    fill: "rgba(6, 13, 19, 0.88)",
+    stroke: "rgba(147, 234, 255, 0.4)",
+    innerLines: false,
+  });
+  ctx.fillStyle = "rgba(147, 234, 255, 0.16)";
+  ctx.fillRect(crateX + 16, crateY + 18, width - 144, 9);
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(crateX + (width - 112) * 0.5 - 3, crateY + 12, 6, 62);
+
+  const crate = getActiveLootCrate(state.run);
+  if (crate?.rareSignalTimer > 0) {
+    const glow = clamp(crate.rareSignalTimer, 0, 1);
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = `rgba(246, 233, 138, ${0.1 + glow * 0.2})`;
+    ctx.fillRect(x, y, width, height);
+  }
+
+  ctx.restore();
+}
+
+function drawLootSlot(ctx, theme, item, index, selected, x, y, width, height) {
+  const visible = Boolean(item?.revealed || item?.looted);
+  const meta = getLootRarityMeta(item.rarity);
+  const progress = item.looted
+    ? 1
+    : clamp((item.transferProgress ?? item.lootProgress ?? 0) / Math.max(0.1, item.lootTime ?? 0.6), 0, 1);
+  const revealFlash = clamp(item.revealFlash ?? 0, 0, 1);
+  const blocked = clamp(item.blockedTimer ?? 0, 0, 1);
+
+  ctx.save();
+  ctx.globalAlpha = item.looted ? 0.4 : 1;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: visible
+      ? (selected ? "rgba(13, 26, 36, 0.9)" : "rgba(7, 13, 20, 0.72)")
+      : "rgba(255,255,255,0.045)",
+    stroke: selected ? meta.color : "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+
+  if (!visible) {
+    ctx.strokeStyle = "rgba(147, 234, 255, 0.14)";
+    ctx.lineWidth = 1;
+    for (let offset = -height; offset < width; offset += 18) {
+      ctx.beginPath();
+      ctx.moveTo(x + offset, y + height);
+      ctx.lineTo(x + offset + height, y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("UNKNOWN", x + width / 2, y + height / 2 + 4);
+    ctx.textAlign = "left";
+    ctx.restore();
+    return;
+  }
+
+  if ((selected && !item.looted) || revealFlash > 0) {
+    ctx.fillStyle = revealFlash > 0 ? `rgba(147, 234, 255, ${0.16 + revealFlash * 0.22})` : meta.glow;
+    ctx.fillRect(x + 2, y + 2, width - 4, height - 4);
+  }
+
+  const iconX = x + 16;
+  const iconY = y + 20;
+  drawBeveledPanel(ctx, theme, iconX, iconY, 58, 58, {
+    cut: 10,
+    fill: "rgba(255,255,255,0.08)",
+    stroke: meta.color,
+    innerLines: false,
+  });
+  ctx.fillStyle = meta.glow;
+  ctx.fillRect(iconX + 7, iconY + 7, 44, 44);
+  ctx.fillStyle = meta.color;
+  ctx.beginPath();
+  ctx.moveTo(iconX + 29, iconY + 12);
+  ctx.lineTo(iconX + 46, iconY + 29);
+  ctx.lineTo(iconX + 29, iconY + 46);
+  ctx.lineTo(iconX + 12, iconY + 29);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = meta.color;
+  ctx.font = "700 11px 'Segoe UI', sans-serif";
+  ctx.fillText(meta.label, x + 88, y + 24);
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 16px 'Segoe UI', sans-serif";
+  ctx.fillText(item.name, x + 88, y + 50);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  const typeLabel = item.type ? String(item.type).toUpperCase() : "ITEM";
+  ctx.fillText(typeLabel, x + 88, y + 72);
+  ctx.textAlign = "right";
+  ctx.fillText(`x${item.quantity ?? 1}`, x + width - 18, y + 24);
+  ctx.fillText(`${Number(item.weight ?? 1).toFixed(1)}kg`, x + width - 18, y + 48);
+  ctx.fillText(`+${Math.round(item.value ?? 0)}`, x + width - 18, y + 72);
+  ctx.textAlign = "left";
+
+  ctx.fillStyle = "rgba(255,255,255,0.09)";
+  ctx.fillRect(x + 16, y + height - 16, width - 32, 5);
+  ctx.fillStyle = item.looted ? "rgba(255,255,255,0.42)" : meta.color;
+  ctx.fillRect(x + 16, y + height - 16, (width - 32) * progress, 5);
+
+  if (item.looted) {
+    ctx.fillStyle = "rgba(255,255,255,0.72)";
+    ctx.font = "700 11px 'Segoe UI', sans-serif";
+    ctx.fillText("PACKED", x + 88, y + height - 25);
+  } else if (selected) {
+    ctx.fillStyle = blocked > 0 ? "#ff9fb4" : theme.textDim;
+    ctx.font = "700 11px 'Segoe UI', sans-serif";
+    ctx.fillText(blocked > 0 ? "PACK FULL" : "HOLD E TO TAKE", x + 88, y + height - 25);
+  }
+
+  ctx.restore();
+}
+
+function drawLootDetailPanel(ctx, theme, item, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(5, 12, 18, 0.72)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+
+  if (!item || !item.revealed) {
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "700 12px 'Segoe UI', sans-serif";
+    ctx.fillText("SIGNAL", x + 22, y + 30);
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "15px 'Segoe UI', sans-serif";
+    ctx.fillText("수색 중인 슬롯", x + 22, y + 60);
+    return;
+  }
+
+  const meta = getLootRarityMeta(item.rarity);
+  ctx.fillStyle = meta.color;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText(meta.label, x + 22, y + 30);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 22px 'Segoe UI', sans-serif";
+  ctx.fillText(item.name, x + 22, y + 64);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "13px 'Segoe UI', sans-serif";
+  ctx.fillText(`TYPE ${String(item.type || "item").toUpperCase()}`, x + 22, y + 102);
+  ctx.fillText(`VALUE ${Math.round(item.value ?? 0)}`, x + 22, y + 126);
+  ctx.fillText(`WEIGHT ${Number(item.weight ?? 1).toFixed(1)}kg`, x + 22, y + 150);
+  ctx.fillText(`TRANSFER ${Number(item.lootTime ?? 0.6).toFixed(1)}s`, x + 22, y + 174);
+}
+
+function drawLootOverlay(ctx, state, data, theme) {
+  const run = state.run;
+  const crate = getActiveLootCrate(run);
+  if (!crate) {
+    return;
+  }
+
+  const rareSignal = clamp(run.loot?.rareSignalTimer ?? 0, 0, 1);
+  const searchProgress = clamp((crate.searchProgress ?? 0) / Math.max(0.1, crate.searchTime ?? 1), 0, 1);
+  const selectedItem = crate.items[run.loot.selectedIndex] || null;
+  ctx.save();
+  ctx.fillStyle = "rgba(2, 6, 10, 0.38)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  if (rareSignal > 0) {
+    ctx.strokeStyle = `rgba(246, 233, 138, ${0.18 + rareSignal * 0.44})`;
+    ctx.lineWidth = 3 + rareSignal * 5;
+    ctx.strokeRect(24, 24, SCREEN_WIDTH - 48, SCREEN_HEIGHT - 48);
+  }
+
+  drawLootLeftArt(ctx, state, data, theme, 34, 126, 350, 548);
+
+  const panelX = 428;
+  const panelY = 72;
+  const panelW = 808;
+  const panelH = 602;
+  drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
+    cut: 20,
+    fill: "rgba(4, 10, 16, 0.82)",
+    stroke: rareSignal > 0 ? "rgba(246, 233, 138, 0.68)" : "rgba(147, 234, 255, 0.2)",
+    glow: rareSignal > 0,
+  });
+
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText(crate.scanComplete ? "CONTAINER" : "SEARCHING", panelX + 34, panelY + 38);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 30px 'Segoe UI', sans-serif";
+  ctx.fillText(crate.label, panelX + 34, panelY + 75);
+
+  const remaining = crate.items.filter((item) => !item.looted).length;
+  ctx.textAlign = "right";
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "13px 'Segoe UI', sans-serif";
+  ctx.fillText(`${remaining}/${crate.items.length} ITEMS`, panelX + panelW - 34, panelY + 48);
+  ctx.fillText("W/S SELECT  ·  ESC CLOSE", panelX + panelW - 34, panelY + 72);
+  ctx.textAlign = "left";
+
+  ctx.save();
+  ctx.fillStyle = "rgba(4, 10, 16, 0.92)";
+  ctx.fillRect(panelX + panelW - 390, panelY + 57, 358, 22);
+  ctx.textAlign = "right";
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "13px 'Segoe UI', sans-serif";
+  ctx.fillText("WASD SELECT  ·  HOLD E TAKE  ·  ESC CLOSE", panelX + panelW - 34, panelY + 72);
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(panelX + 34, panelY + 94, panelW - 68, 6);
+  ctx.fillStyle = crate.scanComplete ? theme.accentSecondary : theme.accent;
+  ctx.fillRect(panelX + 34, panelY + 94, (panelW - 68) * searchProgress, 6);
+  ctx.fillStyle = crate.scanComplete ? theme.textDim : theme.accent;
+  ctx.font = "700 11px 'Segoe UI', sans-serif";
+  ctx.fillText(crate.scanComplete ? "CONTENTS IDENTIFIED" : "SCANNING CONTENTS", panelX + 34, panelY + 118);
+
+  const listX = panelX + 34;
+  const listY = panelY + 142;
+  const cardW = 238;
+  const cardH = 112;
+  const gap = 14;
+  const columns = 3;
+
+  if (!crate.items.length) {
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "18px 'Segoe UI', sans-serif";
+    ctx.fillText("비어 있음", listX, listY + 36);
+  }
+
+  crate.items.forEach((item, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    drawLootSlot(
+      ctx,
+      theme,
+      item,
+      index,
+      index === run.loot.selectedIndex,
+      listX + column * (cardW + gap),
+      listY + row * (cardH + gap),
+      cardW,
+      cardH
+    );
+  });
+
+  const detailY = listY + Math.ceil(Math.max(1, crate.items.length) / columns) * (cardH + gap) + 10;
+  drawLootDetailPanel(ctx, theme, selectedItem, listX, detailY, 344, 190);
+
+  const packX = listX + 372;
+  const packY = detailY;
+  const packW = panelW - 68 - 372;
+  const packH = 190;
+  drawBeveledPanel(ctx, theme, packX, packY, packW, packH, {
+    cut: 14,
+    fill: "rgba(5, 12, 18, 0.68)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText("BACKPACK", packX + 22, packY + 30);
+  const capacity = Math.max(1, run.lootCapacity ?? 16);
+  const weight = clamp((run.lootWeight ?? 0) / capacity, 0, 1);
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(packX + 22, packY + 50, packW - 44, 8);
+  ctx.fillStyle = weight > 0.82 ? "#ff9fb4" : theme.accentSecondary;
+  ctx.fillRect(packX + 22, packY + 50, (packW - 44) * weight, 8);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(`${Number(run.lootWeight ?? 0).toFixed(1)} / ${capacity.toFixed(1)}kg`, packX + 22, packY + 78);
+
+  const recent = run.lootInventory.slice(-3);
+  if (!recent.length) {
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "13px 'Segoe UI', sans-serif";
+    ctx.fillText("NO SECURED ITEMS", packX + 22, packY + 116);
+  }
+  recent.forEach((item, index) => {
+    const meta = getLootRarityMeta(item.rarity);
+    const chipY = packY + 104 + index * 24;
+    ctx.fillStyle = meta.glow;
+    ctx.fillRect(packX + 22, chipY - 12, packW - 44, 18);
+    ctx.fillStyle = meta.color;
+    ctx.font = "700 11px 'Segoe UI', sans-serif";
+    ctx.fillText(item.name, packX + 30, chipY + 1);
+  });
+
+  ctx.fillStyle = "rgba(147, 234, 255, 0.12)";
+  ctx.fillRect(panelX + 34, panelY + panelH - 44, panelW - 68, 1);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(`획득 재료 ${Math.round(run.materials)}  ·  보관 ${run.lootInventory.length}`, panelX + 34, panelY + panelH - 20);
+  ctx.fillStyle = "rgba(4, 10, 16, 0.94)";
+  ctx.fillRect(panelX + 34, panelY + panelH - 38, 320, 22);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(`MATERIAL ${Math.round(run.materials)}  ·  SECURED ${run.lootInventory.length}`, panelX + 34, panelY + panelH - 20);
+  ctx.restore();
+}
+
+function drawLootPanelTitle(ctx, theme, title, meta, x, y, width) {
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 20px 'Segoe UI', sans-serif";
+  ctx.fillText(title, x, y);
+  if (meta) {
+    ctx.textAlign = "right";
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "700 12px 'Segoe UI', sans-serif";
+    ctx.fillText(meta, x + width, y - 2);
+    ctx.textAlign = "left";
+  }
+}
+
+function drawLootRummageArt(ctx, state, data, theme, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 20,
+    fill: "rgba(3, 8, 13, 0.7)",
+    stroke: "rgba(147, 234, 255, 0.16)",
+    glow: true,
+    innerLines: false,
+  });
+
+  ctx.save();
+  beveledPath(ctx, x, y, width, height, 20);
+  ctx.clip();
+
+  const background = ctx.createLinearGradient(x, y, x + width * 0.8, y + height);
+  background.addColorStop(0, "rgba(22, 36, 48, 0.78)");
+  background.addColorStop(0.55, "rgba(7, 14, 22, 0.54)");
+  background.addColorStop(1, "rgba(18, 34, 42, 0.72)");
+  ctx.fillStyle = background;
+  ctx.fillRect(x, y, width, height);
+
+  const customArt = getImageAsset(data.art?.lootRummage?.src);
+  if (customArt && customArt.complete && customArt.naturalWidth) {
+    const scale = Math.min(width / customArt.naturalWidth, height / customArt.naturalHeight);
+    const drawWidth = customArt.naturalWidth * scale;
+    const drawHeight = customArt.naturalHeight * scale;
+    ctx.globalAlpha = 0.96;
+    ctx.drawImage(
+      customArt,
+      x + (width - drawWidth) / 2,
+      y + (height - drawHeight) / 2,
+      drawWidth,
+      drawHeight
+    );
+    ctx.globalAlpha = 1;
+  } else {
+    drawStandingArt(ctx, data, "operatorStanding", x - 8, y + 18, width * 0.98, height * 0.94, 0.9);
+
+    const chestX = x + 34;
+    const chestY = y + height - 190;
+    const chestW = width - 68;
+    const chestH = 124;
+
+    ctx.save();
+    ctx.translate(chestX + chestW / 2, chestY + 16);
+    ctx.rotate(-0.08);
+    drawBeveledPanel(ctx, theme, -chestW / 2, -24, chestW, 56, {
+      cut: 14,
+      fill: "rgba(83, 70, 50, 0.92)",
+      stroke: "rgba(231, 244, 126, 0.32)",
+      innerLines: false,
+    });
+    ctx.fillStyle = "rgba(190, 165, 100, 0.55)";
+    ctx.fillRect(-chestW / 2 + 22, -10, chestW - 44, 8);
+    ctx.restore();
+
+    drawBeveledPanel(ctx, theme, chestX, chestY + 34, chestW, chestH, {
+      cut: 16,
+      fill: "rgba(48, 39, 30, 0.96)",
+      stroke: "rgba(147, 234, 255, 0.28)",
+      innerLines: false,
+    });
+    ctx.fillStyle = "rgba(147, 234, 255, 0.12)";
+    ctx.fillRect(chestX + 18, chestY + 54, chestW - 36, 10);
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillRect(chestX + chestW / 2 - 4, chestY + 44, 8, chestH - 18);
+  }
+
+  const crate = getActiveLootCrate(state.run);
+  const pulse = clamp(crate?.rareSignalTimer ?? 0, 0, 1);
+  if (pulse > 0) {
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = `rgba(246, 233, 138, ${0.08 + pulse * 0.18})`;
+    ctx.fillRect(x, y, width, height);
+  }
+
+  ctx.restore();
+}
+
+function drawLootCell(ctx, theme, item, selected, x, y, size) {
+  const visible = Boolean(item?.revealed || item?.looted);
+  const meta = visible ? getLootRarityMeta(item.rarity) : null;
+  const progress = item?.looted
+    ? 1
+    : clamp((item?.transferProgress ?? item?.lootProgress ?? 0) / Math.max(0.1, item?.lootTime ?? 0.6), 0, 1);
+  const revealFlash = clamp(item?.revealFlash ?? 0, 0, 1);
+  const blocked = clamp(item?.blockedTimer ?? 0, 0, 1);
+
+  drawBeveledPanel(ctx, theme, x, y, size, size, {
+    cut: 10,
+    fill: visible ? "rgba(8, 15, 24, 0.82)" : "rgba(255,255,255,0.035)",
+    stroke: selected && visible ? meta.color : "rgba(255,255,255,0.13)",
+    innerLines: false,
+  });
+
+  if (selected && visible) {
+    ctx.fillStyle = meta.glow;
+    ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
+  }
+  if (revealFlash > 0) {
+    ctx.fillStyle = `rgba(147, 234, 255, ${0.12 + revealFlash * 0.28})`;
+    ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
+  }
+
+  if (!visible) {
+    ctx.strokeStyle = "rgba(147, 234, 255, 0.12)";
+    ctx.lineWidth = 1;
+    for (let offset = -size; offset < size; offset += 15) {
+      ctx.beginPath();
+      ctx.moveTo(x + offset, y + size);
+      ctx.lineTo(x + offset + size, y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.26)";
+    ctx.font = "700 20px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("?", x + size / 2, y + size / 2 + 8);
+    ctx.textAlign = "left";
+    return;
+  }
+
+  ctx.fillStyle = meta.glow;
+  ctx.fillRect(x + 11, y + 12, size - 22, size - 24);
+  ctx.fillStyle = meta.color;
+  ctx.beginPath();
+  ctx.moveTo(x + size / 2, y + 17);
+  ctx.lineTo(x + size - 18, y + size / 2);
+  ctx.lineTo(x + size / 2, y + size - 20);
+  ctx.lineTo(x + 18, y + size / 2);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = item.looted ? "rgba(255,255,255,0.36)" : meta.color;
+  ctx.fillRect(x + 8, y + size - 9, (size - 16) * progress, 4);
+
+  ctx.fillStyle = blocked > 0 ? "#ff9fb4" : "rgba(255,255,255,0.72)";
+  ctx.font = "700 10px 'Segoe UI', sans-serif";
+  ctx.fillText(item.looted ? "PACK" : `x${item.quantity ?? 1}`, x + 8, y + 14);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = meta.color;
+  ctx.fillText(String(item.rarity || "").toUpperCase().slice(0, 1), x + size - 8, y + 14);
+  ctx.textAlign = "left";
+}
+
+function drawBackpackCell(ctx, theme, item, x, y, size) {
+  const hasItem = Boolean(item);
+  const meta = hasItem ? getLootRarityMeta(item.rarity) : null;
+  drawBeveledPanel(ctx, theme, x, y, size, size, {
+    cut: 10,
+    fill: hasItem ? "rgba(8, 15, 24, 0.78)" : "rgba(255,255,255,0.03)",
+    stroke: hasItem ? meta.color : "rgba(255,255,255,0.1)",
+    innerLines: false,
+  });
+  if (!hasItem) {
+    return;
+  }
+
+  ctx.fillStyle = meta.glow;
+  ctx.fillRect(x + 9, y + 9, size - 18, size - 24);
+  ctx.fillStyle = meta.color;
+  ctx.beginPath();
+  ctx.roundRect?.(x + 22, y + 17, size - 44, size - 38, 6);
+  if (ctx.roundRect) {
+    ctx.fill();
+  } else {
+    ctx.fillRect(x + 22, y + 17, size - 44, size - 38);
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.76)";
+  ctx.font = "700 10px 'Segoe UI', sans-serif";
+  ctx.fillText(item.name.slice(0, 10), x + 8, y + size - 8);
+}
+
+function drawLootDetailCompact(ctx, theme, item, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 16,
+    fill: "rgba(5, 12, 18, 0.74)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+
+  if (!item || !item.revealed) {
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "700 12px 'Segoe UI', sans-serif";
+    ctx.fillText("ITEM DETAIL", x + 22, y + 30);
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "15px 'Segoe UI', sans-serif";
+    ctx.fillText("Scanning container...", x + 22, y + 66);
+    return;
+  }
+
+  const meta = getLootRarityMeta(item.rarity);
+  const progress = item.looted
+    ? 1
+    : clamp((item.transferProgress ?? item.lootProgress ?? 0) / Math.max(0.1, item.lootTime ?? 0.6), 0, 1);
+
+  ctx.fillStyle = meta.color;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText(meta.label, x + 22, y + 30);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 22px 'Segoe UI', sans-serif";
+  ctx.fillText(item.name, x + 22, y + 64);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "13px 'Segoe UI', sans-serif";
+  ctx.fillText(`TYPE  ${String(item.type || "item").toUpperCase()}`, x + 22, y + 102);
+  ctx.fillText(`VALUE ${Math.round(item.value ?? 0)}`, x + 22, y + 126);
+  ctx.fillText(`WEIGHT ${Number(item.weight ?? 1).toFixed(1)}kg`, x + 22, y + 150);
+
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(x + 22, y + height - 36, width - 44, 7);
+  ctx.fillStyle = item.looted ? "rgba(255,255,255,0.4)" : meta.color;
+  ctx.fillRect(x + 22, y + height - 36, (width - 44) * progress, 7);
+}
+
+function drawLootOverlayV2(ctx, state, data, theme) {
+  const run = state.run;
+  const crate = getActiveLootCrate(run);
+  if (!crate) {
+    return;
+  }
+
+  const rareSignal = clamp(run.loot?.rareSignalTimer ?? 0, 0, 1);
+  const searchProgress = clamp((crate.searchProgress ?? 0) / Math.max(0.1, crate.searchTime ?? 1), 0, 1);
+  const selectedItem = crate.items[run.loot.selectedIndex] || null;
+  const remaining = crate.items.filter((item) => !item.looted).length;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(1, 5, 10, 0.58)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const haze = ctx.createRadialGradient(760, 280, 120, 760, 280, 720);
+  haze.addColorStop(0, "rgba(76, 118, 150, 0.16)");
+  haze.addColorStop(0.55, "rgba(6, 12, 20, 0.34)");
+  haze.addColorStop(1, "rgba(0, 0, 0, 0.42)");
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  if (rareSignal > 0) {
+    ctx.strokeStyle = `rgba(246, 233, 138, ${0.2 + rareSignal * 0.42})`;
+    ctx.lineWidth = 3 + rareSignal * 5;
+    ctx.strokeRect(28, 28, SCREEN_WIDTH - 56, SCREEN_HEIGHT - 56);
+  }
+
+  const artX = 30;
+  const artY = 58;
+  const artW = 330;
+  const artH = 616;
+  drawLootRummageArt(ctx, state, data, theme, artX, artY, artW, artH);
+
+  const containerX = 386;
+  const containerY = 82;
+  const containerW = 298;
+  const containerH = 276;
+  drawBeveledPanel(ctx, theme, containerX, containerY, containerW, containerH, {
+    cut: 18,
+    fill: "rgba(5, 11, 18, 0.78)",
+    stroke: "rgba(147, 234, 255, 0.16)",
+    innerLines: false,
+  });
+  drawLootPanelTitle(ctx, theme, "CONTAINER", `${remaining}/${crate.items.length}`, containerX + 22, containerY + 36, containerW - 44);
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(containerX + 22, containerY + 55, containerW - 44, 6);
+  ctx.fillStyle = crate.scanComplete ? theme.accentSecondary : theme.accent;
+  ctx.fillRect(containerX + 22, containerY + 55, (containerW - 44) * searchProgress, 6);
+
+  const cellSize = 56;
+  const cellGap = 10;
+  const gridX = containerX + 22;
+  const gridY = containerY + 82;
+  const slots = Math.max(8, crate.items.length);
+  for (let index = 0; index < slots; index += 1) {
+    const item = crate.items[index];
+    const column = index % 4;
+    const row = Math.floor(index / 4);
+    drawLootCell(
+      ctx,
+      theme,
+      item || { revealed: false, looted: false },
+      index === run.loot.selectedIndex,
+      gridX + column * (cellSize + cellGap),
+      gridY + row * (cellSize + cellGap),
+      cellSize
+    );
+  }
+
+  const detailX = 386;
+  const detailY = 384;
+  const detailW = 298;
+  const detailH = 290;
+  drawLootDetailCompact(ctx, theme, selectedItem, detailX, detailY, detailW, detailH);
+
+  const packX = 710;
+  const packY = 82;
+  const packW = 538;
+  const packH = 592;
+  drawBeveledPanel(ctx, theme, packX, packY, packW, packH, {
+    cut: 20,
+    fill: "rgba(4, 10, 16, 0.82)",
+    stroke: "rgba(147, 234, 255, 0.16)",
+    glow: rareSignal > 0,
+    innerLines: false,
+  });
+
+  const capacity = Math.max(1, run.lootCapacity ?? 16);
+  const weightRatio = clamp((run.lootWeight ?? 0) / capacity, 0, 1);
+  drawLootPanelTitle(ctx, theme, "BACKPACK", `${run.lootInventory.length}/16`, packX + 26, packY + 38, packW - 52);
+  ctx.fillStyle = "rgba(255,255,255,0.09)";
+  ctx.fillRect(packX + 26, packY + 58, packW - 52, 7);
+  ctx.fillStyle = weightRatio > 0.82 ? "#ff9fb4" : theme.accentSecondary;
+  ctx.fillRect(packX + 26, packY + 58, (packW - 52) * weightRatio, 7);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(`${Number(run.lootWeight ?? 0).toFixed(1)} / ${capacity.toFixed(1)}kg`, packX + 26, packY + 84);
+
+  const packGridX = packX + 26;
+  const packGridY = packY + 112;
+  const packCell = 72;
+  const packGap = 12;
+  for (let index = 0; index < 16; index += 1) {
+    const column = index % 4;
+    const row = Math.floor(index / 4);
+    drawBackpackCell(
+      ctx,
+      theme,
+      run.lootInventory[index],
+      packGridX + column * (packCell + packGap),
+      packGridY + row * (packCell + packGap),
+      packCell
+    );
+  }
+
+  const sideX = packX + 380;
+  const sideY = packY + 112;
+  drawLootPanelTitle(ctx, theme, "QUICK", "4/4", sideX, sideY - 10, 120);
+  for (let index = 0; index < 4; index += 1) {
+    drawBackpackCell(ctx, theme, run.lootInventory[index + 16], sideX, sideY + index * 78, 66);
+  }
+  drawLootPanelTitle(ctx, theme, "SAFE", "0/1", sideX, sideY + 348, 120);
+  drawBackpackCell(ctx, theme, null, sideX, sideY + 374, 66);
+
+  ctx.restore();
+}
+
 function drawEntity(ctx, entity, palette, label) {
   if (isEntityDisabled(entity) || entity.state === "released") {
     return;
@@ -936,6 +1755,287 @@ function drawEntity(ctx, entity, palette, label) {
     ctx.font = "13px 'Segoe UI', sans-serif";
     ctx.fillText(label, entity.x - 6, entity.y - 10);
   }
+}
+
+function drawHostileCrow(ctx, run, crow) {
+  const cx = crow.x + crow.width * 0.5;
+  const cy = crow.y + crow.height * 0.5;
+  const time = run.time ?? 0;
+  const flap = Math.sin(time * (crow.flapRate ?? 13) + crow.bobSeed);
+  const diveActive = crow.diveTimer > 0;
+  const hitFlash = crow.hitFlash > 0;
+  const speedAngle = clamp((crow.vy ?? 0) / 900, -0.45, 0.45);
+  const bodyColor = hitFlash ? "#f8fbfd" : diveActive ? "#05070b" : "#071018";
+  const wingColor = hitFlash ? "#dff6ff" : "#03070d";
+  const featherColor = hitFlash ? "#f6fbff" : "#101a25";
+  const eyeColor = diveActive ? "#ff7892" : "#87e1ff";
+  const wingReach = 34 + Math.max(0, -flap) * 14;
+  const wingLift = -10 - flap * 22;
+  const wingDrop = 11 + flap * 10;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = `rgba(7, 12, 20, ${diveActive ? 0.2 : 0.14})`;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + crow.height * 0.34, crow.width * 0.52, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(crow.facing === -1 ? -1 : 1, 1);
+  ctx.rotate(speedAngle + (diveActive ? -0.08 : 0));
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = featherColor;
+  ctx.globalAlpha = 0.82;
+  ctx.beginPath();
+  ctx.moveTo(-24, 4);
+  ctx.lineTo(-42, -2);
+  ctx.lineTo(-36, 8);
+  ctx.lineTo(-48, 12);
+  ctx.lineTo(-24, 14);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = wingColor;
+  ctx.beginPath();
+  ctx.moveTo(-6, -4);
+  ctx.bezierCurveTo(-24, wingLift - 6, -wingReach, wingLift, -wingReach - 12, wingDrop);
+  ctx.bezierCurveTo(-wingReach * 0.62, wingDrop + 6, -20, 12, -2, 5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.ellipse(2, 2, 26, 15, -0.08, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = wingColor;
+  ctx.beginPath();
+  ctx.moveTo(2, -4);
+  ctx.bezierCurveTo(18, wingLift - 8, 34 + wingReach * 0.44, wingLift + 3, 38 + wingReach * 0.34, wingDrop + 4);
+  ctx.bezierCurveTo(24, wingDrop + 10, 10, 13, 0, 5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.ellipse(24, -4, 12, 10, 0.18, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = diveActive ? "#ff7892" : "#1f2e3a";
+  ctx.beginPath();
+  ctx.moveTo(35, -5);
+  ctx.lineTo(47, -1);
+  ctx.lineTo(35, 3);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.shadowColor = diveActive ? "rgba(255, 120, 146, 0.9)" : "rgba(135, 225, 255, 0.9)";
+  ctx.shadowBlur = diveActive ? 12 : 8;
+  ctx.fillStyle = eyeColor;
+  ctx.beginPath();
+  ctx.arc(28, -7, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.strokeStyle = diveActive ? "rgba(255, 120, 146, 0.58)" : "rgba(135, 225, 255, 0.42)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-2, 0);
+  ctx.quadraticCurveTo(10, -8, 24, -4);
+  ctx.stroke();
+
+  if (diveActive) {
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = "rgba(135, 225, 255, 0.36)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-28, 9);
+    ctx.lineTo(-54, 16);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  if (crow.hp < crow.maxHp && crow.hp > 0) {
+    ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+    ctx.fillRect(crow.x + 5, crow.y - 10, crow.width - 10, 4);
+    ctx.fillStyle = "#87e1ff";
+    ctx.fillRect(crow.x + 5, crow.y - 10, (crow.width - 10) * (crow.hp / crow.maxHp), 4);
+  }
+}
+
+function drawHostileDrones(ctx, run) {
+  (run.hostileDrones || []).forEach((drone) => {
+    if (isEntityDisabled(drone) || drone.dead) {
+      return;
+    }
+    if (drone.visualKind === "crow") {
+      drawHostileCrow(ctx, run, drone);
+      return;
+    }
+
+    const cx = drone.x + drone.width * 0.5;
+    const cy = drone.y + drone.height * 0.5;
+    const pulse = 0.5 + Math.sin((run.time ?? 0) * 8 + drone.bobSeed) * 0.5;
+    const bodyColor = drone.hitFlash > 0 ? "#f8fbfd" : drone.active ? "#17283a" : "#243646";
+    const glowColor = drone.active ? "rgba(135, 225, 255, 0.72)" : "rgba(147, 234, 255, 0.36)";
+
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = `rgba(135, 225, 255, ${0.12 + pulse * 0.06})`;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 4, drone.width * 0.72, drone.height * 0.72, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(drone.facing === -1 ? -1 : 1, 1);
+
+    ctx.fillStyle = "rgba(5, 12, 20, 0.5)";
+    ctx.beginPath();
+    ctx.ellipse(0, 10, drone.width * 0.44, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = bodyColor;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-drone.width * 0.38, -4);
+    ctx.lineTo(-drone.width * 0.2, -drone.height * 0.42);
+    ctx.lineTo(drone.width * 0.32, -drone.height * 0.34);
+    ctx.lineTo(drone.width * 0.48, 0);
+    ctx.lineTo(drone.width * 0.24, drone.height * 0.34);
+    ctx.lineTo(-drone.width * 0.34, drone.height * 0.28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#87e1ff";
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = drone.active ? 14 : 8;
+    ctx.beginPath();
+    ctx.ellipse(drone.width * 0.2, -1, 10, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(135, 225, 255, 0.86)";
+    ctx.fillRect(-drone.width * 0.18, -drone.height * 0.2, 18, 4);
+    ctx.fillStyle = `rgba(135, 225, 255, ${0.35 + pulse * 0.3})`;
+    ctx.beginPath();
+    ctx.moveTo(-drone.width * 0.44, 0);
+    ctx.lineTo(-drone.width * 0.64, -8);
+    ctx.lineTo(-drone.width * 0.64, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    if (drone.hp < drone.maxHp && drone.hp > 0) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+      ctx.fillRect(drone.x, drone.y - 10, drone.width, 4);
+      ctx.fillStyle = "#87e1ff";
+      ctx.fillRect(drone.x, drone.y - 10, drone.width * (drone.hp / drone.maxHp), 4);
+    }
+  });
+}
+
+function drawDroneTelegraphs(ctx, run) {
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.lineCap = "round";
+  (run.hostileDrones || []).forEach((drone) => {
+    if (isEntityDisabled(drone) || drone.dead || !(drone.aimTimer > 0)) {
+      return;
+    }
+
+    const duration = Math.max(0.001, drone.aimDuration || drone.telegraphDuration || 0.58);
+    const charge = clamp(1 - drone.aimTimer / duration, 0, 1);
+    const flicker = 0.7 + Math.sin((run.time ?? 0) * 48) * 0.18;
+    const startX = drone.aimStartX;
+    const startY = drone.aimStartY;
+    const endX = drone.aimEndX;
+    const endY = drone.aimEndY;
+
+    ctx.setLineDash([14, 10]);
+    ctx.lineDashOffset = -(run.time ?? 0) * 160;
+    ctx.strokeStyle = `rgba(255, 105, 142, ${(0.18 + charge * 0.48) * flicker})`;
+    ctx.lineWidth = 2 + charge * 4;
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.strokeStyle = `rgba(135, 225, 255, ${0.24 + charge * 0.48})`;
+    ctx.lineWidth = 1.2 + charge * 1.8;
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.12 + charge * 0.34})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(endX, endY, 10 + charge * 10, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawEnemyShots(ctx, run) {
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  (run.enemyShots || []).forEach((shot) => {
+    if (shot.type === "beam") {
+      const duration = Math.max(0.001, shot.duration || shot.life || 0.12);
+      const lifeRatio = clamp(shot.life / duration, 0, 1);
+      const coreAlpha = 0.45 + lifeRatio * 0.5;
+
+      ctx.lineCap = "round";
+      ctx.shadowColor = "rgba(135, 225, 255, 0.82)";
+      ctx.shadowBlur = 22;
+      ctx.strokeStyle = `rgba(38, 191, 255, ${0.18 + lifeRatio * 0.3})`;
+      ctx.lineWidth = 16 * lifeRatio + 8;
+      ctx.beginPath();
+      ctx.moveTo(shot.startX, shot.startY);
+      ctx.lineTo(shot.endX, shot.endY);
+      ctx.stroke();
+
+      ctx.shadowBlur = 8;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${coreAlpha})`;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(shot.startX, shot.startY);
+      ctx.lineTo(shot.endX, shot.endY);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      return;
+    }
+
+    const speed = Math.max(1, Math.hypot(shot.vx, shot.vy));
+    const dirX = shot.vx / speed;
+    const dirY = shot.vy / speed;
+    ctx.strokeStyle = "rgba(135, 225, 255, 0.52)";
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(shot.x - dirX * 24, shot.y - dirY * 24);
+    ctx.lineTo(shot.x, shot.y);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255, 159, 180, 0.94)";
+    ctx.shadowColor = "rgba(135, 225, 255, 0.8)";
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
 }
 
 function getPlayerPose(player) {
@@ -1300,14 +2400,7 @@ function drawPlayerFrame(ctx, frame, player, options = {}) {
   }
 
   if (fillTint) {
-    ctx.globalCompositeOperation = "source-atop";
-    ctx.fillStyle = fillTint;
-    ctx.fillRect(
-      -frame.drawWidth * frame.anchorX,
-      -frame.drawHeight * frame.footAnchorY,
-      frame.drawWidth,
-      frame.drawHeight
-    );
+    drawSpriteTint(ctx, frame, fillTint);
   }
 
   ctx.restore();
@@ -1349,6 +2442,153 @@ function drawAfterimages(ctx, run, data) {
   });
   ctx.restore();
   ctx.globalAlpha = 1;
+}
+
+function getRecoilFocusTrailPoint(image) {
+  return {
+    x: image.x + image.width * 0.5,
+    y: image.y + image.height * 0.48,
+  };
+}
+
+function drawRecoilFocusTrailPath(ctx, run) {
+  const images = run.recoilFocusAfterimages || [];
+  if (images.length < 2) {
+    return;
+  }
+
+  const points = images.map((image) => getRecoilFocusTrailPoint(image));
+  points.push({
+    x: run.player.x + run.player.width * 0.5,
+    y: run.player.y + run.player.height * 0.48,
+  });
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  const focusBlend = Math.max(0.25, run.player.recoilFocusBlend ?? 0);
+  ctx.strokeStyle = `rgba(72, 132, 255, ${0.24 * focusBlend})`;
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    const controlX = (previous.x + point.x) * 0.5;
+    const controlY = (previous.y + point.y) * 0.5;
+    ctx.quadraticCurveTo(previous.x, previous.y, controlX, controlY);
+  }
+  const last = points[points.length - 1];
+  ctx.lineTo(last.x, last.y);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(135, 225, 255, ${0.2 * focusBlend})`;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([18, 12]);
+  ctx.beginPath();
+  ctx.moveTo(points[0].x + 6, points[0].y - 4);
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    const controlX = (previous.x + point.x) * 0.5 + 6;
+    const controlY = (previous.y + point.y) * 0.5 - 4;
+    ctx.quadraticCurveTo(previous.x + 6, previous.y - 4, controlX, controlY);
+  }
+  ctx.lineTo(last.x + 6, last.y - 4);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawRecoilFocusAfterimages(ctx, run, data) {
+  const images = run.recoilFocusAfterimages || [];
+  if (!images.length) {
+    return;
+  }
+
+  drawRecoilFocusTrailPath(ctx, run);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.filter = "brightness(1.14) saturate(1.85)";
+  images.forEach((image, index) => {
+    const duration = Math.max(0.001, image.duration ?? 0.44);
+    const lifeRatio = clamp(image.life / duration, 0, 1);
+    if (lifeRatio <= 0) {
+      return;
+    }
+
+    const ghostPlayer = {
+      ...image,
+      recoilFocusActive: image.recoilFocusActive || image.recoilFocusBlend > 0.12,
+    };
+    const pose = getPlayerPose(ghostPlayer);
+    const frame = getPlayerSpriteFrame(ghostPlayer, data, pose, image.time ?? run.time ?? 0);
+    if (!frame) {
+      return;
+    }
+
+    const color = index % 2 === 0
+      ? "rgba(72, 132, 255, 0.78)"
+      : "rgba(135, 225, 255, 0.72)";
+    const alpha = (0.08 + lifeRatio * 0.23) * Math.max(0.35, image.recoilFocusBlend ?? run.player.recoilFocusBlend ?? 0);
+    const drift = (1 - lifeRatio) * 5;
+    const shiftedFrame = {
+      ...frame,
+      footX: frame.footX + (index % 2 === 0 ? drift : -drift),
+      footY: frame.footY - drift * 0.35,
+    };
+
+    drawPlayerFrame(ctx, shiftedFrame, ghostPlayer, {
+      alpha,
+      fillTint: "rgba(58, 128, 255, 0.56)",
+      glowColor: color,
+      glowBlur: 24 * lifeRatio,
+    });
+
+    if (lifeRatio > 0.32) {
+      const chromaFrame = {
+        ...shiftedFrame,
+        footX: shiftedFrame.footX + (index % 2 === 0 ? 3 : -3),
+      };
+      drawPlayerFrame(ctx, chromaFrame, ghostPlayer, {
+        alpha: alpha * 0.32,
+        fillTint: "rgba(135, 225, 255, 0.42)",
+        glowColor: "rgba(135, 225, 255, 0.58)",
+        glowBlur: 14,
+      });
+    }
+  });
+  ctx.restore();
+}
+
+function drawRecoilFocusMapDim(ctx, run, data) {
+  const blend = clamp(run.player.recoilFocusBlend ?? 0, 0, 1);
+  if (blend <= 0.02) {
+    return;
+  }
+
+  const cameraZoom = getRunCameraZoom(run, data);
+  const viewportX = run.cameraX;
+  const viewportY = run.cameraY;
+  const viewportWidth = SCREEN_WIDTH / cameraZoom;
+  const viewportHeight = SCREEN_HEIGHT / cameraZoom;
+  const playerX = run.player.x + run.player.width * 0.5;
+  const playerY = run.player.y + run.player.height * 0.48;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(1, 6, 18, ${0.34 * blend})`;
+  ctx.fillRect(viewportX, viewportY, viewportWidth, viewportHeight);
+
+  ctx.globalCompositeOperation = "screen";
+  const glow = ctx.createRadialGradient(playerX, playerY, 18, playerX, playerY, 210);
+  glow.addColorStop(0, `rgba(72, 132, 255, ${0.14 * blend})`);
+  glow.addColorStop(0.42, `rgba(135, 225, 255, ${0.055 * blend})`);
+  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(viewportX, viewportY, viewportWidth, viewportHeight);
+  ctx.restore();
 }
 
 function drawPlayerHalo(ctx, player) {
@@ -1623,22 +2863,22 @@ function drawRecoilFocusOverlay(ctx, run, data) {
 
   ctx.save();
 
-  ctx.fillStyle = `rgba(5, 10, 8, ${0.08 * blend})`;
+  ctx.fillStyle = `rgba(3, 8, 18, ${0.025 * blend})`;
   ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   ctx.globalCompositeOperation = "screen";
   const pulse = 0.5 + Math.sin(effectTime * 18) * 0.5;
-  const edgeAlpha = (0.09 + pulse * 0.05) * blend;
+  const edgeAlpha = (0.1 + pulse * 0.05) * blend;
   const leftEdge = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.38, 0);
-  leftEdge.addColorStop(0, `rgba(231, 244, 126, ${edgeAlpha})`);
-  leftEdge.addColorStop(0.48, `rgba(147, 234, 255, ${edgeAlpha * 0.34})`);
+  leftEdge.addColorStop(0, `rgba(72, 132, 255, ${edgeAlpha})`);
+  leftEdge.addColorStop(0.48, `rgba(135, 225, 255, ${edgeAlpha * 0.42})`);
   leftEdge.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = leftEdge;
   ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   const rightEdge = ctx.createLinearGradient(SCREEN_WIDTH, 0, SCREEN_WIDTH * 0.62, 0);
-  rightEdge.addColorStop(0, `rgba(147, 234, 255, ${edgeAlpha * 0.88})`);
-  rightEdge.addColorStop(0.54, `rgba(231, 244, 126, ${edgeAlpha * 0.3})`);
+  rightEdge.addColorStop(0, `rgba(135, 225, 255, ${edgeAlpha * 0.88})`);
+  rightEdge.addColorStop(0.54, `rgba(72, 132, 255, ${edgeAlpha * 0.36})`);
   rightEdge.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = rightEdge;
   ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -1652,9 +2892,9 @@ function drawRecoilFocusOverlay(ctx, run, data) {
     playerY,
     auraRadius,
   );
-  aura.addColorStop(0, `rgba(246, 255, 166, ${0.24 * blend})`);
-  aura.addColorStop(0.35, `rgba(231, 244, 126, ${0.13 * blend})`);
-  aura.addColorStop(0.74, `rgba(147, 234, 255, ${0.055 * blend})`);
+  aura.addColorStop(0, `rgba(175, 234, 255, ${0.22 * blend})`);
+  aura.addColorStop(0.35, `rgba(72, 132, 255, ${0.12 * blend})`);
+  aura.addColorStop(0.74, `rgba(135, 225, 255, ${0.055 * blend})`);
   aura.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = aura;
   ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -1662,7 +2902,7 @@ function drawRecoilFocusOverlay(ctx, run, data) {
   const facingFallback = Number.isFinite(run.player.facing) ? -run.player.facing : -1;
   const ghostDirX = aim?.recoilDirX ?? run.player.recoilDirX ?? facingFallback;
   const ghostDirY = aim?.recoilDirY ?? run.player.recoilDirY ?? 0;
-  const ghostColors = ["246, 255, 166", "231, 244, 126", "147, 234, 255"];
+  const ghostColors = ["175, 234, 255", "72, 132, 255", "135, 225, 255"];
   ctx.lineCap = "round";
   for (let index = 0; index < 3; index += 1) {
     const offset = (index + 1) * 18 * cameraZoom;
@@ -1684,12 +2924,12 @@ function drawRecoilFocusOverlay(ctx, run, data) {
   }
 
   const scanOffset = (effectTime * 520) % 22;
-  ctx.fillStyle = `rgba(246, 255, 166, ${0.026 * blend})`;
+  ctx.fillStyle = `rgba(135, 225, 255, ${0.028 * blend})`;
   for (let y = -scanOffset; y < SCREEN_HEIGHT; y += 22) {
     ctx.fillRect(0, y, SCREEN_WIDTH, 1);
   }
 
-  ctx.strokeStyle = `rgba(231, 244, 126, ${0.1 * blend})`;
+  ctx.strokeStyle = `rgba(72, 132, 255, ${0.12 * blend})`;
   ctx.lineWidth = 2;
   for (let index = 0; index < 4; index += 1) {
     const y = ((effectTime * 180 + index * 173) % (SCREEN_HEIGHT + 80)) - 40;
@@ -2315,6 +3555,7 @@ function renderExpedition(ctx, state, data) {
   drawGate(ctx, data, theme);
   drawBraceWalls(ctx, data, theme);
   drawProps(ctx, data, state.pulse, theme);
+  drawLootCrates(ctx, run, theme);
 
   drawEntity(ctx, run.encounters.guard, {
     body: "#86a9c7",
@@ -2342,7 +3583,12 @@ function renderExpedition(ctx, state, data) {
     });
   });
 
+  drawDroneTelegraphs(ctx, run);
+  drawHostileDrones(ctx, run);
+  drawEnemyShots(ctx, run);
+  drawRecoilFocusMapDim(ctx, run, data);
   drawAfterimages(ctx, run, data);
+  drawRecoilFocusAfterimages(ctx, run, data);
   drawPlayer(ctx, run, data);
   drawRecoilAimWorld(ctx, run);
   drawAttackFx(ctx, run);
@@ -2362,6 +3608,7 @@ function renderExpedition(ctx, state, data) {
   ctx.restore();
 
   drawHudV3(ctx, state, data);
+  drawLootOverlayV2(ctx, state, data, theme);
   drawDebugCameraOverlay(ctx, state, data);
 }
 
@@ -2945,6 +4192,217 @@ function drawStatusBarsV3(ctx, run, data, theme, layout) {
   });
 }
 
+function getEmotionPortraitIndex(run, data) {
+  const player = run.player;
+  const hpRatio = clamp(run.hp / (data.player.maxHp || 100), 0, 1);
+
+  if (player.invulnTimer > 0) {
+    return 6;
+  }
+  if (hpRatio <= 0.24) {
+    return 6;
+  }
+  if (hpRatio <= 0.5) {
+    return 4;
+  }
+  if (hpRatio <= 0.75) {
+    return 1;
+  }
+  return 0;
+}
+
+function getCharacterHudStatus(run) {
+  const player = run.player;
+  const hpRatio = run.hp / 100;
+
+  if (player.invulnTimer > 0 || hpRatio <= 0.22) {
+    return { label: "LOW HP", color: "#ff9fb4" };
+  }
+  if (player.recoilShotActive || player.recoilSpinTimer > 0) {
+    return { label: "RECOIL", color: "#87e1ff" };
+  }
+  if (player.recoilFocusActive || (player.recoilFocusBlend ?? 0) > 0.18) {
+    return { label: "FOCUS", color: "#87e1ff" };
+  }
+  if (player.hoverActive && !player.onGround) {
+    return { label: "HOVER", color: "#93eaff" };
+  }
+  if (player.movementState === MOVEMENT_STATES.SLIDE) {
+    return { label: "SLIDE", color: "#e7f47e" };
+  }
+  if (player.movementState === MOVEMENT_STATES.DASH || player.sprintActive) {
+    return { label: "SPEED", color: "#e7f47e" };
+  }
+  if (player.recoilShotCooldownTimer > 0) {
+    return { label: "RELOAD", color: "#d5e7ef" };
+  }
+  return { label: "READY", color: "#f5f8fb" };
+}
+
+function drawMeterBar(ctx, theme, x, y, width, height, value, color, label) {
+  const safeValue = Math.max(0, Math.min(1, value));
+  ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+  ctx.fillRect(x, y, width, height);
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, width * safeValue, height);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, height);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "700 10px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x, y - 6);
+}
+
+function drawEmotionSheetPortrait(ctx, data, emotionIndex, x, y, size) {
+  const assetKey = data.ui?.emotionPortraitSheetAssetKey;
+  const src = data.art?.[assetKey]?.src;
+  const image = getImageAsset(src);
+  const sheet = data.ui?.emotionPortraitSheet || {};
+  const columns = Math.max(1, Math.floor(sheet.columns ?? 3));
+  const rows = Math.max(1, Math.floor(sheet.rows ?? 3));
+
+  ctx.save();
+  beveledPath(ctx, x, y, size, size, 16);
+  ctx.clip();
+
+  const gradient = ctx.createLinearGradient(x, y, x, y + size);
+  gradient.addColorStop(0, "rgba(192, 229, 250, 0.96)");
+  gradient.addColorStop(1, "rgba(27, 48, 66, 0.96)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, size, size);
+
+  if (image && image.complete && image.naturalWidth) {
+    const index = Math.max(0, Math.min(columns * rows - 1, emotionIndex));
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const cellWidth = image.naturalWidth / columns;
+    const cellHeight = image.naturalHeight / rows;
+    const inset = Math.max(2, Math.min(cellWidth, cellHeight) * 0.012);
+    ctx.drawImage(
+      image,
+      column * cellWidth + inset,
+      row * cellHeight + inset,
+      cellWidth - inset * 2,
+      cellHeight - inset * 2,
+      x,
+      y,
+      size,
+      size
+    );
+  }
+
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.82)";
+  ctx.lineWidth = 3;
+  beveledPath(ctx, x, y, size, size, 16);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(135, 225, 255, 0.72)";
+  ctx.lineWidth = 2;
+  beveledPath(ctx, x - 5, y - 5, size + 10, size + 10, 18);
+  ctx.stroke();
+}
+
+function drawPortraitHpVeil(ctx, hpRatio, x, y, size, hitFlash) {
+  const safeHp = clamp(hpRatio, 0, 1);
+  const missingHeight = size * (1 - safeHp);
+  const energyHeight = size * safeHp;
+  const danger = safeHp <= 0.3;
+  const energyColor = danger ? "255, 116, 154" : "135, 225, 255";
+
+  ctx.save();
+  beveledPath(ctx, x, y, size, size, 16);
+  ctx.clip();
+
+  if (missingHeight > 0.5) {
+    const damageGradient = ctx.createLinearGradient(x, y, x, y + missingHeight);
+    damageGradient.addColorStop(0, "rgba(2, 8, 14, 0.68)");
+    damageGradient.addColorStop(1, "rgba(2, 8, 14, 0.18)");
+    ctx.fillStyle = damageGradient;
+    ctx.fillRect(x, y, size, missingHeight);
+  }
+
+  if (energyHeight > 0.5) {
+    const energyTop = y + size - energyHeight;
+    const energyGradient = ctx.createLinearGradient(x, energyTop, x, y + size);
+    energyGradient.addColorStop(0, `rgba(${energyColor}, 0.02)`);
+    energyGradient.addColorStop(1, `rgba(${energyColor}, ${danger ? 0.28 : 0.22})`);
+    ctx.fillStyle = energyGradient;
+    ctx.fillRect(x, energyTop, size, energyHeight);
+
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = `rgba(${energyColor}, ${danger ? 0.72 : 0.54})`;
+    ctx.lineWidth = danger ? 2 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + 8, energyTop);
+    ctx.lineTo(x + size - 8, energyTop);
+    ctx.stroke();
+  }
+
+  if (hitFlash > 0) {
+    const flash = clamp(hitFlash / 0.85, 0, 1);
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = `rgba(255, 116, 154, ${0.08 + flash * 0.18})`;
+    ctx.fillRect(x, y, size, size);
+  }
+
+  ctx.restore();
+
+  ctx.strokeStyle = danger
+    ? `rgba(255, 116, 154, ${0.62 + Math.sin(performance.now() * 0.012) * 0.14})`
+    : "rgba(135, 225, 255, 0.72)";
+  ctx.lineWidth = danger ? 3 : 2;
+  beveledPath(ctx, x - 5, y - 5, size + 10, size + 10, 18);
+  ctx.stroke();
+}
+
+function drawShotCores(ctx, run, data, x, y) {
+  const maxCharges = Math.max(1, Math.floor(data.player.movement.recoilShotCharges ?? 1));
+  const currentCharges = Math.max(0, Math.min(maxCharges, run.player.recoilShotCharges ?? maxCharges));
+  const cooldownMax = Math.max(0.001, (data.player.movement.recoilShotCooldownMs ?? 180) / 1000);
+  const cooldownProgress = run.player.recoilShotCooldownTimer > 0
+    ? 1 - run.player.recoilShotCooldownTimer / cooldownMax
+    : 1;
+
+  for (let index = 0; index < maxCharges; index += 1) {
+    const cx = x + index * 22;
+    ctx.fillStyle = index < currentCharges ? "rgba(135, 225, 255, 0.95)" : "rgba(255, 255, 255, 0.1)";
+    ctx.beginPath();
+    ctx.arc(cx, y, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    if (index >= currentCharges && index === 0 && cooldownProgress < 1) {
+      ctx.strokeStyle = "rgba(135, 225, 255, 0.82)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, y, 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, cooldownProgress));
+      ctx.stroke();
+    }
+  }
+}
+
+function drawCharacterStatusHudV3(ctx, state, data) {
+  const run = state.run;
+  const x = 24;
+  const y = 22;
+  const portraitSize = 94;
+  const hpRatio = clamp(run.hp / (data.player.maxHp || 100), 0, 1);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(4, 10, 16, 0.3)";
+  beveledPath(ctx, x - 9, y - 9, portraitSize + 18, portraitSize + 18, 20);
+  ctx.fill();
+  ctx.restore();
+
+  drawEmotionSheetPortrait(ctx, data, getEmotionPortraitIndex(run, data), x, y, portraitSize);
+  drawPortraitHpVeil(ctx, hpRatio, x, y, portraitSize, run.player.invulnTimer ?? 0);
+}
+
 
 function drawActionClusterV3(ctx, theme, layout) {
   const labels = [
@@ -2993,15 +4451,10 @@ function drawStatusPortraitV3(ctx, data, layout) {
 }
 
 function drawHudV3(ctx, state, data) {
-  const theme = getUiTheme(data);
   if (state.scene !== SCENES.EXPEDITION || !state.run) {
     return;
   }
-
-  const layout = getUiLayoutV3(data);
-  drawStatusBarsV3(ctx, state.run, data, theme, layout);
-  drawSceneToastV3(ctx, state, theme, layout);
-  drawStatusPortraitV3(ctx, data, layout);
+  drawCharacterStatusHudV3(ctx, state, data);
 }
 
 function drawResultsSceneV3(ctx, state, data, isFailure = false) {

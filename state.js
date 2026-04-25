@@ -97,6 +97,97 @@ function createThreatState(definition) {
   };
 }
 
+function createHostileDroneState(definition) {
+  return {
+    ...deepClone(definition),
+    hp: definition.maxHp,
+    vx: 0,
+    vy: 0,
+    active: false,
+    dead: Boolean(definition.disabled),
+    facing: -1,
+    patrolDirection: 1,
+    attackCooldown: definition.initialCooldown ?? 0.8,
+    recoverTimer: 0,
+    diveTimer: 0,
+    diveDuration: 0,
+    diveElapsed: 0,
+    diveStartX: definition.x,
+    diveStartY: definition.y,
+    diveEndX: definition.x,
+    diveEndY: definition.y,
+    diveHasHit: false,
+    aimTimer: 0,
+    aimDuration: 0,
+    aimDirX: -1,
+    aimDirY: 0,
+    aimStartX: definition.x + definition.width * 0.5,
+    aimStartY: definition.y + definition.height * 0.5,
+    aimEndX: definition.x,
+    aimEndY: definition.y,
+    aimLength: definition.beamLength ?? definition.fireRange ?? 620,
+    hitFlash: 0,
+    bobSeed: definition.bobSeed ?? Math.random() * Math.PI * 2,
+  };
+}
+
+function createLootItemState(definition, index) {
+  const quantity = Math.max(1, Math.floor(Number(definition.quantity ?? 1)));
+  const value = Math.max(0, Number(definition.value ?? definition.materials ?? 0));
+  const lootTime = Math.max(0.1, Number(definition.lootTime ?? 0.6));
+  const weight = Math.max(0.1, Number(definition.weight ?? 1));
+  const slotSize = Math.max(1, Math.floor(Number(definition.slotSize ?? 1)));
+  const revealDelay = Number(definition.revealDelay);
+
+  return {
+    ...deepClone(definition),
+    id: definition.id || `loot-item-${index + 1}`,
+    name: definition.name || "Unknown item",
+    rarity: definition.rarity || "common",
+    quantity,
+    value,
+    lootTime,
+    weight,
+    slotSize,
+    revealDelay: Number.isFinite(revealDelay) ? Math.max(0, revealDelay) : null,
+    lootProgress: 0,
+    transferProgress: 0,
+    revealed: Boolean(definition.revealed),
+    revealFlash: 0,
+    blockedTimer: 0,
+    looted: false,
+  };
+}
+
+function createLootCrateState(definition, data, index) {
+  const tableItems = Array.isArray(definition.items)
+    ? definition.items
+    : data.lootTables?.[definition.lootTable] || [];
+  const items = tableItems.map((item, itemIndex) => createLootItemState(item, itemIndex));
+  const searchTime = Math.max(0.2, Number(definition.searchTime ?? 0.75 + items.length * 0.18));
+  items.forEach((item, itemIndex) => {
+    if (item.revealDelay === null) {
+      item.revealDelay = Math.min(searchTime * 0.92, (itemIndex + 1) * (searchTime / (items.length + 1)));
+    }
+  });
+
+  return {
+    ...deepClone(definition),
+    id: definition.id || `loot-crate-${index + 1}`,
+    width: Math.max(24, Number(definition.width ?? 72)),
+    height: Math.max(24, Number(definition.height ?? 48)),
+    label: definition.label || "Supply cache",
+    prompt: definition.prompt || "E: Open cache",
+    opened: false,
+    searchTime,
+    searchProgress: 0,
+    scanComplete: items.length === 0,
+    searched: items.length === 0,
+    rareSignalTimer: 0,
+    items,
+  };
+}
+
 export function loadMetaState() {
   try {
     const raw = window.localStorage.getItem(SAVE_KEY);
@@ -192,6 +283,7 @@ export function createRunState(data, meta) {
     wallRunActive: false,
     wallRunDirection: 0,
     wallRunSpeed: 0,
+    standingOnDynamicId: null,
     wallJumpLockTimer: 0,
     wallJumpLockDirection: 0,
     crouchRequested: false,
@@ -251,6 +343,8 @@ export function createRunState(data, meta) {
     sanity: data.player.startingSanity,
     battery: data.player.maxBattery,
     materials: 0,
+    lootWeight: 0,
+    lootCapacity: Math.max(1, Number(data.player.lootCapacity ?? 16)),
     time: 0,
     timePhase: "day",
     nightActive: false,
@@ -259,14 +353,28 @@ export function createRunState(data, meta) {
       ...deepClone(item),
       used: false,
     })),
+    lootCrates: (data.lootCrates || []).map((crate, index) => createLootCrateState(crate, data, index)),
+    loot: {
+      active: false,
+      crateId: null,
+      selectedIndex: 0,
+      holdItemId: null,
+      holdProgress: 0,
+      rareSignalTimer: 0,
+      lastRarity: null,
+    },
+    lootInventory: [],
     inventory: {
       badge: false,
+      items: [],
     },
     encounters: {
       guard: createGuardState(data.encounters.find((entry) => entry.id === "guard")),
       ritualist: createRitualistState(data.encounters.find((entry) => entry.id === "ritualist")),
     },
     threats: data.nightThreats.map((threat) => createThreatState(threat)),
+    hostileDrones: (data.hostileDrones || []).map((drone) => createHostileDroneState(drone)),
+    enemyShots: [],
     clueLog: data.world.startClueLog?.length
       ? [...data.world.startClueLog]
       : [
@@ -281,6 +389,9 @@ export function createRunState(data, meta) {
     recoilFx: [],
     particles: [],
     afterimages: [],
+    recoilFocusAfterimages: [],
+    recoilFocusAfterimageTimer: 0,
+    recoilFocusAfterimageSerial: 0,
     cameraX: initialCameraX,
     cameraY: initialCameraY,
     cameraZoom,

@@ -275,6 +275,16 @@ canvas {
   scrollbar-width: thin;
 }
 
+.movement-tuning-section {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  padding: 8px 0 2px;
+  color: rgba(147, 234, 255, 0.9);
+  font: 800 11px "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .movement-tuning-grid::-webkit-scrollbar {
   width: 8px;
 }
@@ -347,6 +357,10 @@ canvas {
 .scene-action-button[hidden],
 .touch-controls[hidden] {
   display: none;
+}
+
+#touchControls {
+  display: none !important;
 }
 
 .scene-action-button:hover {

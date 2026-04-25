@@ -1,9 +1,9 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-recoil-22";
+import { GAME_DATA } from "./level-data.js?v=20260424-recoil-42";
 import {
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-recoil-22";
+} from "./level-store.js?v=20260424-recoil-42";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -11,10 +11,10 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260424-recoil-22";
-import { renderGame } from "./render.js?v=20260424-recoil-22";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-22";
-import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-22";
+} from "./movement-tuning.js?v=20260424-recoil-42";
+import { renderGame } from "./render.js?v=20260424-recoil-42";
+import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-42";
+import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-42";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -29,6 +29,15 @@ const movementTuningResetButton = document.getElementById("movementTuningResetBu
 const sceneActionButton = document.getElementById("sceneActionButton");
 const touchControls = document.getElementById("touchControls");
 const touchButtons = Array.from(document.querySelectorAll(".touch-button"));
+const CROW_TUNING_FIELDS = [
+  { key: "width", label: "Crow Width", min: 36, max: 320, step: 1 },
+  { key: "height", label: "Crow Height", min: 24, max: 220, step: 1 },
+  { key: "fireCooldown", label: "Crow Attack Cooldown", min: 0.25, max: 14, step: 0.05 },
+  { key: "initialCooldown", label: "Crow First Attack", min: 0, max: 14, step: 0.05 },
+  { key: "diveSpeed", label: "Crow Dive Speed", min: 300, max: 3200, step: 10 },
+  { key: "backCatchPaddingX", label: "Crow Back Width Bonus", min: 0, max: 120, step: 1 },
+  { key: "backCatchForgivenessY", label: "Crow Back Snap Height", min: 0, max: 72, step: 1 },
+];
 
 const dom = {
   canvas,
@@ -240,7 +249,7 @@ function renderMovementTuningFields(currentDom, movement) {
     return decimals > 0 ? safeValue.toFixed(decimals) : String(Math.round(safeValue));
   };
 
-  currentDom.movementTuningFields.innerHTML = SPRINT_TUNING_FIELDS.map(({ key, label, min, max, step }) => `
+  const movementFields = SPRINT_TUNING_FIELDS.map(({ key, label, min, max, step }) => `
     <label class="movement-tuning-field">
       <span>${label}</span>
       <input
@@ -253,6 +262,30 @@ function renderMovementTuningFields(currentDom, movement) {
       >
     </label>
   `).join("");
+
+  const crow = runtimeData.hostileDrones?.find((entry) => entry.visualKind === "crow") ?? runtimeData.hostileDrones?.[0];
+  const crowFields = crow
+    ? CROW_TUNING_FIELDS.map(({ key, label, min, max, step }) => `
+      <label class="movement-tuning-field">
+        <span>${label}</span>
+        <input
+          type="number"
+          min="${min}"
+          max="${max}"
+          step="${step}"
+          data-crow-field="${key}"
+          value="${formatValue(crow[key], step)}"
+        >
+      </label>
+    `).join("")
+    : "";
+
+  currentDom.movementTuningFields.innerHTML = `
+    <div class="movement-tuning-section">Movement</div>
+    ${movementFields}
+    <div class="movement-tuning-section">Crow</div>
+    ${crowFields}
+  `;
 }
 
 function setMovementTuningPanelOpen(currentDom, isOpen) {
@@ -530,9 +563,9 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.movementTuningSaveButton?.addEventListener("click", () => {
-    const normalized = saveSprintTuning(extractSprintTuning(data.player.movement), GAME_DATA.player.movement);
-    applySprintTuning(data.player.movement, normalized, GAME_DATA.player.movement);
+    saveRuntimeOverride(data, currentState);
     syncMovementTuningToRun(currentState, data);
+    syncCrowTuningToRun(currentState, data);
     renderMovementTuningFields(currentDom, data.player.movement);
   });
 
@@ -540,6 +573,11 @@ function bindUi(currentDom, currentState, data) {
     clearSprintTuning();
     applySprintTuning(data.player.movement, baseSprintTuning, GAME_DATA.player.movement);
     syncMovementTuningToRun(currentState, data);
+    data.hostileDrones = GAME_DATA.hostileDrones.map((crow) => ({
+      ...crow,
+      patrol: crow.patrol ? { ...crow.patrol } : undefined,
+    }));
+    syncCrowTuningToRun(currentState, data);
     renderMovementTuningFields(currentDom, data.player.movement);
   });
 
@@ -550,15 +588,25 @@ function bindUi(currentDom, currentState, data) {
     }
 
     const field = target.dataset.sprintField;
-    if (!field) {
+    if (field) {
+      const next = applySprintFieldValue(data, field, target.value);
+      if (next === null) {
+        return;
+      }
+      syncMovementTuningToRun(currentState, data);
+      target.value = String(next);
       return;
     }
 
-    const next = applySprintFieldValue(data, field, target.value);
+    const crowField = target.dataset.crowField;
+    if (!crowField) {
+      return;
+    }
+    const next = applyCrowFieldValue(data, crowField, target.value);
     if (next === null) {
       return;
     }
-    syncMovementTuningToRun(currentState, data);
+    syncCrowTuningToRun(currentState, data);
     target.value = String(next);
   });
 
@@ -809,6 +857,74 @@ function syncAimPointerLock(currentDom, currentState) {
     document.exitPointerLock
   ) {
     document.exitPointerLock();
+  }
+}
+
+function getCrowTuningConfig(field) {
+  return CROW_TUNING_FIELDS.find((entry) => entry.key === field) ?? null;
+}
+
+function updateCrowCollisionInsets(crow) {
+  crow.solidInsetX = Math.max(0, Math.round(crow.width * 0.11));
+  crow.solidInsetY = Math.max(0, Math.round(crow.height * 0.15));
+  crow.damageInsetX = Math.max(0, Math.round(crow.width * 0.07));
+  crow.damageInsetY = Math.max(0, Math.round(crow.height * 0.11));
+}
+
+function applyCrowFieldValue(data, field, value) {
+  const config = getCrowTuningConfig(field);
+  if (!config || !Array.isArray(data.hostileDrones)) {
+    return null;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  const stepText = String(config.step);
+  const isIntegerStep = !stepText.includes(".");
+  const clamped = Math.max(config.min, Math.min(config.max, numeric));
+  const next = isIntegerStep ? Math.round(clamped) : Number(clamped.toFixed(stepText.split(".")[1]?.length ?? 0));
+
+  data.hostileDrones
+    .filter((crow) => crow.visualKind === "crow")
+    .forEach((crow) => {
+      crow[field] = next;
+      if (field === "width" || field === "height") {
+        updateCrowCollisionInsets(crow);
+      }
+    });
+
+  return next;
+}
+
+function syncCrowTuningToRun(currentState, data) {
+  const runCrows = currentState.run?.hostileDrones;
+  if (!Array.isArray(runCrows) || !Array.isArray(data.hostileDrones)) {
+    return;
+  }
+
+  for (const source of data.hostileDrones) {
+    const target = runCrows.find((crow) => crow.id === source.id);
+    if (!target) {
+      continue;
+    }
+
+    const centerX = target.x + target.width * 0.5;
+    const centerY = target.y + target.height * 0.5;
+    CROW_TUNING_FIELDS.forEach(({ key }) => {
+      target[key] = source[key];
+    });
+    target.solidInsetX = source.solidInsetX;
+    target.solidInsetY = source.solidInsetY;
+    target.backCatchPaddingX = source.backCatchPaddingX;
+    target.backCatchForgivenessY = source.backCatchForgivenessY;
+    target.damageInsetX = source.damageInsetX;
+    target.damageInsetY = source.damageInsetY;
+    target.x = centerX - target.width * 0.5;
+    target.y = centerY - target.height * 0.5;
+    target.attackCooldown = Math.min(target.attackCooldown ?? 0, target.fireCooldown ?? target.attackCooldown ?? 0);
   }
 }
 

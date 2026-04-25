@@ -90,6 +90,45 @@ const CAMERA_BOOLEAN_FIELDS = [
   ["dashAffectsCamera", false],
   ["braceAffectsCamera", false],
 ];
+const HOSTILE_DRONE_NUMBER_FIELDS = [
+  ["x", 0, null],
+  ["y", 0, null],
+  ["width", 54, 12],
+  ["height", 34, 12],
+  ["maxHp", 2, 1],
+  ["damage", 10, 0],
+  ["diveDamage", 12, 0],
+  ["speed", 170, 0],
+  ["acceleration", 7, 0],
+  ["activationRadius", 720, 0],
+  ["preferredRange", 280, 0],
+  ["hoverOffsetY", 120, -1000],
+  ["fireRange", 620, 0],
+  ["initialCooldown", 0.8, 0],
+  ["fireCooldown", 1.4, 0.1],
+  ["telegraphDuration", 0.58, 0],
+  ["beamLife", 0.12, 0.01],
+  ["beamLength", 860, 0],
+  ["beamRadius", 18, 0],
+  ["diveSpeed", 1380, 0],
+  ["diveMaxDuration", 0.68, 0.01],
+  ["diveRecoverTime", 0.36, 0],
+  ["flapRate", 14, 0],
+  ["flapAmplitude", 18, 0],
+  ["solidInsetX", 8, 0],
+  ["solidInsetY", 7, 0],
+  ["backCatchPaddingX", 0, 0],
+  ["backCatchForgivenessY", 0, 0],
+  ["damageInsetX", 5, 0],
+  ["damageInsetY", 5, 0],
+  ["bobSeed", 0, null],
+];
+const HOSTILE_DRONE_BOOLEAN_FIELDS = [
+  ["diveAttack", true],
+  ["solid", true],
+  ["physicsSolid", true],
+  ["braceTarget", true],
+];
 
 function safeNumber(value, fallback, minimum = null) {
   const next = Number(value);
@@ -205,6 +244,56 @@ function sanitizeBraceWall(wall, index, baseWall = null) {
     width: safeNumber(wall?.width, fallback.width, 12),
     height: safeNumber(wall?.height, fallback.height, 12),
   };
+}
+
+function extractHostileDrone(drone = {}) {
+  const next = {
+    id: drone.id,
+    type: drone.type || "hostileDrone",
+    visualKind: drone.visualKind || "crow",
+  };
+  HOSTILE_DRONE_NUMBER_FIELDS.forEach(([field, fallback, minimum]) => {
+    next[field] = safeNumber(drone[field], fallback, minimum);
+  });
+  HOSTILE_DRONE_BOOLEAN_FIELDS.forEach(([field, fallback]) => {
+    if (typeof drone[field] === "boolean" || typeof drone[field] !== "undefined") {
+      next[field] = safeBoolean(drone[field], fallback);
+    }
+  });
+  next.patrol = {
+    left: safeNumber(drone.patrol?.left, drone.x ?? 0),
+    right: safeNumber(drone.patrol?.right, (drone.x ?? 0) + 240),
+  };
+  return next;
+}
+
+function sanitizeHostileDrone(drone, index, baseDrone = null) {
+  const fallback = baseDrone || {
+    id: `crow-${index + 1}`,
+    type: "hostileDrone",
+    visualKind: "crow",
+    x: 600 + index * 420,
+    y: 620,
+    width: 144,
+    height: 92,
+    patrol: { left: 520 + index * 420, right: 900 + index * 420 },
+  };
+  const next = {
+    id: safeString(drone?.id, fallback.id || `crow-${index + 1}`),
+    type: safeString(drone?.type, fallback.type || "hostileDrone"),
+    visualKind: safeString(drone?.visualKind, fallback.visualKind || "crow"),
+  };
+  HOSTILE_DRONE_NUMBER_FIELDS.forEach(([field, fallbackValue, minimum]) => {
+    next[field] = safeNumber(drone?.[field], fallback[field] ?? fallbackValue, minimum);
+  });
+  HOSTILE_DRONE_BOOLEAN_FIELDS.forEach(([field, fallbackValue]) => {
+    next[field] = safeBoolean(drone?.[field], fallback[field] ?? fallbackValue);
+  });
+  next.patrol = {
+    left: safeNumber(drone?.patrol?.left, fallback.patrol?.left ?? next.x),
+    right: safeNumber(drone?.patrol?.right, fallback.patrol?.right ?? next.x + 240),
+  };
+  return next;
 }
 
 function extractPlayerRender(render = {}) {
@@ -325,6 +414,7 @@ export function extractEditableLevelData(data) {
       width: wall.width,
       height: wall.height,
     })),
+    hostileDrones: (data.hostileDrones || []).map((drone) => extractHostileDrone(drone)),
   };
 }
 
@@ -368,6 +458,9 @@ export function normalizeEditableLevelData(raw, baseData) {
     braceWalls: Array.isArray(source.braceWalls)
       ? source.braceWalls.map((wall, index) => sanitizeBraceWall(wall, index, fallback.braceWalls?.[index]))
       : (fallback.braceWalls || []).map((wall, index) => sanitizeBraceWall(wall, index)),
+    hostileDrones: Array.isArray(source.hostileDrones)
+      ? source.hostileDrones.map((drone, index) => sanitizeHostileDrone(drone, index, fallback.hostileDrones?.[index]))
+      : (fallback.hostileDrones || []).map((drone, index) => sanitizeHostileDrone(drone, index)),
   };
 }
 
@@ -404,6 +497,7 @@ export function mergeLevelData(baseData, override) {
   next.platforms = normalized.platforms;
   next.props = normalized.props;
   next.braceWalls = normalized.braceWalls;
+  next.hostileDrones = normalized.hostileDrones;
 
   return next;
 }
