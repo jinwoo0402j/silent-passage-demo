@@ -1,7 +1,10 @@
 import { deepClone } from "./utils.js";
 
 export const LEVEL_OVERRIDE_KEY = "rulebound-level-override-v2";
+export const LEVEL_OVERRIDES_KEY = "rulebound-level-overrides-v3";
+export const RUN_CONFIG_KEY = "rulebound-run-config-v1";
 export const LEVEL_DATA_VERSION = 2;
+export const LEVEL_OVERRIDES_VERSION = 3;
 
 const DEFAULT_PLATFORM_COLOR = "#4b6075";
 const DEFAULT_SIGN_TEXT = "표지";
@@ -172,6 +175,184 @@ function safeRecord(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? deepClone(value)
     : deepClone(fallback);
+}
+
+function safeId(value, fallback) {
+  const raw = safeString(value, fallback);
+  const normalized = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+function extractEntrance(entrance = {}) {
+  return {
+    id: safeString(entrance.id, "start"),
+    label: safeString(entrance.label, entrance.id || "Start"),
+    x: safeNumber(entrance.x, 0),
+    y: safeNumber(entrance.y, 0),
+    facing: safeNumber(entrance.facing, 1),
+  };
+}
+
+function sanitizeEntrance(entrance, index, fallback = null) {
+  const base = fallback || {
+    id: index === 0 ? "start" : `entrance-${index + 1}`,
+    label: index === 0 ? "Start" : `Entrance ${index + 1}`,
+    x: 0,
+    y: 0,
+    facing: 1,
+  };
+  const source = entrance && typeof entrance === "object" ? entrance : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    facing: Math.sign(safeNumber(source.facing, base.facing)) || 1,
+  };
+}
+
+function extractRouteExit(exit = {}) {
+  return {
+    id: safeString(exit.id, "route-exit"),
+    label: safeString(exit.label, exit.id || "Route Exit"),
+    x: safeNumber(exit.x, 0),
+    y: safeNumber(exit.y, 0),
+    width: safeNumber(exit.width, 96, 24),
+    height: safeNumber(exit.height, 192, 24),
+    prompt: safeString(exit.prompt, "E: 다음 구역"),
+    toLevelId: safeString(exit.toLevelId, ""),
+    toEntranceId: safeString(exit.toEntranceId, "start"),
+  };
+}
+
+function sanitizeRouteExit(exit, index, fallback = null) {
+  const base = fallback || {
+    id: `route-exit-${index + 1}`,
+    label: `Route Exit ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 192,
+    prompt: "E: 다음 구역",
+    toLevelId: "",
+    toEntranceId: "start",
+  };
+  const source = exit && typeof exit === "object" ? exit : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    prompt: safeString(source.prompt, base.prompt),
+    toLevelId: safeString(source.toLevelId, base.toLevelId),
+    toEntranceId: safeString(source.toEntranceId, base.toEntranceId || "start"),
+  };
+}
+
+function createDefaultMapRoom(levelId = "level", label = "") {
+  const roomLabel = safeString(label, levelId || "Room");
+  return {
+    id: "main",
+    label: roomLabel || "Room",
+    x: 0,
+    y: 0,
+    width: 180,
+    height: 82,
+  };
+}
+
+function extractMapRoom(room = {}, index = 0, levelId = "level", label = "") {
+  const fallback = index === 0
+    ? createDefaultMapRoom(levelId, label)
+    : {
+      id: `room-${index + 1}`,
+      label: `Room ${index + 1}`,
+      x: index * 220,
+      y: 0,
+      width: 180,
+      height: 82,
+    };
+  return {
+    id: safeString(room.id, fallback.id),
+    label: safeString(room.label, fallback.label),
+    x: safeNumber(room.x, fallback.x),
+    y: safeNumber(room.y, fallback.y),
+    width: safeNumber(room.width, fallback.width, 24),
+    height: safeNumber(room.height, fallback.height, 24),
+  };
+}
+
+function sanitizeMapRoom(room, index, fallback = null, levelId = "level", label = "") {
+  const base = fallback || extractMapRoom({}, index, levelId, label);
+  const source = room && typeof room === "object" ? room : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+  };
+}
+
+function extractMapConfig(map = null, levelId = "level", label = "") {
+  const rooms = Array.isArray(map?.rooms) && map.rooms.length
+    ? map.rooms.map((room, index) => extractMapRoom(room, index, levelId, label))
+    : [createDefaultMapRoom(levelId, label)];
+  return { rooms };
+}
+
+function sanitizeMapConfig(map, fallback = null, levelId = "level", label = "") {
+  const fallbackRooms = Array.isArray(fallback?.rooms) && fallback.rooms.length
+    ? fallback.rooms
+    : [createDefaultMapRoom(levelId, label)];
+  const sourceRooms = Array.isArray(map?.rooms) && map.rooms.length
+    ? map.rooms
+    : fallbackRooms;
+  const rooms = sourceRooms.map((room, index) => (
+    sanitizeMapRoom(room, index, fallbackRooms[index], levelId, label)
+  ));
+  return {
+    rooms: rooms.length ? rooms : [createDefaultMapRoom(levelId, label)],
+  };
+}
+
+function extractExtractionGate(gate = null) {
+  return gate
+    ? {
+      x: gate.x,
+      y: gate.y,
+      width: gate.width,
+      height: gate.height,
+      prompt: gate.prompt,
+    }
+    : null;
+}
+
+function sanitizeExtractionGate(gate, fallback = null) {
+  if (gate === null) {
+    return null;
+  }
+  const base = fallback || {
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 192,
+    prompt: "E: 추출",
+  };
+  if (!gate && !fallback) {
+    return null;
+  }
+  const source = gate && typeof gate === "object" ? gate : {};
+  return {
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    prompt: safeString(source.prompt, base.prompt),
+  };
 }
 
 function extractPlayerConfig(player = {}) {
@@ -470,6 +651,8 @@ function sanitizeUiLayout(layout, baseLayout) {
 export function extractEditableLevelData(data) {
   return {
     version: LEVEL_DATA_VERSION,
+    levelId: data.currentLevelId || data.levelId || data.id || null,
+    label: data.levelLabel || data.label || null,
     world: {
       mode: data.world.mode,
       width: data.world.width,
@@ -496,21 +679,27 @@ export function extractEditableLevelData(data) {
     ui: {
       layout: extractUiLayout(data.ui?.layout),
     },
-    extractionGate: {
-      x: data.extractionGate.x,
-      y: data.extractionGate.y,
-      width: data.extractionGate.width,
-      height: data.extractionGate.height,
-      prompt: data.extractionGate.prompt,
+    faceOff: {
+      enemyLineCharDelay: data.faceOff?.enemyLineCharDelay,
+      enemyLineHoldDuration: data.faceOff?.enemyLineHoldDuration,
+      choiceSlideDuration: data.faceOff?.choiceSlideDuration,
     },
-    platforms: data.platforms.map((platform) => ({
+    map: extractMapConfig(
+      data.map,
+      data.currentLevelId || data.levelId || data.id || "level",
+      data.levelLabel || data.label || data.currentLevelId || data.levelId || "Room",
+    ),
+    entrances: (data.entrances || []).map((entrance) => extractEntrance(entrance)),
+    routeExits: (data.routeExits || []).map((exit) => extractRouteExit(exit)),
+    extractionGate: extractExtractionGate(data.extractionGate),
+    platforms: (data.platforms || []).map((platform) => ({
       x: platform.x,
       y: platform.y,
       width: platform.width,
       height: platform.height,
       color: platform.color,
     })),
-    props: data.props.map((prop) => (
+    props: (data.props || []).map((prop) => (
       prop.kind === "sign"
         ? { kind: prop.kind, x: prop.x, y: prop.y, text: prop.text }
         : { kind: prop.kind, x: prop.x, y: prop.y }
@@ -534,6 +723,8 @@ export function normalizeEditableLevelData(raw, baseData) {
 
   return {
     version: LEVEL_DATA_VERSION,
+    levelId: safeString(source.levelId, fallback.levelId),
+    label: safeString(source.label, fallback.label),
     world: {
       mode: safeString(source.world?.mode, fallback.world.mode),
       width: safeNumber(source.world?.width, fallback.world.width, 640),
@@ -560,13 +751,26 @@ export function normalizeEditableLevelData(raw, baseData) {
     ui: {
       layout: sanitizeUiLayout(source.ui?.layout, fallback.ui.layout),
     },
-    extractionGate: {
-      x: safeNumber(source.extractionGate?.x, fallback.extractionGate.x),
-      y: safeNumber(source.extractionGate?.y, fallback.extractionGate.y),
-      width: safeNumber(source.extractionGate?.width, fallback.extractionGate.width, 24),
-      height: safeNumber(source.extractionGate?.height, fallback.extractionGate.height, 24),
-      prompt: safeString(source.extractionGate?.prompt, fallback.extractionGate.prompt),
+    faceOff: {
+      enemyLineCharDelay: safeNumber(source.faceOff?.enemyLineCharDelay, fallback.faceOff.enemyLineCharDelay, 0.035),
+      enemyLineHoldDuration: safeNumber(source.faceOff?.enemyLineHoldDuration, fallback.faceOff.enemyLineHoldDuration, 0.35),
+      choiceSlideDuration: safeNumber(source.faceOff?.choiceSlideDuration, fallback.faceOff.choiceSlideDuration, 0.26),
     },
+    map: sanitizeMapConfig(
+      source.map,
+      fallback.map,
+      source.levelId || fallback.levelId || "level",
+      source.label || fallback.label || "Room",
+    ),
+    entrances: Array.isArray(source.entrances) && source.entrances.length
+      ? source.entrances.map((entrance, index) => sanitizeEntrance(entrance, index, fallback.entrances?.[index]))
+      : (fallback.entrances || []).map((entrance, index) => sanitizeEntrance(entrance, index)),
+    routeExits: Array.isArray(source.routeExits)
+      ? source.routeExits.map((exit, index) => sanitizeRouteExit(exit, index, fallback.routeExits?.[index]))
+      : (fallback.routeExits || []).map((exit, index) => sanitizeRouteExit(exit, index)),
+    extractionGate: Object.prototype.hasOwnProperty.call(source, "extractionGate")
+      ? sanitizeExtractionGate(source.extractionGate, fallback.extractionGate)
+      : sanitizeExtractionGate(fallback.extractionGate),
     platforms: Array.isArray(source.platforms) && source.platforms.length
       ? source.platforms.map((platform, index) => sanitizePlatform(platform, index, fallback.platforms[index]))
       : fallback.platforms.map((platform, index) => sanitizePlatform(platform, index)),
@@ -629,10 +833,18 @@ export function mergeLevelData(baseData, override) {
       ...normalized.ui.layout,
     },
   };
-  next.extractionGate = {
-    ...next.extractionGate,
-    ...normalized.extractionGate,
+  next.faceOff = {
+    ...next.faceOff,
+    ...normalized.faceOff,
   };
+  next.currentLevelId = normalized.levelId || next.currentLevelId || next.defaultLevelId || null;
+  next.levelId = next.currentLevelId;
+  next.levelLabel = normalized.label || normalized.levelId || next.levelLabel || null;
+  next.label = next.levelLabel;
+  next.map = normalized.map;
+  next.entrances = normalized.entrances;
+  next.routeExits = normalized.routeExits;
+  next.extractionGate = normalized.extractionGate ? { ...normalized.extractionGate } : null;
   next.platforms = normalized.platforms;
   next.props = normalized.props;
   next.braceWalls = normalized.braceWalls;
@@ -643,7 +855,37 @@ export function mergeLevelData(baseData, override) {
   return next;
 }
 
-export function loadLevelOverride(baseData) {
+function readLevelOverridesPayload() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LEVEL_OVERRIDES_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.levels || typeof parsed.levels !== "object") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeLevelOverridesPayload(payload) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(LEVEL_OVERRIDES_KEY, JSON.stringify({
+    version: LEVEL_OVERRIDES_VERSION,
+    levels: payload?.levels || {},
+  }));
+}
+
+function readLegacyLevelOverride(baseData) {
   if (typeof window === "undefined") {
     return null;
   }
@@ -653,26 +895,322 @@ export function loadLevelOverride(baseData) {
     if (!raw) {
       return null;
     }
-    return normalizeEditableLevelData(JSON.parse(raw), baseData);
+    return normalizeEditableLevelData(JSON.parse(raw), createBaseLevelData(baseData, getDefaultLevelId(baseData)));
   } catch {
     return null;
   }
 }
 
-export function saveLevelOverride(override, baseData) {
-  const normalized = normalizeEditableLevelData(override, baseData);
+export function getDefaultLevelId(baseData) {
+  return baseData.defaultLevelId
+    || Object.keys(baseData.levels || {})[0]
+    || baseData.currentLevelId
+    || "movement-lab-01";
+}
+
+export function getUrlLevelId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return new URLSearchParams(window.location.search).get("level");
+  } catch {
+    return null;
+  }
+}
+
+export function getLevelIds(baseData) {
+  const ids = new Set(Object.keys(baseData.levels || {}));
+  const payload = readLevelOverridesPayload();
+  Object.keys(payload?.levels || {}).forEach((id) => ids.add(id));
+  if (ids.size === 0) {
+    ids.add(getDefaultLevelId(baseData));
+  }
+  return [...ids];
+}
+
+export function getRequestedLevelId(baseData, requestedLevelId = null) {
+  const requested = safeString(requestedLevelId, "").trim();
+  const levelIds = getLevelIds(baseData);
+  if (requested && levelIds.includes(requested)) {
+    return requested;
+  }
+  return getDefaultLevelId(baseData);
+}
+
+function readRunConfigPayload() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(RUN_CONFIG_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRunConfigPayload(payload) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(RUN_CONFIG_KEY, JSON.stringify({
+    version: 1,
+    startLevelId: payload?.startLevelId || "",
+  }));
+}
+
+export function getRunStartLevelId(baseData) {
+  const configured = safeString(readRunConfigPayload()?.startLevelId, "").trim();
+  const levelIds = getLevelIds(baseData);
+  if (configured && levelIds.includes(configured)) {
+    return configured;
+  }
+  return getDefaultLevelId(baseData);
+}
+
+export function saveRunStartLevelId(baseData, levelId) {
+  const requested = safeString(levelId, "").trim();
+  const nextLevelId = getRequestedLevelId(baseData, requested);
+  writeRunConfigPayload({ startLevelId: nextLevelId });
+  return nextLevelId;
+}
+
+export function getLevelDefinition(baseData, levelId) {
+  return baseData.levels?.[levelId] || null;
+}
+
+export function createBaseLevelData(baseData, requestedLevelId = null) {
+  const levelId = requestedLevelId || getDefaultLevelId(baseData);
+  const levelDefinition = getLevelDefinition(baseData, levelId) || {
+    id: levelId,
+    levelId,
+    label: levelId,
+  };
+  const next = mergeLevelData(baseData, {
+    ...levelDefinition,
+    levelId: levelDefinition.levelId || levelDefinition.id || levelId,
+    label: levelDefinition.label || levelDefinition.id || levelId,
+  });
+  next.defaultLevelId = getDefaultLevelId(baseData);
+  next.currentLevelId = levelId;
+  next.levelId = levelId;
+  next.levelLabel = levelDefinition.label || next.levelLabel || levelId;
+  next.label = next.levelLabel;
+  return next;
+}
+
+export function loadLevelOverrides(baseData) {
+  const payload = readLevelOverridesPayload();
+  if (payload) {
+    return Object.fromEntries(
+      Object.entries(payload.levels || {}).map(([levelId, override]) => [
+        levelId,
+        normalizeEditableLevelData(override, createBaseLevelData(baseData, levelId)),
+      ]),
+    );
+  }
+
+  const legacy = readLegacyLevelOverride(baseData);
+  return legacy ? { [getDefaultLevelId(baseData)]: legacy } : {};
+}
+
+export function loadLevelOverride(baseData, requestedLevelId = null) {
+  const levelId = requestedLevelId || getRequestedLevelId(baseData, getUrlLevelId());
+  return loadLevelOverrides(baseData)[levelId] || null;
+}
+
+export function getLevelSummaries(baseData) {
+  const overrides = loadLevelOverrides(baseData);
+  return getLevelIds(baseData).map((id) => {
+    const definition = getLevelDefinition(baseData, id);
+    const override = overrides[id];
+    const baseLevel = createBaseLevelData(baseData, id);
+    const effective = override ? mergeLevelData(baseLevel, override) : baseLevel;
+    const label = override?.label || definition?.label || effective.levelLabel || id;
+    return {
+      id,
+      label,
+      builtIn: Boolean(definition),
+      hasOverride: Boolean(override),
+      map: extractMapConfig(effective.map, id, label),
+      world: {
+        width: safeNumber(effective.world?.width, 1280, 1),
+        height: safeNumber(effective.world?.height, 720, 1),
+        groundY: safeNumber(effective.world?.groundY, 0),
+      },
+      platforms: (effective.platforms || []).map((platform) => ({
+        x: platform.x,
+        y: platform.y,
+        width: platform.width,
+        height: platform.height,
+      })),
+      braceWalls: (effective.braceWalls || []).map((wall) => ({
+        id: wall.id,
+        x: wall.x,
+        y: wall.y,
+        width: wall.width,
+        height: wall.height,
+      })),
+      lootCrates: (effective.lootCrates || []).map((crate) => ({
+        id: crate.id,
+        x: crate.x,
+        y: crate.y,
+        width: crate.width,
+        height: crate.height,
+      })),
+      humanoidEnemies: (effective.humanoidEnemies || []).map((enemy) => ({
+        id: enemy.id,
+        x: enemy.x,
+        y: enemy.y,
+        width: enemy.width,
+        height: enemy.height,
+      })),
+      routeExits: (effective.routeExits || []).map((exit) => extractRouteExit(exit)),
+      extractionGate: extractExtractionGate(effective.extractionGate),
+    };
+  });
+}
+
+export function isBuiltInLevel(baseData, levelId) {
+  return Boolean(levelId && baseData.levels?.[levelId]);
+}
+
+export function isLocalOnlyLevel(baseData, levelId) {
+  if (!levelId || isBuiltInLevel(baseData, levelId)) {
+    return false;
+  }
+  return Boolean(loadLevelOverrides(baseData)[levelId]);
+}
+
+export function getLevelRouteReferences(baseData, targetLevelId) {
+  const target = safeString(targetLevelId, "").trim();
+  if (!target) {
+    return [];
+  }
+  return getLevelSummaries(baseData).flatMap((summary) => (
+    (summary.routeExits || [])
+      .filter(() => summary.id !== target)
+      .filter((routeExit) => routeExit.toLevelId === target)
+      .map((routeExit) => ({
+        levelId: summary.id,
+        levelLabel: summary.label || summary.id,
+        routeId: routeExit.id || "",
+        routeLabel: routeExit.label || routeExit.id || "",
+      }))
+  ));
+}
+
+export function deleteLocalLevel(baseData, targetLevelId) {
+  const levelId = safeString(targetLevelId, "").trim();
+  if (!levelId) {
+    return { ok: false, reason: "missing-level" };
+  }
+  if (isBuiltInLevel(baseData, levelId)) {
+    return { ok: false, reason: "built-in" };
+  }
+  if (!loadLevelOverrides(baseData)[levelId]) {
+    return { ok: false, reason: "not-local" };
+  }
+  const references = getLevelRouteReferences(baseData, levelId);
+  if (references.length > 0) {
+    return { ok: false, reason: "referenced", references };
+  }
+  clearLevelOverride(baseData, levelId);
+  return { ok: true, levelId };
+}
+
+function attachRuntimeMetadata(runtimeData, baseData, levelId) {
+  runtimeData.defaultLevelId = getDefaultLevelId(baseData);
+  runtimeData.currentLevelId = levelId;
+  runtimeData.levelId = levelId;
+  runtimeData.levelLabel = runtimeData.levelLabel || runtimeData.label || levelId;
+  runtimeData.label = runtimeData.levelLabel;
+  runtimeData.levelSummaries = getLevelSummaries(baseData);
+  Object.defineProperty(runtimeData, "__baseData", {
+    value: baseData,
+    enumerable: false,
+    configurable: true,
+  });
+  return runtimeData;
+}
+
+export function saveLevelOverride(override, baseData, requestedLevelId = null) {
+  const levelId = safeId(
+    requestedLevelId || override?.levelId || override?.id || baseData.currentLevelId || getDefaultLevelId(baseData),
+    getDefaultLevelId(baseData),
+  );
+  const baseLevel = createBaseLevelData(baseData, levelId);
+  const normalized = normalizeEditableLevelData({
+    ...override,
+    levelId,
+  }, baseLevel);
+  normalized.levelId = levelId;
+
   if (typeof window !== "undefined") {
-    window.localStorage.setItem(LEVEL_OVERRIDE_KEY, JSON.stringify(normalized));
+    const payload = readLevelOverridesPayload() || {
+      version: LEVEL_OVERRIDES_VERSION,
+      levels: {},
+    };
+    payload.levels = payload.levels || {};
+    payload.levels[levelId] = normalized;
+    writeLevelOverridesPayload(payload);
   }
   return normalized;
 }
 
-export function clearLevelOverride() {
+export function clearLevelOverride(baseDataOrLevelId = null, requestedLevelId = null) {
   if (typeof window !== "undefined") {
-    window.localStorage.removeItem(LEVEL_OVERRIDE_KEY);
+    const levelId = typeof baseDataOrLevelId === "string"
+      ? baseDataOrLevelId
+      : requestedLevelId;
+
+    if (!levelId) {
+      window.localStorage.removeItem(LEVEL_OVERRIDE_KEY);
+      window.localStorage.removeItem(LEVEL_OVERRIDES_KEY);
+      return;
+    }
+
+    if (
+      baseDataOrLevelId &&
+      typeof baseDataOrLevelId === "object" &&
+      levelId === getDefaultLevelId(baseDataOrLevelId)
+    ) {
+      window.localStorage.removeItem(LEVEL_OVERRIDE_KEY);
+    }
+
+    const payload = readLevelOverridesPayload();
+    if (!payload?.levels) {
+      return;
+    }
+    delete payload.levels[levelId];
+    if (Object.keys(payload.levels).length === 0) {
+      window.localStorage.removeItem(LEVEL_OVERRIDES_KEY);
+    } else {
+      writeLevelOverridesPayload(payload);
+    }
   }
 }
 
-export function createRuntimeGameData(baseData) {
-  return mergeLevelData(baseData, loadLevelOverride(baseData));
+export function createRuntimeGameData(baseData, requestedLevelId = null) {
+  const explicitLevelId = requestedLevelId || getUrlLevelId();
+  const levelId = getRequestedLevelId(baseData, explicitLevelId || getRunStartLevelId(baseData));
+  const baseLevel = createBaseLevelData(baseData, levelId);
+  const override = loadLevelOverride(baseData, levelId);
+  const runtimeData = override ? mergeLevelData(baseLevel, override) : baseLevel;
+  return attachRuntimeMetadata(runtimeData, baseData, levelId);
+}
+
+export function loadRuntimeLevelData(runtimeData, targetLevelId) {
+  const baseData = runtimeData.__baseData || runtimeData;
+  const next = createRuntimeGameData(baseData, targetLevelId);
+  Object.keys(runtimeData).forEach((key) => {
+    delete runtimeData[key];
+  });
+  Object.assign(runtimeData, next);
+  return attachRuntimeMetadata(runtimeData, baseData, next.currentLevelId);
 }

@@ -22,6 +22,15 @@ export const GAME_DATA = {
     "lootRummage": {
       "src": "./assets/ui/type07a-loot-rummage.png?v=20260425-1"
     },
+    "faceOffTargetReference": {
+      "src": "./assets/ui/faceoff-reference.png?v=20260426-1"
+    },
+    "faceOffTargetStylized": {
+      "src": "./assets/ui/faceoff-target-stylized-v2.png?v=20260426-1"
+    },
+    "faceOffFingerGun": {
+      "src": "./assets/ui/faceoff-finger-gun.png?v=20260426-1"
+    },
     "playerSide": {
       "src": "./assets/characters/type-07a-player-side-sd.png?v=20260424-2"
     },
@@ -248,6 +257,202 @@ export const GAME_DATA = {
       "출구까지 도달"
     ]
   },
+  "faceOff": {
+    "range": 720,
+    "aimRadius": 72,
+    "acquireDuration": 1,
+    "aimCameraPull": 5.5,
+    "entryZoomDuration": 1,
+    "entryZoomScale": 1.62,
+    "cursorAssistDuration": 0.34,
+    "targetBackdropAssetKey": null,
+    "targetArtAssetKey": "faceOffTargetStylized",
+    "targetArtCrop": {
+      "sx": 0.02,
+      "sy": 0,
+      "sw": 0.96,
+      "sh": 0.995
+    },
+    "fingerGunAssetKey": "faceOffFingerGun",
+    "fingerGunCrop": {
+      "sx": 0.39,
+      "sy": 0.08,
+      "sw": 0.61,
+      "sh": 0.92
+    },
+    "fingerGunAnchor": {
+      "x": 0.035,
+      "y": 0.2
+    },
+    "fingerGunWidth": 640,
+    "shotShakeDuration": 0.22,
+    "shotShakeIntensity": 18,
+    "shotFlashDuration": 0.16,
+    "enemyLineCharDelay": 0.045,
+    "enemyLineHoldDuration": 0.85,
+    "choiceSlideDuration": 0.32,
+    "enemyLines": {
+      "ambushed": "뭐야... 어디서 나타난 거야?",
+      "combat": "늦었어. 이미 조준하고 있었어.",
+      "knockdown": "살려줘... 반격할 힘도 없어.",
+      "dialogue": "말로 끝내고 싶다면 빨리 말해.",
+      "threatenSuccess": "알았어. 총 내려놓을게.",
+      "threatenFail": "그 협박은 안 통해.",
+      "deescalateSuccess": "좋아... 잠깐 멈추지.",
+      "deescalateFail": "멈추는 건 네 쪽이야.",
+      "persuadeLead": "정보? 네가 뭘 줄 수 있는데?",
+      "persuadeDeal": "좋아. 루트 하나는 알려주지.",
+      "persuadeFail": "친구 같은 소리 하지 마.",
+      "hit": "윽...!",
+      "failed": "끝났어."
+    },
+    "timeScale": 0.08,
+    "triggerLimit": 4.5,
+    "maxDialogueFailures": 2,
+    "bodyParts": [
+      { "id": "head", "label": "머리", "damage": 120, "disable": 0 },
+      { "id": "torso", "label": "몸통", "damage": 58, "disable": 12 },
+      { "id": "leftArm", "label": "왼팔", "damage": 18, "disable": 42 },
+      { "id": "rightArm", "label": "오른 팔", "damage": 18, "disable": 42 },
+      { "id": "leftLeg", "label": "왼 다리", "damage": 16, "disable": 46 },
+      { "id": "rightLeg", "label": "오른 다리", "damage": 16, "disable": 46 }
+    ],
+    "dialogueOptions": [
+      {
+        "key": "KeyW",
+        "label": "무장해제해!",
+        "type": "threaten",
+        "baseChance": 0.52,
+        "successEffect": "surrender",
+        "failEffect": "trigger"
+      },
+      {
+        "key": "KeyA",
+        "label": "멈춰.",
+        "type": "deescalate",
+        "baseChance": 0.42,
+        "successEffect": "surrender",
+        "failEffect": "trigger"
+      },
+      {
+        "key": "KeyD",
+        "label": "안녕 친구?",
+        "type": "persuade",
+        "baseChance": 0.48,
+        "successEffect": "dealProgress",
+        "failEffect": "trigger"
+      }
+    ]
+  },
+  "armWeapons": {
+    "shotgun-arm-a": {
+      "id": "shotgun-arm-a",
+      "label": "Shotgun Arm",
+      "type": "shotgun",
+      "ammoType": "shell",
+      "magazineSize": 2,
+      "reloadDuration": 0.95,
+      "damage": 5,
+      "humanoidDamage": 58,
+      "droneDamage": 3,
+      "spread": 0.38,
+      "recoil": 1550,
+      "fireCooldown": 0.28,
+      "range": 540,
+      "hitRadius": 44,
+      "knockdownPower": 1.15,
+      "airActionCost": 1
+    },
+    "pistol-arm-a": {
+      "id": "pistol-arm-a",
+      "label": "Pistol Arm",
+      "type": "pistol",
+      "ammoType": "pistol",
+      "magazineSize": 8,
+      "reloadDuration": 0.75,
+      "damage": 2,
+      "humanoidDamage": 24,
+      "droneDamage": 1.4,
+      "spread": 0.08,
+      "recoil": 360,
+      "fireCooldown": 0.16,
+      "range": 620,
+      "hitRadius": 22,
+      "knockdownPower": 0.45,
+      "airActionCost": 0
+    }
+  },
+  "weaponModules": {
+    "spread-reducer": {
+      "id": "spread-reducer",
+      "label": "Spread Reducer",
+      "shortLabel": "SPR",
+      "effects": {
+        "spreadMultiplier": 0.82
+      }
+    },
+    "homing-micro-missile": {
+      "id": "homing-micro-missile",
+      "label": "Homing Micro Missile",
+      "shortLabel": "MIS",
+      "effects": {
+        "missileCount": 1
+      }
+    },
+    "impact-barrier": {
+      "id": "impact-barrier",
+      "label": "Impact Barrier",
+      "shortLabel": "BRR",
+      "effects": {
+        "barrierDuration": 0.22,
+        "barrierStrength": 1
+      }
+    },
+    "recoil-amplifier": {
+      "id": "recoil-amplifier",
+      "label": "Recoil Amplifier",
+      "shortLabel": "RCL",
+      "effects": {
+        "recoilMultiplier": 1.18
+      }
+    },
+    "magazine-extender": {
+      "id": "magazine-extender",
+      "label": "Magazine Extender",
+      "shortLabel": "MAG",
+      "effects": {
+        "magazineBonus": 1
+      }
+    },
+    "knockdown-booster": {
+      "id": "knockdown-booster",
+      "label": "Knockdown Booster",
+      "shortLabel": "KDN",
+      "effects": {
+        "knockdownMultiplier": 1.22,
+        "humanoidDamageBonus": 4
+      }
+    }
+  },
+  "defaultLoadout": {
+    "selectedSide": "left",
+    "reserveAmmo": {
+      "shell": 16,
+      "pistol": 48
+    },
+    "arms": {
+      "left": {
+        "armId": "shotgun-arm-a",
+        "magazine": null,
+        "modules": ["recoil-amplifier", "impact-barrier", "spread-reducer"]
+      },
+      "right": {
+        "armId": "pistol-arm-a",
+        "magazine": null,
+        "modules": ["magazine-extender", "homing-micro-missile", "knockdown-booster"]
+      }
+    }
+  },
   "player": {
     "spawn": {
       "x": 688,
@@ -329,6 +534,7 @@ export const GAME_DATA = {
       "braceBoostVertical": 940,
       "braceReuseMs": 180,
       "recoilShotCharges": 1,
+      "recoilShotHumanoidDamage": 50,
       "recoilShotForce": 1550,
       "recoilShotMaxHorizontalSpeed": 3000,
       "recoilShotMaxUpSpeed": 2000,
@@ -590,6 +796,39 @@ export const GAME_DATA = {
       "y": 736,
       "width": 192,
       "height": 272
+    }
+  ],
+  "humanoidEnemies": [
+    {
+      "id": "faceoff-guard-01",
+      "type": "humanoidEnemy",
+      "label": "Checkpoint gunman",
+      "x": 1390,
+      "y": 1800,
+      "width": 58,
+      "height": 104,
+      "maxHp": 100,
+      "disableThreshold": 100,
+      "damage": 14,
+      "fireRange": 620,
+      "triggerRate": 1,
+      "timelineShotDamage": 12,
+      "knockdownEnabled": true,
+      "crawlSpeed": 42,
+      "escapeDistance": 360,
+      "exhaustionLimit": 2,
+      "knockdownStaggerDuration": 0.65,
+      "social": {
+        "resolve": 0.45,
+        "fear": 0.62,
+        "trust": 0.34,
+        "aggression": 0.48,
+        "reason": 0.56
+      },
+      "patrol": {
+        "left": 1320,
+        "right": 1540
+      }
     }
   ],
   "hostileDrones": [
@@ -865,4 +1104,115 @@ export const GAME_DATA = {
     "role": "오퍼레이터",
     "dialogue": "움직임과 화면 배치를 필요한 만큼만 조정한다."
   }
+};
+
+const BASE_EXTRACTION_GATE = {
+  ...GAME_DATA.extractionGate,
+};
+
+const BASE_PLAYER_SPAWN = {
+  ...GAME_DATA.player.spawn,
+};
+
+GAME_DATA.defaultLevelId = "movement-lab-01";
+GAME_DATA.levels = {
+  "movement-lab-01": {
+    "id": "movement-lab-01",
+    "label": "Movement Lab 01",
+    "entrances": [
+      {
+        "id": "start",
+        "label": "Start",
+        "x": BASE_PLAYER_SPAWN.x,
+        "y": BASE_PLAYER_SPAWN.y,
+        "facing": 1
+      }
+    ],
+    "routeExits": [
+      {
+        "id": "to-faceoff-checkpoint",
+        "label": "Face-off Checkpoint",
+        "x": BASE_EXTRACTION_GATE.x,
+        "y": BASE_EXTRACTION_GATE.y,
+        "width": BASE_EXTRACTION_GATE.width,
+        "height": BASE_EXTRACTION_GATE.height,
+        "prompt": "E: 다음 구역",
+        "toLevelId": "faceoff-checkpoint-01",
+        "toEntranceId": "start"
+      }
+    ],
+    "map": {
+      "rooms": [
+        {
+          "id": "main",
+          "label": "Movement Lab",
+          "x": 0,
+          "y": 0,
+          "width": 180,
+          "height": 82
+        }
+      ]
+    },
+    "extractionGate": null
+  },
+  "faceoff-checkpoint-01": {
+    "id": "faceoff-checkpoint-01",
+    "label": "Face-off Checkpoint 01",
+    "entrances": [
+      {
+        "id": "start",
+        "label": "Start",
+        "x": BASE_PLAYER_SPAWN.x,
+        "y": BASE_PLAYER_SPAWN.y,
+        "facing": 1
+      }
+    ],
+    "routeExits": [],
+    "map": {
+      "rooms": [
+        {
+          "id": "main",
+          "label": "Checkpoint",
+          "x": 240,
+          "y": 0,
+          "width": 180,
+          "height": 82
+        }
+      ]
+    },
+    "extractionGate": {
+      ...BASE_EXTRACTION_GATE,
+      "prompt": "E: 추출"
+    }
+  }
+};
+
+GAME_DATA.worldMap = {
+  showUnknownNodes: true,
+  nodes: [
+    {
+      id: "movement-lab-01",
+      levelId: "movement-lab-01",
+      x: 0,
+      y: 0,
+      width: 180,
+      height: 82,
+    },
+    {
+      id: "faceoff-checkpoint-01",
+      levelId: "faceoff-checkpoint-01",
+      x: 260,
+      y: 0,
+      width: 180,
+      height: 82,
+    },
+  ],
+  edges: [
+    {
+      id: "movement-to-faceoff",
+      fromLevelId: "movement-lab-01",
+      toLevelId: "faceoff-checkpoint-01",
+      routeId: "to-faceoff-checkpoint",
+    },
+  ],
 };

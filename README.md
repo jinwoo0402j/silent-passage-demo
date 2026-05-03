@@ -1,78 +1,151 @@
-# Rulebound Extraction
+# Silent Passage Demo
 
-Browser-first vertical slice for validating a 2D side-view extraction loop built around rule-bound NPC encounters.
+2D side-view extraction action prototype focused on movement, dual-arm weapons, connected levels, and aftermath Face-off interactions.
 
-The current browser build is switched to a `movement lab` layout. Expedition content is stripped out so you can tune run, jump, recoil shot, crouch, and wall control before placing a real authored map.
+## Quick Links
 
-## What this prototype tests
+- Game: `index.html`
+- Level Editor: `editor.html`
+- Level Design Handoff Page: `level-design.html`
+- Level design workflow: [levels/README.md](levels/README.md)
+- Level validation script: [scripts/validate-levels.mjs](scripts/validate-levels.mjs)
+- GitHub Pages deploy workflow: [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)
 
-- Whether `Release` versus `Harvest` creates a meaningful moral and mechanical trade-off
-- Whether clue-driven rule interpretation is strong enough to carry the encounter design
-- Whether dusk and night pressure create urgency without becoming a hard fail timer
+If GitHub Pages is enabled for the repository, the deployed build is expected at:
 
-## Play loop
-
-1. Open the shelter link
-2. Deploy into the quarantine yard
-3. Read the `Checkpoint Warden` and `Loop Adherent`
-4. Choose `Release`, `Harvest`, or extraction without resolution
-5. Return to shelter with materials, trust changes, and possible unlocks
-
-## Controls
-
-- `C` or `Enter`: advance title, shelter, results, and failure scenes
-- `A` / `D` (`ArrowLeft` / `ArrowRight` fallback): move
-- `Space` (`C` fallback): jump, wall jump, brace off depth walls, and hold-to-hover after a fresh air press
-- `Shift`: dash, keep holding to sprint, or wall-run while touching a wall
-- Right mouse (hold): focus aim / bullet time
-- Left mouse during focus: fire the recoil shot; the player is pushed opposite the muzzle direction
-- `ArrowDown` (`S` fallback): crouch, crouch-walk, or slide when pressed at run speed
-- `Z` (`E` fallback): interact, align pedestals, extract
-- `V` (`F` fallback): attack / harvest
-- `R`: restart the current expedition from spawn
-- `Q` (hold): lamp, and `Threat Sense` once unlocked
-- `F3` or `` ` ``: toggle collision debug overlay
-
-## Current Lab Notes
-
-- Recoil shot is a one-charge movement tool. Landing or a fresh wall contact reloads it.
-- Sprint is a ground-only acceleration layer on `Shift`.
-- Pressing crouch at run speed starts a slide. Jumping out of a slide carries the slide speed into the jump.
-- Pressing `Space` again while airborne starts a slow-fall hover; releasing it or landing cancels the hover.
-- `Brace walls` are non-solid volumes you can press `Space` on in mid-air for an extra climb.
-- NPC encounters, ritual logic, and night pressure are disabled in the lab map.
-- Exit from the far-right gate to leave the lab and return to shelter.
-
-## Run rules
-
-- `Release` restores sanity and unlocks story fragments
-- `Harvest` grants materials and unlocks `Threat Sense`, but reduces sanity
-- `Night` lowers visibility, drains sanity, and activates hostile dark threats
-- If `HP` or `Sanity` reaches `0`, the current run is lost and nothing from that run is banked
-
-## Local run
-
-Use a local static server. The app now relies on ES modules.
-
-```powershell
-python -m http.server 8000
+```text
+https://jinwoo0402j.github.io/silent-passage-demo/
 ```
 
-Then open [http://localhost:8000](http://localhost:8000).
+The Pages workflow deploys from `main`. Branch work appears on GitHub immediately after push, but the public Pages build updates after the branch is merged to `main` or the workflow is manually dispatched from `main`.
 
-## Files
+## Current Prototype Scope
 
-- `index.html`: static shell and sidebar HUD
-- `main.js`: module entry and frame loop
-- `level-data.js`: world layout, encounters, interactables, and meta content
-- `state.js`: scene state, run state, and saved meta progression
-- `systems.js`: movement, combat, encounters, extraction, and progression logic
-- `render.js`: canvas rendering and sidebar updates
-- `utils.js`: shared math and formatting helpers
-- `styles.css`: layout and visual framing
+- 2D platform action movement
+- Shotgun recoil movement
+- Air-only bullet time while aiming
+- Slide, hover, wall brace, dash, sprint, and wall-run movement tuning
+- Connected run levels with `entrance` and `routeExit`
+- Hollow-Knight-style run map overlay
+- Local run start level setting
+- Dual-arm weapon loadout: left shotgun arm, right pistol arm
+- Face-off aftermath flow for knocked-down humanoid enemies
+- Level editor support for local level creation and JSON export
 
-## Notes
+## Local Run
 
-- Meta progression is stored in browser local storage
-- This slice is intentionally placeholder-heavy on art and audio
-- The implementation target is browser validation, not Unity parity
+Use a local static server because the app uses ES modules.
+
+```powershell
+python -m http.server 4173 --bind 127.0.0.1
+```
+
+Open:
+
+```text
+http://localhost:4173/index.html
+```
+
+Open the editor:
+
+```text
+http://localhost:4173/editor.html
+```
+
+## Level Designer Workflow
+
+Designers should not rely on browser localStorage as the team handoff format. The editor's local save is only for that browser profile.
+
+Team handoff uses exported JSON files under `levels/`.
+
+1. Create a branch.
+
+   ```powershell
+   git checkout -b level/faceoff-checkpoint-pass-01
+   ```
+
+2. Build the level in `editor.html`.
+
+3. Export with `JSON 저장`.
+
+4. Put the file under `levels/drafts/`.
+
+   ```text
+   levels/drafts/faceoff-checkpoint-01.v001.json
+   ```
+
+5. Validate.
+
+   ```powershell
+   node scripts/validate-levels.mjs
+   ```
+
+6. Commit and push.
+
+   ```powershell
+   git add levels/drafts/faceoff-checkpoint-01.v001.json
+   git commit -m "Add draft faceoff checkpoint level"
+   git push origin level/faceoff-checkpoint-pass-01
+   ```
+
+7. Open a PR using the level design PR template.
+
+More detail: [levels/README.md](levels/README.md)
+
+## Editor Tool Shortcuts
+
+- `1`: select
+- `2`: platform
+- `3`: brace wall
+- `4`: sign
+- `5`: spawn
+- `6`: entrance
+- `7`: route exit
+- `8`: extraction exit
+
+Use `route exit` for level-to-level movement. Use `extraction exit` only for ending the run.
+
+## Validation
+
+Validate all level JSON exports:
+
+```powershell
+node scripts/validate-levels.mjs
+```
+
+Validate a specific file or folder:
+
+```powershell
+node scripts/validate-levels.mjs levels/drafts/faceoff-checkpoint-01.v001.json
+```
+
+The validator checks:
+
+- JSON parse errors
+- missing or malformed `levelId`
+- duplicate entrance IDs
+- duplicate route exit IDs
+- missing target levels
+- missing target entrances
+- invalid position and size fields
+
+## Key Files
+
+- [index.html](index.html): game shell
+- [editor.html](editor.html): level editor shell
+- [level-data.js](level-data.js): built-in level and gameplay data
+- [level-store.js](level-store.js): level save/load, overrides, run start, and editor data normalization
+- [state.js](state.js): scene and run state
+- [systems.js](systems.js): input, movement, combat, level transitions, and interactions
+- [render.js](render.js): canvas rendering
+- [save-game.js](save-game.js): local run save and restore
+- [levels/](levels/): level designer JSON handoff
+- [scripts/](scripts/): repo utility scripts
+
+## Team Rules
+
+- Do not commit browser localStorage dumps.
+- Do not edit `level-data.js` directly for draft level work.
+- Commit exported level JSON under `levels/drafts/`.
+- Move reviewed levels into `levels/accepted/` or integrate them into `level-data.js` after review.
+- Keep one PR focused on one level pass or one connected route pass.

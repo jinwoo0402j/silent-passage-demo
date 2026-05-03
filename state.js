@@ -131,6 +131,31 @@ function createHostileDroneState(definition) {
   };
 }
 
+function createHumanoidEnemyState(definition) {
+  return {
+    ...deepClone(definition),
+    hp: definition.maxHp ?? 100,
+    disableMeter: 0,
+    state: definition.disabled ? "disabled" : "patrol",
+    active: false,
+    dead: Boolean(definition.disabled),
+    surrendered: false,
+    dealt: false,
+    released: false,
+    facing: definition.facing ?? -1,
+    escapeTargetX: definition.escapeTargetX ?? null,
+    crawlSpeed: definition.crawlSpeed ?? 34,
+    exhaustionHits: 0,
+    staggerTimer: 0,
+    knockdownFacing: definition.facing ?? -1,
+    trigger: 0,
+    dialogueFailures: 0,
+    dialogueStage: 0,
+    hitFlash: 0,
+    outcome: null,
+  };
+}
+
 function createLootItemState(definition, index) {
   const quantity = Math.max(1, Math.floor(Number(definition.quantity ?? 1)));
   const value = Math.max(0, Number(definition.value ?? definition.materials ?? 0));
@@ -188,6 +213,76 @@ function createLootCrateState(definition, data, index) {
   };
 }
 
+export function createLevelRuntimeState(data) {
+  return {
+    interactables: (data.interactables || []).map((item) => ({
+      ...deepClone(item),
+      used: false,
+    })),
+    lootCrates: (data.lootCrates || []).map((crate, index) => createLootCrateState(crate, data, index)),
+    loot: {
+      active: false,
+      crateId: null,
+      selectedIndex: 0,
+      holdItemId: null,
+      holdProgress: 0,
+      rareSignalTimer: 0,
+      lastRarity: null,
+    },
+    encounters: {
+      guard: createGuardState(data.encounters.find((entry) => entry.id === "guard")),
+      ritualist: createRitualistState(data.encounters.find((entry) => entry.id === "ritualist")),
+    },
+    threats: data.nightThreats.map((threat) => createThreatState(threat)),
+    hostileDrones: (data.hostileDrones || []).map((drone) => createHostileDroneState(drone)),
+    humanoidEnemies: (data.humanoidEnemies || []).map((enemy) => createHumanoidEnemyState(enemy)),
+    enemyShots: [],
+    faceOff: {
+      active: false,
+      targetId: null,
+      hoverPart: null,
+      selectedPart: "torso",
+      selectedDialogueKey: "KeyW",
+      acquireTargetId: null,
+      acquireTimer: 0,
+      acquireProgress: 0,
+      acquireDuration: data.faceOff?.acquireDuration ?? 1,
+      entryTransitionTimer: 0,
+      entryTransitionStartedAt: 0,
+      entryTransitionDuration: data.faceOff?.entryZoomDuration ?? 1,
+      cursorAssistTimer: 0,
+      cursorAssistDuration: data.faceOff?.cursorAssistDuration ?? 0.34,
+      cursorAssistStartX: CAMERA_SCREEN_WIDTH / 2,
+      cursorAssistStartY: CAMERA_SCREEN_HEIGHT / 2,
+      cursorAssistTargetX: CAMERA_SCREEN_WIDTH / 2,
+      cursorAssistTargetY: 327,
+      encounterState: "ambushed",
+      enemyLine: "",
+      enemyLineVisible: "",
+      enemyLineIndex: 0,
+      enemyLineTimer: 0,
+      enemyLineCharDelay: data.faceOff?.enemyLineCharDelay ?? 0.035,
+      choiceRevealTimer: 0,
+      choiceRevealHold: data.faceOff?.enemyLineHoldDuration ?? 0.35,
+      choiceRevealDuration: data.faceOff?.choiceSlideDuration ?? 0.26,
+      choiceRevealProgress: 0,
+      choicesReady: false,
+      shotShakeTimer: 0,
+      shotShakeDuration: data.faceOff?.shotShakeDuration ?? 0.22,
+      shotShakeIntensity: data.faceOff?.shotShakeIntensity ?? 18,
+      shotFlashTimer: 0,
+      shotFlashDuration: data.faceOff?.shotFlashDuration ?? 0.16,
+      timeline: 0,
+      triggerLimit: data.faceOff?.triggerLimit ?? 4.5,
+      result: null,
+      resultTimer: 0,
+      message: "",
+    },
+    prompt: "",
+    promptWorld: null,
+  };
+}
+
 export function loadMetaState() {
   try {
     const raw = window.localStorage.getItem(SAVE_KEY);
@@ -219,19 +314,171 @@ export function hasUnlocked(meta, abilityId) {
   return meta.unlockedAbilities.includes(abilityId);
 }
 
+const ARM_SIDES = ["left", "right"];
+
+function getDefaultArmState(data, side) {
+  const defaultLoadout = data.defaultLoadout || {};
+  const defaultArm = defaultLoadout.arms?.[side] || {};
+  return {
+    side,
+    armId: defaultArm.armId || (side === "right" ? "pistol-arm-a" : "shotgun-arm-a"),
+    magazine: defaultArm.magazine ?? null,
+    modules: Array.isArray(defaultArm.modules) ? [...defaultArm.modules].slice(0, 3) : [],
+    reloadTimer: 0,
+    reloadDuration: 0,
+    fireCooldownTimer: 0,
+  };
+}
+
+export function getArmWeapon(data, armId) {
+  return data.armWeapons?.[armId] || null;
+}
+
+export function getWeaponModule(data, moduleId) {
+  return data.weaponModules?.[moduleId] || null;
+}
+
+export function computeArmWeaponStats(data, armState = {}) {
+  const weapon = getArmWeapon(data, armState.armId) || {};
+  const modules = Array.isArray(armState.modules) ? armState.modules.slice(0, 3) : [];
+  let spreadMultiplier = 1;
+  let recoilMultiplier = 1;
+  let knockdownMultiplier = 1;
+  let magazineBonus = 0;
+  let missileCount = 0;
+  let barrierDuration = 0;
+  let barrierStrength = 0;
+  let humanoidDamageBonus = 0;
+
+  modules.forEach((moduleId) => {
+    const effects = getWeaponModule(data, moduleId)?.effects || {};
+    if (Number.isFinite(effects.spreadMultiplier)) {
+      spreadMultiplier *= effects.spreadMultiplier;
+    }
+    if (Number.isFinite(effects.recoilMultiplier)) {
+      recoilMultiplier *= effects.recoilMultiplier;
+    }
+    if (Number.isFinite(effects.knockdownMultiplier)) {
+      knockdownMultiplier *= effects.knockdownMultiplier;
+    }
+    magazineBonus += Number.isFinite(effects.magazineBonus) ? effects.magazineBonus : 0;
+    missileCount += Number.isFinite(effects.missileCount) ? effects.missileCount : 0;
+    barrierDuration = Math.max(barrierDuration, Number.isFinite(effects.barrierDuration) ? effects.barrierDuration : 0);
+    barrierStrength += Number.isFinite(effects.barrierStrength) ? effects.barrierStrength : 0;
+    humanoidDamageBonus += Number.isFinite(effects.humanoidDamageBonus) ? effects.humanoidDamageBonus : 0;
+  });
+
+  const magazineSize = Math.max(1, Math.floor((weapon.magazineSize ?? 1) + magazineBonus));
+  const damage = Math.max(0, Number(weapon.damage ?? 1));
+  const humanoidDamage = Math.max(0, Number(weapon.humanoidDamage ?? damage) + humanoidDamageBonus);
+
+  return {
+    id: weapon.id || armState.armId || "unknown-arm",
+    label: weapon.label || armState.armId || "Arm",
+    type: weapon.type || "shotgun",
+    ammoType: weapon.ammoType || "shell",
+    magazineSize,
+    reloadDuration: Math.max(0.05, Number(weapon.reloadDuration ?? 0.8)),
+    damage,
+    humanoidDamage,
+    droneDamage: Math.max(0, Number(weapon.droneDamage ?? damage)),
+    spread: Math.max(0, Number(weapon.spread ?? 0) * spreadMultiplier),
+    recoil: Math.max(0, Number(weapon.recoil ?? 0) * recoilMultiplier),
+    fireCooldown: Math.max(0.03, Number(weapon.fireCooldown ?? 0.2)),
+    range: Math.max(32, Number(weapon.range ?? 520)),
+    hitRadius: Math.max(1, Number(weapon.hitRadius ?? 32)),
+    knockdownPower: Math.max(0, Number(weapon.knockdownPower ?? 1) * knockdownMultiplier),
+    airActionCost: Math.max(0, Math.floor(Number(weapon.airActionCost ?? 0))),
+    missileCount: Math.max(0, Math.floor(missileCount)),
+    barrierDuration,
+    barrierStrength,
+    modules,
+  };
+}
+
+export function createWeaponLoadoutState(data) {
+  const defaultLoadout = data.defaultLoadout || {};
+  const reserveAmmo = {
+    ...(defaultLoadout.reserveAmmo || {}),
+  };
+  const arms = {};
+
+  ARM_SIDES.forEach((side) => {
+    const armState = getDefaultArmState(data, side);
+    const stats = computeArmWeaponStats(data, armState);
+    armState.magazine = Number.isFinite(armState.magazine)
+      ? clampValue(Math.floor(armState.magazine), 0, stats.magazineSize)
+      : stats.magazineSize;
+    arms[side] = armState;
+    if (!Number.isFinite(reserveAmmo[stats.ammoType])) {
+      reserveAmmo[stats.ammoType] = 0;
+    }
+  });
+
+  return {
+    selectedSide: defaultLoadout.selectedSide === "right" ? "right" : "left",
+    reserveAmmo,
+    arms,
+  };
+}
+
+export function ensureWeaponLoadoutState(run, data) {
+  const fallback = createWeaponLoadoutState(data);
+  if (!run.weapons || typeof run.weapons !== "object") {
+    run.weapons = fallback;
+    return run.weapons;
+  }
+
+  run.weapons.selectedSide = run.weapons.selectedSide === "right" ? "right" : "left";
+  run.weapons.reserveAmmo = {
+    ...fallback.reserveAmmo,
+    ...(run.weapons.reserveAmmo || {}),
+  };
+  run.weapons.arms = run.weapons.arms && typeof run.weapons.arms === "object"
+    ? run.weapons.arms
+    : {};
+
+  ARM_SIDES.forEach((side) => {
+    const fallbackArm = fallback.arms[side];
+    const armState = {
+      ...fallbackArm,
+      ...(run.weapons.arms[side] || {}),
+    };
+    armState.side = side;
+    armState.modules = Array.isArray(armState.modules) ? armState.modules.slice(0, 3) : [...fallbackArm.modules];
+    armState.reloadTimer = Math.max(0, Number(armState.reloadTimer ?? 0));
+    armState.reloadDuration = Math.max(0, Number(armState.reloadDuration ?? 0));
+    armState.fireCooldownTimer = Math.max(0, Number(armState.fireCooldownTimer ?? 0));
+
+    const stats = computeArmWeaponStats(data, armState);
+    armState.magazine = Number.isFinite(armState.magazine)
+      ? clampValue(Math.floor(armState.magazine), 0, stats.magazineSize)
+      : stats.magazineSize;
+    if (!Number.isFinite(run.weapons.reserveAmmo[stats.ammoType])) {
+      run.weapons.reserveAmmo[stats.ammoType] = fallback.reserveAmmo[stats.ammoType] ?? 0;
+    }
+    run.weapons.arms[side] = armState;
+  });
+
+  return run.weapons;
+}
+
 export function createRunState(data, meta) {
   const movement = data.player.movement;
   const maxDashCount = Math.max(1, Math.floor(movement.maxDashCount ?? 1));
+  const startEntrance = (data.entrances || []).find((entry) => entry.id === "start")
+    || (data.entrances || [])[0]
+    || data.player.spawn;
   const player = {
-    x: data.player.spawn.x,
-    y: data.player.spawn.y,
+    x: startEntrance.x,
+    y: startEntrance.y,
     width: data.player.size.width,
     height: data.player.size.height,
     standHeight: data.player.size.height,
     crouchHeight: movement.crouchHeight,
     vx: 0,
     vy: 0,
-    facing: 1,
+    facing: Math.sign(startEntrance.facing ?? 1) || 1,
     onGround: true,
     wasOnGround: true,
     movementState: MOVEMENT_STATES.GROUNDED,
@@ -337,6 +584,8 @@ export function createRunState(data, meta) {
   const focusY = cameraConfig.lookAheadEnabled ? (cameraConfig.neutralFocusY ?? 0.5) : CAMERA_FOCUS_Y;
   const initialCameraX = clampValue(player.x - viewportWidth * focusX, 0, maxCameraX);
   const initialCameraY = clampValue(player.y - viewportHeight * focusY, 0, maxCameraY);
+  const levelRuntime = createLevelRuntimeState(data);
+  const currentLevelId = data.currentLevelId || data.defaultLevelId || "movement-lab-01";
 
   return {
     hp: data.player.maxHp,
@@ -348,6 +597,29 @@ export function createRunState(data, meta) {
     time: 0,
     timePhase: "day",
     nightActive: false,
+    currentLevelId,
+    levelStates: {},
+    map: {
+      visitedLevelIds: [currentLevelId],
+      discoveredLevelIds: [currentLevelId],
+      discoveredRouteIds: [],
+      exploredCellsByLevel: {
+        [currentLevelId]: [],
+      },
+    },
+    mapOverlay: {
+      active: false,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      dragging: false,
+      dragPointerId: null,
+      dragStartX: 0,
+      dragStartY: 0,
+      dragStartPanX: 0,
+      dragStartPanY: 0,
+    },
+    weapons: createWeaponLoadoutState(data),
     player,
     interactables: data.interactables.map((item) => ({
       ...deepClone(item),
@@ -374,7 +646,50 @@ export function createRunState(data, meta) {
     },
     threats: data.nightThreats.map((threat) => createThreatState(threat)),
     hostileDrones: (data.hostileDrones || []).map((drone) => createHostileDroneState(drone)),
+    humanoidEnemies: (data.humanoidEnemies || []).map((enemy) => createHumanoidEnemyState(enemy)),
     enemyShots: [],
+    faceOff: {
+      active: false,
+      targetId: null,
+      hoverPart: null,
+      selectedPart: "torso",
+      selectedDialogueKey: "KeyW",
+      acquireTargetId: null,
+      acquireTimer: 0,
+      acquireProgress: 0,
+      acquireDuration: data.faceOff?.acquireDuration ?? 1,
+      entryTransitionTimer: 0,
+      entryTransitionStartedAt: 0,
+      entryTransitionDuration: data.faceOff?.entryZoomDuration ?? 1,
+      cursorAssistTimer: 0,
+      cursorAssistDuration: data.faceOff?.cursorAssistDuration ?? 0.34,
+      cursorAssistStartX: CAMERA_SCREEN_WIDTH / 2,
+      cursorAssistStartY: CAMERA_SCREEN_HEIGHT / 2,
+      cursorAssistTargetX: CAMERA_SCREEN_WIDTH / 2,
+      cursorAssistTargetY: 327,
+      encounterState: "ambushed",
+      enemyLine: "",
+      enemyLineVisible: "",
+      enemyLineIndex: 0,
+      enemyLineTimer: 0,
+      enemyLineCharDelay: data.faceOff?.enemyLineCharDelay ?? 0.035,
+      choiceRevealTimer: 0,
+      choiceRevealHold: data.faceOff?.enemyLineHoldDuration ?? 0.35,
+      choiceRevealDuration: data.faceOff?.choiceSlideDuration ?? 0.26,
+      choiceRevealProgress: 0,
+      choicesReady: false,
+      shotShakeTimer: 0,
+      shotShakeDuration: data.faceOff?.shotShakeDuration ?? 0.22,
+      shotShakeIntensity: data.faceOff?.shotShakeIntensity ?? 18,
+      shotFlashTimer: 0,
+      shotFlashDuration: data.faceOff?.shotFlashDuration ?? 0.16,
+      timeline: 0,
+      triggerLimit: data.faceOff?.triggerLimit ?? 4.5,
+      result: null,
+      resultTimer: 0,
+      message: "",
+    },
+    ...levelRuntime,
     clueLog: data.world.startClueLog?.length
       ? [...data.world.startClueLog]
       : [
@@ -387,6 +702,8 @@ export function createRunState(data, meta) {
     noticeTimer: 3.6,
     attackFx: [],
     recoilFx: [],
+    weaponMissiles: [],
+    weaponBarriers: [],
     particles: [],
     afterimages: [],
     recoilFocusAfterimages: [],
@@ -430,11 +747,21 @@ export function createInitialState(data) {
       primaryDown: false,
       secondaryDown: false,
       primaryJustPressed: false,
+      secondaryJustPressed: false,
+      clientX: null,
+      clientY: null,
       onCanvas: false,
     },
     meta: loadMetaState(),
     run: null,
+    save: {
+      hasRun: false,
+      lastSavedAt: null,
+    },
     sceneTimer: 0,
+    debugFrame: 0,
+    debugLastNow: 0,
+    debugLastDt: 0,
     statusText: "C: 입장",
     resultSummary: null,
     currentControls: [],

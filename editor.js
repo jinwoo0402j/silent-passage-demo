@@ -1,12 +1,20 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-recoil-46";
+import { GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
 import {
   clearLevelOverride,
+  createBaseLevelData,
   createRuntimeGameData,
+  deleteLocalLevel,
   extractEditableLevelData,
+  getLevelRouteReferences,
+  getLevelSummaries,
+  getRunStartLevelId,
+  isBuiltInLevel,
+  isLocalOnlyLevel,
   mergeLevelData,
   normalizeEditableLevelData,
+  saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-recoil-46";
+} from "./level-store.js?v=20260501-run-start-v1";
 import { clamp, deepClone } from "./utils.js";
 
 const TOOL_IDS = {
@@ -16,7 +24,39 @@ const TOOL_IDS = {
   SIGN: "sign",
   LANTERN: "lantern",
   SPAWN: "spawn",
+  ENTRANCE: "entrance",
+  ROUTE_EXIT: "routeExit",
   GATE: "gate",
+};
+
+const TOOL_SHORTCUTS = {
+  Digit1: TOOL_IDS.SELECT,
+  Numpad1: TOOL_IDS.SELECT,
+  Digit2: TOOL_IDS.PLATFORM,
+  Numpad2: TOOL_IDS.PLATFORM,
+  Digit3: TOOL_IDS.BRACE_WALL,
+  Numpad3: TOOL_IDS.BRACE_WALL,
+  Digit4: TOOL_IDS.SIGN,
+  Numpad4: TOOL_IDS.SIGN,
+  Digit5: TOOL_IDS.SPAWN,
+  Numpad5: TOOL_IDS.SPAWN,
+  Digit6: TOOL_IDS.ENTRANCE,
+  Numpad6: TOOL_IDS.ENTRANCE,
+  Digit7: TOOL_IDS.ROUTE_EXIT,
+  Numpad7: TOOL_IDS.ROUTE_EXIT,
+  Digit8: TOOL_IDS.GATE,
+  Numpad8: TOOL_IDS.GATE,
+};
+
+const TOOL_SHORTCUT_LABELS = {
+  [TOOL_IDS.SELECT]: "1",
+  [TOOL_IDS.PLATFORM]: "2",
+  [TOOL_IDS.BRACE_WALL]: "3",
+  [TOOL_IDS.SIGN]: "4",
+  [TOOL_IDS.SPAWN]: "5",
+  [TOOL_IDS.ENTRANCE]: "6",
+  [TOOL_IDS.ROUTE_EXIT]: "7",
+  [TOOL_IDS.GATE]: "8",
 };
 
 const TOOL_HINTS = {
@@ -29,6 +69,9 @@ const TOOL_HINTS = {
 };
 
 TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
+
+TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
+TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
 
 const PLAYER_RENDER_GROUPS = [
   ["idle", "Idle"],
@@ -407,6 +450,9 @@ const COLORS = {
   ground: "rgba(131, 158, 118, 0.18)",
   gate: "rgba(231, 244, 126, 0.82)",
   gateFill: "rgba(231, 244, 126, 0.12)",
+  routeExit: "rgba(231, 244, 126, 0.82)",
+  routeExitFill: "rgba(231, 244, 126, 0.1)",
+  entrance: "rgba(147, 234, 255, 0.9)",
   spawn: "rgba(147, 234, 255, 0.9)",
   sign: "rgba(239, 248, 252, 0.94)",
   lantern: "rgba(231, 244, 126, 0.88)",
@@ -606,6 +652,15 @@ function getEditorDom() {
     ctx: canvas.getContext("2d"),
     collapsiblePanels: [...document.querySelectorAll(".editor-panel.is-collapsible")],
     toolButtons: [...document.querySelectorAll("[data-tool]")],
+    levelSelect: document.getElementById("levelSelect"),
+    levelNameInput: document.getElementById("levelNameInput"),
+    runStartLevelSelect: document.getElementById("runStartLevelSelect"),
+    levelMetaLabel: document.getElementById("levelMetaLabel"),
+    duplicateLevelButton: document.getElementById("duplicateLevelButton"),
+    newLevelButton: document.getElementById("newLevelButton"),
+    deleteLevelButton: document.getElementById("deleteLevelButton"),
+    mapRoomsFields: document.getElementById("mapRoomsFields"),
+    addMapRoomButton: document.getElementById("addMapRoomButton"),
     worldWidthInput: document.getElementById("worldWidthInput"),
     worldHeightInput: document.getElementById("worldHeightInput"),
     groundYInput: document.getElementById("groundYInput"),
@@ -636,9 +691,57 @@ function getEditorDom() {
   };
 }
 
-function createEditorState() {
-  const data = createRuntimeGameData(GAME_DATA);
+function createDefaultEditorMapRoom(data, index = 0) {
+  const label = index === 0
+    ? (data.levelLabel || data.label || data.currentLevelId || "Room")
+    : `Room ${index + 1}`;
+  return {
+    id: index === 0 ? "main" : `room-${index + 1}`,
+    label,
+    x: index * 220,
+    y: 0,
+    width: 180,
+    height: 82,
+  };
+}
+
+function ensureEditorMapRooms(data) {
+  data.map = data.map || {};
+  if (!Array.isArray(data.map.rooms) || data.map.rooms.length === 0) {
+    data.map.rooms = [createDefaultEditorMapRoom(data, 0)];
+  }
+  data.map.rooms = data.map.rooms.map((room, index) => {
+    const source = room && typeof room === "object" ? room : {};
+    return {
+      ...createDefaultEditorMapRoom(data, index),
+      ...source,
+      width: Math.max(24, Number(source.width ?? 180) || 180),
+      height: Math.max(24, Number(source.height ?? 82) || 82),
+    };
+  });
+  return data.map.rooms;
+}
+
+function prepareEditorData(data) {
   data.braceWalls = data.braceWalls || [];
+  data.entrances = data.entrances || [];
+  data.routeExits = data.routeExits || [];
+  ensureEditorMapRooms(data);
+  if (data.entrances.length === 0) {
+    data.entrances.push({
+      id: "start",
+      label: "Start",
+      x: data.player.spawn.x,
+      y: data.player.spawn.y,
+      facing: 1,
+    });
+  }
+  data.levelSummaries = getLevelSummaries(GAME_DATA);
+  return data;
+}
+
+function createEditorState() {
+  const data = prepareEditorData(createRuntimeGameData(GAME_DATA));
   const scale = getScaleConfig(data);
 
   return {
@@ -754,7 +857,8 @@ function clampEditorViewToWorld(editor) {
 }
 
 function applyEditorSnapshot(editor, dom, snapshot, dirty = true) {
-  editor.data = mergeLevelData(GAME_DATA, snapshot.override);
+  const levelId = snapshot.override?.levelId || editor.data.currentLevelId || GAME_DATA.defaultLevelId;
+  editor.data = prepareEditorData(mergeLevelData(createBaseLevelData(GAME_DATA, levelId), snapshot.override));
   editor.snap = snapshot.snap;
   editor.previewPose = snapshot.previewPose || "idle";
   editor.preview = null;
@@ -903,7 +1007,174 @@ function syncWorldInputs(editor, dom) {
   dom.cameraZoomInput.value = getEditorCameraZoom(editor.data).toFixed(2);
   renderCameraTuningFields(editor, dom);
   renderPlayerPreviewPoseOptions(editor, dom);
+  renderLevelControls(editor, dom);
+  renderMapRoomFields(editor, dom);
   updateScaleInfo(editor, dom);
+}
+
+function renderLevelControls(editor, dom) {
+  if (!dom.levelSelect || !dom.levelNameInput) {
+    return;
+  }
+  const summaries = getLevelSummaries(GAME_DATA);
+  editor.data.levelSummaries = summaries;
+  dom.levelSelect.innerHTML = summaries
+    .map((level) => {
+      const source = level.builtIn ? "built-in" : "local";
+      const dirty = level.hasOverride && level.builtIn ? " *" : "";
+      return `<option value="${escapeHtml(level.id)}">${escapeHtml(level.label || level.id)} (${source}${dirty})</option>`;
+    })
+    .join("");
+  const runStartLevelId = getRunStartLevelId(GAME_DATA);
+  if (dom.runStartLevelSelect) {
+    dom.runStartLevelSelect.innerHTML = summaries
+      .map((level) => `<option value="${escapeHtml(level.id)}">${escapeHtml(level.label || level.id)}</option>`)
+      .join("");
+    dom.runStartLevelSelect.value = runStartLevelId;
+  }
+  const currentLevelId = editor.data.currentLevelId || editor.data.defaultLevelId || summaries[0]?.id || "";
+  const currentSummary = summaries.find((level) => level.id === currentLevelId);
+  const builtIn = isBuiltInLevel(GAME_DATA, currentLevelId);
+  const localOnly = isLocalOnlyLevel(GAME_DATA, currentLevelId);
+  dom.levelSelect.value = currentLevelId;
+  dom.levelNameInput.value = editor.data.levelLabel || editor.data.label || editor.data.currentLevelId || "";
+  if (dom.levelMetaLabel) {
+    const source = builtIn ? "built-in" : "local";
+    const override = currentSummary?.hasOverride ? " · edited" : "";
+    const defaultMark = currentLevelId === editor.data.defaultLevelId ? " · default start" : "";
+    const runStartMark = currentLevelId === runStartLevelId ? " / run start" : "";
+    dom.levelMetaLabel.textContent = `${source}${override}${defaultMark}${runStartMark}`;
+  }
+  if (dom.deleteLevelButton) {
+    dom.deleteLevelButton.disabled = !localOnly;
+    dom.deleteLevelButton.textContent = localOnly ? "Delete Local" : "Built-in Protected";
+  }
+}
+
+function renderMapRoomFields(editor, dom) {
+  if (!dom.mapRoomsFields) {
+    return;
+  }
+  const rooms = ensureEditorMapRooms(editor.data);
+  dom.mapRoomsFields.innerHTML = rooms.map((room, index) => `
+    <div class="field-heading full">Room ${index + 1}</div>
+    <label class="field">
+      <span>ID</span>
+      <input data-map-room-index="${index}" data-map-room-field="id" type="text" value="${escapeHtml(room.id)}">
+    </label>
+    <label class="field">
+      <span>Label</span>
+      <input data-map-room-index="${index}" data-map-room-field="label" type="text" value="${escapeHtml(room.label)}">
+    </label>
+    <label class="field">
+      <span>X</span>
+      <input data-map-room-index="${index}" data-map-room-field="x" type="number" step="1" value="${Math.round(room.x)}">
+    </label>
+    <label class="field">
+      <span>Y</span>
+      <input data-map-room-index="${index}" data-map-room-field="y" type="number" step="1" value="${Math.round(room.y)}">
+    </label>
+    <label class="field">
+      <span>Width</span>
+      <input data-map-room-index="${index}" data-map-room-field="width" type="number" min="24" step="1" value="${Math.round(room.width)}">
+    </label>
+    <label class="field">
+      <span>Height</span>
+      <input data-map-room-index="${index}" data-map-room-field="height" type="number" min="24" step="1" value="${Math.round(room.height)}">
+    </label>
+    <button
+      type="button"
+      class="ghost-button"
+      data-map-room-delete="${index}"
+      ${rooms.length <= 1 ? "disabled" : ""}
+    >Delete Room</button>
+  `).join("");
+}
+
+function applyMapRoomField(editor, dom, index, field, rawValue) {
+  const rooms = ensureEditorMapRooms(editor.data);
+  const room = rooms[index];
+  if (!room || !["id", "label", "x", "y", "width", "height"].includes(field)) {
+    return;
+  }
+  const before = captureEditorSnapshot(editor);
+  if (field === "id" || field === "label") {
+    room[field] = String(rawValue ?? "");
+  } else {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    room[field] = field === "width" || field === "height" ? Math.max(24, value) : value;
+  }
+
+  const after = captureEditorSnapshot(editor);
+  if (getSnapshotKey(before) === getSnapshotKey(after)) {
+    return;
+  }
+  pushUndoSnapshot(editor, before);
+  markDirty(editor, dom);
+  queueRender(editor, dom);
+}
+
+function addMapRoom(editor, dom) {
+  const before = captureEditorSnapshot(editor);
+  const rooms = ensureEditorMapRooms(editor.data);
+  rooms.push(createDefaultEditorMapRoom(editor.data, rooms.length));
+  pushUndoSnapshot(editor, before);
+  renderMapRoomFields(editor, dom);
+  markDirty(editor, dom);
+  queueRender(editor, dom);
+}
+
+function deleteMapRoom(editor, dom, index) {
+  const rooms = ensureEditorMapRooms(editor.data);
+  if (rooms.length <= 1 || !rooms[index]) {
+    return;
+  }
+  const before = captureEditorSnapshot(editor);
+  rooms.splice(index, 1);
+  pushUndoSnapshot(editor, before);
+  renderMapRoomFields(editor, dom);
+  markDirty(editor, dom);
+  queueRender(editor, dom);
+}
+
+function slugifyLevelId(value, fallback = "level") {
+  const slug = String(value || fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || fallback;
+}
+
+function createUniqueLevelId(editor, seed) {
+  const existing = new Set(getLevelSummaries(GAME_DATA).map((level) => level.id));
+  const base = slugifyLevelId(seed, "level");
+  let candidate = base;
+  let suffix = 2;
+  while (existing.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function getLevelEntranceOptions(levelId) {
+  if (!levelId) {
+    return [{ id: "start", label: "Start" }];
+  }
+  try {
+    const targetData = createRuntimeGameData(GAME_DATA, levelId);
+    const entrances = (targetData.entrances || []).map((entrance) => ({
+      id: entrance.id,
+      label: entrance.label || entrance.id,
+    }));
+    return entrances.length ? entrances : [{ id: "start", label: "Start" }];
+  } catch {
+    return [{ id: "start", label: "Start" }];
+  }
 }
 
 function getSpawnRect(data) {
@@ -913,6 +1184,24 @@ function getSpawnRect(data) {
     width: data.player.size.width,
     height: data.player.size.height,
   };
+}
+
+function getEntranceRect(entrance) {
+  return {
+    x: entrance.x - 18,
+    y: entrance.y - 52,
+    width: 36,
+    height: 52,
+  };
+}
+
+function syncStartEntranceToSpawn(editor) {
+  const start = (editor.data.entrances || []).find((entrance) => entrance.id === "start");
+  if (!start) {
+    return;
+  }
+  start.x = editor.data.player.spawn.x;
+  start.y = editor.data.player.spawn.y;
 }
 
 function getPropRect(prop) {
@@ -955,8 +1244,14 @@ function getSelectedEntity(editor) {
   if (editor.selected.kind === "spawn") {
     return editor.data.player.spawn;
   }
+  if (editor.selected.kind === "entrance") {
+    return editor.data.entrances[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "routeExit") {
+    return editor.data.routeExits[editor.selected.index] || null;
+  }
   if (editor.selected.kind === "gate") {
-    return editor.data.extractionGate;
+    return editor.data.extractionGate || null;
   }
 
   return null;
@@ -1054,8 +1349,15 @@ function getSelectionRect(editor, selection = editor.selected) {
   if (selection.kind === "spawn") {
     return getSpawnRect(editor.data);
   }
+  if (selection.kind === "entrance") {
+    const entrance = editor.data.entrances[selection.index];
+    return entrance ? getEntranceRect(entrance) : null;
+  }
+  if (selection.kind === "routeExit") {
+    return editor.data.routeExits[selection.index] || null;
+  }
   if (selection.kind === "gate") {
-    return editor.data.extractionGate;
+    return editor.data.extractionGate || null;
   }
 
   return null;
@@ -1086,8 +1388,18 @@ function getSelectionOrigin(editor, selection = editor.selected) {
   if (selection.kind === "spawn") {
     return { x: editor.data.player.spawn.x, y: editor.data.player.spawn.y };
   }
+  if (selection.kind === "entrance") {
+    const entrance = editor.data.entrances[selection.index];
+    return entrance ? { x: entrance.x, y: entrance.y } : null;
+  }
+  if (selection.kind === "routeExit") {
+    const routeExit = editor.data.routeExits[selection.index];
+    return routeExit ? { x: routeExit.x, y: routeExit.y } : null;
+  }
   if (selection.kind === "gate") {
-    return { x: editor.data.extractionGate.x, y: editor.data.extractionGate.y };
+    return editor.data.extractionGate
+      ? { x: editor.data.extractionGate.x, y: editor.data.extractionGate.y }
+      : null;
   }
 
   return null;
@@ -1107,6 +1419,20 @@ function getSelectionOrigins(editor, selection = editor.selected) {
 
 function describeSelection(editor) {
   const scale = getScaleConfig(editor.data);
+
+  if (editor.selected?.kind === "entrance") {
+    const entrance = editor.data.entrances[editor.selected.index];
+    return entrance ? `Entrance · ${entrance.id}` : "No selection";
+  }
+
+  if (editor.selected?.kind === "routeExit") {
+    const routeExit = editor.data.routeExits[editor.selected.index];
+    return routeExit ? `Route Exit · ${routeExit.toLevelId || "no target"}` : "No selection";
+  }
+
+  if (editor.selected?.kind === "gate" && !editor.data.extractionGate) {
+    return "Extraction Gate 없음";
+  }
 
   if (!editor.selected) {
     return `선택 없음 · 스냅 ${editor.snap}`;
@@ -1170,6 +1496,8 @@ function canDeleteSelection(selection) {
     item.kind === "platform"
     || item.kind === "braceWall"
     || item.kind === "prop"
+    || item.kind === "routeExit"
+    || (item.kind === "entrance" && item.index > 0)
   ));
 }
 
@@ -1219,6 +1547,24 @@ function renderSelectionFields(editor, dom) {
     fields.push(`<label class="field full"><span>${label}</span><input type="text" data-field="${field}" value="${escapeHtml(value)}"></label>`);
   };
 
+  const addSelect = (label, field, value, options) => {
+    const safeValue = String(value || "");
+    const optionList = [...options];
+    if (safeValue && !optionList.some((option) => option.value === safeValue)) {
+      optionList.push({ value: safeValue, label: `Missing: ${safeValue}` });
+    }
+    fields.push(`
+      <label class="field full">
+        <span>${label}</span>
+        <select data-field="${field}">
+          ${optionList.map((option) => `
+            <option value="${escapeHtml(option.value)}"${option.value === safeValue ? " selected" : ""}>${escapeHtml(option.label)}</option>
+          `).join("")}
+        </select>
+      </label>
+    `);
+  };
+
   if (editor.selected.kind === "platform") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -1239,6 +1585,31 @@ function renderSelectionFields(editor, dom) {
   } else if (editor.selected.kind === "spawn") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
+  } else if (editor.selected.kind === "entrance") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Facing", "facing", entity.facing ?? 1, { min: -1, max: 1 });
+  } else if (editor.selected.kind === "routeExit") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addText("Prompt", "prompt", entity.prompt || "");
+    const levelOptions = getLevelSummaries(GAME_DATA).map((level) => ({
+      value: level.id,
+      label: level.label || level.id,
+    }));
+    const targetLevelId = entity.toLevelId || levelOptions[0]?.value || "";
+    const entranceOptions = getLevelEntranceOptions(targetLevelId).map((entrance) => ({
+      value: entrance.id,
+      label: entrance.label || entrance.id,
+    }));
+    addSelect("To Level", "toLevelId", targetLevelId, levelOptions);
+    addSelect("To Entrance", "toEntranceId", entity.toEntranceId || entranceOptions[0]?.value || "start", entranceOptions);
   } else if (editor.selected.kind === "gate") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -1323,12 +1694,56 @@ function renderHudLayoutFields(editor, dom) {
   dom.hudLayoutFields.innerHTML = fields.join("");
 }
 
+function getToolShortcutLabel(tool) {
+  return TOOL_SHORTCUT_LABELS[tool] || "";
+}
+
+function getToolHint(tool) {
+  const shortcut = getToolShortcutLabel(tool);
+  const hint = TOOL_HINTS[tool] || "";
+  return shortcut && hint ? `${shortcut}: ${hint}` : hint;
+}
+
+function isTextEditingTarget(target) {
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target instanceof HTMLElement && target.isContentEditable;
+}
+
+function renderToolShortcutLabels(dom) {
+  dom.toolButtons.forEach((button) => {
+    const shortcut = getToolShortcutLabel(button.dataset.tool);
+    if (!shortcut) {
+      return;
+    }
+    const label = button.dataset.originalLabel || button.textContent.trim();
+    button.dataset.originalLabel = label;
+    button.dataset.shortcut = shortcut;
+    button.title = `${shortcut}: ${label}`;
+    button.textContent = `${shortcut} ${label}`;
+  });
+}
+
+function handleToolShortcut(editor, dom, event) {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+    return false;
+  }
+  const tool = TOOL_SHORTCUTS[event.code];
+  if (!tool) {
+    return false;
+  }
+  event.preventDefault();
+  setTool(editor, dom, tool);
+  return true;
+}
+
 function setTool(editor, dom, tool) {
   editor.tool = tool;
   dom.toolButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.tool === tool);
   });
-  dom.toolHint.textContent = TOOL_HINTS[tool] || "";
+  dom.toolHint.textContent = getToolHint(tool);
 }
 
 function setAllPanelsOpen(dom, isOpen) {
@@ -1390,6 +1805,18 @@ function getRectFromPoints(start, end) {
 function getSelectionsInRect(editor, rect) {
   const items = [];
 
+  (editor.data.routeExits || []).forEach((routeExit, index) => {
+    if (rectsIntersect(rect, routeExit)) {
+      items.push({ kind: "routeExit", index });
+    }
+  });
+
+  (editor.data.entrances || []).forEach((entrance, index) => {
+    if (rectsIntersect(rect, getEntranceRect(entrance))) {
+      items.push({ kind: "entrance", index });
+    }
+  });
+
   editor.data.braceWalls.forEach((wall, index) => {
     if (rectsIntersect(rect, getBraceWallRect(wall))) {
       items.push({ kind: "braceWall", index });
@@ -1415,8 +1842,20 @@ function hitTest(editor, point) {
   if (pointInRect(point, getSpawnRect(editor.data))) {
     return { kind: "spawn" };
   }
-  if (pointInRect(point, editor.data.extractionGate)) {
+  if (editor.data.extractionGate && pointInRect(point, editor.data.extractionGate)) {
     return { kind: "gate" };
+  }
+
+  for (let index = editor.data.routeExits.length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, editor.data.routeExits[index])) {
+      return { kind: "routeExit", index };
+    }
+  }
+
+  for (let index = editor.data.entrances.length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getEntranceRect(editor.data.entrances[index]))) {
+      return { kind: "entrance", index };
+    }
   }
 
   for (let index = editor.data.props.length - 1; index >= 0; index -= 1) {
@@ -1470,8 +1909,20 @@ function deleteSelection(editor, dom) {
   const propIndexes = new Set(
     items.filter((item) => item.kind === "prop").map((item) => item.index),
   );
+  const routeExitIndexes = new Set(
+    items.filter((item) => item.kind === "routeExit").map((item) => item.index),
+  );
+  const entranceIndexes = new Set(
+    items.filter((item) => item.kind === "entrance" && item.index > 0).map((item) => item.index),
+  );
 
-  if (platformIndexes.size === 0 && braceWallIndexes.size === 0 && propIndexes.size === 0) {
+  if (
+    platformIndexes.size === 0
+    && braceWallIndexes.size === 0
+    && propIndexes.size === 0
+    && routeExitIndexes.size === 0
+    && entranceIndexes.size === 0
+  ) {
     return;
   }
 
@@ -1480,6 +1931,8 @@ function deleteSelection(editor, dom) {
   editor.data.platforms = editor.data.platforms.filter((_, index) => !platformIndexes.has(index));
   editor.data.braceWalls = editor.data.braceWalls.filter((_, index) => !braceWallIndexes.has(index));
   editor.data.props = editor.data.props.filter((_, index) => !propIndexes.has(index));
+  editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
+  editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
 
   editor.selected = null;
   renderSelectionFields(editor, dom);
@@ -1555,12 +2008,26 @@ function applySelectionField(editor, dom, field, value) {
     return;
   }
 
-  if (field === "color" || field === "text" || field === "prompt") {
+  if (
+    field === "color"
+    || field === "text"
+    || field === "prompt"
+    || field === "id"
+    || field === "label"
+    || field === "toLevelId"
+    || field === "toEntranceId"
+  ) {
     if (entity[field] === value) {
       return;
     }
     pushUndo(editor);
     entity[field] = value;
+    if (editor.selected?.kind === "routeExit" && field === "toLevelId") {
+      const entrances = getLevelEntranceOptions(value);
+      if (!entrances.some((entrance) => entrance.id === entity.toEntranceId)) {
+        entity.toEntranceId = entrances[0]?.id || "start";
+      }
+    }
     renderSelectionFields(editor, dom);
     markDirty(editor, dom);
     queueRender(editor, dom);
@@ -1577,8 +2044,15 @@ function applySelectionField(editor, dom, field, value) {
     nextValue = Math.max(12, numericValue);
   }
 
-  if (editor.selected?.kind === "gate" && (field === "width" || field === "height")) {
+  if (
+    (editor.selected?.kind === "gate" || editor.selected?.kind === "routeExit")
+    && (field === "width" || field === "height")
+  ) {
     nextValue = Math.max(24, numericValue);
+  }
+
+  if (editor.selected?.kind === "entrance" && field === "facing") {
+    nextValue = Math.sign(numericValue) || 1;
   }
 
   if (entity[field] === nextValue) {
@@ -1587,6 +2061,9 @@ function applySelectionField(editor, dom, field, value) {
 
   pushUndo(editor);
   entity[field] = nextValue;
+  if (editor.selected?.kind === "spawn" && (field === "x" || field === "y")) {
+    syncStartEntranceToSpawn(editor);
+  }
   renderSelectionFields(editor, dom);
   markDirty(editor, dom);
   queueRender(editor, dom);
@@ -1669,7 +2146,25 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
   } else if (selection.kind === "spawn") {
     editor.data.player.spawn.x = snappedX;
     editor.data.player.spawn.y = snappedY;
+    syncStartEntranceToSpawn(editor);
+  } else if (selection.kind === "entrance") {
+    const entity = editor.data.entrances[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "routeExit") {
+    const entity = editor.data.routeExits[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
   } else if (selection.kind === "gate") {
+    if (!editor.data.extractionGate) {
+      return;
+    }
     editor.data.extractionGate.x = snappedX;
     editor.data.extractionGate.y = snappedY;
   }
@@ -1785,17 +2280,70 @@ function placeSpawnAt(editor, dom, point) {
   }, editor.snap);
   editor.data.player.spawn.x = snapped.x;
   editor.data.player.spawn.y = snapped.y;
+  syncStartEntranceToSpawn(editor);
   setSelection(editor, dom, { kind: "spawn" });
+  markDirty(editor, dom);
+}
+
+function placeEntranceAt(editor, dom, point) {
+  pushUndo(editor);
+  const snapped = snapPoint(point, editor.snap);
+  const entrance = {
+    id: `entrance-${Date.now()}`,
+    label: "Entrance",
+    x: snapped.x,
+    y: snapped.y,
+    facing: 1,
+  };
+  editor.data.entrances.push(entrance);
+  setSelection(editor, dom, { kind: "entrance", index: editor.data.entrances.length - 1 });
+  markDirty(editor, dom);
+}
+
+function getDefaultRouteTarget(editor) {
+  const currentId = editor.data.currentLevelId;
+  const target = getLevelSummaries(GAME_DATA).find((level) => level.id !== currentId);
+  return target?.id || currentId || editor.data.defaultLevelId || "movement-lab-01";
+}
+
+function placeRouteExitAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 96;
+  const height = 192;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const routeExit = {
+    id: `route-exit-${Date.now()}`,
+    label: "Route Exit",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    prompt: "E: 다음 구역",
+    toLevelId: getDefaultRouteTarget(editor),
+    toEntranceId: "start",
+  };
+  editor.data.routeExits.push(routeExit);
+  setSelection(editor, dom, { kind: "routeExit", index: editor.data.routeExits.length - 1 });
   markDirty(editor, dom);
 }
 
 function placeGateAt(editor, dom, point) {
   pushUndo(editor);
-  const gate = editor.data.extractionGate;
+  const gate = editor.data.extractionGate || {
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 192,
+    prompt: "E: 추출",
+  };
   const snapped = snapPoint({
     x: point.x - gate.width / 2,
     y: point.y - gate.height,
   }, editor.snap);
+  editor.data.extractionGate = gate;
   editor.data.extractionGate.x = snapped.x;
   editor.data.extractionGate.y = snapped.y;
   setSelection(editor, dom, { kind: "gate" });
@@ -1898,6 +2446,18 @@ function handlePointerDown(editor, dom, event) {
 
   if (editor.tool === TOOL_IDS.SPAWN) {
     placeSpawnAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.ENTRANCE) {
+    placeEntranceAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.ROUTE_EXIT) {
+    placeRouteExitAt(editor, dom, world);
     queueRender(editor, dom);
     return;
   }
@@ -2051,8 +2611,128 @@ function nudgeSelection(editor, dom, dx, dy, fine) {
   queueRender(editor, dom);
 }
 
+function loadEditorLevel(editor, dom, levelId, options = {}) {
+  if (!levelId || levelId === editor.data.currentLevelId) {
+    renderLevelControls(editor, dom);
+    return;
+  }
+  if (editor.dirty && options.saveCurrent !== false) {
+    saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
+  }
+  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId));
+  editor.snap = getScaleConfig(editor.data).subTileSize;
+  editor.preview = null;
+  editor.drag = null;
+  editor.previewPose = "idle";
+  editor.history.undoStack = [];
+  editor.history.redoStack = [];
+  setSelection(editor, dom, null);
+  syncWorldInputs(editor, dom);
+  renderSelectionFields(editor, dom);
+  renderPlayerRenderFields(editor, dom);
+  renderHudLayoutFields(editor, dom);
+  setStatus(editor, dom, "레벨 전환 완료", "", false);
+  fitViewToWorld(editor, dom);
+}
+
+function duplicateCurrentLevel(editor, dom) {
+  const copy = extractEditableLevelData(editor.data);
+  const baseName = copy.levelId || editor.data.currentLevelId || "level";
+  copy.levelId = createUniqueLevelId(editor, `${baseName}-copy`);
+  copy.label = `${copy.label || baseName} Copy`;
+  saveLevelOverride(copy, GAME_DATA, copy.levelId);
+  loadEditorLevel(editor, dom, copy.levelId, { saveCurrent: false });
+}
+
+function createNewLevel(editor, dom) {
+  const copy = extractEditableLevelData(editor.data);
+  copy.levelId = createUniqueLevelId(editor, "new-level");
+  copy.label = "New Level";
+  copy.routeExits = [];
+  copy.extractionGate = null;
+  copy.entrances = [{
+    id: "start",
+    label: "Start",
+    x: copy.player.spawn.x,
+    y: copy.player.spawn.y,
+    facing: 1,
+  }];
+  copy.map = {
+    rooms: [{
+      id: "main",
+      label: copy.label,
+      x: 0,
+      y: 0,
+      width: 180,
+      height: 82,
+    }],
+  };
+  saveLevelOverride(copy, GAME_DATA, copy.levelId);
+  loadEditorLevel(editor, dom, copy.levelId, { saveCurrent: false });
+}
+
+function deleteCurrentLocalLevel(editor, dom) {
+  const levelId = editor.data.currentLevelId || editor.data.levelId;
+  if (!isLocalOnlyLevel(GAME_DATA, levelId)) {
+    setStatus(editor, dom, "Only local levels can be deleted.", "error", editor.dirty);
+    renderLevelControls(editor, dom);
+    return;
+  }
+
+  const references = getLevelRouteReferences(GAME_DATA, levelId);
+  if (references.length > 0) {
+    const refs = references
+      .map((ref) => `${ref.levelId}:${ref.routeId || ref.routeLabel || "route"}`)
+      .join(", ");
+    setStatus(editor, dom, `Delete blocked. Referenced by ${refs}.`, "error", editor.dirty);
+    return;
+  }
+
+  if (typeof window !== "undefined" && !window.confirm(`Delete local level "${levelId}"? This cannot be undone.`)) {
+    setStatus(editor, dom, "Delete cancelled.", "", editor.dirty);
+    return;
+  }
+
+  const result = deleteLocalLevel(GAME_DATA, levelId);
+  if (!result.ok) {
+    const reason = result.reason === "built-in"
+      ? "Built-in levels cannot be deleted."
+      : "Only local levels can be deleted.";
+    setStatus(editor, dom, reason, "error", editor.dirty);
+    renderLevelControls(editor, dom);
+    return;
+  }
+
+  const fallbackLevelId = GAME_DATA.defaultLevelId || getLevelSummaries(GAME_DATA)[0]?.id || "movement-lab-01";
+  editor.dirty = false;
+  loadEditorLevel(editor, dom, fallbackLevelId, { saveCurrent: false });
+  setStatus(editor, dom, `Deleted local level ${levelId}.`, "", false);
+}
+
+function updateLevelLabel(editor, dom, value) {
+  const next = String(value || "").trim() || editor.data.currentLevelId;
+  if (editor.data.levelLabel === next && editor.data.label === next) {
+    renderLevelControls(editor, dom);
+    return;
+  }
+  pushUndo(editor);
+  editor.data.levelLabel = next;
+  editor.data.label = next;
+  renderLevelControls(editor, dom);
+  renderMapRoomFields(editor, dom);
+  markDirty(editor, dom);
+  queueRender(editor, dom);
+}
+
+function updateRunStartLevel(editor, dom, levelId) {
+  const nextLevelId = saveRunStartLevelId(GAME_DATA, levelId);
+  renderLevelControls(editor, dom);
+  setStatus(editor, dom, `Run start level set to ${nextLevelId}.`, "", editor.dirty);
+}
+
 function saveEditorLevel(editor, dom) {
-  saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA);
+  saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
+  renderLevelControls(editor, dom);
   setStatus(editor, dom, "로컬 저장 완료", "", false);
 }
 
@@ -2076,20 +2756,22 @@ async function importLevelFile(editor, dom, file) {
   try {
     const text = await file.text();
     const parsed = JSON.parse(text);
-    const normalized = normalizeEditableLevelData(parsed, GAME_DATA);
+    const levelId = parsed.levelId || editor.data.currentLevelId || GAME_DATA.defaultLevelId;
+    const baseLevel = createBaseLevelData(GAME_DATA, levelId);
+    const normalized = normalizeEditableLevelData(parsed, baseLevel);
     const before = captureEditorSnapshot(editor);
     const nextSnapshot = {
       override: normalized,
-      snap: getScaleConfig(mergeLevelData(GAME_DATA, normalized)).subTileSize,
+      snap: getScaleConfig(mergeLevelData(baseLevel, normalized)).subTileSize,
       previewPose: "idle",
       selected: null,
     };
     if (getSnapshotKey(before) !== getSnapshotKey(nextSnapshot)) {
       pushUndoSnapshot(editor, before);
     }
-    editor.data = mergeLevelData(GAME_DATA, normalized);
+    editor.data = prepareEditorData(mergeLevelData(baseLevel, normalized));
     editor.snap = getScaleConfig(editor.data).subTileSize;
-    saveLevelOverride(normalized, GAME_DATA);
+    saveLevelOverride(normalized, GAME_DATA, normalized.levelId);
     editor.previewPose = "idle";
     setSelection(editor, dom, null);
     syncWorldInputs(editor, dom);
@@ -2105,8 +2787,9 @@ async function importLevelFile(editor, dom, file) {
 
 function resetEditorLevel(editor, dom) {
   const before = captureEditorSnapshot(editor);
-  clearLevelOverride();
-  editor.data = createRuntimeGameData(GAME_DATA);
+  const levelId = editor.data.currentLevelId || GAME_DATA.defaultLevelId;
+  clearLevelOverride(GAME_DATA, levelId);
+  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId));
   editor.snap = getScaleConfig(editor.data).subTileSize;
   editor.preview = null;
   editor.drag = null;
@@ -2135,10 +2818,26 @@ function snapEntireLevelToScale(editor, dom) {
   editor.data.world.groundY = snapValue(editor.data.world.groundY, step);
   editor.data.player.spawn.x = snapValue(editor.data.player.spawn.x, step);
   editor.data.player.spawn.y = snapValue(editor.data.player.spawn.y, step);
-  editor.data.extractionGate.x = snapValue(editor.data.extractionGate.x, step);
-  editor.data.extractionGate.y = snapValue(editor.data.extractionGate.y, step);
-  editor.data.extractionGate.width = Math.max(tile, snapValue(editor.data.extractionGate.width, step));
-  editor.data.extractionGate.height = Math.max(tile, snapValue(editor.data.extractionGate.height, step));
+  if (editor.data.extractionGate) {
+    editor.data.extractionGate.x = snapValue(editor.data.extractionGate.x, step);
+    editor.data.extractionGate.y = snapValue(editor.data.extractionGate.y, step);
+    editor.data.extractionGate.width = Math.max(tile, snapValue(editor.data.extractionGate.width, step));
+    editor.data.extractionGate.height = Math.max(tile, snapValue(editor.data.extractionGate.height, step));
+  }
+
+  editor.data.entrances = (editor.data.entrances || []).map((entrance) => ({
+    ...entrance,
+    x: snapValue(entrance.x, step),
+    y: snapValue(entrance.y, step),
+  }));
+
+  editor.data.routeExits = (editor.data.routeExits || []).map((routeExit) => ({
+    ...routeExit,
+    x: snapValue(routeExit.x, step),
+    y: snapValue(routeExit.y, step),
+    width: Math.max(tile, snapValue(routeExit.width, step)),
+    height: Math.max(tile, snapValue(routeExit.height, step)),
+  }));
 
   editor.data.platforms = editor.data.platforms.map((platform) => ({
     ...platform,
@@ -2179,8 +2878,45 @@ function snapEntireLevelToScale(editor, dom) {
 }
 
 function bindEvents(editor, dom) {
+  renderToolShortcutLabels(dom);
+
   dom.toolButtons.forEach((button) => {
     button.addEventListener("click", () => setTool(editor, dom, button.dataset.tool));
+  });
+
+  dom.levelSelect?.addEventListener("change", () => loadEditorLevel(editor, dom, dom.levelSelect.value));
+  dom.levelNameInput?.addEventListener("change", () => updateLevelLabel(editor, dom, dom.levelNameInput.value));
+  dom.runStartLevelSelect?.addEventListener("change", () => updateRunStartLevel(editor, dom, dom.runStartLevelSelect.value));
+  dom.duplicateLevelButton?.addEventListener("click", () => duplicateCurrentLevel(editor, dom));
+  dom.newLevelButton?.addEventListener("click", () => createNewLevel(editor, dom));
+  dom.deleteLevelButton?.addEventListener("click", () => deleteCurrentLocalLevel(editor, dom));
+  dom.addMapRoomButton?.addEventListener("click", () => addMapRoom(editor, dom));
+
+  const handleMapRoomFieldChange = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    const index = Number(target.dataset.mapRoomIndex);
+    const field = target.dataset.mapRoomField;
+    if (!Number.isInteger(index) || !field) {
+      return;
+    }
+    applyMapRoomField(editor, dom, index, field, target.value);
+  };
+
+  dom.mapRoomsFields?.addEventListener("input", handleMapRoomFieldChange);
+  dom.mapRoomsFields?.addEventListener("change", handleMapRoomFieldChange);
+  dom.mapRoomsFields?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const index = Number(target.dataset.mapRoomDelete);
+    if (!Number.isInteger(index)) {
+      return;
+    }
+    deleteMapRoom(editor, dom, index);
   });
 
   dom.collapseAllButton?.addEventListener("click", () => setAllPanelsOpen(dom, false));
@@ -2207,9 +2943,9 @@ function bindEvents(editor, dom) {
     queueRender(editor, dom);
   });
 
-  dom.selectionFields.addEventListener("input", (event) => {
+  const handleSelectionFieldChange = (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
       return;
     }
     const field = target.dataset.field;
@@ -2217,7 +2953,10 @@ function bindEvents(editor, dom) {
       return;
     }
     applySelectionField(editor, dom, field, target.value);
-  });
+  };
+
+  dom.selectionFields.addEventListener("input", handleSelectionFieldChange);
+  dom.selectionFields.addEventListener("change", handleSelectionFieldChange);
 
   dom.playerRenderFields.addEventListener("input", (event) => {
     const target = event.target;
@@ -2264,9 +3003,7 @@ function bindEvents(editor, dom) {
   window.addEventListener("editor-rerender", () => queueRender(editor, dom));
 
   window.addEventListener("keydown", (event) => {
-    const isTyping = event.target instanceof HTMLInputElement
-      || event.target instanceof HTMLTextAreaElement
-      || event.target instanceof HTMLSelectElement;
+    const isTyping = isTextEditingTarget(event.target);
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       if (isTyping) {
@@ -2287,6 +3024,10 @@ function bindEvents(editor, dom) {
       return;
     }
 
+    if (handleToolShortcut(editor, dom, event)) {
+      return;
+    }
+
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
       deleteSelection(editor, dom);
@@ -2301,8 +3042,9 @@ function bindEvents(editor, dom) {
 
     if (event.code === "KeyG") {
       event.preventDefault();
-      saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA);
-      window.location.href = "./index.html";
+      saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
+      const levelId = encodeURIComponent(editor.data.currentLevelId || editor.data.defaultLevelId || "movement-lab-01");
+      window.location.href = `./index.html?level=${levelId}&directLevel=1`;
       return;
     }
 
@@ -2607,8 +3349,51 @@ function drawSpawn(ctx, editor) {
   ctx.fill();
 }
 
+function drawEntrances(ctx, editor) {
+  (editor.data.entrances || []).forEach((entrance, index) => {
+    const rect = getEntranceRect(entrance);
+    const selected = isSelectionItemSelected(editor.selected, { kind: "entrance", index });
+    ctx.fillStyle = "rgba(147, 234, 255, 0.1)";
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.entrance;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.fillStyle = COLORS.entrance;
+    ctx.font = `${16 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(entrance.id || "entrance", entrance.x, rect.y - 10);
+    ctx.beginPath();
+    ctx.moveTo(entrance.x + (entrance.facing || 1) * 18, entrance.y - 20);
+    ctx.lineTo(entrance.x - (entrance.facing || 1) * 8, entrance.y - 32);
+    ctx.lineTo(entrance.x - (entrance.facing || 1) * 8, entrance.y - 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.textAlign = "left";
+  });
+}
+
+function drawRouteExits(ctx, editor) {
+  (editor.data.routeExits || []).forEach((routeExit, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "routeExit", index });
+    ctx.fillStyle = COLORS.routeExitFill;
+    ctx.fillRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
+    ctx.strokeStyle = selected ? COLORS.accentAlt : COLORS.routeExit;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
+    ctx.fillStyle = COLORS.routeExit;
+    ctx.font = `${16 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(routeExit.label || "Route", routeExit.x + routeExit.width / 2, routeExit.y - 12);
+    ctx.fillText(routeExit.toLevelId || "-", routeExit.x + routeExit.width / 2, routeExit.y + routeExit.height + 22);
+    ctx.textAlign = "left";
+  });
+}
+
 function drawGate(ctx, editor) {
   const gate = editor.data.extractionGate;
+  if (!gate) {
+    return;
+  }
   const selected = isSelectionItemSelected(editor.selected, { kind: "gate" });
 
   ctx.fillStyle = COLORS.gateFill;
@@ -2810,6 +3595,8 @@ function renderEditor(editor, dom) {
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawProps(ctx, editor);
+  drawRouteExits(ctx, editor);
+  drawEntrances(ctx, editor);
   drawSpawn(ctx, editor);
   drawGate(ctx, editor);
   drawSelectionOutline(ctx, editor);

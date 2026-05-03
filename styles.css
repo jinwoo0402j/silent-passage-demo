@@ -194,6 +194,15 @@ canvas {
   border-color: rgba(231, 244, 126, 0.54);
 }
 
+body.is-map-overlay-active .app-links,
+body.is-map-overlay-active .live-edit-button,
+body.is-map-overlay-active .debug-button,
+body.is-map-overlay-active .movement-tuning-button,
+body.is-map-overlay-active .touch-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .movement-tuning-panel {
   position: absolute;
   top: 206px;

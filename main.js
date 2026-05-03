@@ -1,9 +1,9 @@
-import { GAME_DATA } from "./level-data.js?v=20260424-recoil-49";
+import { GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
 import {
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260424-recoil-49";
+} from "./level-store.js?v=20260501-run-start-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -11,10 +11,11 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260424-recoil-49";
-import { renderGame } from "./render.js?v=20260424-recoil-49";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260424-recoil-49";
-import { bindInput, updateGame } from "./systems.js?v=20260424-recoil-49";
+} from "./movement-tuning.js?v=20260501-run-start-v1";
+import { renderGame } from "./render.js?v=20260501-run-start-v1";
+import { saveCurrentGame } from "./save-game.js?v=20260501-run-start-fix-v2";
+import { SCENES, createInitialState, createRunState } from "./state.js?v=20260501-run-start-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260501-run-start-fix-v2";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -29,6 +30,28 @@ const movementTuningResetButton = document.getElementById("movementTuningResetBu
 const sceneActionButton = document.getElementById("sceneActionButton");
 const touchControls = document.getElementById("touchControls");
 const touchButtons = Array.from(document.querySelectorAll(".touch-button"));
+const faceOffDebugPanel = document.createElement("pre");
+faceOffDebugPanel.setAttribute("aria-label", "Face-off debug");
+Object.assign(faceOffDebugPanel.style, {
+  position: "fixed",
+  left: "10px",
+  bottom: "10px",
+  zIndex: "99999",
+  margin: "0",
+  padding: "10px 12px",
+  maxWidth: "520px",
+  maxHeight: "46vh",
+  overflow: "auto",
+  pointerEvents: "none",
+  color: "#dff7ff",
+  background: "rgba(0, 0, 0, 0.78)",
+  border: "1px solid rgba(255,255,255,0.28)",
+  borderRadius: "6px",
+  font: "12px/1.35 Consolas, 'Cascadia Mono', monospace",
+  whiteSpace: "pre-wrap",
+  textShadow: "0 1px 2px rgba(0,0,0,0.75)",
+});
+document.body.appendChild(faceOffDebugPanel);
 const CROW_TUNING_FIELDS = [
   { key: "width", label: "Crow Width", min: 36, max: 320, step: 1 },
   { key: "height", label: "Crow Height", min: 24, max: 220, step: 1 },
@@ -37,6 +60,11 @@ const CROW_TUNING_FIELDS = [
   { key: "diveSpeed", label: "Crow Dive Speed", min: 300, max: 3200, step: 10 },
   { key: "backCatchPaddingX", label: "Crow Back Width Bonus", min: 0, max: 120, step: 1 },
   { key: "backCatchForgivenessY", label: "Crow Back Snap Height", min: 0, max: 72, step: 1 },
+];
+const FACE_OFF_TUNING_FIELDS = [
+  { key: "enemyLineCharDelay", label: "Text Char Delay", min: 0.015, max: 0.12, step: 0.005 },
+  { key: "enemyLineHoldDuration", label: "Enemy Line Hold", min: 0.2, max: 3, step: 0.05 },
+  { key: "choiceSlideDuration", label: "Choice Slide", min: 0.08, max: 1, step: 0.02 },
 ];
 
 const dom = {
@@ -64,9 +92,56 @@ applySprintTuning(
 );
 
 const state = createInitialState(runtimeData);
+window.__faceOffState = state;
+window.__faceOffData = runtimeData;
 bindInput(state);
 
 let lastFrame = performance.now();
+
+function formatNumber(value, digits = 3) {
+  return Number.isFinite(value) ? Number(value).toFixed(digits) : String(value);
+}
+
+function updateFaceOffDebugPanel(currentState, now, error = null) {
+  const run = currentState.run;
+  const faceOff = run?.faceOff;
+  const faceOffEnemy = faceOff?.targetId
+    ? (run?.humanoidEnemies || []).find((enemy) => enemy.id === faceOff.targetId)
+    : null;
+  const shouldShow = Boolean(
+    error ||
+    currentState.debug?.active
+  );
+  faceOffDebugPanel.hidden = !shouldShow;
+  if (!shouldShow) {
+    return;
+  }
+
+  const entryDuration = Math.max(0.001, faceOff?.entryTransitionDuration ?? 1);
+  const entryStartedAt = faceOff?.entryTransitionStartedAt ?? 0;
+  const entryElapsed = entryStartedAt > 0 ? Math.max(0, (now - entryStartedAt) / 1000) : 0;
+  const entryRenderRemaining = entryStartedAt > 0
+    ? Math.max(0, 1 - entryElapsed / entryDuration)
+    : Math.max(0, (faceOff?.entryTransitionTimer ?? 0) / entryDuration);
+  const pressed = Array.from(currentState.pressed || []).join(",");
+  const justPressed = Array.from(currentState.justPressed || []).join(",");
+  const text = [
+    "FACE-OFF DEBUG",
+    `frame=${currentState.debugFrame} now=${formatNumber(now / 1000, 2)} dt=${formatNumber(currentState.debugLastDt, 4)}`,
+    `scene=${currentState.scene} status=${currentState.statusText}`,
+    `active=${Boolean(faceOff?.active)} target=${faceOff?.targetId ?? "-"} acquire=${faceOff?.acquireTargetId ?? "-"} progress=${formatNumber(faceOff?.acquireProgress ?? 0)}`,
+    `entryTimer=${formatNumber(faceOff?.entryTransitionTimer ?? 0)} startedAt=${formatNumber(entryStartedAt / 1000, 2)} elapsed=${formatNumber(entryElapsed)} renderRemain=${formatNumber(entryRenderRemaining)}`,
+    `line=${faceOff?.enemyLineIndex ?? 0}/${faceOff?.enemyLine?.length ?? 0} choice=${formatNumber(faceOff?.choiceRevealProgress ?? 0)} ready=${Boolean(faceOff?.choicesReady)}`,
+    `result=${faceOff?.result ?? "-"} resultTimer=${formatNumber(faceOff?.resultTimer ?? 0)} message=${faceOff?.message ?? "-"}`,
+    `aftermath=${faceOffEnemy?.state ?? "-"} exhaustion=${faceOffEnemy?.exhaustionHits ?? 0}/${faceOffEnemy?.exhaustionLimit ?? 2} hover=${faceOff?.hoverPart ?? "-"} selected=${faceOff?.selectedPart ?? "-"}`,
+    `loot=${Boolean(run?.loot?.active)} liveEdit=${Boolean(currentState.liveEdit?.active)} recoilAim=${Boolean(run?.recoilAim?.active)} secondary=${Boolean(currentState.mouse?.secondaryDown)}`,
+    `mouse=${formatNumber(currentState.mouse?.screenX ?? 0, 1)},${formatNumber(currentState.mouse?.screenY ?? 0, 1)} primary=${Boolean(currentState.mouse?.primaryDown)} justPrimary=${Boolean(currentState.mouse?.primaryJustPressed)}`,
+    `pressed=[${pressed}] just=[${justPressed}]`,
+    error ? `ERROR=${error?.stack || error?.message || String(error)}` : "",
+  ].filter(Boolean).join("\n");
+  faceOffDebugPanel.textContent = text;
+  window.__faceOffDebugText = text;
+}
 
 function clampValue(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -81,7 +156,7 @@ function isLiveEditAvailable(currentState, data) {
 }
 
 function saveRuntimeOverride(data, currentState) {
-  saveLevelOverride(extractEditableLevelData(data), GAME_DATA);
+  saveLevelOverride(extractEditableLevelData(data), GAME_DATA, data.currentLevelId);
   saveSprintTuning(extractSprintTuning(data.player.movement), GAME_DATA.player.movement);
   if (currentState?.liveEdit) {
     currentState.liveEdit.saveFlashTimer = 1.2;
@@ -120,7 +195,8 @@ function jumpToExpedition(currentState, data) {
 
 function openLevelEditor(data, currentState) {
   saveRuntimeOverride(data, currentState);
-  window.location.href = "./editor.html";
+  const levelId = encodeURIComponent(data.currentLevelId || data.defaultLevelId || "movement-lab-01");
+  window.location.href = `./editor.html?level=${levelId}`;
 }
 
 function getCanvasPoint(targetCanvas, event) {
@@ -181,7 +257,7 @@ function consumeShortcutState(currentState, code) {
 
 function getSceneActionLabel(currentState) {
   if (currentState.scene === SCENES.TITLE) {
-    return "입장";
+    return currentState.save?.hasRun ? "이어하기" : "입장";
   }
   if (currentState.scene === SCENES.SHELTER) {
     return "출격";
@@ -279,12 +355,28 @@ function renderMovementTuningFields(currentDom, movement) {
       </label>
     `).join("")
     : "";
+  const faceOff = runtimeData.faceOff ?? {};
+  const faceOffFields = FACE_OFF_TUNING_FIELDS.map(({ key, label, min, max, step }) => `
+    <label class="movement-tuning-field">
+      <span>${label}</span>
+      <input
+        type="number"
+        min="${min}"
+        max="${max}"
+        step="${step}"
+        data-faceoff-field="${key}"
+        value="${formatValue(faceOff[key], step)}"
+      >
+    </label>
+  `).join("");
 
   currentDom.movementTuningFields.innerHTML = `
     <div class="movement-tuning-section">Movement</div>
     ${movementFields}
     <div class="movement-tuning-section">Crow</div>
     ${crowFields}
+    <div class="movement-tuning-section">Face-off Dialogue</div>
+    ${faceOffFields}
   `;
 }
 
@@ -314,6 +406,36 @@ function applySprintFieldValue(data, field, value) {
   const next = isIntegerStep ? Math.round(clamped) : clamped;
   data.player.movement[field] = next;
   return next;
+}
+
+function applyFaceOffFieldValue(data, field, value) {
+  const config = FACE_OFF_TUNING_FIELDS.find((entry) => entry.key === field);
+  if (!config || !data.faceOff) {
+    return null;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  const stepText = String(config.step);
+  const decimals = stepText.includes(".") ? stepText.split(".")[1].length : 0;
+  const clamped = Math.max(config.min, Math.min(config.max, numeric));
+  const next = Number(clamped.toFixed(decimals));
+  data.faceOff[field] = next;
+  return next;
+}
+
+function syncFaceOffTuningToRun(currentState, data) {
+  const faceOff = currentState.run?.faceOff;
+  if (!faceOff || !data.faceOff) {
+    return;
+  }
+
+  faceOff.enemyLineCharDelay = data.faceOff.enemyLineCharDelay ?? faceOff.enemyLineCharDelay;
+  faceOff.choiceRevealHold = data.faceOff.enemyLineHoldDuration ?? faceOff.choiceRevealHold;
+  faceOff.choiceRevealDuration = data.faceOff.choiceSlideDuration ?? faceOff.choiceRevealDuration;
 }
 
 function syncMovementTuningToRun(currentState, data) {
@@ -366,6 +488,8 @@ function syncMovementTuningToRun(currentState, data) {
 }
 
 function syncBrowserControls(currentDom, currentState) {
+  document.body.classList.toggle("is-map-overlay-active", Boolean(currentState.run?.mapOverlay?.active));
+
   if (currentDom.sceneActionButton) {
     const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION;
     currentDom.sceneActionButton.hidden = !sceneActionVisible;
@@ -436,32 +560,70 @@ function bindUi(currentDom, currentState, data) {
       document.exitPointerLock();
     }
   };
+  const isFaceOffVirtualCursorActive = () => (
+    currentState.scene === SCENES.EXPEDITION &&
+    currentState.run?.faceOff?.active
+  );
+  const isMapOverlayActive = () => (
+    currentState.scene === SCENES.EXPEDITION &&
+    Boolean(currentState.run?.mapOverlay?.active)
+  );
+  const getMapOverlay = () => currentState.run?.mapOverlay || null;
+  const stopMapOverlayDrag = () => {
+    const overlay = getMapOverlay();
+    if (!overlay) {
+      return;
+    }
+    overlay.dragging = false;
+    overlay.dragPointerId = null;
+  };
+  const syncVirtualMouseFromMovement = (event) => {
+    const rect = currentDom.canvas.getBoundingClientRect();
+    const scaleX = currentDom.canvas.width / Math.max(1, rect.width);
+    const scaleY = currentDom.canvas.height / Math.max(1, rect.height);
+    let movementX = typeof event.movementX === "number" ? event.movementX : 0;
+    let movementY = typeof event.movementY === "number" ? event.movementY : 0;
+    if (movementX === 0 && movementY === 0) {
+      const previousClientX = Number.isFinite(currentState.mouse.clientX) ? currentState.mouse.clientX : event.clientX;
+      const previousClientY = Number.isFinite(currentState.mouse.clientY) ? currentState.mouse.clientY : event.clientY;
+      movementX = event.clientX - previousClientX;
+      movementY = event.clientY - previousClientY;
+    }
+    currentState.mouse.clientX = event.clientX;
+    currentState.mouse.clientY = event.clientY;
+    currentState.mouse.screenX = clampValue(
+      currentState.mouse.screenX + movementX * scaleX,
+      0,
+      currentDom.canvas.width
+    );
+    currentState.mouse.screenY = clampValue(
+      currentState.mouse.screenY + movementY * scaleY,
+      0,
+      currentDom.canvas.height
+    );
+    currentState.mouse.onCanvas = true;
+  };
   const syncMouseFromEvent = (event) => {
+    if (isFaceOffVirtualCursorActive()) {
+      syncVirtualMouseFromMovement(event);
+      return;
+    }
+
     if (isAimPointerLocked()) {
       if (
         (event.movementX !== 0 || event.movementY !== 0) &&
         typeof event.movementX === "number" &&
         typeof event.movementY === "number"
       ) {
-        const rect = currentDom.canvas.getBoundingClientRect();
-        const scaleX = currentDom.canvas.width / Math.max(1, rect.width);
-        const scaleY = currentDom.canvas.height / Math.max(1, rect.height);
-        currentState.mouse.screenX = clampValue(
-          currentState.mouse.screenX + event.movementX * scaleX,
-          0,
-          currentDom.canvas.width
-        );
-        currentState.mouse.screenY = clampValue(
-          currentState.mouse.screenY + event.movementY * scaleY,
-          0,
-          currentDom.canvas.height
-        );
+        syncVirtualMouseFromMovement(event);
       }
       currentState.mouse.onCanvas = true;
       return;
     }
 
     const point = getCanvasPoint(currentDom.canvas, event);
+    currentState.mouse.clientX = event.clientX;
+    currentState.mouse.clientY = event.clientY;
     currentState.mouse.screenX = clampValue(point.x, 0, currentDom.canvas.width);
     currentState.mouse.screenY = clampValue(point.y, 0, currentDom.canvas.height);
     currentState.mouse.onCanvas = (
@@ -478,12 +640,17 @@ function bindUi(currentDom, currentState, data) {
     currentState.mouse.primaryDown = true;
   };
   const markSecondaryMouseDown = () => {
+    if (!currentState.mouse.secondaryDown) {
+      currentState.mouse.secondaryJustPressed = true;
+    }
     currentState.mouse.secondaryDown = true;
   };
   const clearMouseButtons = () => {
     currentState.mouse.primaryDown = false;
     currentState.mouse.secondaryDown = false;
     currentState.mouse.primaryJustPressed = false;
+    currentState.mouse.secondaryJustPressed = false;
+    stopMapOverlayDrag();
     releaseAimPointerLock();
   };
   const syncMouseButtonsFromEvent = (event) => {
@@ -504,6 +671,10 @@ function bindUi(currentDom, currentState, data) {
   const handleRecoilMouseDown = (event) => {
     syncMouseFromEvent(event);
 
+    if (isMapOverlayActive()) {
+      return false;
+    }
+
     if (currentState.scene !== SCENES.EXPEDITION || currentState.liveEdit.active) {
       return false;
     }
@@ -522,6 +693,58 @@ function bindUi(currentDom, currentState, data) {
     if (primaryPressed) {
       markPrimaryMouseDown();
     }
+    event.preventDefault();
+    return true;
+  };
+  const beginMapOverlayDrag = (event) => {
+    if (!isMapOverlayActive() || event.button !== 0) {
+      return false;
+    }
+    syncMouseFromEvent(event);
+    const overlay = getMapOverlay();
+    if (!overlay) {
+      return false;
+    }
+    overlay.dragging = true;
+    overlay.dragPointerId = Number.isFinite(event.pointerId) ? event.pointerId : null;
+    overlay.dragStartX = currentState.mouse.screenX;
+    overlay.dragStartY = currentState.mouse.screenY;
+    overlay.dragStartPanX = Number.isFinite(overlay.panX) ? overlay.panX : 0;
+    overlay.dragStartPanY = Number.isFinite(overlay.panY) ? overlay.panY : 0;
+    currentDom.canvas.style.cursor = "grabbing";
+    event.preventDefault();
+    return true;
+  };
+  const updateMapOverlayDrag = (event) => {
+    if (!isMapOverlayActive()) {
+      return false;
+    }
+    syncMouseFromEvent(event);
+    const overlay = getMapOverlay();
+    if (!overlay) {
+      return false;
+    }
+    if (!overlay.dragging || (Number.isFinite(overlay.dragPointerId) && event.pointerId !== overlay.dragPointerId)) {
+      currentDom.canvas.style.cursor = "grab";
+      return false;
+    }
+    overlay.panX = overlay.dragStartPanX + currentState.mouse.screenX - overlay.dragStartX;
+    overlay.panY = overlay.dragStartPanY + currentState.mouse.screenY - overlay.dragStartY;
+    currentDom.canvas.style.cursor = "grabbing";
+    event.preventDefault();
+    return true;
+  };
+  const zoomMapOverlay = (event) => {
+    if (!isMapOverlayActive()) {
+      return false;
+    }
+    const overlay = getMapOverlay();
+    if (!overlay) {
+      return false;
+    }
+    const currentZoom = clampValue(Number(overlay.zoom ?? 1), 0.55, 3.25);
+    const nextZoom = clampValue(currentZoom * Math.exp(-event.deltaY * 0.0015), 0.55, 3.25);
+    overlay.zoom = nextZoom;
     event.preventDefault();
     return true;
   };
@@ -570,6 +793,7 @@ function bindUi(currentDom, currentState, data) {
     saveRuntimeOverride(data, currentState);
     syncMovementTuningToRun(currentState, data);
     syncCrowTuningToRun(currentState, data);
+    syncFaceOffTuningToRun(currentState, data);
     renderMovementTuningFields(currentDom, data.player.movement);
   });
 
@@ -581,7 +805,11 @@ function bindUi(currentDom, currentState, data) {
       ...crow,
       patrol: crow.patrol ? { ...crow.patrol } : undefined,
     }));
+    data.faceOff.enemyLineCharDelay = GAME_DATA.faceOff.enemyLineCharDelay;
+    data.faceOff.enemyLineHoldDuration = GAME_DATA.faceOff.enemyLineHoldDuration;
+    data.faceOff.choiceSlideDuration = GAME_DATA.faceOff.choiceSlideDuration;
     syncCrowTuningToRun(currentState, data);
+    syncFaceOffTuningToRun(currentState, data);
     renderMovementTuningFields(currentDom, data.player.movement);
   });
 
@@ -603,14 +831,25 @@ function bindUi(currentDom, currentState, data) {
     }
 
     const crowField = target.dataset.crowField;
-    if (!crowField) {
+    if (crowField) {
+      const next = applyCrowFieldValue(data, crowField, target.value);
+      if (next === null) {
+        return;
+      }
+      syncCrowTuningToRun(currentState, data);
+      target.value = String(next);
       return;
     }
-    const next = applyCrowFieldValue(data, crowField, target.value);
+
+    const faceOffField = target.dataset.faceoffField;
+    if (!faceOffField) {
+      return;
+    }
+    const next = applyFaceOffFieldValue(data, faceOffField, target.value);
     if (next === null) {
       return;
     }
-    syncCrowTuningToRun(currentState, data);
+    syncFaceOffTuningToRun(currentState, data);
     target.value = String(next);
   });
 
@@ -626,11 +865,24 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.canvas.addEventListener("pointermove", (event) => {
+    if (updateMapOverlayDrag(event)) {
+      return;
+    }
     syncMouseFromEvent(event);
     syncMouseButtonsFromEvent(event);
   });
 
   currentDom.canvas.addEventListener("pointerdown", (event) => {
+    if (beginMapOverlayDrag(event)) {
+      if (currentDom.canvas.setPointerCapture) {
+        try {
+          currentDom.canvas.setPointerCapture(event.pointerId);
+        } catch {
+          // Pointer capture is best-effort; window-level pointer handlers still finish the drag.
+        }
+      }
+      return;
+    }
     if (handleRecoilMouseDown(event)) {
       if (currentDom.canvas.setPointerCapture) {
         try {
@@ -643,12 +895,21 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.canvas.addEventListener("mousedown", (event) => {
+    if (isMapOverlayActive()) {
+      event.preventDefault();
+      return;
+    }
     handleRecoilMouseDown(event);
   });
+
+  currentDom.canvas.addEventListener("wheel", (event) => {
+    zoomMapOverlay(event);
+  }, { passive: false });
 
   window.addEventListener("mousedown", (event) => {
     const buttons = typeof event.buttons === "number" ? event.buttons : 0;
     const aimingOrCombinedClick =
+      isFaceOffVirtualCursorActive() ||
       currentState.mouse.secondaryDown ||
       event.button === 2 ||
       (buttons & 2) !== 0 ||
@@ -686,9 +947,18 @@ function bindUi(currentDom, currentState, data) {
   });
 
   window.addEventListener("pointermove", (event) => {
-    if (currentState.mouse.secondaryDown || currentState.mouse.primaryDown) {
+    if (updateMapOverlayDrag(event)) {
+      return;
+    }
+
+    if (isFaceOffVirtualCursorActive() || currentState.mouse.secondaryDown || currentState.mouse.primaryDown) {
       syncMouseFromEvent(event);
       syncMouseButtonsFromEvent(event);
+    }
+
+    if (isFaceOffVirtualCursorActive()) {
+      currentDom.canvas.style.cursor = "none";
+      return;
     }
 
     if (!isLiveEditAvailable(currentState, data) || !currentState.run) {
@@ -728,6 +998,9 @@ function bindUi(currentDom, currentState, data) {
   });
 
   window.addEventListener("pointerup", (event) => {
+    if (isMapOverlayActive()) {
+      stopMapOverlayDrag();
+    }
     const primaryReleaseDuringFocus = event.button === 0 && currentState.mouse.secondaryDown;
     if (primaryReleaseDuringFocus && !currentState.mouse.primaryDown) {
       markPrimaryMouseDown();
@@ -757,6 +1030,9 @@ function bindUi(currentDom, currentState, data) {
   });
 
   window.addEventListener("mouseup", (event) => {
+    if (isMapOverlayActive()) {
+      stopMapOverlayDrag();
+    }
     const primaryReleaseDuringFocus = event.button === 0 && currentState.mouse.secondaryDown;
     if (primaryReleaseDuringFocus && !currentState.mouse.primaryDown) {
       markPrimaryMouseDown();
@@ -786,6 +1062,7 @@ function bindUi(currentDom, currentState, data) {
     if (currentState.mouse.secondaryDown) {
       currentState.mouse.secondaryDown = false;
       currentState.mouse.primaryDown = false;
+      currentState.mouse.secondaryJustPressed = false;
     }
   });
 
@@ -800,6 +1077,16 @@ function bindUi(currentDom, currentState, data) {
     if ((event.ctrlKey || event.metaKey) && lowerKey === "s") {
       event.preventDefault();
       saveRuntimeOverride(data, currentState);
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && code === "KeyM") {
+      event.preventDefault();
+      if (event.repeat) {
+        return;
+      }
+      consumeShortcutState(currentState, code);
+      openLevelEditor(data, currentState);
       return;
     }
 
@@ -832,13 +1119,6 @@ function bindUi(currentDom, currentState, data) {
       consumeShortcutState(currentState, code);
       currentState.debug.active = !currentState.debug.active;
       syncDebugButton(currentDom, currentState);
-      return;
-    }
-
-    if (code === "KeyM") {
-      event.preventDefault();
-      consumeShortcutState(currentState, code);
-      openLevelEditor(data, currentState);
       return;
     }
 
@@ -935,14 +1215,23 @@ function syncCrowTuningToRun(currentState, data) {
 function frame(now) {
   const dt = Math.min(0.033, (now - lastFrame) / 1000);
   lastFrame = now;
+  state.debugFrame += 1;
+  state.debugLastNow = now;
+  state.debugLastDt = dt;
 
-  updateGame(state, runtimeData, dt);
-  syncAimPointerLock(dom, state);
-  syncLiveEditButton(dom, state, runtimeData);
-  syncDebugButton(dom, state);
-  syncMovementTuningButton(dom);
-  syncBrowserControls(dom, state);
-  renderGame(dom, state, runtimeData);
+  try {
+    updateGame(state, runtimeData, dt);
+    syncAimPointerLock(dom, state);
+    syncLiveEditButton(dom, state, runtimeData);
+    syncDebugButton(dom, state);
+    syncMovementTuningButton(dom);
+    syncBrowserControls(dom, state);
+    renderGame(dom, state, runtimeData);
+    updateFaceOffDebugPanel(state, now);
+  } catch (error) {
+    console.error(error);
+    updateFaceOffDebugPanel(state, now, error);
+  }
   requestAnimationFrame(frame);
 }
 
@@ -951,5 +1240,9 @@ syncLiveEditButton(dom, state, runtimeData);
 syncDebugButton(dom, state);
 syncMovementTuningButton(dom);
 syncBrowserControls(dom, state);
+window.addEventListener("beforeunload", () => {
+  saveCurrentGame(state, runtimeData);
+});
 renderGame(dom, state, runtimeData);
+updateFaceOffDebugPanel(state, performance.now());
 requestAnimationFrame(frame);

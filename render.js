@@ -1,11 +1,18 @@
-import { MOVEMENT_STATES, SCENES, hasUnlocked } from "./state.js";
-import { clamp, formatOutcome } from "./utils.js";
+import {
+  MOVEMENT_STATES,
+  SCENES,
+  computeArmWeaponStats,
+  ensureWeaponLoadoutState,
+  hasUnlocked,
+} from "./state.js";
+import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
 let spriteTintCanvas = null;
 let spriteTintContext = null;
 const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
+const MAP_EXPLORE_CELL_SIZE = 320;
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
   && (
     window.__SILENT_PASSAGE_PERF === "lite" ||
@@ -928,6 +935,9 @@ function drawGroundShine(ctx) {
 
 function drawGate(ctx, data, theme) {
   const gate = data.extractionGate;
+  if (!gate) {
+    return;
+  }
   drawBeveledPanel(ctx, theme, gate.x - 14, gate.y - 18, gate.width + 28, gate.height + 24, {
     cut: 16,
     fill: "rgba(10, 20, 26, 0.22)",
@@ -939,6 +949,27 @@ function drawGate(ctx, data, theme) {
   ctx.fillStyle = "rgba(255,255,255,0.8)";
   ctx.fillRect(gate.x + 10, gate.y, 6, gate.height);
   ctx.fillRect(gate.x + gate.width - 16, gate.y, 6, gate.height);
+}
+
+function drawRouteExits(ctx, data, theme) {
+  (data.routeExits || []).forEach((routeExit) => {
+    drawBeveledPanel(ctx, theme, routeExit.x - 14, routeExit.y - 18, routeExit.width + 28, routeExit.height + 24, {
+      cut: 16,
+      fill: "rgba(10, 20, 26, 0.2)",
+      stroke: "rgba(231, 244, 126, 0.42)",
+      glow: true,
+    });
+    ctx.fillStyle = "rgba(231, 244, 126, 0.12)";
+    ctx.fillRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
+    ctx.strokeStyle = "rgba(231, 244, 126, 0.58)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(routeExit.label || "Route", routeExit.x + routeExit.width / 2, routeExit.y - 24);
+    ctx.textAlign = "left";
+  });
 }
 
 function drawBraceWalls(ctx, data, theme) {
@@ -1760,6 +1791,144 @@ function drawEntity(ctx, entity, palette, label) {
     ctx.font = "13px 'Segoe UI', sans-serif";
     ctx.fillText(label, entity.x - 6, entity.y - 10);
   }
+}
+
+function isHumanoidDrawable(entity) {
+  return Boolean(
+    entity &&
+    !entity.dead &&
+    entity.state !== "dead" &&
+    entity.state !== "escaped" &&
+    entity.state !== "released"
+  );
+}
+
+function drawHumanoidEnemy(ctx, enemy) {
+  if (!isHumanoidDrawable(enemy)) {
+    return;
+  }
+
+  const cx = enemy.x + enemy.width * 0.5;
+  const hitFlash = enemy.hitFlash > 0;
+  const resolved = enemy.state === "disabled" || enemy.state === "surrendered" || enemy.state === "dealt";
+  const coat = hitFlash ? "#f3f6f7" : resolved ? "#5b6063" : enemy.active ? "#34383d" : "#4b5055";
+  const line = enemy.active ? "rgba(255, 118, 132, 0.7)" : "rgba(255,255,255,0.28)";
+
+  if (enemy.state === "knockedDown") {
+    const baseY = enemy.y + enemy.height - 10;
+    const exhaustion = enemy.exhaustionHits ?? 0;
+    const exhaustionLimit = Math.max(1, enemy.exhaustionLimit ?? 2);
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY + 8, enemy.width * 0.92, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.translate(cx, baseY - 18);
+    ctx.scale(enemy.facing === -1 ? -1 : 1, 1);
+    ctx.strokeStyle = hitFlash ? "#ffffff" : "rgba(220,224,226,0.82)";
+    ctx.fillStyle = hitFlash ? "#ffffff" : "#3f444a";
+    ctx.lineWidth = 8;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-34, 6);
+    ctx.lineTo(26, -1);
+    ctx.lineTo(44, 8);
+    ctx.stroke();
+
+    ctx.fillStyle = hitFlash ? "#ffffff" : "#c8c9c6";
+    ctx.beginPath();
+    ctx.arc(46, -6, 13, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = hitFlash ? "#ffffff" : "rgba(255,118,132,0.64)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(2, 4);
+    ctx.lineTo(-28, 24);
+    ctx.moveTo(-14, 4);
+    ctx.lineTo(-45, 20);
+    ctx.stroke();
+
+    ctx.restore();
+
+    drawBeveledPanel(ctx, { font: "700 12px 'Segoe UI', sans-serif" }, enemy.x - 9, enemy.y - 24, enemy.width + 18, 22, {
+      fill: "rgba(8, 10, 14, 0.62)",
+      stroke: "rgba(255,255,255,0.2)",
+      cut: 5,
+      innerLines: false,
+    });
+    ctx.fillStyle = "rgba(245,248,251,0.82)";
+    ctx.font = "700 11px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`탈진 ${exhaustion}/${exhaustionLimit}`, cx, enemy.y - 9);
+    return;
+  }
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(cx, enemy.y + enemy.height + 5, enemy.width * 0.48, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.translate(cx, resolved ? enemy.y + 24 : enemy.y);
+  ctx.scale(enemy.facing === -1 ? -1 : 1, 1);
+  if (enemy.state === "disabled") {
+    ctx.rotate(-0.82);
+  }
+
+  ctx.fillStyle = hitFlash ? "#ffffff" : "#c8c9c6";
+  ctx.beginPath();
+  ctx.arc(0, 16, 15, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = coat;
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-22, 34);
+  ctx.lineTo(22, 34);
+  ctx.lineTo(18, 78);
+  ctx.lineTo(8, 104);
+  ctx.lineTo(-8, 104);
+  ctx.lineTo(-18, 78);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = resolved ? "rgba(220,220,220,0.56)" : line;
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(20, 48);
+  ctx.lineTo(resolved ? 33 : 43, resolved ? 80 : 58);
+  ctx.lineTo(resolved ? 42 : 52, resolved ? 88 : 55);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(230,230,230,0.84)";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(-8, 102);
+  ctx.lineTo(-16, 132);
+  ctx.moveTo(8, 102);
+  ctx.lineTo(16, 132);
+  ctx.stroke();
+  ctx.restore();
+
+  const hpRatio = clamp((enemy.hp ?? enemy.maxHp ?? 100) / Math.max(1, enemy.maxHp ?? 100), 0, 1);
+  const triggerRatio = clamp((enemy.trigger ?? 0) / 4.5, 0, 1);
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fillRect(enemy.x, enemy.y - 14, enemy.width, 4);
+  ctx.fillStyle = "#dce7ec";
+  ctx.fillRect(enemy.x, enemy.y - 14, enemy.width * hpRatio, 4);
+  if (triggerRatio > 0.02) {
+    ctx.fillStyle = "rgba(255, 88, 104, 0.78)";
+    ctx.fillRect(enemy.x, enemy.y - 8, enemy.width * triggerRatio, 3);
+  }
+}
+
+function drawHumanoidEnemies(ctx, run) {
+  (run.humanoidEnemies || []).forEach((enemy) => drawHumanoidEnemy(ctx, enemy));
 }
 
 function drawHostileCrow(ctx, run, crow) {
@@ -2790,9 +2959,52 @@ function drawRecoilFx(ctx, run) {
   });
 }
 
+function drawWeaponModulesWorld(ctx, run) {
+  (run.weaponBarriers || []).forEach((barrier) => {
+    const alpha = clamp((barrier.life ?? 0) / Math.max(0.001, barrier.duration ?? 0.2), 0, 1);
+    const angle = Math.atan2(barrier.dirY ?? 0, barrier.dirX ?? 1);
+    ctx.save();
+    ctx.translate(barrier.x, barrier.y);
+    ctx.rotate(angle);
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = `rgba(231, 244, 126, ${0.12 * alpha})`;
+    ctx.fillRect(-barrier.width * 0.5, -barrier.height * 0.5, barrier.width, barrier.height);
+    ctx.strokeStyle = `rgba(231, 244, 126, ${0.72 * alpha})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-barrier.width * 0.42, -barrier.height * 0.34);
+    ctx.lineTo(barrier.width * 0.42, -barrier.height * 0.12);
+    ctx.lineTo(barrier.width * 0.42, barrier.height * 0.12);
+    ctx.lineTo(-barrier.width * 0.42, barrier.height * 0.34);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  (run.weaponMissiles || []).forEach((missile) => {
+    const alpha = clamp((missile.life ?? 0) / Math.max(0.001, missile.duration ?? 0.9), 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = `rgba(135, 225, 255, ${0.58 * alpha})`;
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(missile.x - (missile.dirX ?? 1) * 24, missile.y - (missile.dirY ?? 0) * 24);
+    ctx.lineTo(missile.x, missile.y);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(245, 248, 251, ${0.86 * alpha})`;
+    ctx.beginPath();
+    ctx.arc(missile.x, missile.y, missile.radius ?? 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
 function drawRecoilAimWorld(ctx, run) {
   const aim = run.recoilAim;
-  const blend = run.player.recoilFocusBlend ?? 0;
+  const blend = aim?.aiming
+    ? Math.max(run.player.recoilFocusBlend ?? 0, aim.active ? 0.75 : 0.34)
+    : (run.player.recoilFocusBlend ?? 0);
   if (!aim || blend <= 0.02) {
     return;
   }
@@ -3130,7 +3342,12 @@ function drawDebugWorldOverlay(ctx, state, data) {
 
   ctx.strokeStyle = "rgba(126, 255, 170, 0.92)";
   ctx.lineWidth = 2;
-  ctx.strokeRect(data.extractionGate.x, data.extractionGate.y, data.extractionGate.width, data.extractionGate.height);
+  if (data.extractionGate) {
+    ctx.strokeRect(data.extractionGate.x, data.extractionGate.y, data.extractionGate.width, data.extractionGate.height);
+  }
+  (data.routeExits || []).forEach((routeExit) => {
+    ctx.strokeRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
+  });
 
   ctx.fillStyle = "rgba(8, 14, 22, 0.84)";
   ctx.fillRect(player.x - 4, player.y - 64, 448, 58);
@@ -3288,16 +3505,19 @@ function drawMiniMap(ctx, state, data, theme) {
     ctx.stroke();
   });
 
-  const gateX = centerX - radius * 0.82 + (data.extractionGate.x / data.world.width) * radius * 1.64;
-  const gateY = centerY - radius * 0.52 + (data.extractionGate.y / data.world.height) * radius * 0.92;
-  ctx.fillStyle = theme.accent;
-  ctx.beginPath();
-  ctx.moveTo(gateX, gateY - 5);
-  ctx.lineTo(gateX + 5, gateY);
-  ctx.lineTo(gateX, gateY + 5);
-  ctx.lineTo(gateX - 5, gateY);
-  ctx.closePath();
-  ctx.fill();
+  const destination = data.extractionGate || (data.routeExits || [])[0];
+  if (destination) {
+    const gateX = centerX - radius * 0.82 + (destination.x / data.world.width) * radius * 1.64;
+    const gateY = centerY - radius * 0.52 + (destination.y / data.world.height) * radius * 0.92;
+    ctx.fillStyle = data.extractionGate ? theme.accent : theme.accentSecondary;
+    ctx.beginPath();
+    ctx.moveTo(gateX, gateY - 5);
+    ctx.lineTo(gateX + 5, gateY);
+    ctx.lineTo(gateX, gateY + 5);
+    ctx.lineTo(gateX - 5, gateY);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   const playerX = centerX - radius * 0.82 + (run.player.x / data.world.width) * radius * 1.64;
   const playerY = centerY - radius * 0.52 + (run.player.y / data.world.height) * radius * 0.92;
@@ -3550,6 +3770,773 @@ function drawHud(ctx, state, data) {
   }
 }
 
+function getFaceOffTarget(run) {
+  if (!run?.faceOff?.active || !run.faceOff.targetId) {
+    return null;
+  }
+  return (run.humanoidEnemies || []).find((enemy) => enemy.id === run.faceOff.targetId) || null;
+}
+
+function getFaceOffDialogueChance(enemy, option) {
+  const social = enemy?.social || {};
+  const resolve = Number(social.resolve ?? 0.5);
+  const fear = Number(social.fear ?? 0.5);
+  const trust = Number(social.trust ?? 0.5);
+  const aggression = Number(social.aggression ?? 0.5);
+  const reason = Number(social.reason ?? 0.5);
+  let chance = Number(option.baseChance ?? 0.45);
+  if (option.type === "threaten") {
+    chance += fear * 0.24 - resolve * 0.16 - aggression * 0.08;
+  } else if (option.type === "deescalate") {
+    chance += reason * 0.18 + trust * 0.12 - aggression * 0.18;
+  } else if (option.type === "persuade") {
+    chance += trust * 0.2 + reason * 0.16 - resolve * 0.08;
+  } else if (option.type === "stall") {
+    chance += reason * 0.12 + fear * 0.08 - aggression * 0.1;
+  }
+  chance -= Math.max(0, enemy?.dialogueFailures ?? 0) * 0.08;
+  if ((enemy?.dialogueStage ?? 0) > 0 && option.successEffect === "dealProgress") {
+    chance -= 0.1;
+  }
+  return clamp(chance, 0.05, 0.92);
+}
+
+function drawFaceOffTimeline(ctx, theme, faceOff, enemy) {
+  const x = 214;
+  const y = 34;
+  const exhaustion = `${enemy?.exhaustionHits ?? 0}/${Math.max(1, enemy?.exhaustionLimit ?? 2)}`;
+  const chips = [
+    { label: "KNOCKDOWN", width: 142, danger: true },
+    { label: "도주 중지", width: 126 },
+    { label: `탈진 ${exhaustion}`, width: 116 },
+    { label: "R: 놓아주기", width: 142 },
+    { label: "ESC / 우클릭 취소", width: 176 },
+  ];
+  const displayChips = [
+    { label: "KNOCKDOWN", width: 142, danger: true },
+    { label: "CRAWL PAUSED", width: 142 },
+    { label: `EXHAUST ${exhaustion}`, width: 132 },
+    { label: "Q: RELEASE", width: 126 },
+    { label: "ESC / RMB: CANCEL", width: 174 },
+  ];
+  const gap = 12;
+  const totalWidth = displayChips.reduce((sum, chip) => sum + chip.width, 0) + gap * (displayChips.length - 1);
+  let cursorX = x + (SCREEN_WIDTH - x * 2 - totalWidth) / 2;
+
+  ctx.save();
+  displayChips.forEach((chip) => {
+    drawBeveledPanel(ctx, theme, cursorX, y, chip.width, 38, {
+      fill: chip.danger ? "rgba(42, 12, 16, 0.66)" : "rgba(8, 10, 14, 0.58)",
+      stroke: chip.danger ? "rgba(255, 96, 112, 0.48)" : "rgba(255,255,255,0.2)",
+      cut: 9,
+      innerLines: false,
+    });
+    ctx.fillStyle = chip.danger ? "rgba(255, 172, 180, 0.92)" : "rgba(245,248,251,0.82)";
+    ctx.font = "700 14px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(chip.label, cursorX + chip.width / 2, y + 24);
+    cursorX += chip.width + gap;
+  });
+  ctx.restore();
+}
+
+function addFaceOffRoundRectPath(ctx, x, y, width, height, radius) {
+  if (ctx.roundRect) {
+    ctx.roundRect(x, y, width, height, radius);
+  } else {
+    ctx.rect(x, y, width, height);
+  }
+}
+
+function drawFaceOffTargetBackdrop(ctx, data) {
+  const width = 650;
+  const height = 612;
+  const x = SCREEN_WIDTH / 2 - width / 2;
+  const y = 74;
+  const hasBackdropOverride = Object.prototype.hasOwnProperty.call(data.faceOff || {}, "targetBackdropAssetKey");
+  const assetKey = hasBackdropOverride ? data.faceOff?.targetBackdropAssetKey : data.faceOff?.targetArtAssetKey;
+  const src = assetKey ? data.art?.[assetKey]?.src : null;
+  const image = getImageAsset(src);
+
+  ctx.save();
+  ctx.beginPath();
+  addFaceOffRoundRectPath(ctx, x, y, width, height, 8);
+  ctx.clip();
+
+  if (image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+    const sx = image.naturalWidth * 0.22;
+    const sy = image.naturalHeight * 0.02;
+    const sw = image.naturalWidth * 0.56;
+    const sh = image.naturalHeight * 0.94;
+    ctx.filter = "grayscale(1) contrast(1.08) brightness(0.62) blur(0.7px)";
+    ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
+    ctx.filter = "none";
+  } else {
+    const fallback = ctx.createLinearGradient(0, y, 0, y + height);
+    fallback.addColorStop(0, "rgba(3, 5, 8, 0.94)");
+    fallback.addColorStop(0.54, "rgba(8, 11, 16, 0.9)");
+    fallback.addColorStop(1, "rgba(0, 0, 0, 0.96)");
+    ctx.fillStyle = fallback;
+    ctx.fillRect(x, y, width, height);
+  }
+
+  const haze = ctx.createRadialGradient(
+    x + width * 0.52,
+    y + height * 0.33,
+    20,
+    x + width * 0.52,
+    y + height * 0.4,
+    width * 0.62
+  );
+  haze.addColorStop(0, "rgba(255,255,255,0.08)");
+  haze.addColorStop(0.48, "rgba(255,255,255,0.02)");
+  haze.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = haze;
+  ctx.fillRect(x, y, width, height);
+
+  const vignette = ctx.createRadialGradient(
+    x + width * 0.5,
+    y + height * 0.48,
+    width * 0.2,
+    x + width * 0.5,
+    y + height * 0.5,
+    width * 0.76
+  );
+  vignette.addColorStop(0, "rgba(0,0,0,0.02)");
+  vignette.addColorStop(0.58, "rgba(0,0,0,0.22)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.78)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(x, y, width, height);
+
+  const floorShade = ctx.createLinearGradient(0, y + height * 0.52, 0, y + height);
+  floorShade.addColorStop(0, "rgba(0,0,0,0)");
+  floorShade.addColorStop(1, "rgba(0,0,0,0.42)");
+  ctx.fillStyle = floorShade;
+  ctx.fillRect(x, y, width, height);
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.16)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+  ctx.restore();
+}
+
+function drawFaceOffTargetArt(ctx, data) {
+  const assetKey = data.faceOff?.targetArtAssetKey;
+  const src = assetKey ? data.art?.[assetKey]?.src : null;
+  const image = getImageAsset(src);
+  if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return false;
+  }
+
+  const crop = data.faceOff?.targetArtCrop || {};
+  const sx = clamp(crop.sx ?? 0.33, 0, 0.95) * image.naturalWidth;
+  const sy = clamp(crop.sy ?? 0.02, 0, 0.95) * image.naturalHeight;
+  const sw = clamp(crop.sw ?? 0.36, 0.05, 1) * image.naturalWidth;
+  const sh = clamp(crop.sh ?? 0.94, 0.05, 1) * image.naturalHeight;
+  const drawH = 708;
+  const drawW = drawH * (sw / Math.max(1, sh));
+  const x = SCREEN_WIDTH / 2 - drawW / 2;
+  const y = 46;
+
+  ctx.save();
+  ctx.globalAlpha = 0.95;
+  ctx.shadowColor = "rgba(0,0,0,0.48)";
+  ctx.shadowBlur = 16;
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, drawW, drawH);
+  ctx.shadowBlur = 0;
+
+  const fade = ctx.createLinearGradient(0, y, 0, y + drawH);
+  fade.addColorStop(0, "rgba(0,0,0,0.34)");
+  fade.addColorStop(0.18, "rgba(0,0,0,0)");
+  fade.addColorStop(0.76, "rgba(0,0,0,0)");
+  fade.addColorStop(1, "rgba(0,0,0,0.56)");
+  ctx.globalCompositeOperation = "source-atop";
+  ctx.fillStyle = fade;
+  ctx.fillRect(x, y, drawW, drawH);
+  ctx.restore();
+  return true;
+}
+
+function drawFaceOffSilhouette(ctx, theme, data, faceOff) {
+  const cx = SCREEN_WIDTH / 2;
+  const top = 138;
+  const selected = faceOff.selectedPart;
+  const hover = faceOff.hoverPart;
+  drawFaceOffTargetBackdrop(ctx, data);
+  const hasTargetArt = drawFaceOffTargetArt(ctx, data);
+  const zones = [
+    { id: "head", label: "머리", x: cx - 45, y: top, width: 90, height: 86, shape: "ellipse" },
+    { id: "torso", label: "몸통", x: cx - 74, y: top + 98, width: 148, height: 190 },
+    { id: "leftArm", label: "왼팔", x: cx - 158, y: top + 116, width: 68, height: 170 },
+    { id: "rightArm", label: "오른 팔", x: cx + 90, y: top + 116, width: 68, height: 170 },
+    { id: "leftLeg", label: "왼 다리", x: cx - 78, y: top + 287, width: 64, height: 205 },
+    { id: "rightLeg", label: "오른 다리", x: cx + 14, y: top + 287, width: 64, height: 205 },
+  ];
+
+  ctx.save();
+  ctx.shadowColor = hasTargetArt ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.12)";
+  ctx.shadowBlur = hasTargetArt ? 8 : 18;
+  zones.forEach((zone) => {
+    const active = zone.id === selected || zone.id === hover;
+    ctx.fillStyle = hasTargetArt
+      ? active ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.015)"
+      : active ? "rgba(235,238,240,0.34)" : "rgba(218,222,225,0.16)";
+    ctx.strokeStyle = active ? "rgba(255,255,255,0.72)" : "rgba(255,255,255,0.24)";
+    ctx.lineWidth = active ? 2 : 1.2;
+    ctx.beginPath();
+    if (zone.shape === "ellipse") {
+      ctx.ellipse(zone.x + zone.width / 2, zone.y + zone.height / 2, zone.width / 2, zone.height / 2, 0, 0, Math.PI * 2);
+    } else {
+      ctx.roundRect?.(zone.x, zone.y, zone.width, zone.height, 12);
+      if (!ctx.roundRect) {
+        ctx.rect(zone.x, zone.y, zone.width, zone.height);
+      }
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    const labelX = zone.id.includes("right") ? zone.x + zone.width + 18 : zone.x - 18;
+    const align = zone.id.includes("right") ? "left" : "right";
+    const labelY = zone.y + zone.height * 0.5;
+    drawBeveledPanel(ctx, theme, align === "left" ? labelX : labelX - 78, labelY - 15, 78, 30, {
+      fill: active ? "rgba(32, 36, 42, 0.78)" : "rgba(8, 10, 14, 0.48)",
+      stroke: active ? "rgba(255,255,255,0.46)" : "rgba(255,255,255,0.16)",
+      cut: 7,
+      innerLines: false,
+    });
+    ctx.fillStyle = active ? "#ffffff" : "rgba(245,248,251,0.68)";
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(zone.label, align === "left" ? labelX + 39 : labelX - 39, labelY + 5);
+  });
+  ctx.restore();
+
+}
+
+function drawFaceOffCrosshair(ctx, state) {
+  const mouse = state.mouse || {};
+  const x = mouse.screenX ?? SCREEN_WIDTH / 2;
+  const y = mouse.screenY ?? SCREEN_HEIGHT / 2;
+  ctx.save();
+  ctx.strokeStyle = "rgba(255, 72, 86, 0.86)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(x, y, 15, 0, Math.PI * 2);
+  ctx.moveTo(x - 28, y);
+  ctx.lineTo(x - 10, y);
+  ctx.moveTo(x + 10, y);
+  ctx.lineTo(x + 28, y);
+  ctx.moveTo(x, y - 28);
+  ctx.lineTo(x, y - 10);
+  ctx.moveTo(x, y + 10);
+  ctx.lineTo(x, y + 28);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFaceOffFingerGun(ctx, state, data) {
+  const assetKey = data.faceOff?.fingerGunAssetKey;
+  const src = assetKey ? data.art?.[assetKey]?.src : null;
+  const image = getImageAsset(src);
+  if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return;
+  }
+
+  const mouse = state.mouse || {};
+  const aimX = mouse.screenX ?? SCREEN_WIDTH / 2;
+  const aimY = mouse.screenY ?? SCREEN_HEIGHT / 2;
+  const crop = data.faceOff?.fingerGunCrop || {};
+  const sx = clamp(crop.sx ?? 0.39, 0, 0.95) * image.naturalWidth;
+  const sy = clamp(crop.sy ?? 0.08, 0, 0.95) * image.naturalHeight;
+  const sw = clamp(crop.sw ?? 0.61, 0.05, 1) * image.naturalWidth;
+  const sh = clamp(crop.sh ?? 0.92, 0.05, 1) * image.naturalHeight;
+  const drawW = data.faceOff?.fingerGunWidth ?? 640;
+  const drawH = drawW * (sh / Math.max(1, sw));
+  const anchor = data.faceOff?.fingerGunAnchor || {};
+  const anchorX = clamp(anchor.x ?? 0.035, 0, 1);
+  const anchorY = clamp(anchor.y ?? 0.2, 0, 1);
+  const x = aimX - drawW * anchorX;
+  const y = aimY - drawH * anchorY;
+
+  ctx.save();
+  ctx.globalAlpha = 0.98;
+  ctx.shadowColor = "rgba(0,0,0,0.52)";
+  ctx.shadowBlur = 18;
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, drawW, drawH);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawFaceOffAcquireGauge(ctx, state) {
+  const faceOff = state.run?.faceOff;
+  if (!faceOff || faceOff.active || !faceOff.acquireTargetId || !(faceOff.acquireProgress > 0)) {
+    return;
+  }
+
+  const mouse = state.mouse || {};
+  const x = mouse.screenX ?? SCREEN_WIDTH / 2;
+  const y = mouse.screenY ?? SCREEN_HEIGHT / 2;
+  const progress = clamp(faceOff.acquireProgress ?? 0, 0, 1);
+  const radius = 24;
+  const startAngle = -Math.PI / 2;
+  const endAngle = startAngle + Math.PI * 2 * progress;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = progress >= 1 ? "rgba(255,255,255,0.94)" : "rgba(255, 72, 86, 0.86)";
+  ctx.shadowColor = "rgba(255, 72, 86, 0.52)";
+  ctx.shadowBlur = 10;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(x, y, radius, startAngle, endAngle);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.strokeStyle = "rgba(255, 72, 86, 0.72)";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(x - 34, y);
+  ctx.lineTo(x - 14, y);
+  ctx.moveTo(x + 14, y);
+  ctx.lineTo(x + 34, y);
+  ctx.moveTo(x, y - 34);
+  ctx.lineTo(x, y - 14);
+  ctx.moveTo(x, y + 14);
+  ctx.lineTo(x, y + 34);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFaceOffDialogue(ctx, theme, data, enemy, faceOff) {
+  const reveal = clamp(faceOff.choiceRevealProgress ?? 0, 0, 1);
+  if (reveal <= 0) {
+    return;
+  }
+  const options = data.faceOff?.dialogueOptions || [];
+  const cardW = 286;
+  const cardH = 58;
+  const lowerGap = 30;
+  const lowerStartX = SCREEN_WIDTH / 2 - (cardW * 2 + lowerGap) / 2;
+  const eased = 1 - Math.pow(1 - reveal, 3);
+  const baseY = lerp(744, 632, eased);
+  const layout = {
+    KeyW: {
+      x: SCREEN_WIDTH / 2 - cardW / 2,
+      y: baseY - 66,
+      direction: "up",
+    },
+    KeyA: {
+      x: lowerStartX,
+      y: baseY,
+      direction: "left",
+    },
+    KeyD: {
+      x: lowerStartX + cardW + lowerGap,
+      y: baseY,
+      direction: "right",
+    },
+  };
+  ctx.save();
+  ctx.globalAlpha = reveal;
+  options.forEach((option) => {
+    const slot = layout[option.key];
+    if (!slot) {
+      return;
+    }
+    const { x, y } = slot;
+    const selected = faceOff.selectedDialogueKey === option.key;
+    const chance = Math.round(getFaceOffDialogueChance(enemy, option) * 100);
+    drawBeveledPanel(ctx, theme, x, y, cardW, cardH, {
+      fill: selected ? "rgba(34, 38, 44, 0.76)" : "rgba(8, 10, 14, 0.56)",
+      stroke: selected ? "rgba(255,255,255,0.44)" : "rgba(255,255,255,0.18)",
+      cut: 11,
+      innerLines: false,
+    });
+    ctx.fillStyle = "rgba(245,248,251,0.72)";
+    ctx.font = "700 14px 'Segoe UI', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(option.key.replace("Key", ""), x + 16, y + 24);
+    drawFaceOffDialogueArrow(ctx, x + 34, y + 39, slot.direction, selected);
+    ctx.fillStyle = "#f5f8fb";
+    ctx.font = "700 17px 'Segoe UI', sans-serif";
+    ctx.fillText(option.label, x + 68, y + 24);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "rgba(245,248,251,0.78)";
+    ctx.font = "700 15px 'Segoe UI', sans-serif";
+    ctx.fillText(`${chance}%`, x + cardW - 18, y + 43);
+  });
+  ctx.restore();
+}
+
+function drawFaceOffDialogueArrow(ctx, x, y, direction, selected) {
+  const size = 9;
+  ctx.save();
+  ctx.strokeStyle = selected ? "rgba(255,255,255,0.94)" : "rgba(245,248,251,0.58)";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  if (direction === "up") {
+    ctx.moveTo(x, y + size);
+    ctx.lineTo(x, y - size);
+    ctx.moveTo(x - size * 0.65, y - size * 0.25);
+    ctx.lineTo(x, y - size);
+    ctx.lineTo(x + size * 0.65, y - size * 0.25);
+  } else if (direction === "left") {
+    ctx.moveTo(x + size, y);
+    ctx.lineTo(x - size, y);
+    ctx.moveTo(x - size * 0.25, y - size * 0.65);
+    ctx.lineTo(x - size, y);
+    ctx.lineTo(x - size * 0.25, y + size * 0.65);
+  } else {
+    ctx.moveTo(x - size, y);
+    ctx.lineTo(x + size, y);
+    ctx.moveTo(x + size * 0.25, y - size * 0.65);
+    ctx.lineTo(x + size, y);
+    ctx.lineTo(x + size * 0.25, y + size * 0.65);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFaceOffWeaponPanel(ctx, theme, run, data) {
+  const hud = getSelectedArmHud(run, data);
+  const x = 64;
+  const y = 92;
+  const width = 320;
+  const height = 152;
+  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
+    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
+    : 1;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(4, 8, 12, 0.68)",
+    stroke: "rgba(255,255,255,0.22)",
+    innerLines: false,
+  });
+
+  ctx.fillStyle = "rgba(245,248,251,0.64)";
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("CURRENT ARM", x + 18, y + 20);
+
+  drawArmSlotChip(ctx, theme, "1 LEFT", hud.side === "left", x + 16, y + 32);
+  drawArmSlotChip(ctx, theme, "2 RIGHT", hud.side === "right", x + 88, y + 32);
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText(hud.stats.label, x + 166, y + 52);
+
+  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.font = "900 28px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.magazine}/${hud.stats.magazineSize}`, x + 20, y + 88);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} ${hud.reserve}`, x + 104, y + 84);
+  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOADING" : "READY", x + 104, y + 100);
+
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(x + 166, y + 68, 110, 6);
+  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
+  ctx.fillRect(x + 166, y + 68, 110 * reloadRatio, 6);
+
+  const moduleLabels = (hud.arm.modules || []).slice(0, 3).map((moduleId) => data.weaponModules?.[moduleId]?.shortLabel || moduleId.slice(0, 3).toUpperCase());
+  moduleLabels.forEach((label, index) => {
+    const chipX = x + 166 + index * 32;
+    drawBeveledPanel(ctx, theme, chipX, y + 82, 28, 18, {
+      cut: 5,
+      fill: "rgba(255,255,255,0.06)",
+      stroke: "rgba(255,255,255,0.12)",
+      innerLines: false,
+    });
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "800 8px 'Segoe UI', sans-serif";
+    ctx.fillText(label, chipX + 4, y + 95);
+  });
+
+  const commands = ["1/2 ARM", "LMB FIRE", "R RELOAD", "Q RELEASE"];
+  commands.forEach((label, index) => {
+    const chipX = x + 16 + index * 74;
+    drawBeveledPanel(ctx, theme, chipX, y + 116, 66, 22, {
+      cut: 6,
+      fill: label === "Q RELEASE" ? "rgba(42, 12, 16, 0.42)" : "rgba(255,255,255,0.06)",
+      stroke: label === "Q RELEASE" ? "rgba(255, 96, 112, 0.34)" : "rgba(255,255,255,0.14)",
+      innerLines: false,
+    });
+    ctx.fillStyle = label === "Q RELEASE" ? "rgba(255, 188, 194, 0.92)" : "rgba(245,248,251,0.72)";
+    ctx.font = "800 8px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(label, chipX + 33, y + 131);
+  });
+}
+
+function getFaceOffShotShake(faceOff) {
+  const duration = Math.max(0.001, faceOff.shotShakeDuration ?? 0.22);
+  const ratio = clamp((faceOff.shotShakeTimer ?? 0) / duration, 0, 1);
+  if (ratio <= 0) {
+    return { x: 0, y: 0, ratio: 0 };
+  }
+  const intensity = (faceOff.shotShakeIntensity ?? 18) * ratio * ratio;
+  const time = performance.now() * 0.045;
+  return {
+    x: Math.sin(time * 2.17) * intensity + Math.sin(time * 5.3) * intensity * 0.35,
+    y: Math.cos(time * 2.9) * intensity * 0.62,
+    ratio,
+  };
+}
+
+function drawFaceOffShotFlash(ctx, state, faceOff) {
+  const duration = Math.max(0.001, faceOff.shotFlashDuration ?? 0.16);
+  const ratio = clamp((faceOff.shotFlashTimer ?? 0) / duration, 0, 1);
+  if (ratio <= 0) {
+    return;
+  }
+
+  const mouse = state.mouse || {};
+  const x = mouse.screenX ?? SCREEN_WIDTH / 2;
+  const y = mouse.screenY ?? SCREEN_HEIGHT / 2;
+  const coreAlpha = 0.36 * ratio;
+  const ringAlpha = 0.72 * ratio;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  const blast = ctx.createRadialGradient(x, y, 8, x, y, 190);
+  blast.addColorStop(0, `rgba(255,255,255,${coreAlpha})`);
+  blast.addColorStop(0.18, `rgba(255,80,94,${0.24 * ratio})`);
+  blast.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = blast;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.strokeStyle = `rgba(255,255,255,${ringAlpha})`;
+  ctx.lineWidth = 3 + ratio * 5;
+  ctx.beginPath();
+  ctx.arc(x, y, 26 + (1 - ratio) * 68, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(255,72,86,${0.7 * ratio})`;
+  ctx.lineWidth = 2;
+  for (let index = 0; index < 10; index += 1) {
+    const angle = (Math.PI * 2 * index) / 10 + ratio * 0.2;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(angle) * 24, y + Math.sin(angle) * 24);
+    ctx.lineTo(x + Math.cos(angle) * (88 + (1 - ratio) * 38), y + Math.sin(angle) * (88 + (1 - ratio) * 38));
+    ctx.stroke();
+  }
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = `rgba(255,255,255,${0.16 * ratio})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.restore();
+}
+
+function drawFaceOffEnemySpeech(ctx, theme, faceOff) {
+  const text = faceOff.enemyLineVisible || "";
+  if (!text && !faceOff.enemyLine) {
+    return;
+  }
+  const reveal = clamp(faceOff.choiceRevealProgress ?? 0, 0, 1);
+  if (reveal >= 1) {
+    return;
+  }
+
+  const stateLabel = faceOff.encounterState === "ambushed"
+    ? "기습 당함"
+    : faceOff.encounterState === "dialogue"
+      ? "대화"
+      : faceOff.encounterState === "knockdown"
+        ? "넉다운"
+      : "교전";
+  const x = SCREEN_WIDTH / 2 - 310;
+  const y = lerp(606, 728, 1 - Math.pow(1 - reveal, 3));
+  const width = 620;
+  const height = 78;
+
+  ctx.save();
+  ctx.globalAlpha = 1 - reveal * 0.88;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    fill: "rgba(6, 8, 12, 0.82)",
+    stroke: "rgba(255,255,255,0.28)",
+    cut: 12,
+    innerLines: false,
+  });
+
+  ctx.fillStyle = faceOff.encounterState === "ambushed"
+    ? "rgba(255,255,255,0.78)"
+    : faceOff.encounterState === "dialogue"
+      ? "rgba(210,230,255,0.82)"
+      : faceOff.encounterState === "knockdown"
+        ? "rgba(255,172,180,0.82)"
+      : "rgba(255,118,132,0.82)";
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(stateLabel, x + 22, y + 24);
+
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "700 20px 'Segoe UI', sans-serif";
+  ctx.fillText(text, x + 22, y + 54);
+
+  if (faceOff.enemyLineIndex < (faceOff.enemyLine?.length ?? 0)) {
+    const blink = Math.sin(performance.now() * 0.012) > 0 ? 1 : 0.25;
+    ctx.fillStyle = `rgba(245,248,251,${blink})`;
+    ctx.fillRect(x + 24 + ctx.measureText(text).width + 6, y + 38, 8, 20);
+  }
+  ctx.restore();
+}
+
+function drawFaceOffOverlay(ctx, state, data, theme) {
+  const run = state.run;
+  const faceOff = run?.faceOff;
+  if (!faceOff?.active) {
+    return;
+  }
+
+  const enemy = getFaceOffTarget(run);
+  ctx.save();
+  const entryDuration = Math.max(0.001, faceOff.entryTransitionDuration ?? 1);
+  const entryProgress = clamp(1 - (faceOff.entryTransitionTimer ?? 0) / entryDuration, 0, 1);
+  ctx.globalAlpha = clamp(entryProgress * 1.35, 0.2, 1);
+  const shake = getFaceOffShotShake(faceOff);
+  if (shake.ratio > 0) {
+    ctx.translate(shake.x, shake.y);
+  }
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.fillStyle = "rgba(255,255,255,0.018)";
+  ctx.fillRect(0, 100, SCREEN_WIDTH, 430);
+
+  drawFaceOffTimeline(ctx, theme, faceOff, enemy);
+  drawFaceOffSilhouette(ctx, theme, data, faceOff);
+  drawFaceOffFingerGun(ctx, state, data);
+  drawFaceOffCrosshair(ctx, state);
+  drawFaceOffEnemySpeech(ctx, theme, faceOff);
+  drawFaceOffDialogue(ctx, theme, data, enemy, faceOff);
+  drawFaceOffWeaponPanel(ctx, theme, run, data);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(245,248,251,0.82)";
+  ctx.font = "700 15px 'Segoe UI', sans-serif";
+  ctx.fillText(enemy?.label || "Human target", SCREEN_WIDTH / 2, 116);
+  if (faceOff.message) {
+    ctx.fillStyle = faceOff.result ? "rgba(255,255,255,0.92)" : "rgba(245,248,251,0.58)";
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    ctx.fillText(faceOff.message, SCREEN_WIDTH / 2, 138);
+  }
+  ctx.restore();
+
+  drawFaceOffShotFlash(ctx, state, faceOff);
+}
+
+function getFaceOffEntryProgress(run) {
+  const faceOff = run?.faceOff;
+  if (!faceOff?.active) {
+    return 0;
+  }
+  const duration = Math.max(0.001, faceOff.entryTransitionDuration ?? 1);
+  if ((faceOff.entryTransitionStartedAt ?? 0) > 0 && typeof performance !== "undefined") {
+    const elapsed = Math.max(0, (performance.now() - faceOff.entryTransitionStartedAt) / 1000);
+    return clamp(1 - elapsed / duration, 0, 1);
+  }
+  return clamp((faceOff.entryTransitionTimer ?? 0) / duration, 0, 1);
+}
+
+function getFaceOffEntryElapsedProgress(run) {
+  const remaining = getFaceOffEntryProgress(run);
+  return remaining > 0 ? 1 - remaining : 0;
+}
+
+function getFaceOffTargetScreenPoint(run, data, cameraZoom) {
+  const target = getFaceOffTarget(run);
+  if (!target) {
+    return {
+      x: SCREEN_WIDTH / 2,
+      y: SCREEN_HEIGHT * 0.48,
+    };
+  }
+
+  return {
+    x: (target.x + target.width * 0.5 - run.cameraX) * cameraZoom,
+    y: (target.y + target.height * 0.42 - run.cameraY) * cameraZoom,
+  };
+}
+
+function applyFaceOffEntryCameraTransform(ctx, run, data, cameraZoom) {
+  const remaining = getFaceOffEntryProgress(run);
+  if (remaining <= 0) {
+    return;
+  }
+
+  const progress = getFaceOffEntryElapsedProgress(run);
+  const zoomProgress = clamp(progress / 0.5, 0, 1);
+  const eased = 1 - Math.pow(1 - zoomProgress, 3);
+  const entryScale = 1 + (data.faceOff?.entryZoomScale ?? 1.62) * eased;
+  const focus = getFaceOffTargetScreenPoint(run, data, cameraZoom);
+
+  ctx.translate(SCREEN_WIDTH * 0.5, SCREEN_HEIGHT * 0.48);
+  ctx.scale(entryScale, entryScale);
+  ctx.translate(-focus.x, -focus.y);
+}
+
+function drawFaceOffEntryTransition(ctx, run, data) {
+  const remaining = getFaceOffEntryProgress(run);
+  if (remaining <= 0) {
+    return;
+  }
+
+  const progress = getFaceOffEntryElapsedProgress(run);
+  const zoomProgress = clamp(progress / 0.5, 0, 1);
+  const eased = 1 - Math.pow(1 - zoomProgress, 3);
+  const streakAlpha = progress < 0.5
+    ? clamp(1 - progress / 0.5, 0, 1)
+    : 0;
+  const whiteAlpha = progress < 0.5
+    ? clamp(progress / 0.5, 0, 1) * 0.24
+    : clamp(1 - (progress - 0.5) / 0.5, 0, 1);
+  const focus = getFaceOffTargetScreenPoint(run, data, getRunCameraZoom(run, data));
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.strokeStyle = `rgba(255,255,255,${0.22 * streakAlpha})`;
+  ctx.lineWidth = 2;
+  for (let index = 0; index < 18; index += 1) {
+    const angle = (Math.PI * 2 * index) / 18 + eased * 0.22;
+    const inner = 70 + eased * 120;
+    const outer = 320 + eased * 220;
+    ctx.beginPath();
+    ctx.moveTo(focus.x + Math.cos(angle) * inner, focus.y + Math.sin(angle) * inner);
+    ctx.lineTo(focus.x + Math.cos(angle) * outer, focus.y + Math.sin(angle) * outer);
+    ctx.stroke();
+  }
+
+  ctx.globalCompositeOperation = "source-over";
+  const vignette = ctx.createRadialGradient(focus.x, focus.y, 80, focus.x, focus.y, 640);
+  vignette.addColorStop(0, `rgba(0,0,0,${0.04 * streakAlpha})`);
+  vignette.addColorStop(0.55, `rgba(0,0,0,${0.18 * streakAlpha})`);
+  vignette.addColorStop(1, `rgba(0,0,0,${0.78 * streakAlpha})`);
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.strokeStyle = `rgba(255, 72, 86, ${0.55 * streakAlpha})`;
+  ctx.lineWidth = 1.5 + eased * 2;
+  ctx.beginPath();
+  ctx.arc(focus.x, focus.y, 26 + eased * 42, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = `rgba(255,255,255,${whiteAlpha})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.restore();
+}
+
 function renderExpedition(ctx, state, data) {
   const run = state.run;
   const theme = getUiTheme(data);
@@ -3558,12 +4545,14 @@ function renderExpedition(ctx, state, data) {
   drawScenicBackdrop(ctx, theme, state.pulse, run.cameraX);
 
   ctx.save();
+  applyFaceOffEntryCameraTransform(ctx, run, data, cameraZoom);
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
   ctx.scale(cameraZoom, cameraZoom);
   drawWorldMegastructures(ctx, run);
   drawGroundShine(ctx);
   drawTerrain(ctx, data);
   drawGate(ctx, data, theme);
+  drawRouteExits(ctx, data, theme);
   drawBraceWalls(ctx, data, theme);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
@@ -3595,6 +4584,7 @@ function renderExpedition(ctx, state, data) {
   });
 
   drawDroneTelegraphs(ctx, run);
+  drawHumanoidEnemies(ctx, run);
   drawHostileDrones(ctx, run);
   drawEnemyShots(ctx, run);
   drawRecoilFocusMapDim(ctx, run, data);
@@ -3604,6 +4594,7 @@ function renderExpedition(ctx, state, data) {
   drawRecoilAimWorld(ctx, run);
   drawAttackFx(ctx, run);
   drawRecoilFx(ctx, run);
+  drawWeaponModulesWorld(ctx, run);
   drawParticles(ctx, run);
   drawDebugWorldOverlay(ctx, state, data);
   drawLiveEditWorldOverlay(ctx, state, data);
@@ -3612,6 +4603,7 @@ function renderExpedition(ctx, state, data) {
 
   drawRecoilFocusOverlay(ctx, run, data);
   drawDarknessOverlay(ctx, run, data);
+  drawFaceOffEntryTransition(ctx, run, data);
   ctx.save();
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
   ctx.scale(cameraZoom, cameraZoom);
@@ -3620,6 +4612,8 @@ function renderExpedition(ctx, state, data) {
 
   drawHudV3(ctx, state, data);
   drawLootOverlayV2(ctx, state, data, theme);
+  drawFaceOffAcquireGauge(ctx, state);
+  drawFaceOffOverlay(ctx, state, data, theme);
   drawDebugCameraOverlay(ctx, state, data);
 }
 
@@ -3651,7 +4645,7 @@ function drawTitleSceneV2(ctx, state, data) {
 
   ctx.fillStyle = theme.accent;
   ctx.font = "700 16px 'Segoe UI', sans-serif";
-  ctx.fillText("C: 시작", 84, 254);
+  ctx.fillText(state.save?.hasRun ? "C: 이어하기  ·  N: 새 런" : "C: 시작", 84, 254);
 
   drawArtPanel(ctx, theme, data, "titlePanel", 540, 74, 664, 574, {
     cut: 24,
@@ -3826,16 +4820,19 @@ function drawMiniMapV2(ctx, state, data, theme) {
     ctx.stroke();
   });
 
-  const gateX = centerX - radius * 0.82 + (data.extractionGate.x / data.world.width) * radius * 1.64;
-  const gateY = centerY - radius * 0.52 + (data.extractionGate.y / data.world.height) * radius * 0.92;
-  ctx.fillStyle = theme.accent;
-  ctx.beginPath();
-  ctx.moveTo(gateX, gateY - 4);
-  ctx.lineTo(gateX + 4, gateY);
-  ctx.lineTo(gateX, gateY + 4);
-  ctx.lineTo(gateX - 4, gateY);
-  ctx.closePath();
-  ctx.fill();
+  const destination = data.extractionGate || (data.routeExits || [])[0];
+  if (destination) {
+    const gateX = centerX - radius * 0.82 + (destination.x / data.world.width) * radius * 1.64;
+    const gateY = centerY - radius * 0.52 + (destination.y / data.world.height) * radius * 0.92;
+    ctx.fillStyle = data.extractionGate ? theme.accent : theme.accentSecondary;
+    ctx.beginPath();
+    ctx.moveTo(gateX, gateY - 4);
+    ctx.lineTo(gateX + 4, gateY);
+    ctx.lineTo(gateX, gateY + 4);
+    ctx.lineTo(gateX - 4, gateY);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   const playerX = centerX - radius * 0.82 + (run.player.x / data.world.width) * radius * 1.64;
   const playerY = centerY - radius * 0.52 + (run.player.y / data.world.height) * radius * 0.92;
@@ -4011,7 +5008,7 @@ function drawTitleSceneV3(ctx, state, data) {
 
   ctx.fillStyle = theme.accent;
   ctx.font = "700 16px 'Segoe UI', sans-serif";
-  ctx.fillText("C: 시작", 84, 254);
+  ctx.fillText(state.save?.hasRun ? "C: 이어하기  ·  N: 새 런" : "C: 시작", 84, 254);
 
   drawArtPanel(ctx, theme, data, "titlePanel", 540, 74, 664, 574, {
     cut: 24,
@@ -4137,16 +5134,19 @@ function drawMiniMapV3(ctx, state, data, theme, layout) {
     ctx.stroke();
   });
 
-  const gateX = centerX - radius * 0.82 + (data.extractionGate.x / data.world.width) * radius * 1.64;
-  const gateY = centerY - radius * 0.52 + (data.extractionGate.y / data.world.height) * radius * 0.92;
-  ctx.fillStyle = theme.accent;
-  ctx.beginPath();
-  ctx.moveTo(gateX, gateY - 4);
-  ctx.lineTo(gateX + 4, gateY);
-  ctx.lineTo(gateX, gateY + 4);
-  ctx.lineTo(gateX - 4, gateY);
-  ctx.closePath();
-  ctx.fill();
+  const destination = data.extractionGate || (data.routeExits || [])[0];
+  if (destination) {
+    const gateX = centerX - radius * 0.82 + (destination.x / data.world.width) * radius * 1.64;
+    const gateY = centerY - radius * 0.52 + (destination.y / data.world.height) * radius * 0.92;
+    ctx.fillStyle = data.extractionGate ? theme.accent : theme.accentSecondary;
+    ctx.beginPath();
+    ctx.moveTo(gateX, gateY - 4);
+    ctx.lineTo(gateX + 4, gateY);
+    ctx.lineTo(gateX, gateY + 4);
+    ctx.lineTo(gateX - 4, gateY);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   const playerX = centerX - radius * 0.82 + (run.player.x / data.world.width) * radius * 1.64;
   const playerY = centerY - radius * 0.52 + (run.player.y / data.world.height) * radius * 0.92;
@@ -4397,6 +5397,90 @@ function drawShotCores(ctx, run, data, x, y) {
   }
 }
 
+function getSelectedArmHud(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const side = weapons.selectedSide === "right" ? "right" : "left";
+  const arm = weapons.arms[side];
+  const stats = computeArmWeaponStats(data, arm);
+  return {
+    weapons,
+    side,
+    arm,
+    stats,
+    magazine: Math.max(0, Math.floor(arm.magazine ?? 0)),
+    reserve: Math.max(0, Math.floor(weapons.reserveAmmo?.[stats.ammoType] ?? 0)),
+  };
+}
+
+function drawArmSlotChip(ctx, theme, label, active, x, y) {
+  drawBeveledPanel(ctx, theme, x, y, 64, 28, {
+    cut: 7,
+    fill: active ? "rgba(135, 225, 255, 0.24)" : "rgba(8, 12, 18, 0.46)",
+    stroke: active ? "rgba(135,225,255,0.62)" : "rgba(255,255,255,0.14)",
+    innerLines: false,
+  });
+  ctx.fillStyle = active ? "#f5f8fb" : theme.textDim;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x + 16, y + 18);
+}
+
+function drawWeaponHudV3(ctx, run, data, theme) {
+  const hud = getSelectedArmHud(run, data);
+  const x = 24;
+  const y = 132;
+  const width = 314;
+  const height = 108;
+  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
+    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
+    : 1;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(4, 10, 16, 0.58)",
+    stroke: "rgba(255,255,255,0.2)",
+    innerLines: false,
+  });
+
+  ctx.fillStyle = "rgba(245,248,251,0.66)";
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText("DUAL ARMS", x + 18, y + 18);
+
+  drawArmSlotChip(ctx, theme, "1 LEFT", hud.side === "left", x + 16, y + 28);
+  drawArmSlotChip(ctx, theme, "2 RIGHT", hud.side === "right", x + 88, y + 28);
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText(hud.stats.label, x + 174, y + 48);
+
+  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.font = "900 28px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.magazine}/${hud.stats.magazineSize}`, x + 20, y + 82);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} ${hud.reserve}`, x + 104, y + 78);
+  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOAD" : "R RELOAD", x + 104, y + 94);
+
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(x + 174, y + 64, 112, 7);
+  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
+  ctx.fillRect(x + 174, y + 64, 112 * reloadRatio, 7);
+
+  const moduleLabels = (hud.arm.modules || []).slice(0, 3).map((moduleId) => data.weaponModules?.[moduleId]?.shortLabel || moduleId.slice(0, 3).toUpperCase());
+  moduleLabels.forEach((label, index) => {
+    const chipX = x + 174 + index * 40;
+    drawBeveledPanel(ctx, theme, chipX, y + 78, 34, 20, {
+      cut: 5,
+      fill: "rgba(255,255,255,0.06)",
+      stroke: "rgba(255,255,255,0.12)",
+      innerLines: false,
+    });
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "800 9px 'Segoe UI', sans-serif";
+    ctx.fillText(label, chipX + 5, y + 92);
+  });
+}
+
 function drawCharacterStatusHudV3(ctx, state, data) {
   const run = state.run;
   const x = 24;
@@ -4461,11 +5545,1135 @@ function drawStatusPortraitV3(ctx, data, layout) {
   drawPortraitAsset(ctx, data, layout.portrait.x, layout.portrait.y, layout.portrait.radius);
 }
 
+function getMapLevelSummary(data, run, levelId) {
+  const summaries = data.levelSummaries || [];
+  const summary = summaries.find((entry) => entry.id === levelId) || null;
+  const currentLevelId = run?.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  if (levelId === currentLevelId) {
+    return {
+      ...summary,
+      id: levelId,
+      label: data.levelLabel || data.label || summary?.label || levelId,
+      map: data.map || summary?.map,
+      world: {
+        width: data.world?.width ?? summary?.world?.width ?? 1280,
+        height: data.world?.height ?? summary?.world?.height ?? 720,
+        groundY: data.world?.groundY ?? summary?.world?.groundY ?? 0,
+      },
+      platforms: data.platforms || summary?.platforms || [],
+      braceWalls: data.braceWalls || summary?.braceWalls || [],
+      lootCrates: run?.lootCrates || summary?.lootCrates || [],
+      humanoidEnemies: run?.humanoidEnemies || summary?.humanoidEnemies || [],
+      routeExits: data.routeExits || summary?.routeExits || [],
+      extractionGate: data.extractionGate ?? summary?.extractionGate ?? null,
+    };
+  }
+  return summary || {
+    id: levelId,
+    label: levelId,
+    map: null,
+    routeExits: [],
+    extractionGate: null,
+  };
+}
+
+function getMapRooms(summary) {
+  if (Array.isArray(summary?.map?.rooms) && summary.map.rooms.length) {
+    return summary.map.rooms;
+  }
+  return [{
+    id: "main",
+    label: summary?.label || summary?.id || "Room",
+    x: 0,
+    y: 0,
+    width: 180,
+    height: 82,
+  }];
+}
+
+function getLevelMapCenter(summary) {
+  const rooms = getMapRooms(summary);
+  const bounds = rooms.reduce((acc, room) => ({
+    minX: Math.min(acc.minX, room.x),
+    minY: Math.min(acc.minY, room.y),
+    maxX: Math.max(acc.maxX, room.x + room.width),
+    maxY: Math.max(acc.maxY, room.y + room.height),
+  }), {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  });
+  return {
+    x: (bounds.minX + bounds.maxX) * 0.5,
+    y: (bounds.minY + bounds.maxY) * 0.5,
+  };
+}
+
+function getRunMapSummaries(data, run) {
+  const discoveredIds = new Set(run.map?.discoveredLevelIds || [run.currentLevelId || data.currentLevelId]);
+  discoveredIds.add(run.currentLevelId || data.currentLevelId || data.defaultLevelId);
+  return [...discoveredIds].map((levelId) => getMapLevelSummary(data, run, levelId));
+}
+
+function getRunMapBounds(summaries) {
+  return summaries.flatMap((summary) => getMapRooms(summary)).reduce((acc, room) => ({
+    minX: Math.min(acc.minX, room.x),
+    minY: Math.min(acc.minY, room.y),
+    maxX: Math.max(acc.maxX, room.x + room.width),
+    maxY: Math.max(acc.maxY, room.y + room.height),
+  }), {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  });
+}
+
+function drawCurrentMapChip(ctx, state, data, theme) {
+  const run = state.run;
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const summary = getMapLevelSummary(data, run, currentLevelId);
+  const x = 140;
+  const y = 26;
+  const width = 258;
+  const height = 48;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: "rgba(4, 10, 16, 0.48)",
+    stroke: "rgba(255,255,255,0.16)",
+    innerLines: false,
+  });
+
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "700 10px 'Segoe UI', sans-serif";
+  ctx.fillText("MAP", x + 20, y + 18);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 15px 'Segoe UI', sans-serif";
+  ctx.fillText(summary.label || currentLevelId, x + 20, y + 36);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "700 11px 'Segoe UI', sans-serif";
+  ctx.fillText("M", x + width - 38, y + 29);
+}
+
+function drawMapRoom(ctx, theme, room, transform, stateStyle, label) {
+  const x = transform.x(room.x);
+  const y = transform.y(room.y);
+  const width = room.width * transform.scale;
+  const height = room.height * transform.scale;
+
+  ctx.save();
+  beveledPath(ctx, x, y, width, height, 10);
+  ctx.fillStyle = stateStyle.fill;
+  ctx.fill();
+  ctx.strokeStyle = stateStyle.stroke;
+  ctx.lineWidth = stateStyle.lineWidth;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = stateStyle.text;
+  ctx.font = stateStyle.font;
+  ctx.textAlign = "center";
+  ctx.fillText(label || room.label || room.id, x + width * 0.5, y + height * 0.5 + 5);
+  ctx.textAlign = "left";
+}
+
+function drawMapExtractionIcon(ctx, theme, room, transform, dimmed = false) {
+  const x = transform.x(room.x + room.width) - 18;
+  const y = transform.y(room.y) + 18;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = dimmed ? "rgba(231,244,126,0.34)" : "rgba(231,244,126,0.82)";
+  ctx.fillRect(-5, -5, 10, 10);
+  ctx.strokeStyle = "rgba(255,255,255,0.42)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-7, -7, 14, 14);
+  ctx.restore();
+}
+
+function createLevelLayoutTransform(data, x, y, width, height) {
+  const worldWidth = Math.max(1, Number(data.world?.width ?? 1280));
+  const worldHeight = Math.max(1, Number(data.world?.height ?? 720));
+  const padding = 18;
+  const scale = Math.min((width - padding * 2) / worldWidth, (height - padding * 2) / worldHeight);
+  const drawWidth = worldWidth * scale;
+  const drawHeight = worldHeight * scale;
+  const offsetX = x + (width - drawWidth) * 0.5;
+  const offsetY = y + (height - drawHeight) * 0.5;
+  return {
+    scale,
+    offsetX,
+    offsetY,
+    drawWidth,
+    drawHeight,
+    worldWidth,
+    worldHeight,
+    x: (value) => offsetX + value * scale,
+    y: (value) => offsetY + value * scale,
+    w: (value) => value * scale,
+    h: (value) => value * scale,
+  };
+}
+
+function drawLevelLayoutRect(ctx, transform, rect, fill, stroke = null, lineWidth = 1) {
+  const x = transform.x(rect.x);
+  const y = transform.y(rect.y);
+  const width = Math.max(1, transform.w(rect.width));
+  const height = Math.max(1, transform.h(rect.height));
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, y, width, height);
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth;
+    ctx.strokeRect(x, y, width, height);
+  }
+}
+
+function getExploredMapCells(run, levelId) {
+  const entries = run.map?.exploredCellsByLevel?.[levelId] || [];
+  return new Set(entries);
+}
+
+function isRectExplored(rect, exploredCells) {
+  if (!exploredCells.size) {
+    return false;
+  }
+  const left = Math.floor(rect.x / MAP_EXPLORE_CELL_SIZE);
+  const right = Math.floor((rect.x + rect.width) / MAP_EXPLORE_CELL_SIZE);
+  const top = Math.floor(rect.y / MAP_EXPLORE_CELL_SIZE);
+  const bottom = Math.floor((rect.y + rect.height) / MAP_EXPLORE_CELL_SIZE);
+  for (let y = top; y <= bottom; y += 1) {
+    for (let x = left; x <= right; x += 1) {
+      if (exploredCells.has(`${x},${y}`)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function drawExploredMapCells(ctx, transform, exploredCells) {
+  if (!exploredCells.size) {
+    return;
+  }
+  ctx.save();
+  exploredCells.forEach((key) => {
+    const [cellX, cellY] = key.split(",").map(Number);
+    if (!Number.isFinite(cellX) || !Number.isFinite(cellY)) {
+      return;
+    }
+    const x = transform.x(cellX * MAP_EXPLORE_CELL_SIZE);
+    const y = transform.y(cellY * MAP_EXPLORE_CELL_SIZE);
+    const size = MAP_EXPLORE_CELL_SIZE * transform.scale;
+    ctx.fillStyle = "rgba(226, 235, 232, 0.075)";
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, size, size);
+  });
+  ctx.restore();
+}
+
+function getCurrentMapDestination(run, data, discoveredRouteIds, exploredCells) {
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const playerCenter = {
+    x: run.player.x + run.player.width * 0.5,
+    y: run.player.y + run.player.height * 0.5,
+  };
+  const candidates = (data.routeExits || [])
+    .filter((routeExit) => discoveredRouteIds.has(`${currentLevelId}:${routeExit.id}`))
+    .map((routeExit) => ({
+      kind: "route",
+      label: routeExit.label || "ROUTE",
+      targetLabel: routeExit.toLevelId || routeExit.label || "NEXT",
+      x: routeExit.x + routeExit.width * 0.5,
+      y: routeExit.y + routeExit.height * 0.5,
+      rect: routeExit,
+    }));
+  if (data.extractionGate) {
+    const gate = data.extractionGate;
+    if (isRectExplored(gate, exploredCells)) {
+      candidates.push({
+        kind: "extract",
+        label: "EXTRACT",
+        targetLabel: "EXTRACT",
+        x: gate.x + gate.width * 0.5,
+        y: gate.y + gate.height * 0.5,
+        rect: gate,
+      });
+    }
+  }
+  candidates.sort((left, right) => (
+    Math.hypot(left.x - playerCenter.x, left.y - playerCenter.y)
+    - Math.hypot(right.x - playerCenter.x, right.y - playerCenter.y)
+  ));
+  return candidates[0] || null;
+}
+
+function drawMapDirectionLine(ctx, theme, transform, run, destination) {
+  if (!destination) {
+    return;
+  }
+  const playerX = run.player.x + run.player.width * 0.5;
+  const playerY = run.player.y + run.player.height * 0.5;
+  const startX = transform.x(playerX);
+  const startY = transform.y(playerY);
+  const endX = transform.x(destination.x);
+  const endY = transform.y(destination.y);
+  const angle = Math.atan2(endY - startY, endX - startX);
+
+  ctx.save();
+  ctx.strokeStyle = destination.kind === "extract" ? "rgba(231,244,126,0.55)" : "rgba(147,234,255,0.5)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 7]);
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.translate(endX, endY);
+  ctx.rotate(angle);
+  ctx.fillStyle = destination.kind === "extract" ? theme.accent : theme.accentSecondary;
+  ctx.beginPath();
+  ctx.moveTo(12, 0);
+  ctx.lineTo(-7, -6);
+  ctx.lineTo(-3, 0);
+  ctx.lineTo(-7, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function getLevelRuntimeForMap(data, run, levelId) {
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const summary = getMapLevelSummary(data, run, levelId);
+  const savedState = run.levelStates?.[levelId] || null;
+  if (levelId === currentLevelId) {
+    return {
+      ...summary,
+      lootCrates: run.lootCrates || summary.lootCrates || [],
+      humanoidEnemies: run.humanoidEnemies || summary.humanoidEnemies || [],
+    };
+  }
+  return {
+    ...summary,
+    lootCrates: savedState?.lootCrates || summary.lootCrates || [],
+    humanoidEnemies: savedState?.humanoidEnemies || summary.humanoidEnemies || [],
+  };
+}
+
+function createRoomLevelTransform(levelData, roomScreen) {
+  const worldWidth = Math.max(1, Number(levelData.world?.width ?? 1280));
+  const worldHeight = Math.max(1, Number(levelData.world?.height ?? 720));
+  const padding = Math.max(5, Math.min(roomScreen.width, roomScreen.height) * 0.06);
+  const scale = Math.min((roomScreen.width - padding * 2) / worldWidth, (roomScreen.height - padding * 2) / worldHeight);
+  const drawWidth = worldWidth * scale;
+  const drawHeight = worldHeight * scale;
+  const offsetX = roomScreen.x + (roomScreen.width - drawWidth) * 0.5;
+  const offsetY = roomScreen.y + (roomScreen.height - drawHeight) * 0.5;
+  return {
+    scale,
+    offsetX,
+    offsetY,
+    drawWidth,
+    drawHeight,
+    worldWidth,
+    worldHeight,
+    x: (value) => offsetX + value * scale,
+    y: (value) => offsetY + value * scale,
+    w: (value) => value * scale,
+    h: (value) => value * scale,
+  };
+}
+
+function getRoomBounds(rooms) {
+  return rooms.reduce((acc, room) => ({
+    minX: Math.min(acc.minX, room.x),
+    minY: Math.min(acc.minY, room.y),
+    maxX: Math.max(acc.maxX, room.x + room.width),
+    maxY: Math.max(acc.maxY, room.y + room.height),
+  }), {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  });
+}
+
+function createWorldMapNodeFromSummary(summary) {
+  const rooms = getMapRooms(summary);
+  const bounds = getRoomBounds(rooms);
+  return {
+    id: summary?.id || "level",
+    levelId: summary?.id || "level",
+    x: Number.isFinite(bounds.minX) ? bounds.minX : 0,
+    y: Number.isFinite(bounds.minY) ? bounds.minY : 0,
+    width: Number.isFinite(bounds.maxX - bounds.minX) ? Math.max(72, bounds.maxX - bounds.minX) : 180,
+    height: Number.isFinite(bounds.maxY - bounds.minY) ? Math.max(52, bounds.maxY - bounds.minY) : 82,
+  };
+}
+
+function normalizeWorldMapNode(node, summary) {
+  const fallback = createWorldMapNodeFromSummary(summary || { id: node?.levelId || node?.id || "level" });
+  const levelId = node?.levelId || node?.id || fallback.levelId;
+  return {
+    id: node?.id || levelId,
+    levelId,
+    x: Number.isFinite(node?.x) ? node.x : fallback.x,
+    y: Number.isFinite(node?.y) ? node.y : fallback.y,
+    width: Number.isFinite(node?.width) ? Math.max(48, node.width) : fallback.width,
+    height: Number.isFinite(node?.height) ? Math.max(42, node.height) : fallback.height,
+  };
+}
+
+function getWorldMapNodes(data) {
+  const summaries = data.levelSummaries || [];
+  const summaryById = new Map(summaries.map((summary) => [summary.id, summary]));
+  const nodes = [];
+  const seen = new Set();
+  (Array.isArray(data.worldMap?.nodes) ? data.worldMap.nodes : []).forEach((node) => {
+    const normalized = normalizeWorldMapNode(node, summaryById.get(node?.levelId || node?.id));
+    nodes.push(normalized);
+    seen.add(normalized.levelId);
+  });
+  summaries.forEach((summary) => {
+    if (seen.has(summary.id)) {
+      return;
+    }
+    nodes.push(createWorldMapNodeFromSummary(summary));
+    seen.add(summary.id);
+  });
+  return nodes;
+}
+
+function getWorldMapEdges(data) {
+  const summaries = data.levelSummaries || [];
+  const edges = [];
+  const seen = new Set();
+  const pushEdge = (edge) => {
+    if (!edge?.fromLevelId || !edge?.toLevelId) {
+      return;
+    }
+    const routeId = edge.routeId || edge.routeExitId || "";
+    const id = edge.id || `${edge.fromLevelId}:${routeId || edge.toLevelId}`;
+    const key = `${edge.fromLevelId}:${edge.toLevelId}:${routeId}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    edges.push({
+      id,
+      fromLevelId: edge.fromLevelId,
+      toLevelId: edge.toLevelId,
+      routeId,
+    });
+  };
+  (Array.isArray(data.worldMap?.edges) ? data.worldMap.edges : []).forEach(pushEdge);
+  summaries.forEach((summary) => {
+    (summary.routeExits || []).forEach((routeExit) => {
+      pushEdge({
+        fromLevelId: summary.id,
+        toLevelId: routeExit.toLevelId,
+        routeId: routeExit.id,
+      });
+    });
+  });
+  return edges;
+}
+
+function getFullMapNodeBounds(nodes) {
+  return nodes.reduce((acc, node) => ({
+    minX: Math.min(acc.minX, node.x),
+    minY: Math.min(acc.minY, node.y),
+    maxX: Math.max(acc.maxX, node.x + node.width),
+    maxY: Math.max(acc.maxY, node.y + node.height),
+  }), {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  });
+}
+
+function createFullMapTransform(bounds, x, y, width, height, overlay = {}) {
+  const safeWidth = Math.max(1, bounds.maxX - bounds.minX);
+  const safeHeight = Math.max(1, bounds.maxY - bounds.minY);
+  const zoom = clamp(Number(overlay.zoom ?? 1), 0.55, 3.25);
+  const baseScale = Math.min(width / (safeWidth + 96), height / (safeHeight + 96));
+  const scale = baseScale * zoom;
+  const panX = Number.isFinite(overlay.panX) ? overlay.panX : 0;
+  const panY = Number.isFinite(overlay.panY) ? overlay.panY : 0;
+  const offsetX = x + width * 0.5 + panX - (bounds.minX + safeWidth * 0.5) * scale;
+  const offsetY = y + height * 0.5 + panY - (bounds.minY + safeHeight * 0.5) * scale;
+  return {
+    scale,
+    zoom,
+    x: (value) => offsetX + value * scale,
+    y: (value) => offsetY + value * scale,
+    w: (value) => value * scale,
+    h: (value) => value * scale,
+  };
+}
+
+function getWorldMapNodeScreenRect(node, fullTransform) {
+  return {
+    x: fullTransform.x(node.x),
+    y: fullTransform.y(node.y),
+    width: fullTransform.w(node.width),
+    height: fullTransform.h(node.height),
+  };
+}
+
+function getPrimaryRoomScreenRect(summary, fullTransform) {
+  const node = createWorldMapNodeFromSummary(summary);
+  return {
+    room: getMapRooms(summary)[0],
+    ...getWorldMapNodeScreenRect(node, fullTransform),
+  };
+}
+
+function drawLevelContentInsideRoom(ctx, theme, levelData, run, levelId, roomScreen, options = {}) {
+  const currentLevelId = run.currentLevelId || levelData.id;
+  const current = levelId === currentLevelId;
+  const exploredCells = getExploredMapCells(run, levelId);
+  const transform = createRoomLevelTransform(levelData, roomScreen);
+
+  drawBeveledPanel(ctx, theme, roomScreen.x, roomScreen.y, roomScreen.width, roomScreen.height, {
+    cut: Math.max(8, Math.min(roomScreen.width, roomScreen.height) * 0.07),
+    fill: current ? "rgba(7, 16, 22, 0.9)" : "rgba(7, 12, 17, 0.72)",
+    stroke: current ? "rgba(147,234,255,0.84)" : "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(roomScreen.x + 5, roomScreen.y + 5, roomScreen.width - 10, roomScreen.height - 10);
+  ctx.clip();
+  ctx.fillStyle = "rgba(5, 9, 13, 0.92)";
+  ctx.fillRect(transform.offsetX, transform.offsetY, transform.drawWidth, transform.drawHeight);
+  drawExploredMapCells(ctx, transform, exploredCells);
+
+  if (Number.isFinite(levelData.world?.groundY) && isRectExplored({
+    x: 0,
+    y: levelData.world.groundY - MAP_EXPLORE_CELL_SIZE * 0.5,
+    width: levelData.world.width,
+    height: MAP_EXPLORE_CELL_SIZE,
+  }, exploredCells)) {
+    ctx.strokeStyle = "rgba(231,244,126,0.22)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(transform.offsetX, transform.y(levelData.world.groundY));
+    ctx.lineTo(transform.offsetX + transform.drawWidth, transform.y(levelData.world.groundY));
+    ctx.stroke();
+  }
+
+  (levelData.platforms || []).forEach((platform) => {
+    if (!isRectExplored(platform, exploredCells)) {
+      return;
+    }
+    const solid = platform.height >= 100;
+    drawLevelLayoutRect(
+      ctx,
+      transform,
+      platform,
+      solid ? "rgba(92, 115, 124, 0.78)" : "rgba(220, 231, 236, 0.56)",
+      solid ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.36)",
+      1,
+    );
+  });
+
+  (levelData.braceWalls || []).forEach((wall) => {
+    if (!isRectExplored(wall, exploredCells)) {
+      return;
+    }
+    drawLevelLayoutRect(ctx, transform, wall, "rgba(147,234,255,0.18)", "rgba(147,234,255,0.5)", 1);
+  });
+
+  (levelData.routeExits || []).forEach((routeExit) => {
+    const routeKey = `${levelId}:${routeExit.id}`;
+    const known = options.discoveredRouteIds?.has(routeKey);
+    const explored = isRectExplored(routeExit, exploredCells);
+    if (!known && !explored) {
+      return;
+    }
+    const targetKnown = known && run.map?.visitedLevelIds?.includes(routeExit.toLevelId);
+    drawLevelLayoutMarker(
+      ctx,
+      theme,
+      transform,
+      routeExit.x + routeExit.width * 0.5,
+      routeExit.y + routeExit.height * 0.5,
+      targetKnown ? routeExit.toLevelId : "ROUTE",
+      known ? "rgba(147,234,255,0.86)" : "rgba(231,244,126,0.6)",
+      {
+        fill: "rgba(5, 10, 15, 0.82)",
+        textColor: known ? theme.accentSecondary : theme.accent,
+      },
+    );
+  });
+
+  if (levelData.extractionGate && isRectExplored(levelData.extractionGate, exploredCells)) {
+    const gate = levelData.extractionGate;
+    drawLevelLayoutMarker(ctx, theme, transform, gate.x + gate.width * 0.5, gate.y + gate.height * 0.5, "EXTRACT", "rgba(231,244,126,0.9)", {
+      fill: "rgba(28, 31, 12, 0.82)",
+      textColor: theme.accent,
+    });
+  }
+
+  if (current) {
+    const destination = getCurrentMapDestination(run, levelData, options.discoveredRouteIds || new Set(), exploredCells);
+    drawMapDirectionLine(ctx, theme, transform, run, destination);
+    const player = run.player;
+    const markerX = transform.x(player.x + player.width * 0.5);
+    const markerY = transform.y(player.y + player.height * 0.5);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(markerX + (player.facing || 1) * 8, markerY);
+    ctx.lineTo(markerX - (player.facing || 1) * 5, markerY - 5);
+    ctx.lineTo(markerX - (player.facing || 1) * 2, markerY);
+    ctx.lineTo(markerX - (player.facing || 1) * 5, markerY + 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(147,234,255,0.95)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(transform.offsetX, transform.offsetY, transform.drawWidth, transform.drawHeight);
+  ctx.restore();
+
+  ctx.fillStyle = current ? theme.textMain : theme.textDim;
+  ctx.font = current ? "700 13px 'Segoe UI', sans-serif" : "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText(levelData.label || levelId, roomScreen.x + 14, roomScreen.y + 22);
+}
+
+function isWorldMapEdgeKnown(edge, run, discoveredRouteIds, visitedIds) {
+  if (visitedIds.has(edge.fromLevelId) && visitedIds.has(edge.toLevelId)) {
+    return true;
+  }
+  return Boolean(edge.routeId && discoveredRouteIds.has(`${edge.fromLevelId}:${edge.routeId}`));
+}
+
+function isWorldMapNodeAdjacentToKnownRoute(node, edges, run, discoveredRouteIds, visitedIds) {
+  return edges.some((edge) => (
+    edge.toLevelId === node.levelId
+    && visitedIds.has(edge.fromLevelId)
+    && isWorldMapEdgeKnown(edge, run, discoveredRouteIds, visitedIds)
+  ));
+}
+
+function drawWorldMapEdge(ctx, theme, edge, nodeByLevelId, transform, known) {
+  const from = nodeByLevelId.get(edge.fromLevelId);
+  const to = nodeByLevelId.get(edge.toLevelId);
+  if (!from || !to) {
+    return;
+  }
+  const fromRect = getWorldMapNodeScreenRect(from, transform);
+  const toRect = getWorldMapNodeScreenRect(to, transform);
+  ctx.save();
+  ctx.strokeStyle = known ? "rgba(147,234,255,0.52)" : "rgba(255,255,255,0.12)";
+  ctx.lineWidth = known ? 2.5 : 1.5;
+  if (!known) {
+    ctx.setLineDash([6, 9]);
+  }
+  ctx.beginPath();
+  ctx.moveTo(fromRect.x + fromRect.width * 0.5, fromRect.y + fromRect.height * 0.5);
+  ctx.lineTo(toRect.x + toRect.width * 0.5, toRect.y + toRect.height * 0.5);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawUnknownWorldMapNode(ctx, theme, node, transform, adjacentKnown = false) {
+  const rect = getWorldMapNodeScreenRect(node, transform);
+  ctx.save();
+  beveledPath(ctx, rect.x, rect.y, rect.width, rect.height, Math.max(8, Math.min(rect.width, rect.height) * 0.08));
+  ctx.fillStyle = adjacentKnown ? "rgba(12, 20, 25, 0.62)" : "rgba(9, 12, 16, 0.36)";
+  ctx.fill();
+  ctx.strokeStyle = adjacentKnown ? "rgba(147,234,255,0.34)" : "rgba(255,255,255,0.12)";
+  ctx.lineWidth = adjacentKnown ? 1.5 : 1;
+  ctx.setLineDash(adjacentKnown ? [7, 6] : [4, 8]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.rect(rect.x + 6, rect.y + 6, rect.width - 12, rect.height - 12);
+  ctx.clip();
+  ctx.strokeStyle = adjacentKnown ? "rgba(147,234,255,0.08)" : "rgba(255,255,255,0.045)";
+  ctx.lineWidth = 1;
+  for (let lineX = rect.x - rect.height; lineX < rect.x + rect.width + rect.height; lineX += 18) {
+    ctx.beginPath();
+    ctx.moveTo(lineX, rect.y + rect.height);
+    ctx.lineTo(lineX + rect.height, rect.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = adjacentKnown ? "rgba(239,245,251,0.42)" : "rgba(239,245,251,0.24)";
+  ctx.font = "700 11px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(adjacentKnown ? "UNMAPPED ROUTE" : "UNMAPPED", rect.x + rect.width * 0.5, rect.y + rect.height * 0.5 + 4);
+  ctx.textAlign = "left";
+}
+
+function drawFullRunLayoutMap(ctx, state, data, theme, x, y, width, height, discoveredRouteIds) {
+  const run = state.run;
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const visitedIds = new Set(run.map?.visitedLevelIds || [currentLevelId]);
+  visitedIds.add(currentLevelId);
+  const nodes = getWorldMapNodes(data);
+  const edges = getWorldMapEdges(data);
+  const nodeByLevelId = new Map(nodes.map((node) => [node.levelId, node]));
+  const summaryById = new Map(nodes.map((node) => [node.levelId, getMapLevelSummary(data, run, node.levelId)]));
+  const bounds = getFullMapNodeBounds(nodes);
+  const transform = createFullMapTransform(bounds, x, y, width, height, run.mapOverlay || {});
+  const showUnknownNodes = data.worldMap?.showUnknownNodes !== false;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 16,
+    fill: "rgba(5, 10, 15, 0.64)",
+    stroke: "rgba(255,255,255,0.14)",
+    innerLines: false,
+  });
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x + 10, y + 10, width - 20, height - 20);
+  ctx.clip();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.055)";
+  ctx.lineWidth = 1;
+  for (let gx = x + 28; gx < x + width - 28; gx += 48) {
+    ctx.beginPath();
+    ctx.moveTo(gx, y + 16);
+    ctx.lineTo(gx, y + height - 16);
+    ctx.stroke();
+  }
+  for (let gy = y + 28; gy < y + height - 28; gy += 48) {
+    ctx.beginPath();
+    ctx.moveTo(x + 16, gy);
+    ctx.lineTo(x + width - 16, gy);
+    ctx.stroke();
+  }
+
+  edges.forEach((edge) => {
+    drawWorldMapEdge(ctx, theme, edge, nodeByLevelId, transform, isWorldMapEdgeKnown(edge, run, discoveredRouteIds, visitedIds));
+  });
+
+  nodes.forEach((node) => {
+    const visited = visitedIds.has(node.levelId);
+    const adjacentKnown = isWorldMapNodeAdjacentToKnownRoute(node, edges, run, discoveredRouteIds, visitedIds);
+    if (!visited) {
+      if (showUnknownNodes || adjacentKnown) {
+        drawUnknownWorldMapNode(ctx, theme, node, transform, adjacentKnown);
+      }
+      return;
+    }
+    const levelData = getLevelRuntimeForMap(data, run, node.levelId);
+    const roomScreen = getWorldMapNodeScreenRect(node, transform);
+    drawLevelContentInsideRoom(ctx, theme, levelData, run, node.levelId, roomScreen, { discoveredRouteIds });
+  });
+
+  ctx.restore();
+
+  const exploredCount = Object.values(run.map?.exploredCellsByLevel || {}).reduce((total, cells) => (
+    total + (Array.isArray(cells) ? cells.length : 0)
+  ), 0);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "11px 'Segoe UI', sans-serif";
+  ctx.fillText(`world map / visited ${visitedIds.size}/${nodes.length} / zoom ${Math.round(transform.zoom * 100)}% / inked cells ${exploredCount}`, x + 22, y + 44);
+}
+
+function drawLevelLayoutMarker(ctx, theme, transform, x, y, label, color, options = {}) {
+  const cx = transform.x(x);
+  const cy = transform.y(y);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = color;
+  ctx.fillRect(-6, -6, 12, 12);
+  ctx.strokeStyle = "rgba(255,255,255,0.68)";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-8, -8, 16, 16);
+  ctx.restore();
+
+  const labelX = cx + 14;
+  const labelY = cy - 12;
+  const text = String(label || "");
+  if (!text) {
+    return;
+  }
+  ctx.font = "700 10px 'Segoe UI', sans-serif";
+  const chipW = Math.max(52, ctx.measureText(text).width + 22);
+  drawBeveledPanel(ctx, theme, labelX, labelY - 13, chipW, 26, {
+    cut: 8,
+    fill: options.fill || "rgba(5, 10, 15, 0.76)",
+    stroke: options.stroke || "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+  ctx.fillStyle = options.textColor || theme.textMain;
+  ctx.fillText(text, labelX + 11, labelY + 4);
+}
+
+function drawCurrentLevelLayoutMap(ctx, state, data, theme, x, y, width, height, discoveredRouteIds) {
+  const run = state.run;
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const transform = createLevelLayoutTransform(data, x, y, width, height);
+  const exploredCells = getExploredMapCells(run, currentLevelId);
+  const totalCells = Math.max(
+    1,
+    Math.ceil(transform.worldWidth / MAP_EXPLORE_CELL_SIZE)
+      * Math.ceil(transform.worldHeight / MAP_EXPLORE_CELL_SIZE),
+  );
+  const chartedPercent = Math.round(clamp(exploredCells.size / totalCells, 0, 1) * 100);
+  const destination = getCurrentMapDestination(run, data, discoveredRouteIds, exploredCells);
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 16,
+    fill: "rgba(5, 10, 15, 0.64)",
+    stroke: "rgba(255,255,255,0.14)",
+    innerLines: false,
+  });
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x + 10, y + 10, width - 20, height - 20);
+  ctx.clip();
+
+  const skyGradient = ctx.createLinearGradient(0, transform.offsetY, 0, transform.offsetY + transform.drawHeight);
+  skyGradient.addColorStop(0, "rgba(30, 49, 62, 0.72)");
+  skyGradient.addColorStop(1, "rgba(8, 13, 18, 0.94)");
+  ctx.fillStyle = skyGradient;
+  ctx.fillRect(transform.offsetX, transform.offsetY, transform.drawWidth, transform.drawHeight);
+  drawExploredMapCells(ctx, transform, exploredCells);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.055)";
+  ctx.lineWidth = 1;
+  const majorGrid = 640;
+  for (let gx = 0; gx <= transform.worldWidth; gx += majorGrid) {
+    ctx.beginPath();
+    ctx.moveTo(transform.x(gx), transform.offsetY);
+    ctx.lineTo(transform.x(gx), transform.offsetY + transform.drawHeight);
+    ctx.stroke();
+  }
+  for (let gy = 0; gy <= transform.worldHeight; gy += 320) {
+    ctx.beginPath();
+    ctx.moveTo(transform.offsetX, transform.y(gy));
+    ctx.lineTo(transform.offsetX + transform.drawWidth, transform.y(gy));
+    ctx.stroke();
+  }
+
+  if (Number.isFinite(data.world?.groundY)) {
+    ctx.strokeStyle = "rgba(231,244,126,0.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(transform.offsetX, transform.y(data.world.groundY));
+    ctx.lineTo(transform.offsetX + transform.drawWidth, transform.y(data.world.groundY));
+    ctx.stroke();
+  }
+
+  (data.platforms || []).forEach((platform) => {
+    const solid = platform.height >= 100;
+    const explored = isRectExplored(platform, exploredCells);
+    drawLevelLayoutRect(
+      ctx,
+      transform,
+      platform,
+      solid
+        ? (explored ? "rgba(94, 119, 128, 0.76)" : "rgba(72, 85, 92, 0.24)")
+        : (explored ? "rgba(220, 231, 236, 0.54)" : "rgba(202, 220, 226, 0.14)"),
+      solid
+        ? (explored ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.06)")
+        : (explored ? "rgba(255,255,255,0.34)" : "rgba(255,255,255,0.1)"),
+      solid ? 1 : 1.5,
+    );
+  });
+
+  (data.braceWalls || []).forEach((wall) => {
+    const explored = isRectExplored(wall, exploredCells);
+    drawLevelLayoutRect(
+      ctx,
+      transform,
+      wall,
+      explored ? "rgba(147,234,255,0.18)" : "rgba(147,234,255,0.05)",
+      explored ? "rgba(147,234,255,0.5)" : "rgba(147,234,255,0.16)",
+      1.5,
+    );
+  });
+
+  const cameraZoom = getRunCameraZoom(run, data);
+  const cameraRect = {
+    x: run.cameraX ?? 0,
+    y: run.cameraY ?? 0,
+    width: SCREEN_WIDTH / cameraZoom,
+    height: SCREEN_HEIGHT / cameraZoom,
+  };
+  drawLevelLayoutRect(ctx, transform, cameraRect, "rgba(147,234,255,0.035)", "rgba(147,234,255,0.42)", 1.5);
+
+  (run.lootCrates || []).forEach((crate) => {
+    if (crate.searched) {
+      return;
+    }
+    const cx = crate.x + crate.width * 0.5;
+    const cy = crate.y + crate.height * 0.5;
+    ctx.fillStyle = "rgba(246,233,138,0.64)";
+    ctx.fillRect(transform.x(cx) - 2, transform.y(cy) - 2, 4, 4);
+  });
+
+  (run.humanoidEnemies || []).forEach((enemy) => {
+    if (enemy.dead || enemy.state === "escaped" || enemy.state === "released") {
+      return;
+    }
+    const cx = enemy.x + enemy.width * 0.5;
+    const cy = enemy.y + enemy.height * 0.5;
+    ctx.strokeStyle = enemy.state === "knockedDown" ? "rgba(231,244,126,0.72)" : "rgba(255,116,154,0.62)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(transform.x(cx), transform.y(cy), enemy.state === "knockedDown" ? 5 : 4, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  (data.routeExits || []).forEach((routeExit) => {
+    const routeKey = `${currentLevelId}:${routeExit.id}`;
+    const known = discoveredRouteIds.has(routeKey);
+    const explored = isRectExplored(routeExit, exploredCells);
+    if (!known && !explored) {
+      return;
+    }
+    const label = known
+      ? `TO ${routeExit.toLevelId || "LEVEL"}`
+      : "UNKNOWN ROUTE";
+    drawLevelLayoutMarker(
+      ctx,
+      theme,
+      transform,
+      routeExit.x + routeExit.width * 0.5,
+      routeExit.y + routeExit.height * 0.5,
+      label,
+      known ? "rgba(147,234,255,0.92)" : "rgba(231,244,126,0.62)",
+      {
+        fill: known ? "rgba(8, 24, 31, 0.82)" : "rgba(28, 31, 12, 0.76)",
+        textColor: known ? theme.accentSecondary : theme.accent,
+      },
+    );
+  });
+
+  if (data.extractionGate) {
+    const gate = data.extractionGate;
+    drawLevelLayoutMarker(
+      ctx,
+      theme,
+      transform,
+      gate.x + gate.width * 0.5,
+      gate.y + gate.height * 0.5,
+      "EXTRACT",
+      "rgba(231,244,126,0.92)",
+      {
+        fill: "rgba(28, 31, 12, 0.82)",
+        textColor: theme.accent,
+      },
+    );
+  }
+
+  drawMapDirectionLine(ctx, theme, transform, run, destination);
+
+  const player = run.player;
+  const playerX = player.x + player.width * 0.5;
+  const playerY = player.y + player.height * 0.5;
+  const markerX = transform.x(playerX);
+  const markerY = transform.y(playerY);
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.moveTo(markerX + (player.facing || 1) * 9, markerY);
+  ctx.lineTo(markerX - (player.facing || 1) * 6, markerY - 6);
+  ctx.lineTo(markerX - (player.facing || 1) * 3, markerY);
+  ctx.lineTo(markerX - (player.facing || 1) * 6, markerY + 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(147,234,255,0.95)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  drawBeveledPanel(ctx, theme, markerX + 14, markerY - 15, 46, 28, {
+    cut: 8,
+    fill: "rgba(5,10,15,0.78)",
+    stroke: "rgba(147,234,255,0.42)",
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "700 10px 'Segoe UI', sans-serif";
+  ctx.fillText("YOU", markerX + 26, markerY + 3);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.26)";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(transform.offsetX, transform.offsetY, transform.drawWidth, transform.drawHeight);
+  ctx.restore();
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 13px 'Segoe UI', sans-serif";
+  ctx.fillText(data.levelLabel || data.label || currentLevelId, x + 22, y + 26);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "11px 'Segoe UI', sans-serif";
+  ctx.fillText(`survey map / inked ${chartedPercent}% / objective ${destination?.targetLabel || "-"}`, x + 22, y + 44);
+}
+
+function drawRunMapOverlay(ctx, state, data, theme) {
+  const run = state.run;
+  if (!run?.mapOverlay?.active) {
+    return;
+  }
+
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const discoveredRouteIds = new Set(run.map?.discoveredRouteIds || []);
+  const panelX = 174;
+  const panelY = 76;
+  const panelW = 932;
+  const panelH = 568;
+  const layoutX = panelX + 44;
+  const layoutY = panelY + 88;
+  const layoutW = panelW - 88;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.68)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
+    cut: 22,
+    fill: "rgba(5, 9, 14, 0.86)",
+    stroke: "rgba(255,255,255,0.2)",
+    glow: true,
+    innerLines: true,
+  });
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "700 28px 'Segoe UI', sans-serif";
+  ctx.fillText("RUN MAP", panelX + 44, panelY + 58);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText("Drag pan / Wheel zoom / M Esc close", panelX + panelW - 268, panelY + 56);
+
+  drawFullRunLayoutMap(ctx, state, data, theme, layoutX, layoutY, layoutW, panelH - 166, discoveredRouteIds);
+
+  const fullLegendY = panelY + panelH - 58;
+  const fullLegend = [
+    { color: "#ffffff", label: "you" },
+    { color: "rgba(147,234,255,0.82)", label: "known route" },
+    { color: "rgba(230,239,244,0.36)", label: "inked" },
+    { color: "rgba(231,244,126,0.82)", label: "extract" },
+  ];
+  fullLegend.forEach((item, index) => {
+    const legendX = panelX + 52 + index * 132;
+    ctx.fillStyle = item.color;
+    ctx.fillRect(legendX, fullLegendY - 10, 18, 10);
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "12px 'Segoe UI', sans-serif";
+    ctx.fillText(item.label, legendX + 28, fullLegendY);
+  });
+
+  ctx.restore();
+  return;
+
+  ctx.strokeStyle = "rgba(255,255,255,0.07)";
+  ctx.lineWidth = 1;
+  for (let x = mapX; x <= mapX + mapW; x += 42) {
+    ctx.beginPath();
+    ctx.moveTo(x, mapY);
+    ctx.lineTo(x, mapY + mapH);
+    ctx.stroke();
+  }
+  for (let y = mapY; y <= mapY + mapH; y += 42) {
+    ctx.beginPath();
+    ctx.moveTo(mapX, y);
+    ctx.lineTo(mapX + mapW, y);
+    ctx.stroke();
+  }
+
+  for (const routeId of discoveredRouteIds) {
+    const separator = routeId.indexOf(":");
+    const sourceLevelId = separator >= 0 ? routeId.slice(0, separator) : currentLevelId;
+    const sourceRouteId = separator >= 0 ? routeId.slice(separator + 1) : routeId;
+    const sourceSummary = getMapLevelSummary(data, run, sourceLevelId);
+    const routeExit = (sourceSummary.routeExits || []).find((exit) => exit.id === sourceRouteId);
+    const targetSummary = routeExit?.toLevelId ? summaryById.get(routeExit.toLevelId) : null;
+    if (!routeExit || !targetSummary) {
+      continue;
+    }
+    const from = getLevelMapCenter(sourceSummary);
+    const to = getLevelMapCenter(targetSummary);
+    ctx.strokeStyle = "rgba(147, 234, 255, 0.42)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(transform.x(from.x), transform.y(from.y));
+    ctx.lineTo(transform.x(to.x), transform.y(to.y));
+    ctx.stroke();
+  }
+
+  summaries.forEach((summary) => {
+    const visited = visitedIds.has(summary.id);
+    const current = summary.id === currentLevelId;
+    const style = {
+      fill: visited ? "rgba(230, 239, 244, 0.18)" : "rgba(230, 239, 244, 0.055)",
+      stroke: current
+        ? "rgba(147, 234, 255, 0.92)"
+        : visited
+          ? "rgba(255,255,255,0.54)"
+          : "rgba(255,255,255,0.2)",
+      lineWidth: current ? 3 : 1.5,
+      text: visited ? theme.textMain : "rgba(239,245,251,0.44)",
+      font: visited ? "700 13px 'Segoe UI', sans-serif" : "700 13px 'Segoe UI', sans-serif",
+    };
+    const rooms = getMapRooms(summary);
+    rooms.forEach((room, index) => {
+      drawMapRoom(ctx, theme, room, transform, style, index === 0 ? summary.label : room.label);
+    });
+    if (summary.extractionGate) {
+      drawMapExtractionIcon(ctx, theme, rooms[0], transform, !visited);
+    }
+    if (current) {
+      const center = getLevelMapCenter(summary);
+      const markerX = transform.x(center.x);
+      const markerY = transform.y(center.y);
+      ctx.fillStyle = theme.accentSecondary;
+      ctx.beginPath();
+      ctx.arc(markerX, markerY, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.82)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  });
+
+  const legendY = panelY + panelH - 58;
+  const legend = [
+    { color: "#ffffff", label: "you" },
+    { color: "rgba(147,234,255,0.82)", label: "route" },
+    { color: "rgba(230,239,244,0.36)", label: "visited" },
+    { color: "rgba(231,244,126,0.82)", label: "extract" },
+  ];
+  legend.forEach((item, index) => {
+    const x = panelX + 52 + index * 118;
+    ctx.fillStyle = item.color;
+    ctx.fillRect(x, legendY - 10, 18, 10);
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "12px 'Segoe UI', sans-serif";
+    ctx.fillText(item.label, x + 28, legendY);
+  });
+
+  ctx.restore();
+}
+
 function drawHudV3(ctx, state, data) {
   if (state.scene !== SCENES.EXPEDITION || !state.run) {
     return;
   }
   drawCharacterStatusHudV3(ctx, state, data);
+  const theme = getUiTheme(data);
+  drawWeaponHudV3(ctx, state.run, data, theme);
+  drawCurrentMapChip(ctx, state, data, theme);
+  drawRunMapOverlay(ctx, state, data, theme);
 }
 
 function drawResultsSceneV3(ctx, state, data, isFailure = false) {

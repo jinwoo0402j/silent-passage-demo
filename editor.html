@@ -22,6 +22,45 @@
 
       <details class="editor-panel is-collapsible" open>
         <summary class="panel-toggle">
+          <span>Levels</span>
+          <span class="panel-toggle-meta">run route</span>
+        </summary>
+        <div class="panel-body">
+          <label class="field full">
+            <span>Current Level</span>
+            <select id="levelSelect"></select>
+          </label>
+          <label class="field full">
+            <span>Level Label</span>
+            <input id="levelNameInput" type="text">
+          </label>
+          <label class="field full">
+            <span>Run Start Level</span>
+            <select id="runStartLevelSelect"></select>
+          </label>
+          <p class="panel-helper" id="levelMetaLabel">Level status</p>
+          <div class="panel-row">
+            <button type="button" class="ghost-button" id="duplicateLevelButton">Duplicate</button>
+            <button type="button" class="ghost-button" id="newLevelButton">New Level</button>
+            <button type="button" class="ghost-button" id="deleteLevelButton">Delete Local</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" hidden>
+        <summary class="panel-toggle">
+          <span>Map</span>
+          <span class="panel-toggle-meta">rooms</span>
+        </summary>
+        <div class="panel-body">
+          <p class="panel-helper">M overlay uses these hand-placed room rectangles for this level.</p>
+          <div class="field-grid selection-fields" id="mapRoomsFields"></div>
+          <button type="button" class="ghost-button" id="addMapRoomButton">Add Room</button>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
           <span>도구</span>
           <span class="panel-toggle-meta">배치</span>
         </summary>
@@ -33,6 +72,8 @@
             <button type="button" class="tool-button" data-tool="sign">표지판</button>
             <button type="button" class="tool-button" data-tool="lantern">랜턴</button>
             <button type="button" class="tool-button" data-tool="spawn">스폰</button>
+            <button type="button" class="tool-button" data-tool="entrance">Entrance</button>
+            <button type="button" class="tool-button" data-tool="routeExit">Route Exit</button>
             <button type="button" class="tool-button" data-tool="gate">출구</button>
           </div>
         </div>
@@ -195,6 +236,6 @@
     </section>
   </main>
 
-  <script type="module" src="./editor.js?v=20260424-recoil-46"></script>
+  <script type="module" src="./editor.js?v=20260501-start-level-fix-v1"></script>
 </body>
 </html>
