@@ -43,7 +43,17 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
 
 5. Use the editor's `JSON 저장` button to export the level.
 
-6. Put the exported file under `levels/drafts/`.
+   In Chrome or Edge, the editor will ask for a folder. Choose:
+
+   ```text
+   levels/drafts/
+   ```
+
+   Then the JSON file is written directly into the repository and appears in Git changes.
+
+   If the browser only downloads a file, move the downloaded JSON from `Downloads` into `levels/drafts/` manually.
+
+6. Confirm the exported file is under `levels/drafts/`.
 
    ```text
    levels/drafts/faceoff-checkpoint-01.v001.json

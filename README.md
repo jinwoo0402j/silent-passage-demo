@@ -78,7 +78,9 @@ Team handoff uses exported JSON files under `levels/`.
 
 3. Export with `JSON 저장`.
 
-4. Put the file under `levels/drafts/`.
+   In Chrome or Edge, choose the repository's `levels/drafts/` folder when the browser asks for a folder. If the browser downloads the JSON instead, move it from `Downloads` into `levels/drafts/`.
+
+4. Confirm the file is under `levels/drafts/`.
 
    ```text
    levels/drafts/faceoff-checkpoint-01.v001.json

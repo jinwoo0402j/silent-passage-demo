@@ -2736,15 +2736,62 @@ function saveEditorLevel(editor, dom) {
   setStatus(editor, dom, "로컬 저장 완료", "", false);
 }
 
-function downloadLevelJson(editor, dom) {
+function createLevelExportFileName(editor) {
+  const levelId = String(
+    editor.data.currentLevelId
+      || editor.data.levelId
+      || editor.data.id
+      || "level",
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "level";
+  return `${levelId}.v001.json`;
+}
+
+async function saveLevelJsonToDraftFolder(editor, dom, fileName, json) {
+  if (typeof window === "undefined" || typeof window.showDirectoryPicker !== "function") {
+    return false;
+  }
+
+  try {
+    setStatus(editor, dom, "Choose levels/drafts folder for the exported level JSON.", "", editor.dirty);
+    const directory = await window.showDirectoryPicker({
+      id: "silent-passage-level-drafts",
+      mode: "readwrite",
+      startIn: "documents",
+    });
+    const file = await directory.getFileHandle(fileName, { create: true });
+    const writable = await file.createWritable();
+    await writable.write(json);
+    await writable.close();
+    setStatus(editor, dom, `Saved ${fileName} to the selected folder.`, "", editor.dirty);
+    return true;
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      console.warn("Draft folder save failed", error);
+    }
+    return false;
+  }
+}
+
+async function downloadLevelJson(editor, dom) {
+  const fileName = createLevelExportFileName(editor);
   const json = JSON.stringify(extractEditableLevelData(editor.data), null, 2);
+  if (await saveLevelJsonToDraftFolder(editor, dom, fileName, json)) {
+    return;
+  }
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "rulebound-level.json";
+  anchor.download = fileName;
   anchor.click();
   URL.revokeObjectURL(url);
+  setStatus(editor, dom, `Downloaded ${fileName}. Move it to levels/drafts/.`, "", editor.dirty);
+  return;
   setStatus(editor, dom, "JSON 저장 완료", "", editor.dirty);
 }
 
