@@ -41,6 +41,7 @@ On Windows, designers can use the double-click launchers in the repository root:
 - `start-game.bat`: opens the game
 
 Each launcher starts the local server on port `4173` if it is not already running, then opens the target page.
+When the launcher starts the server, it opens a separate server window. Keep that window open while using the editor.
 
 Manual server command:
 

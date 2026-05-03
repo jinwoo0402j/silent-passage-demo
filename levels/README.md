@@ -30,6 +30,7 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
    ```
 
    `start-editor.bat` is the fastest path for level editing.
+   If a server window opens, keep it open while editing.
 
    ```text
    http://localhost:4173/editor.html
