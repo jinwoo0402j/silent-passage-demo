@@ -5502,8 +5502,8 @@ function drawCharacterStatusHudV3(ctx, state, data) {
 function drawActionClusterV3(ctx, theme, layout) {
   const labels = [
     { x: layout.actions.moveX, y: layout.actions.moveY, text: "A D" },
-    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Shift" },
-    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "Space" },
+    { x: layout.actions.dashX, y: layout.actions.dashY, text: "A/D x2" },
+    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "W/Space" },
     { x: layout.actions.crouchX, y: layout.actions.crouchY, text: "↓" },
     { x: layout.actions.useX, y: layout.actions.useY, text: "Z" },
   ];

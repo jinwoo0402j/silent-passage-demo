@@ -16,7 +16,7 @@ import {
 import { renderGame } from "./render.js?v=20260501-run-start-v1";
 import { saveCurrentGame } from "./save-game.js?v=20260503-level-manifest-v1";
 import { SCENES, createInitialState, createRunState } from "./state.js?v=20260501-run-start-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260503-level-manifest-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260503-controls-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

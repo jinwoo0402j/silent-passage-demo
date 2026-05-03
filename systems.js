@@ -37,9 +37,15 @@ const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
 const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const CROUCH_KEYS = ["ArrowDown", "KeyS"];
-const JUMP_KEYS = ["KeyC", "Space"];
+const JUMP_KEYS = ["KeyW", "KeyC", "Space"];
 const DASH_KEYS = ["KeyX", "ShiftLeft", "ShiftRight"];
 const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
+const DOUBLE_TAP_DASH_KEYS = {
+  KeyA: -1,
+  KeyD: 1,
+};
+const DOUBLE_TAP_WINDOW_MS = 280;
+const DOUBLE_TAP_BUFFER_MS = 140;
 const INTERACT_KEYS = ["KeyZ", "KeyE"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
@@ -105,6 +111,89 @@ function consumePress(state, code) {
 
 function consumeEitherPress(state, codes) {
   return codes.some((code) => consumePress(state, code));
+}
+
+function ensureInputState(state) {
+  state.input = state.input || {};
+  state.input.directionTap = state.input.directionTap || {
+    lastCode: null,
+    lastTime: 0,
+    dashDirection: 0,
+    dashExpiresAt: 0,
+    sprintDirection: 0,
+  };
+  return state.input.directionTap;
+}
+
+function getNowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function getDirectionKey(direction) {
+  return direction < 0 ? "KeyA" : direction > 0 ? "KeyD" : null;
+}
+
+function registerDirectionTap(state, code) {
+  const direction = DOUBLE_TAP_DASH_KEYS[code] || 0;
+  if (direction === 0) {
+    return;
+  }
+
+  const input = ensureInputState(state);
+  const now = getNowMs();
+  if (
+    input.lastCode === code &&
+    now - input.lastTime <= DOUBLE_TAP_WINDOW_MS
+  ) {
+    input.dashDirection = direction;
+    input.dashExpiresAt = now + DOUBLE_TAP_BUFFER_MS;
+    input.sprintDirection = direction;
+    input.lastCode = null;
+    input.lastTime = 0;
+    return;
+  }
+
+  input.lastCode = code;
+  input.lastTime = now;
+}
+
+function releaseDirectionTap(state, code) {
+  const input = state.input?.directionTap;
+  if (!input) {
+    return;
+  }
+
+  if (getDirectionKey(input.sprintDirection) === code) {
+    input.sprintDirection = 0;
+  }
+}
+
+function consumeDoubleTapDashDirection(state) {
+  const input = state.input?.directionTap;
+  if (!input?.dashDirection) {
+    return 0;
+  }
+
+  if (getNowMs() > input.dashExpiresAt) {
+    input.dashDirection = 0;
+    input.dashExpiresAt = 0;
+    return 0;
+  }
+
+  const direction = input.dashDirection;
+  input.dashDirection = 0;
+  input.dashExpiresAt = 0;
+  return direction;
+}
+
+function isDoubleTapSprintHeld(state, moveAxis) {
+  const direction = state.input?.directionTap?.sprintDirection || 0;
+  const code = getDirectionKey(direction);
+  return Boolean(
+    code &&
+    moveAxis === direction &&
+    isPressed(state, code)
+  );
 }
 
 function setStatus(state, message) {
@@ -3175,9 +3264,11 @@ function updatePlayer(run, data, state, dt, input) {
   const crouchPressed = consumeEitherPress(state, CROUCH_KEYS);
   const jumpPressed = consumeEitherPress(state, JUMP_KEYS);
   const jumpHeld = isEitherPressed(state, JUMP_KEYS);
-  const dashPressed = consumeEitherPress(state, DASH_KEYS);
-  const sprintPressed = consumeEitherPress(state, SPRINT_KEYS);
-  const sprintHeld = isEitherPressed(state, SPRINT_KEYS);
+  const doubleTapDashDirection = consumeDoubleTapDashDirection(state);
+  const dashPressed = consumeEitherPress(state, DASH_KEYS) || doubleTapDashDirection !== 0;
+  const sprintPressed = consumeEitherPress(state, SPRINT_KEYS) || doubleTapDashDirection !== 0;
+  const doubleTapSprintHeld = isDoubleTapSprintHeld(state, moveAxis);
+  const sprintHeld = isEitherPressed(state, SPRINT_KEYS) || doubleTapSprintHeld;
   const activeBraceWall = getActiveBraceWall(player, data, run);
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
   const wasWallSliding = player.wallSliding;
@@ -3389,7 +3480,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallJumpLockTimer === 0 &&
     player.height === player.standHeight
   ) {
-    const direction = moveAxis || player.facing;
+    const direction = doubleTapDashDirection || moveAxis || player.facing;
     if (direction !== 0) {
       startDash(player, run, config, direction);
     }
@@ -5686,14 +5777,17 @@ export function bindInput(state) {
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Digit1", "Digit2", "KeyA", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
-    if (!state.pressed.has(event.code)) {
+    const wasPressed = state.pressed.has(event.code);
+    if (!wasPressed) {
       state.justPressed.add(event.code);
+      registerDirectionTap(state, event.code);
     }
     state.pressed.add(event.code);
   });
 
   window.addEventListener("keyup", (event) => {
     state.pressed.delete(event.code);
+    releaseDirectionTap(state, event.code);
   });
 }
 
