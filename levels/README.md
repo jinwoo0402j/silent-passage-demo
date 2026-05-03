@@ -31,6 +31,7 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
 
    `start-editor.bat` is the fastest path for level editing.
    If a server window opens, keep it open while editing.
+   Python is optional; the launcher falls back to the bundled PowerShell server when Python is not available.
 
    ```text
    http://localhost:4173/editor.html

@@ -22,11 +22,14 @@ if not defined PYTHON_CMD (
   if %ERRORLEVEL% EQU 0 set "PYTHON_CMD=python"
 )
 
-if not defined PYTHON_CMD goto missing_python
-
 echo Starting Silent Passage local server on http://localhost:%PORT%/
 echo Leave the server window open while editing levels.
-start "Silent Passage Local Server - keep this open" cmd /k "%PYTHON_CMD% -m http.server %PORT% --bind 127.0.0.1"
+if defined PYTHON_CMD (
+  start "Silent Passage Local Server - keep this open" cmd /k "%PYTHON_CMD% -m http.server %PORT% --bind 127.0.0.1"
+) else (
+  echo Python was not found. Falling back to the bundled PowerShell server.
+  start "Silent Passage Local Server - keep this open" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -File "%~dp0serve-local.ps1" -Root "%CD%" -Port %PORT%
+)
 
 for /L %%I in (1,1,12) do (
   timeout /t 1 /nobreak >nul
@@ -38,8 +41,7 @@ echo.
 echo The local server did not respond on http://localhost:%PORT%/
 echo Check the server window for the exact error.
 echo Common fixes:
-echo - Install Python from https://www.python.org/downloads/
-echo - Enable "Add python.exe to PATH" during installation
+echo - If Windows blocked PowerShell scripts, run this launcher again.
 echo - Close anything else using port %PORT%
 pause
 exit /b 1
@@ -49,18 +51,6 @@ start "" "http://localhost:%PORT%/%PAGE%"
 endlocal
 exit /b 0
 
-:missing_python
-echo.
-echo Python is required to run the local editor server.
-echo Install Python from:
-echo https://www.python.org/downloads/
-echo.
-echo During installation, enable:
-echo Add python.exe to PATH
-pause
-exit /b 1
-
 :check_server
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%PORT%/index.html' -TimeoutSec 1; if ($r.StatusCode -ge 200) { exit 0 } } catch {}; exit 1" >nul 2>nul
 exit /b %ERRORLEVEL%
-
