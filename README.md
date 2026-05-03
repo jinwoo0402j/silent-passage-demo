@@ -34,7 +34,15 @@ The Pages workflow deploys from `main`. Branch work appears on GitHub immediatel
 
 ## Local Run
 
-Use a local static server because the app uses ES modules.
+On Windows, designers can use the double-click launchers in the repository root:
+
+- `start-guide.bat`: opens the level design handoff page
+- `start-editor.bat`: opens the level editor
+- `start-game.bat`: opens the game
+
+Each launcher starts the local server on port `4173` if it is not already running, then opens the target page.
+
+Manual server command:
 
 ```powershell
 python -m http.server 4173 --bind 127.0.0.1

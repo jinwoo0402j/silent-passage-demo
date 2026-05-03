@@ -21,6 +21,16 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
 
 2. Open the editor.
 
+   On Windows, double-click one of these files from the repository root:
+
+   ```text
+   start-guide.bat
+   start-editor.bat
+   start-game.bat
+   ```
+
+   `start-editor.bat` is the fastest path for level editing.
+
    ```text
    http://localhost:4173/editor.html
    ```
@@ -109,4 +119,3 @@ Use `route exit` for level-to-level movement. Use `extraction exit` only for end
 ## What Not To Commit
 
 Do not commit browser localStorage dumps, screenshots, or temporary test output as level source. The source of truth for designer handoff is exported JSON under this folder.
-
