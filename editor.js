@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
+﻿import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -15,7 +15,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260503-level-manifest-v1";
+} from "./level-store.js?v=20260503-text-fix-v2";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -30,6 +30,8 @@ const TOOL_IDS = {
   ENTRANCE: "entrance",
   ROUTE_EXIT: "routeExit",
   GATE: "gate",
+  HUMANOID_ENEMY: "humanoidEnemy",
+  HOSTILE_DRONE: "hostileDrone",
 };
 
 const TOOL_SHORTCUTS = {
@@ -49,6 +51,10 @@ const TOOL_SHORTCUTS = {
   Numpad7: TOOL_IDS.ROUTE_EXIT,
   Digit8: TOOL_IDS.GATE,
   Numpad8: TOOL_IDS.GATE,
+  Digit9: TOOL_IDS.HUMANOID_ENEMY,
+  Numpad9: TOOL_IDS.HUMANOID_ENEMY,
+  Digit0: TOOL_IDS.HOSTILE_DRONE,
+  Numpad0: TOOL_IDS.HOSTILE_DRONE,
 };
 
 const TOOL_SHORTCUT_LABELS = {
@@ -60,21 +66,26 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.ENTRANCE]: "6",
   [TOOL_IDS.ROUTE_EXIT]: "7",
   [TOOL_IDS.GATE]: "8",
+  [TOOL_IDS.HUMANOID_ENEMY]: "9",
+  [TOOL_IDS.HOSTILE_DRONE]: "0",
 };
 
 const TOOL_HINTS = {
-  [TOOL_IDS.SELECT]: "선택 후 드래그",
-  [TOOL_IDS.PLATFORM]: "드래그로 플랫폼 생성",
-  [TOOL_IDS.SIGN]: "클릭으로 표지 배치",
-  [TOOL_IDS.LANTERN]: "클릭으로 랜턴 배치",
-  [TOOL_IDS.SPAWN]: "클릭으로 스폰 이동",
-  [TOOL_IDS.GATE]: "클릭으로 출구 이동",
+  [TOOL_IDS.SELECT]: "Select and drag objects",
+  [TOOL_IDS.PLATFORM]: "Drag to create a platform",
+  [TOOL_IDS.SIGN]: "Click to place a sign",
+  [TOOL_IDS.LANTERN]: "Click to place a lantern",
+  [TOOL_IDS.SPAWN]: "Click to move the player spawn",
+  [TOOL_IDS.GATE]: "Click to move the exit",
 };
 
-TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
+TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "Drag to create a brace wall";
 
-TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
-TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
+TOOL_HINTS[TOOL_IDS.ENTRANCE] = "Click to place a level entrance";
+TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "Click to place a route exit";
+
+TOOL_HINTS[TOOL_IDS.HUMANOID_ENEMY] = "Click to place a humanoid enemy spawn";
+TOOL_HINTS[TOOL_IDS.HOSTILE_DRONE] = "Click to place a hostile drone spawn";
 
 const PLAYER_RENDER_GROUPS = [
   ["idle", "Idle"],
@@ -98,7 +109,7 @@ const HUD_LAYOUT_GROUPS = [
     fields: [
       ["x", "X"],
       ["y", "Y"],
-      ["width", "폭"],
+      ["width", "Width"],
     ],
   },
   {
@@ -107,7 +118,7 @@ const HUD_LAYOUT_GROUPS = [
     fields: [
       ["x", "X"],
       ["y", "Y"],
-      ["radius", "반경"],
+      ["radius", "Radius"],
     ],
   },
   {
@@ -116,7 +127,7 @@ const HUD_LAYOUT_GROUPS = [
     fields: [
       ["x", "X"],
       ["y", "Y"],
-      ["gap", "간격"],
+      ["gap", "Gap"],
     ],
   },
   {
@@ -125,8 +136,8 @@ const HUD_LAYOUT_GROUPS = [
     fields: [
       ["x", "X"],
       ["y", "Y"],
-      ["width", "폭"],
-      ["gap", "간격"],
+      ["width", "Width"],
+      ["gap", "Gap"],
     ],
   },
   {
@@ -135,7 +146,7 @@ const HUD_LAYOUT_GROUPS = [
     fields: [
       ["x", "X"],
       ["y", "Y"],
-      ["radius", "반경"],
+      ["radius", "Radius"],
     ],
   },
   {
@@ -163,277 +174,277 @@ const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
 
 const CAMERA_TUNING_GROUPS = [
   {
-    title: "기본",
+    title: "Basic",
     fields: [
       {
         key: "lookAheadEnabled",
-        label: "방향 시야",
+        label: "Look Ahead",
         type: "checkbox",
         defaultValue: true,
-        help: "끄면 예전 고정 카메라처럼 플레이어를 기준점에 둔다.",
+        help: "When enabled, the camera leads ahead of the player instead of staying fully centered.",
       },
       {
         key: "dashAffectsCamera",
-        label: "대시 카메라 반응",
+        label: "Dash Camera Response",
         type: "checkbox",
         defaultValue: false,
-        help: "끄면 대시 순간에는 방향 전환, 대시 줌, 속도 줌을 적용하지 않는다.",
+        help: "When disabled, dash movement does not affect direction lead, dash zoom, or speed zoom.",
       },
       {
         key: "braceAffectsCamera",
-        label: "벽짚기 카메라 반응",
+        label: "Brace Camera Response",
         type: "checkbox",
         defaultValue: false,
-        help: "끄면 벽짚기/방출 중 현재 카메라 초점과 줌을 유지한다.",
+        help: "When enabled, brace release can change camera focus and zoom.",
       },
       {
         key: "minZoom",
-        label: "최대 줌아웃",
+        label: "Minimum Zoom",
         min: 0.1,
         max: 1,
         step: 0.01,
         defaultValue: 0.88,
-        help: "기본 줌 대비 최저 배율. 0.88은 최대 12% 더 넓게 본다.",
+        help: "Minimum zoom multiplier compared to the base zoom.",
       },
       {
         key: "neutralFocusX",
-        label: "기본 초점 X",
+        label: "Neutral Focus X",
         min: 0.24,
         max: 0.76,
         step: 0.01,
         defaultValue: 0.5,
-        help: "0.5가 화면 중앙. 낮으면 캐릭터가 왼쪽, 높으면 오른쪽에 선다.",
+        help: "0.5 is screen center. Lower values keep the player farther left.",
       },
       {
         key: "neutralFocusY",
-        label: "기본 초점 Y",
+        label: "Neutral Focus Y",
         min: 0.28,
         max: 0.72,
         step: 0.01,
         defaultValue: 0.5,
-        help: "0.5가 화면 중앙. 높이면 캐릭터가 아래로 가서 위쪽이 더 보인다.",
+        help: "0.5 is screen center. Higher values show more space above the player.",
       },
     ],
   },
   {
-    title: "방향 여백",
+    title: "Direction Lead",
     fields: [
       {
         key: "walkLookAhead",
-        label: "걷기 시야",
+        label: "Walk Lead",
         min: 0,
         max: 0.35,
         step: 0.01,
         defaultValue: 0.08,
-        help: "일반 이동 때 진행 방향으로 열어주는 화면 비율.",
+        help: "Screen ratio used to lead the camera in the walking direction.",
       },
       {
         key: "sprintLookAhead",
-        label: "달리기 시야",
+        label: "Sprint Lead",
         min: 0,
         max: 0.35,
         step: 0.01,
         defaultValue: 0.18,
-        help: "달릴 때 앞쪽 정보를 얼마나 더 보여줄지 정한다.",
+        help: "How much extra forward space is shown while sprinting.",
       },
       {
         key: "sprintJumpLookAhead",
-        label: "달점프 시야",
+        label: "Sprint Jump Lead",
         min: 0,
         max: 0.4,
         step: 0.01,
         defaultValue: 0.25,
-        help: "달리기 점프 유지 중 앞쪽을 더 크게 연다.",
+        help: "Forward lead while sprint jumping.",
       },
       {
         key: "dashLookAhead",
-        label: "대시 시야",
+        label: "Dash Lead",
         min: 0,
         max: 0.35,
         step: 0.01,
         defaultValue: 0,
-        help: "대시 중 진행 방향으로 열어주는 여백.",
+        help: "Forward lead while dashing.",
       },
       {
         key: "wallRunLookAhead",
-        label: "벽달리기 수평 시야",
+        label: "Wall Run Horizontal Lead",
         min: 0,
         max: 0.35,
         step: 0.01,
         defaultValue: 0,
-        help: "벽달리기 중 수평 이탈 방향으로 열어주는 여백.",
+        help: "Horizontal lead while wall running.",
       },
       {
         key: "wallRunUpLookAhead",
-        label: "벽달리기 위쪽 시야",
+        label: "Wall Run Up Lead",
         min: 0,
         max: 0.35,
         step: 0.01,
         defaultValue: 0.22,
-        help: "벽달리기 중 캐릭터를 아래에 두고 위쪽 경로를 더 보여준다.",
+        help: "Upward lead used to show the path above during wall runs.",
       },
       {
         key: "braceLookAhead",
-        label: "벽짚기 시야",
+        label: "Brace Lead",
         min: 0,
         max: 0.35,
         step: 0.01,
         defaultValue: 0,
-        help: "벽짚기/방출 중 다음 이동 방향을 얼마나 보여줄지.",
+        help: "Lead toward the next movement direction during brace release.",
       },
       {
         key: "fallLookAhead",
-        label: "낙하 시야",
+        label: "Fall Lead",
         min: 0,
         max: 0.35,
         step: 0.01,
         defaultValue: 0.12,
-        help: "빠르게 떨어질 때 진행 방향 쪽 여백.",
+        help: "Lead in the falling direction.",
       },
     ],
   },
   {
-    title: "속도 줌",
+    title: "Speed Zoom",
     fields: [
       {
         key: "sprintCameraMinSpeed",
-        label: "달리기 인식 속도",
+        label: "Sprint Camera Min Speed",
         min: 0,
         max: 1200,
         step: 10,
         defaultValue: 260,
-        help: "이 속도 이상일 때 달리기 카메라가 켜진다.",
+        help: "Speed threshold where sprint camera behavior begins.",
       },
       {
         key: "speedZoomStart",
-        label: "줌아웃 시작 속도",
+        label: "Speed Zoom Start",
         min: 0,
         max: 1600,
         step: 10,
         defaultValue: 260,
-        help: "이 속도부터 속도 기반 줌아웃이 시작된다.",
+        help: "Speed where speed-based zoom-out begins.",
       },
       {
         key: "speedZoomFull",
-        label: "줌아웃 최대 속도",
+        label: "Speed Zoom Full",
         min: 1,
         max: 2400,
         step: 10,
         defaultValue: 980,
-        help: "이 속도에서 속도 기반 줌아웃이 최대치가 된다.",
+        help: "Speed where speed-based zoom-out reaches its maximum.",
       },
       {
         key: "speedZoomMin",
-        label: "속도 최대 줌아웃",
+        label: "Speed Minimum Zoom",
         min: 0.1,
         max: 1,
         step: 0.01,
         defaultValue: 0.88,
-        help: "속도만으로 내려갈 수 있는 최저 줌 배율.",
+        help: "Lowest zoom multiplier allowed from speed alone.",
       },
       {
         key: "sprintZoom",
-        label: "달리기 줌",
+        label: "Sprint Zoom",
         min: 0.1,
         max: 1,
         step: 0.01,
         defaultValue: 0.96,
-        help: "달리는 동안 기본 줌에 곱하는 값.",
+        help: "Zoom multiplier while sprinting.",
       },
       {
         key: "sprintJumpZoom",
-        label: "달점프 줌",
+        label: "Sprint Jump Zoom",
         min: 0.1,
         max: 1,
         step: 0.01,
         defaultValue: 0.92,
-        help: "달리기 점프 중 기본 줌에 곱하는 값.",
+        help: "Zoom multiplier while sprint jumping.",
       },
       {
         key: "dashZoom",
-        label: "대시 줌",
+        label: "Dash Zoom",
         min: 0.1,
         max: 1,
         step: 0.01,
         defaultValue: 1,
-        help: "대시 중 기본 줌에 곱하는 값.",
+        help: "Zoom multiplier while dashing.",
       },
       {
         key: "wallRunZoom",
-        label: "벽달리기 줌",
+        label: "Wall Run Zoom",
         min: 0.1,
         max: 1,
         step: 0.01,
         defaultValue: 0.94,
-        help: "벽달리기 중 기본 줌에 곱하는 값.",
+        help: "Zoom multiplier while wall running.",
       },
       {
         key: "braceZoom",
-        label: "벽짚기 줌",
+        label: "Brace Zoom",
         min: 0.1,
         max: 1,
         step: 0.01,
         defaultValue: 1,
-        help: "벽짚기/방출 중 기본 줌에 곱하는 값.",
+        help: "Zoom multiplier during brace release.",
       },
     ],
   },
   {
-    title: "반응",
+    title: "Response",
     fields: [
       {
         key: "upwardFocusOffset",
-        label: "상승 초점",
+        label: "Upward Focus Offset",
         min: -0.35,
         max: 0.35,
         step: 0.01,
         defaultValue: 0.18,
-        help: "양수면 캐릭터를 아래에 두고 위쪽을 더 보여준다.",
+        help: "Vertical focus offset while rising.",
       },
       {
         key: "fallingFocusOffset",
-        label: "낙하 초점",
+        label: "Falling Focus Offset",
         min: -0.35,
         max: 0.35,
         step: 0.01,
         defaultValue: -0.14,
-        help: "음수면 캐릭터를 위에 두고 아래쪽을 더 보여준다.",
+        help: "Vertical focus offset while falling.",
       },
       {
         key: "directionSpeedThreshold",
-        label: "방향 전환 속도",
+        label: "Direction Switch Speed",
         min: 0,
         max: 300,
         step: 5,
         defaultValue: 70,
-        help: "이 속도 이상 움직일 때 카메라 방향을 새로 잡는다.",
+        help: "Minimum speed before direction lead changes.",
       },
       {
         key: "directionLerp",
-        label: "방향 반응",
+        label: "Direction Response",
         min: 0,
         max: 30,
         step: 0.1,
         defaultValue: 6,
-        help: "높을수록 좌우 시선 전환이 빠르다.",
+        help: "Higher values switch horizontal lead faster.",
       },
       {
         key: "focusLerp",
-        label: "초점 반응",
+        label: "Focus Response",
         min: 0,
         max: 30,
         step: 0.1,
         defaultValue: 5.5,
-        help: "높을수록 카메라 위치가 빠르게 따라온다.",
+        help: "Higher values move the camera focus faster.",
       },
       {
         key: "zoomLerp",
-        label: "줌 반응",
+        label: "Zoom Response",
         min: 0,
         max: 30,
         step: 0.1,
         defaultValue: 4.2,
-        help: "높을수록 줌 인/아웃 변화가 빠르다.",
+        help: "Higher values apply zoom changes faster.",
       },
     ],
   },
@@ -457,6 +468,8 @@ const COLORS = {
   routeExitFill: "rgba(231, 244, 126, 0.1)",
   entrance: "rgba(147, 234, 255, 0.9)",
   spawn: "rgba(147, 234, 255, 0.9)",
+  humanoidEnemy: "rgba(255, 125, 147, 0.88)",
+  hostileDrone: "rgba(255, 178, 92, 0.9)",
   sign: "rgba(239, 248, 252, 0.94)",
   lantern: "rgba(231, 244, 126, 0.88)",
 };
@@ -615,6 +628,16 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function normalizeEditorDisplayText(value, fallback = "") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return fallback;
+  }
+  return /[�]|[?][\u3130-\u318f\uac00-\ud7af]|[諛踰湲珥異罹移]/.test(text)
+    ? fallback
+    : text;
+}
+
 function snapValue(value, step) {
   if (!step || step <= 1) {
     return Math.round(value);
@@ -729,6 +752,8 @@ function prepareEditorData(data) {
   data.braceWalls = data.braceWalls || [];
   data.entrances = data.entrances || [];
   data.routeExits = data.routeExits || [];
+  data.humanoidEnemies = data.humanoidEnemies || [];
+  data.hostileDrones = data.hostileDrones || [];
   ensureEditorMapRooms(data);
   if (data.entrances.length === 0) {
     data.entrances.push({
@@ -877,7 +902,7 @@ function applyEditorSnapshot(editor, dom, snapshot, dirty = true) {
   if (dirty) {
     markDirty(editor, dom);
   } else {
-    setStatus(editor, dom, "복원됨", "", false);
+    setStatus(editor, dom, "Restored", "", false);
   }
   queueRender(editor, dom);
 }
@@ -1198,6 +1223,24 @@ function getEntranceRect(entrance) {
   };
 }
 
+function getHumanoidEnemyRect(enemy) {
+  return {
+    x: enemy.x,
+    y: enemy.y,
+    width: enemy.width || 58,
+    height: enemy.height || 104,
+  };
+}
+
+function getHostileDroneRect(drone) {
+  return {
+    x: drone.x,
+    y: drone.y,
+    width: drone.width || 144,
+    height: drone.height || 92,
+  };
+}
+
 function syncStartEntranceToSpawn(editor) {
   const start = (editor.data.entrances || []).find((entrance) => entrance.id === "start");
   if (!start) {
@@ -1252,6 +1295,12 @@ function getSelectedEntity(editor) {
   }
   if (editor.selected.kind === "routeExit") {
     return editor.data.routeExits[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "humanoidEnemy") {
+    return editor.data.humanoidEnemies[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "hostileDrone") {
+    return editor.data.hostileDrones[editor.selected.index] || null;
   }
   if (editor.selected.kind === "gate") {
     return editor.data.extractionGate || null;
@@ -1359,6 +1408,14 @@ function getSelectionRect(editor, selection = editor.selected) {
   if (selection.kind === "routeExit") {
     return editor.data.routeExits[selection.index] || null;
   }
+  if (selection.kind === "humanoidEnemy") {
+    const enemy = editor.data.humanoidEnemies[selection.index];
+    return enemy ? getHumanoidEnemyRect(enemy) : null;
+  }
+  if (selection.kind === "hostileDrone") {
+    const drone = editor.data.hostileDrones[selection.index];
+    return drone ? getHostileDroneRect(drone) : null;
+  }
   if (selection.kind === "gate") {
     return editor.data.extractionGate || null;
   }
@@ -1399,6 +1456,14 @@ function getSelectionOrigin(editor, selection = editor.selected) {
     const routeExit = editor.data.routeExits[selection.index];
     return routeExit ? { x: routeExit.x, y: routeExit.y } : null;
   }
+  if (selection.kind === "humanoidEnemy") {
+    const enemy = editor.data.humanoidEnemies[selection.index];
+    return enemy ? { x: enemy.x, y: enemy.y } : null;
+  }
+  if (selection.kind === "hostileDrone") {
+    const drone = editor.data.hostileDrones[selection.index];
+    return drone ? { x: drone.x, y: drone.y } : null;
+  }
   if (selection.kind === "gate") {
     return editor.data.extractionGate
       ? { x: editor.data.extractionGate.x, y: editor.data.extractionGate.y }
@@ -1434,7 +1499,7 @@ function describeSelection(editor) {
   }
 
   if (editor.selected?.kind === "gate" && !editor.data.extractionGate) {
-    return "Extraction Gate 없음";
+    return "출구 없음";
   }
 
   if (!editor.selected) {
@@ -1478,12 +1543,22 @@ function describeSelection(editor) {
   if (editor.selected.kind === "prop") {
     const prop = editor.data.props[editor.selected.index];
     return prop?.kind === "sign"
-      ? `표지 ${editor.selected.index + 1}`
+      ? `표지판 ${editor.selected.index + 1}`
       : `랜턴 ${editor.selected.index + 1}`;
   }
 
   if (editor.selected.kind === "spawn") {
     return `스폰 · ${formatTiles(editor.data.player.size.width, scale.tileSize)} × ${formatTiles(editor.data.player.size.height, scale.tileSize)}`;
+  }
+
+  if (editor.selected.kind === "humanoidEnemy") {
+    const enemy = editor.data.humanoidEnemies[editor.selected.index];
+    return enemy ? `Enemy ${editor.selected.index + 1} - ${enemy.id || "humanoid"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "hostileDrone") {
+    const drone = editor.data.hostileDrones[editor.selected.index];
+    return drone ? `Drone ${editor.selected.index + 1} - ${drone.id || "drone"}` : "No selection";
   }
 
   if (editor.selected.kind === "gate") {
@@ -1500,6 +1575,8 @@ function canDeleteSelection(selection) {
     || item.kind === "braceWall"
     || item.kind === "prop"
     || item.kind === "routeExit"
+    || item.kind === "humanoidEnemy"
+    || item.kind === "hostileDrone"
     || (item.kind === "entrance" && item.index > 0)
   ));
 }
@@ -1514,7 +1591,7 @@ function renderSelectionFields(editor, dom) {
   }
 
   if (isMultiSelection(editor.selected)) {
-    dom.selectionFields.innerHTML = `<p class="selection-note">여러 개 선택됨. 이동, 방향키, Delete를 바로 쓸 수 있다.</p>`;
+    dom.selectionFields.innerHTML = `<p class="selection-note">여러 개를 선택했습니다. 이동과 Delete 삭제를 바로 적용할 수 있습니다.</p>`;
     return;
   }
 
@@ -1571,19 +1648,19 @@ function renderSelectionFields(editor, dom) {
   if (editor.selected.kind === "platform") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
-    addNumber("가로", "width", entity.width, { min: 12 });
-    addNumber("세로", "height", entity.height, { min: 12 });
-    addColor("색", "color", entity.color);
+    addNumber("Width", "width", entity.width, { min: 12 });
+    addNumber("Height", "height", entity.height, { min: 12 });
+    addColor("Color", "color", entity.color);
   } else if (editor.selected.kind === "braceWall") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
-    addNumber("폭", "width", entity.width, { min: 12 });
-    addNumber("높이", "height", entity.height, { min: 12 });
+    addNumber("Width", "width", entity.width, { min: 12 });
+    addNumber("Height", "height", entity.height, { min: 12 });
   } else if (editor.selected.kind === "prop") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
     if (entity.kind === "sign") {
-      addText("문구", "text", entity.text || "");
+      addText("문구", "text", normalizeEditorDisplayText(entity.text, "표지판"));
     }
   } else if (editor.selected.kind === "spawn") {
     addNumber("X", "x", entity.x);
@@ -1613,11 +1690,28 @@ function renderSelectionFields(editor, dom) {
     }));
     addSelect("To Level", "toLevelId", targetLevelId, levelOptions);
     addSelect("To Entrance", "toEntranceId", entity.toEntranceId || entranceOptions[0]?.value || "start", entranceOptions);
+  } else if (editor.selected.kind === "humanoidEnemy") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addNumber("Patrol Left", "patrol.left", entity.patrol?.left ?? entity.x);
+    addNumber("Patrol Right", "patrol.right", entity.patrol?.right ?? entity.x + 220);
+  } else if (editor.selected.kind === "hostileDrone") {
+    addText("ID", "id", entity.id || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addNumber("Patrol Left", "patrol.left", entity.patrol?.left ?? entity.x);
+    addNumber("Patrol Right", "patrol.right", entity.patrol?.right ?? entity.x + 240);
   } else if (editor.selected.kind === "gate") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
-    addNumber("가로", "width", entity.width, { min: 24 });
-    addNumber("세로", "height", entity.height, { min: 24 });
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
     addText("프롬프트", "prompt", entity.prompt || "");
   }
 
@@ -1645,21 +1739,21 @@ function renderPlayerRenderFields(editor, dom) {
   };
 
   fields.push(`<div class="field-heading">Base</div>`);
-  addNumber("폭 기본값", "widthRatio", render.widthRatio ?? 1, { min: 0.1 });
-  addNumber("높이 기본값", "heightRatio", render.heightRatio ?? 1, { min: 0.1 });
+  addNumber("Base Width", "widthRatio", render.widthRatio ?? 1, { min: 0.1 });
+  addNumber("Base Height", "heightRatio", render.heightRatio ?? 1, { min: 0.1 });
 
   PLAYER_RENDER_GROUPS.forEach(([pose, label]) => {
     fields.push(`<div class="field-heading">${label}</div>`);
-    addNumber("폭 비율", `${pose}WidthRatio`, render[`${pose}WidthRatio`] ?? 1, { min: 0.1 });
-    addNumber("높이 비율", `${pose}HeightRatio`, render[`${pose}HeightRatio`] ?? 1, { min: 0.1 });
-    addNumber("앵커 X", `${pose}AnchorX`, render[`${pose}AnchorX`] ?? 0.5, {
+    addNumber("??鍮꾩쑉", `${pose}WidthRatio`, render[`${pose}WidthRatio`] ?? 1, { min: 0.1 });
+    addNumber("Height Ratio", `${pose}HeightRatio`, render[`${pose}HeightRatio`] ?? 1, { min: 0.1 });
+    addNumber("?듭빱 X", `${pose}AnchorX`, render[`${pose}AnchorX`] ?? 0.5, {
       min: 0,
       max: 1,
     });
   });
 
   fields.push(`<div class="field-heading">Global</div>`);
-  addNumber("발 기준 Y", "footAnchorY", render.footAnchorY ?? 0.98, { min: 0, max: 1.5 });
+  addNumber("Foot Anchor Y", "footAnchorY", render.footAnchorY ?? 0.98, { min: 0, max: 1.5 });
 
   dom.playerRenderFields.innerHTML = fields.join("");
 }
@@ -1820,6 +1914,18 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.hostileDrones || []).forEach((drone, index) => {
+    if (rectsIntersect(rect, getHostileDroneRect(drone))) {
+      items.push({ kind: "hostileDrone", index });
+    }
+  });
+
+  (editor.data.humanoidEnemies || []).forEach((enemy, index) => {
+    if (rectsIntersect(rect, getHumanoidEnemyRect(enemy))) {
+      items.push({ kind: "humanoidEnemy", index });
+    }
+  });
+
   editor.data.braceWalls.forEach((wall, index) => {
     if (rectsIntersect(rect, getBraceWallRect(wall))) {
       items.push({ kind: "braceWall", index });
@@ -1858,6 +1964,18 @@ function hitTest(editor, point) {
   for (let index = editor.data.entrances.length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, getEntranceRect(editor.data.entrances[index]))) {
       return { kind: "entrance", index };
+    }
+  }
+
+  for (let index = editor.data.hostileDrones.length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getHostileDroneRect(editor.data.hostileDrones[index]))) {
+      return { kind: "hostileDrone", index };
+    }
+  }
+
+  for (let index = editor.data.humanoidEnemies.length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getHumanoidEnemyRect(editor.data.humanoidEnemies[index]))) {
+      return { kind: "humanoidEnemy", index };
     }
   }
 
@@ -1918,6 +2036,12 @@ function deleteSelection(editor, dom) {
   const entranceIndexes = new Set(
     items.filter((item) => item.kind === "entrance" && item.index > 0).map((item) => item.index),
   );
+  const humanoidEnemyIndexes = new Set(
+    items.filter((item) => item.kind === "humanoidEnemy").map((item) => item.index),
+  );
+  const hostileDroneIndexes = new Set(
+    items.filter((item) => item.kind === "hostileDrone").map((item) => item.index),
+  );
 
   if (
     platformIndexes.size === 0
@@ -1925,6 +2049,8 @@ function deleteSelection(editor, dom) {
     && propIndexes.size === 0
     && routeExitIndexes.size === 0
     && entranceIndexes.size === 0
+    && humanoidEnemyIndexes.size === 0
+    && hostileDroneIndexes.size === 0
   ) {
     return;
   }
@@ -1936,6 +2062,8 @@ function deleteSelection(editor, dom) {
   editor.data.props = editor.data.props.filter((_, index) => !propIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
   editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
+  editor.data.humanoidEnemies = editor.data.humanoidEnemies.filter((_, index) => !humanoidEnemyIndexes.has(index));
+  editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !hostileDroneIndexes.has(index));
 
   editor.selected = null;
   renderSelectionFields(editor, dom);
@@ -2037,6 +2165,24 @@ function applySelectionField(editor, dom, field, value) {
     return;
   }
 
+  if (field === "patrol.left" || field === "patrol.right") {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return;
+    }
+    const key = field.split(".")[1];
+    entity.patrol = entity.patrol || { left: entity.x, right: entity.x + 240 };
+    if (entity.patrol[key] === numericValue) {
+      return;
+    }
+    pushUndo(editor);
+    entity.patrol[key] = numericValue;
+    renderSelectionFields(editor, dom);
+    markDirty(editor, dom);
+    queueRender(editor, dom);
+    return;
+  }
+
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
     return;
@@ -2049,6 +2195,13 @@ function applySelectionField(editor, dom, field, value) {
 
   if (
     (editor.selected?.kind === "gate" || editor.selected?.kind === "routeExit")
+    && (field === "width" || field === "height")
+  ) {
+    nextValue = Math.max(24, numericValue);
+  }
+
+  if (
+    (editor.selected?.kind === "humanoidEnemy" || editor.selected?.kind === "hostileDrone")
     && (field === "width" || field === "height")
   ) {
     nextValue = Math.max(24, numericValue);
@@ -2164,6 +2317,30 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     }
     entity.x = snappedX;
     entity.y = snappedY;
+  } else if (selection.kind === "humanoidEnemy") {
+    const entity = editor.data.humanoidEnemies[selection.index];
+    if (!entity) {
+      return;
+    }
+    const dx = snappedX - entity.x;
+    entity.x = snappedX;
+    entity.y = snappedY;
+    if (entity.patrol) {
+      entity.patrol.left += dx;
+      entity.patrol.right += dx;
+    }
+  } else if (selection.kind === "hostileDrone") {
+    const entity = editor.data.hostileDrones[selection.index];
+    if (!entity) {
+      return;
+    }
+    const dx = snappedX - entity.x;
+    entity.x = snappedX;
+    entity.y = snappedY;
+    if (entity.patrol) {
+      entity.patrol.left += dx;
+      entity.patrol.right += dx;
+    }
   } else if (selection.kind === "gate") {
     if (!editor.data.extractionGate) {
       return;
@@ -2267,7 +2444,7 @@ function placeProp(editor, dom, kind, point) {
   pushUndo(editor);
   const snapped = snapPoint(point, editor.snap);
   const prop = kind === "sign"
-    ? { kind, x: snapped.x, y: snapped.y, text: "표지" }
+    ? { kind, x: snapped.x, y: snapped.y, text: "표지판" }
     : { kind, x: snapped.x, y: snapped.y };
   editor.data.props.push(prop);
   setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
@@ -2350,6 +2527,88 @@ function placeGateAt(editor, dom, point) {
   editor.data.extractionGate.x = snapped.x;
   editor.data.extractionGate.y = snapped.y;
   setSelection(editor, dom, { kind: "gate" });
+  markDirty(editor, dom);
+}
+
+function placeHumanoidEnemyAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 58;
+  const height = 104;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const enemy = {
+    id: `enemy-${Date.now()}`,
+    type: "humanoidEnemy",
+    label: "Enemy",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    maxHp: 100,
+    disableThreshold: 100,
+    damage: 14,
+    fireRange: 620,
+    triggerRate: 1,
+    timelineShotDamage: 12,
+    knockdownEnabled: true,
+    crawlSpeed: 42,
+    escapeDistance: 360,
+    exhaustionLimit: 2,
+    knockdownStaggerDuration: 0.65,
+    patrol: {
+      left: snapped.x - 80,
+      right: snapped.x + 160,
+    },
+  };
+  editor.data.humanoidEnemies.push(enemy);
+  setSelection(editor, dom, { kind: "humanoidEnemy", index: editor.data.humanoidEnemies.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeHostileDroneAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 144;
+  const height = 92;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height / 2,
+  }, editor.snap);
+  const drone = {
+    id: `crow-${Date.now()}`,
+    type: "hostileDrone",
+    visualKind: "crow",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    maxHp: 2,
+    damage: 10,
+    diveDamage: 12,
+    speed: 170,
+    acceleration: 7,
+    activationRadius: 720,
+    preferredRange: 280,
+    hoverOffsetY: 120,
+    fireRange: 620,
+    initialCooldown: 0.8,
+    fireCooldown: 1.4,
+    telegraphDuration: 0.58,
+    beamLife: 0.12,
+    beamLength: 860,
+    beamRadius: 18,
+    diveAttack: true,
+    solid: true,
+    physicsSolid: true,
+    braceTarget: true,
+    patrol: {
+      left: snapped.x - 120,
+      right: snapped.x + 240,
+    },
+  };
+  editor.data.hostileDrones.push(drone);
+  setSelection(editor, dom, { kind: "hostileDrone", index: editor.data.hostileDrones.length - 1 });
   markDirty(editor, dom);
 }
 
@@ -2467,6 +2726,18 @@ function handlePointerDown(editor, dom, event) {
 
   if (editor.tool === TOOL_IDS.GATE) {
     placeGateAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.HUMANOID_ENEMY) {
+    placeHumanoidEnemyAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.HOSTILE_DRONE) {
+    placeHostileDroneAt(editor, dom, world);
     queueRender(editor, dom);
   }
 }
@@ -2950,6 +3221,30 @@ function snapEntireLevelToScale(editor, dom) {
     y: snapValue(prop.y, step),
   }));
 
+  editor.data.humanoidEnemies = editor.data.humanoidEnemies.map((enemy) => ({
+    ...enemy,
+    x: snapValue(enemy.x, step),
+    y: snapValue(enemy.y, step),
+    width: Math.max(step, snapValue(enemy.width, step)),
+    height: Math.max(step, snapValue(enemy.height, step)),
+    patrol: enemy.patrol ? {
+      left: snapValue(enemy.patrol.left, step),
+      right: snapValue(enemy.patrol.right, step),
+    } : enemy.patrol,
+  }));
+
+  editor.data.hostileDrones = editor.data.hostileDrones.map((drone) => ({
+    ...drone,
+    x: snapValue(drone.x, step),
+    y: snapValue(drone.y, step),
+    width: Math.max(step, snapValue(drone.width, step)),
+    height: Math.max(step, snapValue(drone.height, step)),
+    patrol: drone.patrol ? {
+      left: snapValue(drone.patrol.left, step),
+      right: snapValue(drone.patrol.right, step),
+    } : drone.patrol,
+  }));
+
   editor.snap = step;
   syncWorldInputs(editor, dom);
   renderSelectionFields(editor, dom);
@@ -2957,7 +3252,7 @@ function snapEntireLevelToScale(editor, dom) {
   renderHudLayoutFields(editor, dom);
   const after = captureEditorSnapshot(editor);
   if (getSnapshotKey(before) === getSnapshotKey(after)) {
-    setStatus(editor, dom, "이미 정렬됨", "", editor.dirty);
+    setStatus(editor, dom, "Already snapped", "", editor.dirty);
     queueRender(editor, dom);
     return;
   }
@@ -3341,7 +3636,7 @@ function drawProps(ctx, editor) {
       ctx.fillStyle = COLORS.sign;
       ctx.font = `${18 / editor.view.zoom}px Segoe UI`;
       ctx.textAlign = "center";
-      ctx.fillText(prop.text || "표지", prop.x, prop.y - 32);
+      ctx.fillText(normalizeEditorDisplayText(prop.text, "표지판"), prop.x, prop.y - 32);
       ctx.textAlign = "left";
     } else {
       const gradient = ctx.createRadialGradient(prop.x, prop.y - 4, 2, prop.x, prop.y - 4, 24);
@@ -3363,6 +3658,60 @@ function drawProps(ctx, editor) {
       ctx.arc(prop.x, prop.y - 4, 14, 0, Math.PI * 2);
       ctx.stroke();
     }
+  });
+}
+
+function drawEnemySpawns(ctx, editor) {
+  (editor.data.humanoidEnemies || []).forEach((enemy, index) => {
+    const rect = getHumanoidEnemyRect(enemy);
+    const selected = isSelectionItemSelected(editor.selected, { kind: "humanoidEnemy", index });
+    if (enemy.patrol) {
+      ctx.strokeStyle = "rgba(255, 125, 147, 0.34)";
+      ctx.lineWidth = 1.5 / editor.view.zoom;
+      ctx.beginPath();
+      ctx.moveTo(enemy.patrol.left, rect.y + rect.height + 12);
+      ctx.lineTo(enemy.patrol.right, rect.y + rect.height + 12);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(255, 125, 147, 0.14)";
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.humanoidEnemy;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.fillStyle = COLORS.humanoidEnemy;
+    ctx.font = `${16 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(enemy.id || "enemy", rect.x + rect.width / 2, rect.y - 10);
+    ctx.beginPath();
+    ctx.arc(rect.x + rect.width / 2, rect.y + 18, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textAlign = "left";
+  });
+
+  (editor.data.hostileDrones || []).forEach((drone, index) => {
+    const rect = getHostileDroneRect(drone);
+    const selected = isSelectionItemSelected(editor.selected, { kind: "hostileDrone", index });
+    if (drone.patrol) {
+      ctx.strokeStyle = "rgba(255, 178, 92, 0.34)";
+      ctx.lineWidth = 1.5 / editor.view.zoom;
+      ctx.beginPath();
+      ctx.moveTo(drone.patrol.left, rect.y + rect.height + 12);
+      ctx.lineTo(drone.patrol.right, rect.y + rect.height + 12);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(255, 178, 92, 0.13)";
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.hostileDrone;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.fillStyle = COLORS.hostileDrone;
+    ctx.font = `${16 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(drone.id || "drone", rect.x + rect.width / 2, rect.y - 10);
+    ctx.beginPath();
+    ctx.ellipse(rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width * 0.34, rect.height * 0.26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textAlign = "left";
   });
 }
 
@@ -3684,6 +4033,7 @@ function renderEditor(editor, dom) {
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawProps(ctx, editor);
+  drawEnemySpawns(ctx, editor);
   drawRouteExits(ctx, editor);
   drawEntrances(ctx, editor);
   drawSpawn(ctx, editor);

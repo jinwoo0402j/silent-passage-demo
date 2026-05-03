@@ -546,6 +546,67 @@ function extractHostileDrone(drone = {}) {
   return next;
 }
 
+function extractHumanoidEnemy(enemy = {}) {
+  return {
+    ...deepClone(enemy),
+    id: safeString(enemy.id, "enemy"),
+    type: safeString(enemy.type, "humanoidEnemy"),
+    label: safeString(enemy.label, enemy.id || "Enemy"),
+    x: safeNumber(enemy.x, 0),
+    y: safeNumber(enemy.y, 0),
+    width: safeNumber(enemy.width, 58, 24),
+    height: safeNumber(enemy.height, 104, 24),
+    patrol: {
+      left: safeNumber(enemy.patrol?.left, enemy.x ?? 0),
+      right: safeNumber(enemy.patrol?.right, (enemy.x ?? 0) + 220),
+    },
+  };
+}
+
+function sanitizeHumanoidEnemy(enemy, index, baseEnemy = null) {
+  const fallback = baseEnemy || {
+    id: `enemy-${index + 1}`,
+    type: "humanoidEnemy",
+    label: "Enemy",
+    x: 720 + index * 220,
+    y: 520,
+    width: 58,
+    height: 104,
+    maxHp: 100,
+    disableThreshold: 100,
+    damage: 14,
+    fireRange: 620,
+    triggerRate: 1,
+    timelineShotDamage: 12,
+    knockdownEnabled: true,
+    crawlSpeed: 42,
+    escapeDistance: 360,
+    exhaustionLimit: 2,
+    knockdownStaggerDuration: 0.65,
+    patrol: { left: 640 + index * 220, right: 880 + index * 220 },
+  };
+  const next = {
+    ...deepClone(fallback),
+    ...(enemy && typeof enemy === "object" ? deepClone(enemy) : {}),
+  };
+  next.id = safeString(next.id, fallback.id || `enemy-${index + 1}`);
+  next.type = safeString(next.type, fallback.type || "humanoidEnemy");
+  next.label = safeString(next.label, fallback.label || next.id);
+  next.x = safeNumber(next.x, fallback.x);
+  next.y = safeNumber(next.y, fallback.y);
+  next.width = safeNumber(next.width, fallback.width, 24);
+  next.height = safeNumber(next.height, fallback.height, 24);
+  next.maxHp = safeNumber(next.maxHp, fallback.maxHp ?? 100, 1);
+  next.damage = safeNumber(next.damage, fallback.damage ?? 14, 0);
+  next.fireRange = safeNumber(next.fireRange, fallback.fireRange ?? 620, 0);
+  next.triggerRate = safeNumber(next.triggerRate, fallback.triggerRate ?? 1, 0);
+  next.patrol = {
+    left: safeNumber(next.patrol?.left, fallback.patrol?.left ?? next.x),
+    right: safeNumber(next.patrol?.right, fallback.patrol?.right ?? next.x + 220),
+  };
+  return next;
+}
+
 function sanitizeHostileDrone(drone, index, baseDrone = null) {
   const fallback = baseDrone || {
     id: `crow-${index + 1}`,
@@ -711,6 +772,7 @@ export function extractEditableLevelData(data) {
       width: wall.width,
       height: wall.height,
     })),
+    humanoidEnemies: (data.humanoidEnemies || []).map((enemy) => extractHumanoidEnemy(enemy)),
     hostileDrones: (data.hostileDrones || []).map((drone) => extractHostileDrone(drone)),
     lootTables: safeRecord(data.lootTables),
     lootCrates: (data.lootCrates || []).map((crate) => extractLootCrate(crate)),
@@ -782,6 +844,9 @@ export function normalizeEditableLevelData(raw, baseData) {
     braceWalls: Array.isArray(source.braceWalls)
       ? source.braceWalls.map((wall, index) => sanitizeBraceWall(wall, index, fallback.braceWalls?.[index]))
       : (fallback.braceWalls || []).map((wall, index) => sanitizeBraceWall(wall, index)),
+    humanoidEnemies: Array.isArray(source.humanoidEnemies)
+      ? source.humanoidEnemies.map((enemy, index) => sanitizeHumanoidEnemy(enemy, index, fallback.humanoidEnemies?.[index]))
+      : (fallback.humanoidEnemies || []).map((enemy, index) => sanitizeHumanoidEnemy(enemy, index)),
     hostileDrones: Array.isArray(source.hostileDrones)
       ? source.hostileDrones.map((drone, index) => sanitizeHostileDrone(drone, index, fallback.hostileDrones?.[index]))
       : (fallback.hostileDrones || []).map((drone, index) => sanitizeHostileDrone(drone, index)),
@@ -848,6 +913,7 @@ export function mergeLevelData(baseData, override) {
   next.platforms = normalized.platforms;
   next.props = normalized.props;
   next.braceWalls = normalized.braceWalls;
+  next.humanoidEnemies = normalized.humanoidEnemies;
   next.hostileDrones = normalized.hostileDrones;
   next.lootTables = normalized.lootTables;
   next.lootCrates = normalized.lootCrates;
