@@ -1,7 +1,8 @@
-import { GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
 import {
   clearLevelOverride,
   createBaseLevelData,
+  createGameDataWithExternalLevels,
   createRuntimeGameData,
   deleteLocalLevel,
   extractEditableLevelData,
@@ -14,8 +15,10 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260501-run-start-v1";
+} from "./level-store.js?v=20260503-level-manifest-v1";
 import { clamp, deepClone } from "./utils.js";
+
+const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
 
 const TOOL_IDS = {
   SELECT: "select",
@@ -2751,23 +2754,62 @@ function createLevelExportFileName(editor) {
   return `${levelId}.v001.json`;
 }
 
+async function readLevelManifestFromDirectory(directory) {
+  const fallback = {
+    version: 1,
+    drafts: [],
+    accepted: [],
+  };
+
+  try {
+    const manifestFile = await directory.getFileHandle("manifest.json", { create: false });
+    const text = await (await manifestFile.getFile()).text();
+    const parsed = JSON.parse(text);
+    return {
+      ...fallback,
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      drafts: Array.isArray(parsed?.drafts) ? parsed.drafts : [],
+      accepted: Array.isArray(parsed?.accepted) ? parsed.accepted : [],
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeLevelManifestToDirectory(directory, manifest) {
+  const file = await directory.getFileHandle("manifest.json", { create: true });
+  const writable = await file.createWritable();
+  await writable.write(`${JSON.stringify({
+    version: 1,
+    drafts: Array.from(new Set(manifest.drafts || [])).sort(),
+    accepted: Array.from(new Set(manifest.accepted || [])).sort(),
+  }, null, 2)}\n`);
+  await writable.close();
+}
+
 async function saveLevelJsonToDraftFolder(editor, dom, fileName, json) {
   if (typeof window === "undefined" || typeof window.showDirectoryPicker !== "function") {
     return false;
   }
 
   try {
-    setStatus(editor, dom, "Choose levels/drafts folder for the exported level JSON.", "", editor.dirty);
+    setStatus(editor, dom, "Choose the repository levels folder. The editor will write to levels/drafts/.", "", editor.dirty);
     const directory = await window.showDirectoryPicker({
-      id: "silent-passage-level-drafts",
+      id: "silent-passage-levels",
       mode: "readwrite",
       startIn: "documents",
     });
-    const file = await directory.getFileHandle(fileName, { create: true });
+    const draftsDirectory = await directory.getDirectoryHandle("drafts", { create: true });
+    const file = await draftsDirectory.getFileHandle(fileName, { create: true });
     const writable = await file.createWritable();
     await writable.write(json);
     await writable.close();
-    setStatus(editor, dom, `Saved ${fileName} to the selected folder.`, "", editor.dirty);
+
+    const manifest = await readLevelManifestFromDirectory(directory);
+    manifest.drafts = Array.from(new Set([...(manifest.drafts || []), `drafts/${fileName}`])).sort();
+    await writeLevelManifestToDirectory(directory, manifest);
+
+    setStatus(editor, dom, `Saved drafts/${fileName} and updated levels/manifest.json.`, "", editor.dirty);
     return true;
   } catch (error) {
     if (error?.name !== "AbortError") {

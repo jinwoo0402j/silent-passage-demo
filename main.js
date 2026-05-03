@@ -1,9 +1,10 @@
 import { GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
 import {
+  createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260501-run-start-v1";
+} from "./level-store.js?v=20260503-level-manifest-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,9 +14,9 @@ import {
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
 import { renderGame } from "./render.js?v=20260501-run-start-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260501-run-start-fix-v2";
+import { saveCurrentGame } from "./save-game.js?v=20260503-level-manifest-v1";
 import { SCENES, createInitialState, createRunState } from "./state.js?v=20260501-run-start-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260501-run-start-fix-v2";
+import { bindInput, updateGame } from "./systems.js?v=20260503-level-manifest-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -83,7 +84,8 @@ const dom = {
   touchButtons,
 };
 
-const runtimeData = createRuntimeGameData(GAME_DATA);
+const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
+const runtimeData = createRuntimeGameData(BASE_GAME_DATA);
 const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
 applySprintTuning(
   runtimeData.player.movement,
@@ -156,7 +158,7 @@ function isLiveEditAvailable(currentState, data) {
 }
 
 function saveRuntimeOverride(data, currentState) {
-  saveLevelOverride(extractEditableLevelData(data), GAME_DATA, data.currentLevelId);
+  saveLevelOverride(extractEditableLevelData(data), BASE_GAME_DATA, data.currentLevelId);
   saveSprintTuning(extractSprintTuning(data.player.movement), GAME_DATA.player.movement);
   if (currentState?.liveEdit) {
     currentState.liveEdit.saveFlashTimer = 1.2;

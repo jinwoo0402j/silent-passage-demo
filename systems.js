@@ -8,7 +8,7 @@ import {
   hasUnlocked,
   saveMetaState,
 } from "./state.js";
-import { loadRuntimeLevelData } from "./level-store.js";
+import { loadRuntimeLevelData } from "./level-store.js?v=20260503-level-manifest-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -16,7 +16,7 @@ import {
   saveCurrentGame,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260501-run-start-fix-v2";
+} from "./save-game.js?v=20260503-level-manifest-v1";
 import {
   approach,
   clamp,

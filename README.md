@@ -78,7 +78,13 @@ Team handoff uses exported JSON files under `levels/`.
 
 3. Export with `JSON 저장`.
 
-   In Chrome or Edge, choose the repository's `levels/drafts/` folder when the browser asks for a folder. If the browser downloads the JSON instead, move it from `Downloads` into `levels/drafts/`.
+   In Chrome or Edge, choose the repository's `levels/` folder when the browser asks for a folder. The editor writes the file into `levels/drafts/` and updates `levels/manifest.json`.
+
+   If the browser downloads the JSON instead, move it from `Downloads` into `levels/drafts/`, then run:
+
+   ```powershell
+   node scripts/update-level-manifest.mjs
+   ```
 
 4. Confirm the file is under `levels/drafts/`.
 
@@ -95,7 +101,7 @@ Team handoff uses exported JSON files under `levels/`.
 6. Commit and push.
 
    ```powershell
-   git add levels/drafts/faceoff-checkpoint-01.v001.json
+git add levels/drafts/faceoff-checkpoint-01.v001.json levels/manifest.json
    git commit -m "Add draft faceoff checkpoint level"
    git push origin level/faceoff-checkpoint-pass-01
    ```

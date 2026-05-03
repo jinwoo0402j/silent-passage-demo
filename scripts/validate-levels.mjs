@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+const levelsRoot = path.join(repoRoot, "levels");
+const manifestPath = path.join(levelsRoot, "manifest.json");
 const defaultLevelDirs = [
   path.join(repoRoot, "levels", "drafts"),
   path.join(repoRoot, "levels", "accepted"),
@@ -134,6 +136,42 @@ function collectDuplicateValues(items, getValue) {
     .map(([value]) => value);
 }
 
+async function validateManifestAgainstFiles(jsonFiles) {
+  if (!(await exists(manifestPath))) {
+    pushWarning("levels/manifest.json", "manifest does not exist. Run node scripts/update-level-manifest.mjs.");
+    return;
+  }
+
+  let manifest = null;
+  try {
+    manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  } catch (error) {
+    pushError("levels/manifest.json", `Invalid JSON: ${error.message}`);
+    return;
+  }
+
+  const expected = new Set(
+    jsonFiles
+      .map((filePath) => toPosix(path.relative(levelsRoot, filePath)))
+      .filter((filePath) => filePath.startsWith("drafts/") || filePath.startsWith("accepted/")),
+  );
+  const actual = new Set([
+    ...(Array.isArray(manifest.drafts) ? manifest.drafts : []),
+    ...(Array.isArray(manifest.accepted) ? manifest.accepted : []),
+  ]);
+
+  expected.forEach((filePath) => {
+    if (!actual.has(filePath)) {
+      pushError("levels/manifest.json", `missing ${filePath}. Run node scripts/update-level-manifest.mjs.`);
+    }
+  });
+  actual.forEach((filePath) => {
+    if (!expected.has(filePath)) {
+      pushError("levels/manifest.json", `references missing file ${filePath}. Run node scripts/update-level-manifest.mjs.`);
+    }
+  });
+}
+
 function validateRect(fileLabel, levelId, label, rect, options = {}) {
   const required = options.required !== false;
   if (!isRecord(rect)) {
@@ -229,6 +267,9 @@ function validateLevel(entry, knownLevels) {
 const cliTargets = process.argv.slice(2).map((target) => path.resolve(repoRoot, target));
 const targets = cliTargets.length > 0 ? cliTargets : defaultLevelDirs;
 const jsonFiles = (await Promise.all(targets.map(collectJsonFiles))).flat().sort();
+if (cliTargets.length === 0) {
+  await validateManifestAgainstFiles(jsonFiles);
+}
 
 if (jsonFiles.length === 0) {
   console.log("No level JSON files found under levels/drafts or levels/accepted.");

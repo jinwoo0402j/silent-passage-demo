@@ -43,15 +43,19 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
 
 5. Use the editor's `JSON 저장` button to export the level.
 
-   In Chrome or Edge, the editor will ask for a folder. Choose:
+   In Chrome or Edge, the editor will ask for a folder. Choose the repository's `levels/` folder:
 
    ```text
-   levels/drafts/
+   levels/
    ```
 
-   Then the JSON file is written directly into the repository and appears in Git changes.
+   Then the JSON file is written directly into `levels/drafts/`, `levels/manifest.json` is updated, and both files appear in Git changes.
 
-   If the browser only downloads a file, move the downloaded JSON from `Downloads` into `levels/drafts/` manually.
+   If the browser only downloads a file, move the downloaded JSON from `Downloads` into `levels/drafts/` manually, then run:
+
+   ```powershell
+   node scripts/update-level-manifest.mjs
+   ```
 
 6. Confirm the exported file is under `levels/drafts/`.
 
@@ -68,7 +72,7 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
 8. Commit and push.
 
    ```powershell
-   git add levels/drafts/faceoff-checkpoint-01.v001.json
+   git add levels/drafts/faceoff-checkpoint-01.v001.json levels/manifest.json
    git commit -m "Add draft faceoff checkpoint level"
    git push origin level/faceoff-checkpoint-pass-01
    ```

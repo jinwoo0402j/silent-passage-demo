@@ -1,5 +1,5 @@
 import { SCENES, createRunState, saveMetaState } from "./state.js";
-import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260501-run-start-v1";
+import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260503-level-manifest-v1";
 
 const SAVE_SLOT_KEY = "rulebound-local-profile-v1";
 const SAVE_VERSION = 1;

@@ -1196,6 +1196,131 @@ export function clearLevelOverride(baseDataOrLevelId = null, requestedLevelId = 
   }
 }
 
+const DEFAULT_LEVEL_MANIFEST_URL = "./levels/manifest.json";
+
+function getManifestLevelEntries(manifest) {
+  if (!manifest || typeof manifest !== "object") {
+    return [];
+  }
+
+  const entries = [];
+  const addPath = (source, kind = "level") => {
+    if (typeof source === "string" && source.trim()) {
+      entries.push({ path: source.trim(), kind });
+    } else if (source && typeof source === "object" && typeof source.path === "string" && source.path.trim()) {
+      entries.push({
+        ...source,
+        path: source.path.trim(),
+        kind: source.kind || kind,
+      });
+    }
+  };
+
+  if (Array.isArray(manifest.levels)) {
+    manifest.levels.forEach((entry) => addPath(entry, "level"));
+  }
+  if (Array.isArray(manifest.drafts)) {
+    manifest.drafts.forEach((entry) => addPath(entry, "draft"));
+  }
+  if (Array.isArray(manifest.accepted)) {
+    manifest.accepted.forEach((entry) => addPath(entry, "accepted"));
+  }
+
+  return entries;
+}
+
+function getExternalLevelDocuments(document, fallbackLevelId) {
+  if (!document || typeof document !== "object") {
+    return [];
+  }
+
+  if (document.levels && typeof document.levels === "object" && !Array.isArray(document.levels)) {
+    return Object.entries(document.levels).map(([levelId, level]) => ({
+      ...level,
+      levelId: safeString(level?.levelId || level?.id, levelId),
+    }));
+  }
+
+  const levelId = safeString(document.levelId || document.id, fallbackLevelId);
+  return levelId ? [{ ...document, levelId }] : [];
+}
+
+function getExternalLevelFallbackId(entryPath) {
+  return safeId(
+    String(entryPath || "external-level")
+      .split("/")
+      .pop()
+      ?.replace(/\.json$/i, "") || "external-level",
+    "external-level",
+  );
+}
+
+function toManifestUrl(entryPath, manifestUrl) {
+  const baseUrl = typeof window !== "undefined"
+    ? new URL(manifestUrl, window.location.href)
+    : new URL(manifestUrl, import.meta.url);
+  return new URL(entryPath, baseUrl).href;
+}
+
+export async function createGameDataWithExternalLevels(baseData, manifestUrl = DEFAULT_LEVEL_MANIFEST_URL) {
+  const next = deepClone(baseData);
+  next.levels = {
+    ...(next.levels || {}),
+  };
+  next.externalLevelSources = {};
+
+  if (typeof fetch !== "function") {
+    return next;
+  }
+
+  let manifest = null;
+  try {
+    const response = await fetch(manifestUrl, { cache: "no-store" });
+    if (!response.ok) {
+      return next;
+    }
+    manifest = await response.json();
+  } catch (error) {
+    console.warn("Failed to load level manifest", error);
+    return next;
+  }
+
+  const entries = getManifestLevelEntries(manifest);
+  await Promise.all(entries.map(async (entry) => {
+    const entryUrl = toManifestUrl(entry.path, manifestUrl);
+    try {
+      const response = await fetch(entryUrl, { cache: "no-store" });
+      if (!response.ok) {
+        console.warn(`Failed to load external level ${entry.path}: ${response.status}`);
+        return;
+      }
+      const document = await response.json();
+      getExternalLevelDocuments(document, getExternalLevelFallbackId(entry.path)).forEach((levelDocument) => {
+        const levelId = safeId(levelDocument.levelId || levelDocument.id, getExternalLevelFallbackId(entry.path));
+        const baseLevel = createBaseLevelData(next, levelId);
+        const normalized = normalizeEditableLevelData({
+          ...levelDocument,
+          levelId,
+        }, baseLevel);
+        next.levels[levelId] = {
+          ...normalized,
+          id: levelId,
+          levelId,
+          label: normalized.label || levelDocument.label || levelId,
+        };
+        next.externalLevelSources[levelId] = {
+          path: entry.path,
+          kind: entry.kind || "level",
+        };
+      });
+    } catch (error) {
+      console.warn(`Failed to load external level ${entry.path}`, error);
+    }
+  }));
+
+  return next;
+}
+
 export function createRuntimeGameData(baseData, requestedLevelId = null) {
   const explicitLevelId = requestedLevelId || getUrlLevelId();
   const levelId = getRequestedLevelId(baseData, explicitLevelId || getRunStartLevelId(baseData));
