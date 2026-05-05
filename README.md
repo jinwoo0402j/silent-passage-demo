@@ -78,7 +78,7 @@ Team handoff uses exported JSON files under `levels/`.
 
 3. Export with `JSON 저장`.
 
-   In Chrome or Edge, choose the repository's `levels/` folder when the browser asks for a folder. The editor writes the file into `levels/drafts/` and updates `levels/manifest.json`.
+   In Chrome or Edge, choose the repository's `levels/` folder when the browser asks for a folder. The editor writes the file into `levels/drafts/` and updates `levels/manifest.json`. If you choose `levels/drafts/` by mistake, the editor will reject it; choose the parent `levels/` folder.
 
    If the browser downloads the JSON instead, move it from `Downloads` into `levels/drafts/`, then run:
 

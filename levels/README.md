@@ -31,7 +31,7 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
 
    `start-editor.bat` is the fastest path for level editing.
    If a server window opens, keep it open while editing.
-   Python is optional; the launcher falls back to the bundled PowerShell server when Python is not available.
+   The launcher uses the bundled PowerShell server so level JSON files under `levels/drafts/` and `levels/accepted/` are discovered automatically.
 
    ```text
    http://localhost:4173/editor.html
@@ -49,7 +49,7 @@ Designers should usually commit only files under `levels/drafts/`. Developers mo
    levels/
    ```
 
-   Then the JSON file is written directly into `levels/drafts/`, `levels/manifest.json` is updated, and both files appear in Git changes.
+   Then the JSON file is written directly into `levels/drafts/`, `levels/manifest.json` is updated, and both files appear in Git changes. If you choose `levels/drafts/` by mistake, the editor will reject it; choose the parent `levels/` folder.
 
    If the browser only downloads a file, move the downloaded JSON from `Downloads` into `levels/drafts/` manually, then run:
 

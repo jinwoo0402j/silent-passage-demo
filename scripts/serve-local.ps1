@@ -26,6 +26,66 @@ $contentTypes = @{
   ".bat" = "text/plain; charset=utf-8"
 }
 
+function Get-RelativeWebPath {
+  param(
+    [string]$BasePath,
+    [string]$TargetPath
+  )
+
+  $baseFullPath = (Resolve-Path $BasePath).Path.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $targetFullPath = (Resolve-Path $TargetPath).Path
+  $baseUri = [System.Uri]::new($baseFullPath + [System.IO.Path]::DirectorySeparatorChar)
+  $targetUri = [System.Uri]::new($targetFullPath)
+  return [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace("\", "/")
+}
+
+function Get-LevelJsonEntries {
+  param(
+    [string]$Subfolder
+  )
+
+  $levelsRoot = [System.IO.Path]::Combine($Root, "levels")
+  $targetRoot = [System.IO.Path]::Combine($levelsRoot, $Subfolder)
+  if (-not [System.IO.Directory]::Exists($targetRoot)) {
+    return @()
+  }
+
+  return @(
+    Get-ChildItem -Path $targetRoot -Filter "*.json" -File -Recurse |
+      Sort-Object FullName |
+      ForEach-Object { Get-RelativeWebPath -BasePath $levelsRoot -TargetPath $_.FullName }
+  )
+}
+
+function Get-DynamicLevelManifestJson {
+  $manifestPath = [System.IO.Path]::Combine($Root, "levels", "manifest.json")
+  $previous = $null
+  if ([System.IO.File]::Exists($manifestPath)) {
+    try {
+      $previous = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    } catch {
+      $previous = $null
+    }
+  }
+
+  $manifest = [ordered]@{
+    version = 1
+  }
+
+  if ($null -ne $previous) {
+    foreach ($property in $previous.PSObject.Properties) {
+      if ($property.Name -ne "version" -and $property.Name -ne "drafts" -and $property.Name -ne "accepted") {
+        $manifest[$property.Name] = $property.Value
+      }
+    }
+  }
+
+  $manifest["drafts"] = @(Get-LevelJsonEntries -Subfolder "drafts")
+  $manifest["accepted"] = @(Get-LevelJsonEntries -Subfolder "accepted")
+
+  return ($manifest | ConvertTo-Json -Depth 20)
+}
+
 function Send-HttpResponse {
   param(
     [System.Net.Sockets.NetworkStream]$Stream,
@@ -108,6 +168,20 @@ try {
       $decodedPath = [System.Uri]::UnescapeDataString($urlPath)
       if ([string]::IsNullOrWhiteSpace($decodedPath) -or $decodedPath -eq "/") {
         $decodedPath = "/index.html"
+      }
+
+      if ($decodedPath -eq "/__silent-passage-server") {
+        $healthJson = '{"name":"silent-passage-local-server","dynamicLevelManifest":true}'
+        $body = if ($method -eq "HEAD") { [byte[]]::new(0) } else { [System.Text.Encoding]::UTF8.GetBytes($healthJson) }
+        Send-HttpResponse -Stream $stream -StatusCode 200 -Reason "OK" -Body $body -ContentType "application/json; charset=utf-8"
+        continue
+      }
+
+      if ($decodedPath -eq "/levels/manifest.json") {
+        $manifestJson = Get-DynamicLevelManifestJson
+        $body = if ($method -eq "HEAD") { [byte[]]::new(0) } else { [System.Text.Encoding]::UTF8.GetBytes($manifestJson) }
+        Send-HttpResponse -Stream $stream -StatusCode 200 -Reason "OK" -Body $body -ContentType "application/json; charset=utf-8"
+        continue
       }
 
       $relativePath = $decodedPath.TrimStart("/", "\") -replace "/", [System.IO.Path]::DirectorySeparatorChar
