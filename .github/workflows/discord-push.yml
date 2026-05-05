@@ -1,0 +1,72 @@
+name: Discord Push Notification
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+          SERVER_URL: ${{ github.server_url }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+          COMPARE_URL: ${{ github.event.compare }}
+          PUSHER_NAME: ${{ github.event.pusher.name }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL secret is not set; skipping Discord notification."
+            exit 0
+          fi
+
+          short_sha="${SHA::7}"
+          commit_url="$SERVER_URL/$REPOSITORY/commit/$SHA"
+          run_url="$SERVER_URL/$REPOSITORY/actions/runs/$RUN_ID"
+          compare_url="${COMPARE_URL:-$commit_url}"
+          pusher="${PUSHER_NAME:-$ACTOR}"
+          message="${HEAD_MESSAGE:-Manual workflow run}"
+          title="Push to $REPOSITORY:$REF_NAME"
+          description="**$pusher** pushed \`$short_sha\`\n$message"
+
+          payload="$(jq -n \
+            --arg username "GitHub Push Bot" \
+            --arg title "$title" \
+            --arg url "$compare_url" \
+            --arg description "$description" \
+            --arg branch "$REF_NAME" \
+            --arg sha "$short_sha" \
+            --arg commitUrl "$commit_url" \
+            --arg runUrl "$run_url" \
+            '{
+              username: $username,
+              embeds: [
+                {
+                  title: $title,
+                  url: $url,
+                  description: $description,
+                  color: 5814783,
+                  fields: [
+                    { name: "Branch", value: $branch, inline: true },
+                    { name: "Commit", value: ("[`" + $sha + "`](" + $commitUrl + ")"), inline: true },
+                    { name: "Actions", value: ("[Run](" + $runUrl + ")"), inline: true }
+                  ],
+                  timestamp: (now | todateiso8601)
+                }
+              ]
+            }')"
+
+          curl --fail --silent --show-error \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "$DISCORD_WEBHOOK_URL"
