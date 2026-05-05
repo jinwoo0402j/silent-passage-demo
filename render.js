@@ -3741,8 +3741,8 @@ function drawActionNode(ctx, theme, x, y, type, label, keyLabel, prominent = fal
 
 function drawActionCluster(ctx, theme) {
   drawActionNode(ctx, theme, 118, 610, "move", "이동", "A D", true);
-  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "Space");
-  drawActionNode(ctx, theme, 186, 570, "dash", "집중", "RMB");
+  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "W");
+  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "Space");
   drawActionNode(ctx, theme, 56, 676, "crouch", "숙이기", "↓");
   drawActionNode(ctx, theme, 184, 684, "use", "사용", "Z");
 }
@@ -4927,7 +4927,7 @@ function drawActionClusterV2(ctx, theme) {
   const labels = [
     { x: 46, y: 648, text: "A D" },
     { x: 168, y: 649, text: "RMB/LMB" },
-    { x: 44, y: 699, text: "Space" },
+    { x: 44, y: 699, text: "W" },
     { x: 126, y: 706, text: "↓" },
     { x: 210, y: 690, text: "Z" },
   ];
@@ -5582,8 +5582,8 @@ function drawCharacterStatusHudV3(ctx, state, data) {
 function drawActionClusterV3(ctx, theme, layout) {
   const labels = [
     { x: layout.actions.moveX, y: layout.actions.moveY, text: "A D" },
-    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Shift" },
-    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "Space" },
+    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Space" },
+    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "W" },
     { x: layout.actions.crouchX, y: layout.actions.crouchY, text: "↓" },
     { x: layout.actions.useX, y: layout.actions.useY, text: "Z" },
   ];
@@ -6159,7 +6159,7 @@ function drawPromptHudV5(ctx, state, theme) {
   if (!text && !run.focusActive && !run.focusDepleted) {
     return;
   }
-  const label = text || (run.focusDepleted ? "FOCUS RECOVERING" : "SPACE FOCUS");
+  const label = text || (run.focusDepleted ? "FOCUS RECOVERING" : "RMB FOCUS");
   const x = 544;
   const y = 662;
   drawBeveledPanel(ctx, theme, x, y, 192, 28, {
