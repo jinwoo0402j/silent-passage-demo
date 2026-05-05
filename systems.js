@@ -2716,7 +2716,8 @@ function updateFocusState(run, state, dt) {
     run.focusDepleted = false;
   }
 
-  const requested = BULLET_TIME_KEYS.some((key) => isPressed(state, key));
+  const requested = BULLET_TIME_KEYS.some((key) => isPressed(state, key))
+    || Boolean(run.recoilAim?.aiming);
   const wasActive = Boolean(run.focusActive);
   const canStart = (
     !run.focusDepleted &&
@@ -2735,6 +2736,9 @@ function updateFocusState(run, state, dt) {
   }
 
   run.focusActive = Boolean(active && run.focus > 0);
+  if (run.recoilAim) {
+    run.recoilAim.active = run.focusActive;
+  }
   player.recoilFocusActive = run.focusActive;
   player.recoilFocusBlend = approach(
     player.recoilFocusBlend ?? 0,
