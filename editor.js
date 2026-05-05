@@ -15,7 +15,8 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260505-faceoff-e-v1";
+  shouldUseLocalLevelOverrideFromUrl,
+} from "./level-store.js?v=20260505-level-source-v2";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -792,7 +793,9 @@ function prepareEditorData(data) {
 }
 
 function createEditorState() {
-  const data = prepareEditorData(createRuntimeGameData(GAME_DATA));
+  const data = prepareEditorData(createRuntimeGameData(GAME_DATA, null, {
+    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+  }));
   const scale = getScaleConfig(data);
 
   return {
@@ -2670,7 +2673,9 @@ function loadEditorLevel(editor, dom, levelId, options = {}) {
   if (editor.dirty && options.saveCurrent !== false) {
     saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
   }
-  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId));
+  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
+    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl() || isLocalOnlyLevel(GAME_DATA, levelId),
+  }));
   editor.snap = getScaleConfig(editor.data).subTileSize;
   editor.preview = null;
   editor.drag = null;
@@ -2930,7 +2935,9 @@ function resetEditorLevel(editor, dom) {
   const before = captureEditorSnapshot(editor);
   const levelId = editor.data.currentLevelId || GAME_DATA.defaultLevelId;
   clearLevelOverride(GAME_DATA, levelId);
-  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId));
+  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
+    applyLevelOverride: isLocalOnlyLevel(GAME_DATA, levelId),
+  }));
   editor.snap = getScaleConfig(editor.data).subTileSize;
   editor.preview = null;
   editor.drag = null;
@@ -3185,7 +3192,7 @@ function bindEvents(editor, dom) {
       event.preventDefault();
       saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
       const levelId = encodeURIComponent(editor.data.currentLevelId || editor.data.defaultLevelId || "movement-lab-01");
-      window.location.href = `./index.html?level=${levelId}&directLevel=1`;
+      window.location.href = `./index.html?level=${levelId}&directLevel=1&localOverride=1`;
       return;
     }
 

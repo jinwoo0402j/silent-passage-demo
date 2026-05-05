@@ -56,14 +56,19 @@
       "directionLerp": 2.5,
       "focusLerp": 4,
       "zoomLerp": 1.5,
+      "aimPanMaxX": 0.36,
+      "aimPanMaxY": 0.27,
+      "aimPanLerp": 8.25,
+      "aimPanReturnLerp": 7.5,
       "lookAheadEnabled": true,
       "dashAffectsCamera": false,
-      "braceAffectsCamera": false
+      "braceAffectsCamera": false,
+      "mousePanAlways": true
     }
   },
   "player": {
     "spawn": {
-      "x": 688,
+      "x": 1088,
       "y": 1888
     },
     "speed": 360,
@@ -269,17 +274,17 @@
     {
       "id": "start",
       "label": "Start",
-      "x": 688,
+      "x": 1088,
       "y": 1888,
       "facing": 1
     }
   ],
   "routeExits": [
     {
-      "id": "to-faceoff-checkpoint",
-      "label": "Face-off Checkpoint",
-      "x": 8640,
-      "y": 496,
+      "id": "route-exit-1777804540897",
+      "label": "Route Exit",
+      "x": 7840,
+      "y": 1824,
       "width": 96,
       "height": 192,
       "prompt": "E: 다음 구역",
@@ -290,84 +295,238 @@
   "extractionGate": null,
   "platforms": [
     {
-      "x": 928,
-      "y": 1840,
-      "width": 208,
-      "height": 80,
+      "x": 576,
+      "y": 1968,
+      "width": 1088,
+      "height": 2304,
       "color": "#54697b"
     },
     {
-      "x": 7696,
-      "y": 944,
+      "x": 1664,
+      "y": 1808,
+      "width": 272,
+      "height": 272,
+      "color": "#54697b"
+    },
+    {
+      "x": 1936,
+      "y": 1648,
+      "width": 192,
+      "height": 208,
+      "color": "#54697b"
+    },
+    {
+      "x": 1664,
+      "y": 2320,
       "width": 656,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2480,
+      "y": 1680,
+      "width": 224,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2592,
+      "y": 1504,
+      "width": 224,
+      "height": 112,
+      "color": "#54697b"
+    },
+    {
+      "x": 2496,
+      "y": 1456,
+      "width": 224,
+      "height": 48,
+      "color": "#54697b"
+    },
+    {
+      "x": 2592,
+      "y": 2320,
+      "width": 352,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2592,
+      "y": 2064,
+      "width": 208,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 2496,
+      "y": 1872,
+      "width": 208,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 2400,
+      "y": 1680,
+      "width": 192,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 2320,
+      "y": 2320,
+      "width": 272,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2944,
+      "y": 2320,
+      "width": 1072,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 3488,
+      "y": 2192,
+      "width": 272,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2992,
+      "y": 2384,
+      "width": 128,
+      "height": 1888,
+      "color": "#54697b"
+    },
+    {
+      "x": 6816,
+      "y": 2016,
+      "width": 1264,
+      "height": 2224,
+      "color": "#54697b"
+    },
+    {
+      "x": 5824,
+      "y": 2368,
+      "width": 192,
+      "height": 1872,
+      "color": "#54697b"
+    },
+    {
+      "x": 5072,
+      "y": 2656,
+      "width": 512,
       "height": 80,
       "color": "#54697b"
     },
     {
-      "x": 7696,
-      "y": 992,
-      "width": 304,
-      "height": 432,
+      "x": 4080,
+      "y": 2800,
+      "width": 208,
+      "height": 176,
       "color": "#54697b"
     },
     {
-      "x": 8432,
-      "y": 704,
-      "width": 128,
-      "height": 240,
+      "x": 3920,
+      "y": 2720,
+      "width": 176,
+      "height": 176,
       "color": "#54697b"
     },
     {
-      "x": 16,
-      "y": 1520,
-      "width": 240,
+      "x": 3120,
+      "y": 2672,
+      "width": 816,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 4288,
+      "y": 2960,
+      "width": 672,
+      "height": 1312,
+      "color": "#54697b"
+    },
+    {
+      "x": 4320,
+      "y": 1776,
+      "width": 640,
       "height": 448,
       "color": "#54697b"
     },
     {
-      "x": 304,
-      "y": 2032,
-      "width": 544,
-      "height": 2160,
+      "x": 4960,
+      "y": 3008,
+      "width": 352,
+      "height": 80,
       "color": "#54697b"
     },
     {
-      "x": 1200,
-      "y": 1840,
-      "width": 224,
+      "x": 5264,
+      "y": 3056,
+      "width": 272,
       "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "x": 5520,
+      "y": 3120,
+      "width": 304,
+      "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "x": 5712,
+      "y": 2784,
+      "width": 128,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 5808,
+      "y": 1616,
+      "width": 224,
+      "height": 576,
+      "color": "#54697b"
+    },
+    {
+      "x": 6704,
+      "y": 2016,
+      "width": 288,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 6016,
+      "y": 2512,
+      "width": 800,
+      "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "x": 5328,
+      "y": 1600,
+      "width": 160,
+      "height": 384,
+      "color": "#54697b"
+    },
+    {
+      "x": 5424,
+      "y": 2096,
+      "width": 160,
+      "height": 496,
       "color": "#54697b"
     }
   ],
   "props": [],
   "braceWalls": [
     {
-      "id": "brace-1776961163785",
-      "x": 272,
-      "y": 1808,
-      "width": 528,
-      "height": 176
-    },
-    {
-      "id": "brace-1776961167083",
-      "x": 416,
-      "y": 1952,
-      "width": 224,
-      "height": 2048
-    },
-    {
-      "id": "brace-1776961177963",
-      "x": 0,
-      "y": 1488,
-      "width": 272,
-      "height": 496
-    },
-    {
-      "id": "brace-1776961183074",
-      "x": -16,
-      "y": 880,
-      "width": 896,
-      "height": 272
+      "id": "brace-1777803126375",
+      "x": 4320,
+      "y": 2224,
+      "width": 640,
+      "height": 736
     }
   ],
   "hostileDrones": [
@@ -375,8 +534,8 @@
       "id": "crow-01",
       "type": "hostileDrone",
       "visualKind": "crow",
-      "x": 760,
-      "y": 636,
+      "x": 4536,
+      "y": 1244,
       "width": 231,
       "height": 106,
       "maxHp": 2,
@@ -411,16 +570,16 @@
       "physicsSolid": true,
       "braceTarget": true,
       "patrol": {
-        "left": 650,
-        "right": 1060
+        "left": 4426,
+        "right": 4836
       }
     },
     {
       "id": "crow-02",
       "type": "hostileDrone",
       "visualKind": "crow",
-      "x": 2500,
-      "y": 566,
+      "x": 3524,
+      "y": 1734,
       "width": 231,
       "height": 106,
       "maxHp": 2,
@@ -455,8 +614,8 @@
       "physicsSolid": true,
       "braceTarget": true,
       "patrol": {
-        "left": 2360,
-        "right": 2760
+        "left": 3384,
+        "right": 3784
       }
     }
   ],

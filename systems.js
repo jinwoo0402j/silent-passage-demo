@@ -8,15 +8,16 @@ import {
   hasUnlocked,
   saveMetaState,
 } from "./state.js?v=20260505-player-bullets-v1";
-import { loadRuntimeLevelData } from "./level-store.js?v=20260505-faceoff-e-v1";
+import { loadRuntimeLevelData } from "./level-store.js?v=20260505-level-source-v2";
 import {
   clearSavedGame,
   hasSavedGame,
   restoreSavedGame,
   saveCurrentGame,
+  shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260505-reflex-focus-v3";
+} from "./save-game.js?v=20260505-level-source-v2";
 import {
   approach,
   clamp,
@@ -38,8 +39,8 @@ const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const CROUCH_KEYS = ["ArrowDown", "KeyS"];
 const JUMP_KEYS = ["KeyW"];
-const DASH_KEYS = ["Space", "KeyX", "ShiftLeft", "ShiftRight"];
-const SPRINT_KEYS = ["Space", "ShiftLeft", "ShiftRight"];
+const DASH_KEYS = ["Space", "KeyX"];
+const SPRINT_KEYS = ["Space"];
 const BULLET_TIME_KEYS = [];
 const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
@@ -61,6 +62,7 @@ const DEBUG_KEYS = ["F3", "Backquote"];
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
+const ARM_SWITCH_KEYS = ["ShiftLeft", "ShiftRight"];
 const RELOAD_KEYS = ["KeyR"];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
@@ -2246,6 +2248,11 @@ function setSelectedArm(run, data, side) {
   pushNotice(run, `${context.side === "left" ? "Left" : "Right"} arm: ${context.stats.label}`, 1.35);
 }
 
+function switchSelectedArm(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  setSelectedArm(run, data, weapons.selectedSide === "right" ? "left" : "right");
+}
+
 function getReserveAmmo(context) {
   return Math.max(0, Math.floor(Number(context.weapons.reserveAmmo?.[context.stats.ammoType] ?? 0)));
 }
@@ -2328,6 +2335,9 @@ function updateWeaponRuntime(run, data, state, dt) {
   }
   if (consumeEitherPress(state, ARM_RIGHT_KEYS)) {
     setSelectedArm(run, data, "right");
+  }
+  if (consumeEitherPress(state, ARM_SWITCH_KEYS)) {
+    switchSelectedArm(run, data);
   }
   if (consumeEitherPress(state, RELOAD_KEYS)) {
     startReloadSelectedArm(run, data);
@@ -2716,8 +2726,9 @@ function updateFocusState(run, state, dt) {
     run.focusDepleted = false;
   }
 
-  const requested = BULLET_TIME_KEYS.some((key) => isPressed(state, key))
-    || Boolean(run.recoilAim?.aiming);
+  const requested =
+    BULLET_TIME_KEYS.some((key) => isPressed(state, key)) ||
+    Boolean(state.mouse?.secondaryDown && canAimWeapon(player));
   const wasActive = Boolean(run.focusActive);
   const canStart = (
     !run.focusDepleted &&
@@ -3735,7 +3746,7 @@ function updatePlayer(run, data, state, dt, input) {
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
     holdingWallRunLine &&
-    sprintHeld &&
+    jumpHeld &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
     player.wallJumpLockTimer === 0 &&
@@ -3837,8 +3848,10 @@ function updatePlayer(run, data, state, dt, input) {
     player.jumpBufferTimer > 0 &&
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
-    player.height === player.standHeight;
-  const canWallRun = wantsWallRun && !canWallJump;
+    player.height === player.standHeight &&
+    !wantsWallRun &&
+    !player.wallRunActive;
+  const canWallRun = wantsWallRun;
   const canGroundJump =
     player.jumpBufferTimer > 0 &&
     player.coyoteTimer > 0 &&
@@ -3904,7 +3917,9 @@ function updatePlayer(run, data, state, dt, input) {
     if (!player.wallRunActive || player.wallRunDirection !== wallJumpSourceDirection) {
       enterWallRun(player, run, config, wallJumpSourceDirection);
     }
-  } else if (player.wallRunActive && (!sprintHeld || !holdingWallRunLine)) {
+  } else if (player.wallRunActive && jumpReleased) {
+    launchFromWallRun(player, run, config);
+  } else if (player.wallRunActive && (!jumpHeld || !holdingWallRunLine)) {
     clearWallRun(player);
   }
 
@@ -6060,6 +6075,12 @@ function updateShelter(state) {
 }
 
 function updateTitle(state) {
+  if (shouldStartFromUrlLevel()) {
+    startNewSavedRun(state, state.data, { clearSaved: false, persist: false });
+    setStatus(state, "・懋ｲｩ ・・");
+    return;
+  }
+
   state.save = state.save || {};
   state.save.hasRun = hasSavedGame();
   if (state.save.hasRun && consumeEitherPress(state, NEW_RUN_KEYS)) {

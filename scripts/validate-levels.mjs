@@ -136,6 +136,61 @@ function collectDuplicateValues(items, getValue) {
     .map(([value]) => value);
 }
 
+function getPathVersion(filePath) {
+  const match = path.basename(filePath).match(/\.v(\d+)\.json$/i);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
+async function getSingleLevelId(filePath) {
+  try {
+    const document = JSON.parse(await fs.readFile(filePath, "utf8"));
+    if (isRecord(document)) {
+      if (safeString(document.levelId, "")) {
+        return safeString(document.levelId, "");
+      }
+      if (isRecord(document.levels)) {
+        const ids = Object.keys(document.levels).filter(Boolean);
+        return ids.length === 1 ? ids[0] : null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function getCanonicalManifestFilePaths(jsonFiles) {
+  const canonicalByLevelId = new Map();
+  const passthrough = [];
+
+  for (const filePath of jsonFiles) {
+    const levelId = await getSingleLevelId(filePath);
+    if (!levelId) {
+      passthrough.push(filePath);
+      continue;
+    }
+
+    const candidate = {
+      filePath,
+      manifestPath: toPosix(path.relative(levelsRoot, filePath)),
+      version: getPathVersion(filePath),
+    };
+    const current = canonicalByLevelId.get(levelId);
+    if (
+      !current
+      || candidate.version > current.version
+      || (candidate.version === current.version && candidate.manifestPath > current.manifestPath)
+    ) {
+      canonicalByLevelId.set(levelId, candidate);
+    }
+  }
+
+  return [
+    ...passthrough,
+    ...[...canonicalByLevelId.values()].map((entry) => entry.filePath),
+  ];
+}
+
 async function validateManifestAgainstFiles(jsonFiles) {
   if (!(await exists(manifestPath))) {
     pushWarning("levels/manifest.json", "manifest does not exist. Run node scripts/update-level-manifest.mjs.");
@@ -150,8 +205,9 @@ async function validateManifestAgainstFiles(jsonFiles) {
     return;
   }
 
+  const canonicalJsonFiles = await getCanonicalManifestFilePaths(jsonFiles);
   const expected = new Set(
-    jsonFiles
+    canonicalJsonFiles
       .map((filePath) => toPosix(path.relative(levelsRoot, filePath)))
       .filter((filePath) => filePath.startsWith("drafts/") || filePath.startsWith("accepted/")),
   );
@@ -181,11 +237,13 @@ function validateRect(fileLabel, levelId, label, rect, options = {}) {
     return;
   }
 
-  ["x", "y"].forEach((field) => {
-    if (!isFiniteNumber(rect[field])) {
-      pushError(fileLabel, `${levelId}: ${label}.${field} must be a number.`);
-    }
-  });
+  if (options.position !== false) {
+    ["x", "y"].forEach((field) => {
+      if (!isFiniteNumber(rect[field])) {
+        pushError(fileLabel, `${levelId}: ${label}.${field} must be a number.`);
+      }
+    });
+  }
 
   if (options.size !== false) {
     ["width", "height"].forEach((field) => {
@@ -203,7 +261,7 @@ function validateLevel(entry, knownLevels) {
     pushError(fileLabel, `${levelId}: levelId must use lowercase letters, numbers, hyphen, or underscore.`);
   }
 
-  validateRect(fileLabel, levelId, "world", normalized.world, { size: true });
+  validateRect(fileLabel, levelId, "world", normalized.world, { position: false, size: true });
   validateRect(fileLabel, levelId, "player.spawn", normalized.player?.spawn, { size: false });
 
   const entrances = Array.isArray(normalized.entrances) ? normalized.entrances : [];
@@ -305,7 +363,7 @@ allDuplicateIds.forEach((levelId) => {
     .filter((entry) => entry.levelId === levelId)
     .map((entry) => entry.fileLabel)
     .join(", ");
-  pushWarning(levelId, `levelId appears in multiple exported files: ${files}`);
+  infos.push(`[INFO] ${levelId}: multiple exports found; loaders use the highest .vNNN.json: ${files}`);
 });
 
 const knownLevels = new Map();

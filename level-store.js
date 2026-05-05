@@ -914,14 +914,34 @@ export function getDefaultLevelId(baseData) {
 }
 
 export function getUrlLevelId() {
+  const params = getUrlSearchParams();
+  return params ? params.get("level") : null;
+}
+
+function getUrlSearchParams() {
   if (typeof window === "undefined") {
     return null;
   }
   try {
-    return new URLSearchParams(window.location.search).get("level");
+    return new URLSearchParams(window.location.search);
   } catch {
     return null;
   }
+}
+
+function getUrlFlag(name) {
+  const params = getUrlSearchParams();
+  if (!params) {
+    return false;
+  }
+  const value = params.get(name);
+  return value === "1" || value === "true" || value === name;
+}
+
+export function shouldUseLocalLevelOverrideFromUrl() {
+  const params = getUrlSearchParams();
+  return getUrlFlag("localOverride")
+    || params?.get("mode") === "level-test";
 }
 
 export function getLevelIds(baseData) {
@@ -1129,7 +1149,14 @@ export function deleteLocalLevel(baseData, targetLevelId) {
   return { ok: true, levelId };
 }
 
-function attachRuntimeMetadata(runtimeData, baseData, levelId) {
+function normalizeRuntimeLevelOptions(options = {}) {
+  return {
+    applyLevelOverride: options.applyLevelOverride !== false,
+  };
+}
+
+function attachRuntimeMetadata(runtimeData, baseData, levelId, options = {}) {
+  const runtimeLevelOptions = normalizeRuntimeLevelOptions(options);
   runtimeData.defaultLevelId = getDefaultLevelId(baseData);
   runtimeData.currentLevelId = levelId;
   runtimeData.levelId = levelId;
@@ -1138,6 +1165,11 @@ function attachRuntimeMetadata(runtimeData, baseData, levelId) {
   runtimeData.levelSummaries = getLevelSummaries(baseData);
   Object.defineProperty(runtimeData, "__baseData", {
     value: baseData,
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(runtimeData, "__runtimeLevelOptions", {
+    value: runtimeLevelOptions,
     enumerable: false,
     configurable: true,
   });
@@ -1267,6 +1299,44 @@ function toManifestUrl(entryPath, manifestUrl) {
   return new URL(entryPath, baseUrl).href;
 }
 
+function getExternalLevelPathVersion(entryPath) {
+  const match = String(entryPath || "").match(/\.v(\d+)\.json$/i);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
+function getExternalLevelKindRank(kind) {
+  if (kind === "accepted") {
+    return 3;
+  }
+  if (kind === "level") {
+    return 2;
+  }
+  if (kind === "draft") {
+    return 1;
+  }
+  return 0;
+}
+
+function shouldReplaceExternalLevelSource(previousSource, nextSource) {
+  if (!previousSource) {
+    return true;
+  }
+
+  const previousKindRank = getExternalLevelKindRank(previousSource.kind);
+  const nextKindRank = getExternalLevelKindRank(nextSource.kind);
+  if (nextKindRank !== previousKindRank) {
+    return nextKindRank > previousKindRank;
+  }
+
+  const previousVersion = getExternalLevelPathVersion(previousSource.path);
+  const nextVersion = getExternalLevelPathVersion(nextSource.path);
+  if (nextVersion !== previousVersion) {
+    return nextVersion > previousVersion;
+  }
+
+  return String(nextSource.path || "") > String(previousSource.path || "");
+}
+
 export async function createGameDataWithExternalLevels(baseData, manifestUrl = DEFAULT_LEVEL_MANIFEST_URL) {
   const next = deepClone(baseData);
   next.levels = {
@@ -1291,17 +1361,24 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
   }
 
   const entries = getManifestLevelEntries(manifest);
-  await Promise.all(entries.map(async (entry) => {
+  for (const entry of entries) {
     const entryUrl = toManifestUrl(entry.path, manifestUrl);
     try {
       const response = await fetch(entryUrl, { cache: "no-store" });
       if (!response.ok) {
         console.warn(`Failed to load external level ${entry.path}: ${response.status}`);
-        return;
+        continue;
       }
       const document = await response.json();
       getExternalLevelDocuments(document, getExternalLevelFallbackId(entry.path)).forEach((levelDocument) => {
         const levelId = safeId(levelDocument.levelId || levelDocument.id, getExternalLevelFallbackId(entry.path));
+        const source = {
+          path: entry.path,
+          kind: entry.kind || "level",
+        };
+        if (!shouldReplaceExternalLevelSource(next.externalLevelSources[levelId], source)) {
+          return;
+        }
         const baseLevel = createBaseLevelData(next, levelId);
         const normalized = normalizeEditableLevelData({
           ...levelDocument,
@@ -1313,34 +1390,33 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
           levelId,
           label: normalized.label || levelDocument.label || levelId,
         };
-        next.externalLevelSources[levelId] = {
-          path: entry.path,
-          kind: entry.kind || "level",
-        };
+        next.externalLevelSources[levelId] = source;
       });
     } catch (error) {
       console.warn(`Failed to load external level ${entry.path}`, error);
     }
-  }));
+  }
 
   return next;
 }
 
-export function createRuntimeGameData(baseData, requestedLevelId = null) {
+export function createRuntimeGameData(baseData, requestedLevelId = null, options = {}) {
+  const runtimeLevelOptions = normalizeRuntimeLevelOptions(options);
   const explicitLevelId = requestedLevelId || getUrlLevelId();
   const levelId = getRequestedLevelId(baseData, explicitLevelId || getRunStartLevelId(baseData));
   const baseLevel = createBaseLevelData(baseData, levelId);
-  const override = loadLevelOverride(baseData, levelId);
+  const override = runtimeLevelOptions.applyLevelOverride ? loadLevelOverride(baseData, levelId) : null;
   const runtimeData = override ? mergeLevelData(baseLevel, override) : baseLevel;
-  return attachRuntimeMetadata(runtimeData, baseData, levelId);
+  return attachRuntimeMetadata(runtimeData, baseData, levelId, runtimeLevelOptions);
 }
 
-export function loadRuntimeLevelData(runtimeData, targetLevelId) {
+export function loadRuntimeLevelData(runtimeData, targetLevelId, options = null) {
   const baseData = runtimeData.__baseData || runtimeData;
-  const next = createRuntimeGameData(baseData, targetLevelId);
+  const runtimeLevelOptions = normalizeRuntimeLevelOptions(options || runtimeData.__runtimeLevelOptions || {});
+  const next = createRuntimeGameData(baseData, targetLevelId, runtimeLevelOptions);
   Object.keys(runtimeData).forEach((key) => {
     delete runtimeData[key];
   });
   Object.assign(runtimeData, next);
-  return attachRuntimeMetadata(runtimeData, baseData, next.currentLevelId);
+  return attachRuntimeMetadata(runtimeData, baseData, next.currentLevelId, runtimeLevelOptions);
 }

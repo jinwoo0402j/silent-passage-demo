@@ -4,7 +4,8 @@ import {
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260505-faceoff-e-v1";
+  shouldUseLocalLevelOverrideFromUrl,
+} from "./level-store.js?v=20260505-level-source-v2";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -14,9 +15,9 @@ import {
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
 import { renderGame } from "./render.js?v=20260505-player-bullets-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260505-reflex-focus-v3";
+import { saveCurrentGame } from "./save-game.js?v=20260505-level-source-v2";
 import { SCENES, createInitialState, createRunState } from "./state.js?v=20260505-player-bullets-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260505-player-bullets-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260505-rmb-bullet-time-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -147,7 +148,9 @@ const dom = {
 };
 
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
-const runtimeData = createRuntimeGameData(BASE_GAME_DATA);
+const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
+  applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+});
 const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
 applySprintTuning(
   runtimeData.player.movement,

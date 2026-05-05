@@ -50,11 +50,56 @@ function Get-LevelJsonEntries {
     return @()
   }
 
+  $canonicalByLevelId = @{}
+  $passthrough = New-Object System.Collections.Generic.List[string]
+
+  Get-ChildItem -Path $targetRoot -Filter "*.json" -File -Recurse |
+    Sort-Object FullName |
+    ForEach-Object {
+      $relativePath = Get-RelativeWebPath -BasePath $levelsRoot -TargetPath $_.FullName
+      $levelId = $null
+      try {
+        $rawJson = Get-Content -LiteralPath $_.FullName -Raw
+        $levelIdMatch = [System.Text.RegularExpressions.Regex]::Match(
+          $rawJson,
+          '"levelId"\s*:\s*"([^"]+)"',
+          [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        )
+        if ($levelIdMatch.Success) {
+          $levelId = $levelIdMatch.Groups[1].Value.Trim()
+        }
+      } catch {
+        $levelId = $null
+      }
+
+      if ([string]::IsNullOrWhiteSpace($levelId)) {
+        $passthrough.Add($relativePath)
+        return
+      }
+
+      $version = 0
+      $match = [System.Text.RegularExpressions.Regex]::Match($_.Name, "\.v(\d+)\.json$", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+      if ($match.Success) {
+        $version = [int]$match.Groups[1].Value
+      }
+
+      $current = $canonicalByLevelId[$levelId]
+      if (
+        $null -eq $current -or
+        $version -gt $current.Version -or
+        ($version -eq $current.Version -and [string]::CompareOrdinal($relativePath, $current.Path) -gt 0)
+      ) {
+        $canonicalByLevelId[$levelId] = [pscustomobject]@{
+          Path = $relativePath
+          Version = $version
+        }
+      }
+    }
+
   return @(
-    Get-ChildItem -Path $targetRoot -Filter "*.json" -File -Recurse |
-      Sort-Object FullName |
-      ForEach-Object { Get-RelativeWebPath -BasePath $levelsRoot -TargetPath $_.FullName }
-  )
+    @($passthrough)
+    @($canonicalByLevelId.Values | ForEach-Object { $_.Path })
+  ) | Sort-Object
 }
 
 function Get-DynamicLevelManifestJson {
@@ -138,7 +183,11 @@ try {
   while ($true) {
     $client = $listener.AcceptTcpClient()
     try {
+      $client.ReceiveTimeout = 2000
+      $client.SendTimeout = 5000
       $stream = $client.GetStream()
+      $stream.ReadTimeout = 2000
+      $stream.WriteTimeout = 5000
       $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
       $requestLine = $reader.ReadLine()
       if ([string]::IsNullOrWhiteSpace($requestLine)) {

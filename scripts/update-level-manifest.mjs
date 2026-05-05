@@ -42,6 +42,61 @@ function toManifestPath(filePath) {
   return path.relative(levelsRoot, filePath).split(path.sep).join("/");
 }
 
+function getPathVersion(filePath) {
+  const match = path.basename(filePath).match(/\.v(\d+)\.json$/i);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
+async function getSingleLevelId(filePath) {
+  try {
+    const document = JSON.parse(await fs.readFile(filePath, "utf8"));
+    if (document && typeof document === "object" && !Array.isArray(document)) {
+      if (typeof document.levelId === "string" && document.levelId.trim()) {
+        return document.levelId.trim();
+      }
+      if (document.levels && typeof document.levels === "object" && !Array.isArray(document.levels)) {
+        const ids = Object.keys(document.levels).filter(Boolean);
+        return ids.length === 1 ? ids[0] : null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function getCanonicalJsonFiles(files) {
+  const canonicalByLevelId = new Map();
+  const passthrough = [];
+
+  for (const filePath of files) {
+    const levelId = await getSingleLevelId(filePath);
+    if (!levelId) {
+      passthrough.push(filePath);
+      continue;
+    }
+
+    const candidate = {
+      filePath,
+      manifestPath: toManifestPath(filePath),
+      version: getPathVersion(filePath),
+    };
+    const current = canonicalByLevelId.get(levelId);
+    if (
+      !current
+      || candidate.version > current.version
+      || (candidate.version === current.version && candidate.manifestPath > current.manifestPath)
+    ) {
+      canonicalByLevelId.set(levelId, candidate);
+    }
+  }
+
+  return [
+    ...passthrough,
+    ...[...canonicalByLevelId.values()].map((entry) => entry.filePath),
+  ].sort();
+}
+
 async function readExistingManifest() {
   try {
     const parsed = JSON.parse(await fs.readFile(manifestPath, "utf8"));
@@ -57,11 +112,14 @@ const [draftFiles, acceptedFiles, previous] = await Promise.all([
   readExistingManifest(),
 ]);
 
+const canonicalDraftFiles = await getCanonicalJsonFiles(draftFiles);
+const canonicalAcceptedFiles = await getCanonicalJsonFiles(acceptedFiles);
+
 const manifest = {
   version: 1,
   ...previous,
-  drafts: draftFiles.map(toManifestPath).sort(),
-  accepted: acceptedFiles.map(toManifestPath).sort(),
+  drafts: canonicalDraftFiles.map(toManifestPath).sort(),
+  accepted: canonicalAcceptedFiles.map(toManifestPath).sort(),
 };
 
 await fs.mkdir(levelsRoot, { recursive: true });
@@ -70,4 +128,7 @@ await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8
 console.log(`Updated levels/manifest.json`);
 console.log(`drafts: ${manifest.drafts.length}`);
 console.log(`accepted: ${manifest.accepted.length}`);
+if (canonicalDraftFiles.length !== draftFiles.length || canonicalAcceptedFiles.length !== acceptedFiles.length) {
+  console.log("canonicalized duplicate levelId exports to the highest .vNNN.json file");
+}
 

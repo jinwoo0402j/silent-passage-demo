@@ -1,5 +1,5 @@
 import { SCENES, createRunState, saveMetaState } from "./state.js";
-import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260503-level-manifest-v1";
+import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260505-level-source-v2";
 
 const SAVE_SLOT_KEY = "rulebound-local-profile-v1";
 const SAVE_VERSION = 1;
@@ -225,7 +225,7 @@ function applyRunSnapshot(run, snapshot) {
   run.autoSaveTimer = AUTO_SAVE_INTERVAL;
 }
 
-function shouldStartFromUrlLevel() {
+export function shouldStartFromUrlLevel() {
   if (typeof window === "undefined") {
     return false;
   }
@@ -307,8 +307,11 @@ export function restoreSavedGame(state, data) {
   return true;
 }
 
-export function startNewSavedRun(state, data) {
-  clearSavedGame();
+export function startNewSavedRun(state, data, options = {}) {
+  const shouldPersist = options.persist !== false;
+  if (options.clearSaved !== false) {
+    clearSavedGame();
+  }
   const baseData = data.__baseData || data;
   const startLevelId = shouldStartFromUrlLevel()
     ? data.currentLevelId || getRunStartLevelId(baseData)
@@ -323,8 +326,10 @@ export function startNewSavedRun(state, data) {
   state.liveEdit.selectedPlatformIndex = null;
   state.liveEdit.drag = null;
   state.save = state.save || {};
-  state.save.hasRun = false;
-  saveCurrentGame(state, data);
+  state.save.hasRun = hasSavedGame();
+  if (shouldPersist) {
+    saveCurrentGame(state, data);
+  }
   return true;
 }
 
