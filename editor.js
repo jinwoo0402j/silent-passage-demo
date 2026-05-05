@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260505-faceoff-e-v1";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -15,7 +15,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260503-level-manifest-v1";
+} from "./level-store.js?v=20260505-faceoff-e-v1";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -438,6 +438,54 @@ const CAMERA_TUNING_GROUPS = [
     ],
   },
 ];
+CAMERA_TUNING_GROUPS.push({
+  title: "Aim Pan",
+  fields: [
+    {
+      key: "mousePanAlways",
+      label: "Mouse Pan Always",
+      type: "checkbox",
+      defaultValue: true,
+      help: "Test toggle: camera follows mouse edge pan even without right-click aim.",
+    },
+    {
+      key: "aimPanMaxX",
+      label: "Aim Pan X",
+      min: 0,
+      max: 0.75,
+      step: 0.01,
+      defaultValue: 0.36,
+      help: "Right-click aim camera horizontal pan range. 0.36 is 1.5x the old 0.24 default.",
+    },
+    {
+      key: "aimPanMaxY",
+      label: "Aim Pan Y",
+      min: 0,
+      max: 0.55,
+      step: 0.01,
+      defaultValue: 0.27,
+      help: "Right-click aim camera vertical pan range. 0.27 is 1.5x the old 0.18 default.",
+    },
+    {
+      key: "aimPanLerp",
+      label: "Aim Pan Speed",
+      min: 0,
+      max: 40,
+      step: 0.1,
+      defaultValue: 8.25,
+      help: "Right-click aim camera pan-in speed. 8.25 is 1.5x the old 5.5 default.",
+    },
+    {
+      key: "aimPanReturnLerp",
+      label: "Aim Pan Return",
+      min: 0,
+      max: 40,
+      step: 0.1,
+      defaultValue: 7.5,
+      help: "Camera pan return speed after aim input relaxes.",
+    },
+  ],
+});
 const CAMERA_TUNING_FIELDS = CAMERA_TUNING_GROUPS.flatMap((group) => group.fields);
 const CAMERA_TUNING_FIELD_MAP = new Map(CAMERA_TUNING_FIELDS.map((field) => [field.key, field]));
 
@@ -2799,6 +2847,10 @@ async function saveLevelJsonToDraftFolder(editor, dom, fileName, json) {
       mode: "readwrite",
       startIn: "documents",
     });
+    if (directory.name && directory.name !== "levels") {
+      setStatus(editor, dom, `Choose the repository levels folder, not ${directory.name}.`, "error", editor.dirty);
+      return true;
+    }
     const draftsDirectory = await directory.getDirectoryHandle("drafts", { create: true });
     const file = await draftsDirectory.getFileHandle(fileName, { create: true });
     const writable = await file.createWritable();

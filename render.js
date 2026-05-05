@@ -1916,14 +1916,36 @@ function drawHumanoidEnemy(ctx, enemy) {
   ctx.restore();
 
   const hpRatio = clamp((enemy.hp ?? enemy.maxHp ?? 100) / Math.max(1, enemy.maxHp ?? 100), 0, 1);
+  const staggerRatio = clamp((enemy.stagger ?? 0) / Math.max(1, enemy.staggerMax ?? 100), 0, 1);
   const triggerRatio = clamp((enemy.trigger ?? 0) / 4.5, 0, 1);
+  const breakActive = (enemy.staggerBreakTimer ?? 0) > 0;
+  const barX = enemy.x;
+  const barW = enemy.width;
+
+  if (breakActive) {
+    ctx.save();
+    ctx.fillStyle = "rgba(8, 10, 14, 0.72)";
+    ctx.fillRect(enemy.x + enemy.width * 0.5 - 25, enemy.y - 34, 50, 14);
+    ctx.fillStyle = "#e7f47e";
+    ctx.font = "800 10px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("BREAK", enemy.x + enemy.width * 0.5, enemy.y - 23);
+    ctx.restore();
+  }
+
   ctx.fillStyle = "rgba(255,255,255,0.14)";
-  ctx.fillRect(enemy.x, enemy.y - 14, enemy.width, 4);
+  ctx.fillRect(barX, enemy.y - 18, barW, 4);
   ctx.fillStyle = "#dce7ec";
-  ctx.fillRect(enemy.x, enemy.y - 14, enemy.width * hpRatio, 4);
+  ctx.fillRect(barX, enemy.y - 18, barW * hpRatio, 4);
+  if (staggerRatio > 0.02 || breakActive) {
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(barX, enemy.y - 12, barW, 3);
+    ctx.fillStyle = breakActive ? "#e7f47e" : "rgba(231, 244, 126, 0.86)";
+    ctx.fillRect(barX, enemy.y - 12, barW * (breakActive ? 1 : staggerRatio), 3);
+  }
   if (triggerRatio > 0.02) {
     ctx.fillStyle = "rgba(255, 88, 104, 0.78)";
-    ctx.fillRect(enemy.x, enemy.y - 8, enemy.width * triggerRatio, 3);
+    ctx.fillRect(barX, enemy.y - 7, barW * triggerRatio, 3);
   }
 }
 
@@ -2960,6 +2982,39 @@ function drawRecoilFx(ctx, run) {
 }
 
 function drawWeaponModulesWorld(ctx, run) {
+  (run.playerBullets || []).forEach((bullet) => {
+    const alpha = clamp((bullet.life ?? 0) / Math.max(0.001, bullet.duration ?? 0.2), 0, 1);
+    const dirX = bullet.dirX ?? 1;
+    const dirY = bullet.dirY ?? 0;
+    const trail = bullet.trailLength ?? 62;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.lineCap = "round";
+    ctx.shadowColor = "rgba(233, 247, 255, 0.86)";
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = `rgba(233, 247, 255, ${0.9 * alpha})`;
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(bullet.x - dirX * trail, bullet.y - dirY * trail);
+    ctx.lineTo(bullet.x, bullet.y);
+    ctx.stroke();
+
+    ctx.shadowBlur = 8;
+    ctx.strokeStyle = `rgba(231, 244, 126, ${0.62 * alpha})`;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(bullet.x - dirX * trail * 0.52, bullet.y - dirY * trail * 0.52);
+    ctx.lineTo(bullet.x + dirX * 7, bullet.y + dirY * 7);
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.95 * alpha})`;
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, bullet.radius ?? 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
   (run.weaponBarriers || []).forEach((barrier) => {
     const alpha = clamp((barrier.life ?? 0) / Math.max(0.001, barrier.duration ?? 0.2), 0, 1);
     const angle = Math.atan2(barrier.dirY ?? 0, barrier.dirX ?? 1);
@@ -2996,6 +3051,26 @@ function drawWeaponModulesWorld(ctx, run) {
     ctx.beginPath();
     ctx.arc(missile.x, missile.y, missile.radius ?? 6, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawDamageNumbers(ctx, run) {
+  (run.damageNumbers || []).forEach((number) => {
+    const ratio = clamp((number.life ?? 0) / Math.max(0.001, number.duration ?? 0.7), 0, 1);
+    const text = number.label || `-${number.amount ?? 0}`;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, ratio * 1.45);
+    ctx.font = number.label ? "800 15px 'Segoe UI', sans-serif" : "800 18px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(3, 6, 10, 0.8)";
+    ctx.strokeText(text, number.x, number.y);
+    ctx.fillStyle = number.color || "#f5f8fb";
+    ctx.shadowColor = number.color || "rgba(245, 248, 251, 0.78)";
+    ctx.shadowBlur = 8;
+    ctx.fillText(text, number.x, number.y);
     ctx.restore();
   });
 }
@@ -4556,7 +4631,6 @@ function renderExpedition(ctx, state, data) {
   drawBraceWalls(ctx, data, theme);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
-
   drawEntity(ctx, run.encounters.guard, {
     body: "#86a9c7",
     flash: "#eef5ff",
@@ -4596,6 +4670,7 @@ function renderExpedition(ctx, state, data) {
   drawRecoilFx(ctx, run);
   drawWeaponModulesWorld(ctx, run);
   drawParticles(ctx, run);
+  drawDamageNumbers(ctx, run);
   drawDebugWorldOverlay(ctx, state, data);
   drawLiveEditWorldOverlay(ctx, state, data);
   drawWorldPrompt(ctx, run, theme);
@@ -4610,7 +4685,7 @@ function renderExpedition(ctx, state, data) {
   drawThreatSense(ctx, run, state);
   ctx.restore();
 
-  drawHudV3(ctx, state, data);
+  drawHudV5(ctx, state, data);
   drawLootOverlayV2(ctx, state, data, theme);
   drawFaceOffAcquireGauge(ctx, state);
   drawFaceOffOverlay(ctx, state, data, theme);
@@ -5180,13 +5255,15 @@ function drawObjectiveCardV3(ctx, state, data, theme, layout) {
 
 function drawStatusBarsV3(ctx, run, data, theme, layout) {
   const shotValue = getRecoilShotUiState(run, data);
+  const focusValue = clamp((run.focus ?? run.focusMax ?? 100) / Math.max(1, run.focusMax ?? 100), 0, 1);
   const bars = [
-    { value: run.hp / data.player.maxHp, color: "#fbfefe" },
-    { value: run.battery / data.player.maxBattery, color: theme.accentSecondary },
-    { value: shotValue, color: run.player.recoilFocusActive ? "#e7f47e" : theme.accent },
+    { label: "HP", value: run.hp / data.player.maxHp, color: "#fbfefe" },
+    { label: "BAT", value: run.battery / data.player.maxBattery, color: theme.accentSecondary },
+    { label: "FOCUS", value: focusValue, color: run.focusActive ? "#87e1ff" : "#729cff" },
+    { label: "SHOT", value: shotValue, color: run.player.recoilFocusActive ? "#e7f47e" : theme.accent },
   ];
 
-  drawBeveledPanel(ctx, theme, layout.status.x - 18, layout.status.y - 20, layout.status.width + 118, 74, {
+  drawBeveledPanel(ctx, theme, layout.status.x - 18, layout.status.y - 20, layout.status.width + 118, 96, {
     cut: 14,
     fill: "rgba(8, 12, 18, 0.34)",
     stroke: "rgba(255,255,255,0.1)",
@@ -5200,6 +5277,9 @@ function drawStatusBarsV3(ctx, run, data, theme, layout) {
     ctx.fillRect(x, y, layout.status.width, 8);
     ctx.fillStyle = bar.color;
     ctx.fillRect(x, y, layout.status.width * Math.max(0, Math.min(1, bar.value)), 8);
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "800 9px 'Segoe UI', sans-serif";
+    ctx.fillText(bar.label, x + layout.status.width + 12, y + 8);
   });
 }
 
@@ -5655,6 +5735,444 @@ function drawCurrentMapChip(ctx, state, data, theme) {
   ctx.fillStyle = theme.textMute;
   ctx.font = "700 11px 'Segoe UI', sans-serif";
   ctx.fillText("M", x + width - 38, y + 29);
+}
+
+function drawHudPanelLabel(ctx, theme, label, x, y) {
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x, y);
+}
+
+function drawMeterBarV4(ctx, theme, x, y, width, label, value, color, options = {}) {
+  const safeValue = clamp(value, 0, 1);
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(x, y, width, 9);
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, width * safeValue, 9);
+  ctx.strokeStyle = options.active ? "rgba(255,255,255,0.38)" : "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, 9);
+  ctx.fillStyle = options.active ? "#f5f8fb" : theme.textDim;
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x, y - 6);
+}
+
+function drawOperatorHudV4(ctx, state, data, theme) {
+  const run = state.run;
+  const x = 24;
+  const y = 22;
+  const width = 386;
+  const height = 142;
+  const portraitSize = 84;
+  const status = getCharacterHudStatus(run);
+  const focusValue = clamp((run.focus ?? run.focusMax ?? 100) / Math.max(1, run.focusMax ?? 100), 0, 1);
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(4, 10, 16, 0.56)",
+    stroke: "rgba(255,255,255,0.16)",
+    innerLines: false,
+  });
+
+  drawEmotionSheetPortrait(ctx, data, getEmotionPortraitIndex(run, data), x + 18, y + 22, portraitSize);
+  drawPortraitHpVeil(ctx, clamp(run.hp / (data.player.maxHp || 100), 0, 1), x + 18, y + 22, portraitSize, run.player.invulnTimer ?? 0);
+
+  drawHudPanelLabel(ctx, theme, "TYPE-07A", x + 124, y + 28);
+  ctx.fillStyle = status.color;
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(status.label, x + 124, y + 52);
+
+  drawMeterBarV4(ctx, theme, x + 124, y + 76, 224, "HP", run.hp / data.player.maxHp, "#fbfefe", {
+    active: run.hp / data.player.maxHp <= 0.3,
+  });
+  drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#729cff", {
+    active: run.focusActive,
+  });
+  drawMeterBarV4(ctx, theme, x + 124, y + 132, 152, "BAT", run.battery / data.player.maxBattery, theme.accentSecondary);
+}
+
+function drawWeaponHudV4(ctx, run, data, theme) {
+  const hud = getSelectedArmHud(run, data);
+  const x = 926;
+  const y = 556;
+  const width = 330;
+  const height = 138;
+  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
+    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
+    : 1;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(4, 10, 16, 0.62)",
+    stroke: "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+
+  drawHudPanelLabel(ctx, theme, "WEAPON", x + 20, y + 24);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(hud.stats.label, x + 20, y + 50);
+
+  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.font = "900 34px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.magazine}/${hud.stats.magazineSize}`, x + 20, y + 92);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} RES ${hud.reserve}`, x + 122, y + 78);
+  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOADING" : "R RELOAD", x + 122, y + 96);
+
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(x + 122, y + 104, 176, 8);
+  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
+  ctx.fillRect(x + 122, y + 104, 176 * reloadRatio, 8);
+
+  drawArmSlotChip(ctx, theme, "1 LEFT", hud.side === "left", x + 194, y + 20);
+  drawArmSlotChip(ctx, theme, "2 RIGHT", hud.side === "right", x + 262, y + 20);
+
+  const moduleLabels = (hud.arm.modules || []).slice(0, 3).map((moduleId) => data.weaponModules?.[moduleId]?.shortLabel || moduleId.slice(0, 3).toUpperCase());
+  moduleLabels.forEach((label, index) => {
+    const chipX = x + 20 + index * 42;
+    drawBeveledPanel(ctx, theme, chipX, y + 110, 34, 18, {
+      cut: 5,
+      fill: "rgba(255,255,255,0.06)",
+      stroke: "rgba(255,255,255,0.12)",
+      innerLines: false,
+    });
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "800 9px 'Segoe UI', sans-serif";
+    ctx.fillText(label, chipX + 5, y + 123);
+  });
+}
+
+function drawNavigationHudV4(ctx, state, data, theme) {
+  const run = state.run;
+  const x = 934;
+  const y = 216;
+  const width = 298;
+  const height = 204;
+  const layout = {
+    minimap: { x: x + width - 66, y: y + 72, radius: 46 },
+    objective: { x: x + 22, y: y + 122, gap: 22 },
+  };
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const summary = getMapLevelSummary(data, run, currentLevelId);
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(4, 10, 16, 0.52)",
+    stroke: "rgba(255,255,255,0.16)",
+    innerLines: false,
+  });
+
+  drawHudPanelLabel(ctx, theme, "ROUTE", x + 22, y + 24);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 16px 'Segoe UI', sans-serif";
+  ctx.fillText(summary.label || currentLevelId, x + 22, y + 50);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "800 11px 'Segoe UI', sans-serif";
+  ctx.fillText("M MAP", x + 22, y + 72);
+
+  drawMiniMapV3(ctx, state, data, theme, layout);
+  drawObjectiveCardV3(ctx, state, data, theme, layout);
+}
+
+function drawPromptHudV4(ctx, state, theme) {
+  const run = state.run;
+  const text = run.prompt || (run.noticeTimer > 0 ? run.message : "");
+  if (!text) {
+    return;
+  }
+
+  const x = 24;
+  const y = 646;
+  drawBeveledPanel(ctx, theme, x, y, 360, 42, {
+    cut: 12,
+    fill: "rgba(4, 10, 16, 0.46)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  ctx.fillStyle = run.prompt ? theme.accent : theme.textMain;
+  ctx.font = "800 13px 'Segoe UI', sans-serif";
+  ctx.fillText(text, x + 18, y + 26);
+}
+
+function drawMeterBarV5(ctx, theme, x, y, width, label, value, color, options = {}) {
+  const safeValue = clamp(value, 0, 1);
+  const height = options.height ?? 5;
+  ctx.fillStyle = options.active ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.06)";
+  ctx.fillRect(x, y, width, height);
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, width * safeValue, height);
+  ctx.strokeStyle = options.active ? "rgba(255,255,255,0.32)" : "rgba(255,255,255,0.1)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, height);
+
+  ctx.fillStyle = options.active ? "#f5f8fb" : theme.textDim;
+  ctx.font = "800 8px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x, y - 4);
+  if (options.valueText) {
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "800 8px 'Segoe UI', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(options.valueText, x + width, y - 4);
+    ctx.textAlign = "left";
+  }
+}
+
+function drawQuickSlotIconV5(ctx, icon, x, y, color, scale = 1) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  if (icon === "med") {
+    ctx.fillRect(-3, -11, 6, 22);
+    ctx.fillRect(-11, -3, 22, 6);
+  } else if (icon === "cell") {
+    ctx.strokeRect(-7, -12, 14, 24);
+    ctx.fillRect(-3, -16, 6, 3);
+    ctx.fillRect(-4, -6, 8, 13);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(-7, 11);
+    ctx.lineTo(7, -11);
+    ctx.lineTo(10, -7);
+    ctx.lineTo(-4, 13);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-9, 13);
+    ctx.lineTo(-2, 8);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function getQuickSlotItemsV5(run) {
+  const inventoryItems = Array.isArray(run.inventory?.items) ? run.inventory.items : [];
+  const slots = inventoryItems.slice(0, 3).map((item, index) => ({
+    key: String(index + 3),
+    label: (item.name || item.id || "ITEM").slice(0, 3).toUpperCase(),
+    count: Math.max(1, Math.floor(item.quantity ?? 1)),
+    icon: item.type === "medicine" || /med|kit|heal/i.test(item.name || item.id || "") ? "med" : "cell",
+    active: true,
+  }));
+  const fallback = [
+    { key: "3", label: "MED", count: 0, icon: "med", active: false },
+    { key: "4", label: "BAT", count: 0, icon: "cell", active: false },
+    { key: "5", label: "TOOL", count: 0, icon: "tool", active: false },
+  ];
+  while (slots.length < 3) {
+    slots.push(fallback[slots.length]);
+  }
+  return slots;
+}
+
+function drawQuickSlotsHudV5(ctx, run, theme, x, y) {
+  drawHudPanelLabel(ctx, theme, "ITEM", x, y - 8);
+  getQuickSlotItemsV5(run).forEach((slot, index) => {
+    const slotX = x + index * 38;
+    const slotY = y;
+    drawBeveledPanel(ctx, theme, slotX, slotY, 32, 36, {
+      cut: 7,
+      fill: slot.active ? "rgba(5, 12, 18, 0.34)" : "rgba(5, 12, 18, 0.18)",
+      stroke: slot.active ? "rgba(147,234,255,0.28)" : "rgba(255,255,255,0.1)",
+      innerLines: false,
+    });
+    ctx.fillStyle = slot.active ? "#f5f8fb" : theme.textMute;
+    ctx.font = "900 9px 'Segoe UI', sans-serif";
+    ctx.fillText(slot.key, slotX + 5, slotY + 11);
+    drawQuickSlotIconV5(ctx, slot.icon, slotX + 16, slotY + 21, slot.active ? theme.textMain : "rgba(245,248,251,0.42)", 0.72);
+    ctx.fillStyle = slot.active ? theme.accentSecondary : theme.textMute;
+    ctx.font = "900 9px 'Segoe UI', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(String(slot.count), slotX + 28, slotY + 31);
+    ctx.textAlign = "left";
+  });
+}
+
+function drawOperatorHudV5(ctx, state, data, theme) {
+  const run = state.run;
+  const x = 22;
+  const y = 618;
+  const portraitSize = 48;
+  const hpRatio = clamp(run.hp / (data.player.maxHp || 100), 0, 1);
+  const focusMax = Math.max(1, run.focusMax ?? 100);
+  const focusValue = clamp((run.focus ?? focusMax) / focusMax, 0, 1);
+  const batteryRatio = clamp(run.battery / data.player.maxBattery, 0, 1);
+
+  drawBeveledPanel(ctx, theme, x, y, 376, 78, {
+    cut: 14,
+    fill: "rgba(3, 8, 13, 0.26)",
+    stroke: "rgba(255,255,255,0.1)",
+    innerLines: false,
+  });
+
+  drawEmotionSheetPortrait(ctx, data, getEmotionPortraitIndex(run, data), x + 14, y + 15, portraitSize);
+  drawPortraitHpVeil(ctx, hpRatio, x + 14, y + 15, portraitSize, run.player.invulnTimer ?? 0);
+
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "800 8px 'Segoe UI', sans-serif";
+  ctx.fillText("ID: 00231", x + 76, y + 16);
+
+  drawMeterBarV5(ctx, theme, x + 76, y + 32, 118, "HP", hpRatio, hpRatio <= 0.3 ? "#ff9fb4" : "#fbfefe", {
+    active: hpRatio <= 0.3,
+    valueText: `${Math.max(0, Math.round(run.hp))}/${data.player.maxHp || 100}`,
+  });
+  drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#68d8ec", {
+    active: run.focusActive,
+    valueText: `${Math.round(run.focus ?? focusMax)}/${focusMax}`,
+  });
+  drawMeterBarV5(ctx, theme, x + 76, y + 72, 92, "BAT", batteryRatio, theme.accentSecondary, {
+    valueText: `${Math.round(run.battery)}/${data.player.maxBattery}`,
+  });
+
+  drawQuickSlotsHudV5(ctx, run, theme, x + 224, y + 34);
+}
+
+function drawWeaponSilhouetteV5(ctx, x, y, scale, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-36, -6);
+  ctx.lineTo(20, -10);
+  ctx.lineTo(42, -5);
+  ctx.lineTo(22, 2);
+  ctx.lineTo(-18, 4);
+  ctx.lineTo(-24, 18);
+  ctx.lineTo(-34, 18);
+  ctx.lineTo(-30, 2);
+  ctx.lineTo(-42, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(6, 2, 18, 5);
+  ctx.restore();
+}
+
+function drawArmSlotChipV5(ctx, theme, label, active, x, y) {
+  drawBeveledPanel(ctx, theme, x, y, 34, 18, {
+    cut: 6,
+    fill: active ? "rgba(135, 225, 255, 0.18)" : "rgba(8, 12, 18, 0.28)",
+    stroke: active ? "rgba(135,225,255,0.48)" : "rgba(255,255,255,0.1)",
+    innerLines: false,
+  });
+  ctx.fillStyle = active ? "#f5f8fb" : theme.textDim;
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(label, x + 17, y + 13);
+  ctx.textAlign = "left";
+}
+
+function drawWeaponHudV5(ctx, run, data, theme) {
+  const hud = getSelectedArmHud(run, data);
+  const x = 1042;
+  const y = 626;
+  const width = 216;
+  const height = 70;
+  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
+    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
+    : 1;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: "rgba(3, 8, 13, 0.34)",
+    stroke: "rgba(255,255,255,0.11)",
+    innerLines: false,
+  });
+
+  drawArmSlotChipV5(ctx, theme, "1", hud.side === "left", x + 12, y + 10);
+  drawArmSlotChipV5(ctx, theme, "2", hud.side === "right", x + 52, y + 10);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "800 8px 'Segoe UI', sans-serif";
+  ctx.fillText(hud.side === "left" ? "LEFT" : "RIGHT", x + 14, y + 40);
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  const weaponLabel = String(hud.stats.label || "WEAPON").toUpperCase();
+  ctx.fillText(weaponLabel.length > 13 ? `${weaponLabel.slice(0, 12)}.` : weaponLabel, x + 88, y + 32);
+
+  drawWeaponSilhouetteV5(ctx, x + 156, y + 22, 0.5, hud.magazine > 0 ? "rgba(245,248,251,0.8)" : "rgba(255,159,180,0.82)");
+
+  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.font = "900 22px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.magazine}`, x + 14, y + 62);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "900 11px 'Segoe UI', sans-serif";
+  ctx.fillText(`/${hud.stats.magazineSize}`, x + 42, y + 61);
+
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 8px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} ${hud.reserve}`, x + 88, y + 50);
+  ctx.fillStyle = theme.textDim;
+  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOADING" : "R RELOAD", x + 88, y + 63);
+
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(x + 154, y + 58, 42, 4);
+  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
+  ctx.fillRect(x + 154, y + 58, 42 * reloadRatio, 4);
+}
+
+function drawCompassHudV5(ctx, state, data, theme) {
+  const run = state.run;
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  const summary = getMapLevelSummary(data, run, currentLevelId);
+  const x = 482;
+  const y = 18;
+  const width = 316;
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 24);
+  ctx.lineTo(x + width, y + 24);
+  ctx.stroke();
+  for (let index = 0; index <= 16; index += 1) {
+    const tickX = x + (width / 16) * index;
+    const tall = index % 4 === 0;
+    ctx.beginPath();
+    ctx.moveTo(tickX, y + (tall ? 16 : 20));
+    ctx.lineTo(tickX, y + 24);
+    ctx.stroke();
+  }
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "900 11px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("W", x + 52, y + 10);
+  ctx.fillText("N", x + width * 0.5, y + 10);
+  ctx.fillText("E", x + width - 52, y + 10);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.fillText(String(summary.label || currentLevelId).toUpperCase().slice(0, 16), x + width * 0.5, y + 46);
+  ctx.textAlign = "left";
+  ctx.restore();
+}
+
+function drawPromptHudV5(ctx, state, theme) {
+  const run = state.run;
+  const text = run.prompt || (run.noticeTimer > 0 ? run.message : "");
+  if (!text && !run.focusActive && !run.focusDepleted) {
+    return;
+  }
+  const label = text || (run.focusDepleted ? "FOCUS RECOVERING" : "SPACE FOCUS");
+  const x = 544;
+  const y = 662;
+  drawBeveledPanel(ctx, theme, x, y, 192, 28, {
+    cut: 9,
+    fill: "rgba(3, 8, 13, 0.28)",
+    stroke: run.focusActive ? "rgba(135,225,255,0.36)" : "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  ctx.fillStyle = text ? theme.accent : (run.focusDepleted ? "#ff9fb4" : theme.accentSecondary);
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(label, x + 96, y + 18);
+  ctx.textAlign = "left";
 }
 
 function drawMapRoom(ctx, theme, room, transform, stateStyle, label) {
@@ -6669,10 +7187,38 @@ function drawHudV3(ctx, state, data) {
   if (state.scene !== SCENES.EXPEDITION || !state.run) {
     return;
   }
+  const layout = getUiLayoutV3(data);
   drawCharacterStatusHudV3(ctx, state, data);
   const theme = getUiTheme(data);
+  drawStatusBarsV3(ctx, state.run, data, theme, layout);
   drawWeaponHudV3(ctx, state.run, data, theme);
   drawCurrentMapChip(ctx, state, data, theme);
+  drawRunMapOverlay(ctx, state, data, theme);
+}
+
+function drawHudV4(ctx, state, data) {
+  if (state.scene !== SCENES.EXPEDITION || !state.run) {
+    return;
+  }
+
+  const theme = getUiTheme(data);
+  drawOperatorHudV4(ctx, state, data, theme);
+  drawNavigationHudV4(ctx, state, data, theme);
+  drawWeaponHudV4(ctx, state.run, data, theme);
+  drawPromptHudV4(ctx, state, theme);
+  drawRunMapOverlay(ctx, state, data, theme);
+}
+
+function drawHudV5(ctx, state, data) {
+  if (state.scene !== SCENES.EXPEDITION || !state.run) {
+    return;
+  }
+
+  const theme = getUiTheme(data);
+  drawCompassHudV5(ctx, state, data, theme);
+  drawOperatorHudV5(ctx, state, data, theme);
+  drawWeaponHudV5(ctx, state.run, data, theme);
+  drawPromptHudV5(ctx, state, theme);
   drawRunMapOverlay(ctx, state, data, theme);
 }
 

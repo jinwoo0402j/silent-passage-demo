@@ -98,11 +98,16 @@ const CAMERA_NUMBER_FIELDS = [
   ["directionLerp", 6, 0, 30],
   ["focusLerp", 5.5, 0, 30],
   ["zoomLerp", 4.2, 0, 30],
+  ["aimPanMaxX", 0.36, 0, 0.75],
+  ["aimPanMaxY", 0.27, 0, 0.55],
+  ["aimPanLerp", 8.25, 0, 40],
+  ["aimPanReturnLerp", 7.5, 0, 40],
 ];
 const CAMERA_BOOLEAN_FIELDS = [
   ["lookAheadEnabled", true],
   ["dashAffectsCamera", false],
   ["braceAffectsCamera", false],
+  ["mousePanAlways", true],
 ];
 const HOSTILE_DRONE_NUMBER_FIELDS = [
   ["x", 0, null],
