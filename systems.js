@@ -7,8 +7,8 @@ import {
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js";
-import { loadRuntimeLevelData } from "./level-store.js?v=20260503-level-manifest-v1";
+} from "./state.js?v=20260505-player-bullets-v1";
+import { loadRuntimeLevelData } from "./level-store.js?v=20260505-faceoff-e-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -16,7 +16,7 @@ import {
   saveCurrentGame,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260503-level-manifest-v1";
+} from "./save-game.js?v=20260505-reflex-focus-v3";
 import {
   approach,
   clamp,
@@ -37,9 +37,17 @@ const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
 const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const CROUCH_KEYS = ["ArrowDown", "KeyS"];
-const JUMP_KEYS = ["KeyC", "Space"];
+const JUMP_KEYS = ["KeyW"];
 const DASH_KEYS = ["KeyX", "ShiftLeft", "ShiftRight"];
 const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
+const BULLET_TIME_KEYS = ["Space"];
+const AIM_CAMERA_EDGE_MARGIN = 112;
+const FOCUS_MAX = 100;
+const FOCUS_DRAIN_PER_SECOND = 36;
+const FOCUS_RECOVER_PER_SECOND = 22;
+const FOCUS_MIN_TO_START = 8;
+const FOCUS_REENTRY_RATIO = 0.5;
+const FOCUS_TIME_SCALE = 0.22;
 const INTERACT_KEYS = ["KeyZ", "KeyE"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
@@ -58,6 +66,7 @@ const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
+const FACE_OFF_ENTRY_KEYS = ["KeyE"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
 const FACE_OFF_RELEASE_KEY = "KeyQ";
@@ -109,6 +118,20 @@ function consumeEitherPress(state, codes) {
 
 function setStatus(state, message) {
   state.statusText = message;
+}
+
+function pushInputTrace(state, label, details = {}) {
+  const debug = state.debug || (state.debug = {});
+  const trace = Array.isArray(debug.inputTrace) ? debug.inputTrace : [];
+  const frame = Number.isFinite(state.debugFrame) ? state.debugFrame : 0;
+  const fields = Object.entries(details)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(" ");
+  trace.push(`#${frame} ${label}${fields ? ` ${fields}` : ""}`);
+  debug.inputTrace = trace.slice(-500);
+  if (typeof window !== "undefined") {
+    window.__inputTraceText = debug.inputTrace.join("\n");
+  }
 }
 
 function getRunCurrentLevelId(run, data) {
@@ -317,6 +340,21 @@ function spawnDirectedParticles(run, x, y, amount, color, directionX, directionY
   }
 }
 
+function spawnDamageNumber(run, x, y, amount, color = "#f5f8fb", label = null) {
+  run.damageNumbers = run.damageNumbers || [];
+  run.damageNumbers.push({
+    x,
+    y,
+    vx: (Math.random() - 0.5) * 24,
+    vy: -72 - Math.random() * 28,
+    amount: Math.round(amount),
+    label,
+    color,
+    life: 0.72,
+    duration: 0.72,
+  });
+}
+
 function pushAfterimage(run, player) {
   run.afterimages.push({
     x: player.x,
@@ -424,6 +462,14 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
     updateWeaponProjectiles(run, data, dt);
   }
 
+  run.damageNumbers = (run.damageNumbers || []).filter((number) => {
+    number.life -= visualDt;
+    number.x += (number.vx ?? 0) * visualDt;
+    number.y += (number.vy ?? 0) * visualDt;
+    number.vy = (number.vy ?? 0) + 84 * visualDt;
+    return number.life > 0;
+  });
+
   run.afterimages = run.afterimages.filter((image) => {
     image.life -= dt;
     return image.life > 0;
@@ -494,6 +540,48 @@ function getRecoilCameraState(run, config) {
     directionY,
     horizontalLookAhead,
     verticalLookAhead,
+  };
+}
+
+function getAimEdgeAxis(position, size, margin = AIM_CAMERA_EDGE_MARGIN) {
+  const safeSize = Math.max(1, size);
+  const safeMargin = clamp(margin, 1, safeSize * 0.5);
+  if (position <= safeMargin) {
+    return -clamp((safeMargin - position) / safeMargin, 0, 1);
+  }
+  if (position >= safeSize - safeMargin) {
+    return clamp((position - (safeSize - safeMargin)) / safeMargin, 0, 1);
+  }
+  return 0;
+}
+
+function getAimCameraEdgePan(mouse = {}) {
+  return {
+    x: getAimEdgeAxis(mouse.screenX ?? CAMERA_SCREEN_WIDTH / 2, CAMERA_SCREEN_WIDTH),
+    y: getAimEdgeAxis(mouse.screenY ?? CAMERA_SCREEN_HEIGHT / 2, CAMERA_SCREEN_HEIGHT),
+  };
+}
+
+function updateAimCameraPan(run, config, viewportWidth, viewportHeight, dt, freezeActionCamera = false) {
+  const aim = run.recoilAim;
+  const active = Boolean(!freezeActionCamera && (aim?.aiming || config.mousePanAlways));
+  const maxX = viewportWidth * clamp(config.aimPanMaxX ?? 0.36, 0, 0.75);
+  const maxY = viewportHeight * clamp(config.aimPanMaxY ?? 0.27, 0, 0.55);
+  const targetX = active ? (aim.edgePanX ?? 0) * maxX : 0;
+  const targetY = active ? (aim.edgePanY ?? 0) * maxY : 0;
+  const lerpRate = active ? (config.aimPanLerp ?? 8.25) : (config.aimPanReturnLerp ?? 7.5);
+  const blend = Math.min(1, dt * lerpRate);
+  run.aimCameraPanX = lerp(run.aimCameraPanX ?? 0, targetX, blend);
+  run.aimCameraPanY = lerp(run.aimCameraPanY ?? 0, targetY, blend);
+  if (Math.abs(run.aimCameraPanX) < 0.5) {
+    run.aimCameraPanX = 0;
+  }
+  if (Math.abs(run.aimCameraPanY) < 0.5) {
+    run.aimCameraPanY = 0;
+  }
+  return {
+    x: run.aimCameraPanX,
+    y: run.aimCameraPanY,
   };
 }
 
@@ -833,9 +921,10 @@ function syncCamera(run, data, dt) {
 
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
-  const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX;
+  const aimPan = updateAimCameraPan(run, config, viewportWidth, viewportHeight, dt, freezeActionCamera);
+  const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
   const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
-  const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY;
+  const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
   const maxX = Math.max(0, data.world.width - viewportWidth);
   const maxY = Math.max(0, data.world.height - viewportHeight);
   run.cameraTargetX = targetX;
@@ -1429,39 +1518,25 @@ function isHumanoidFaceOffCandidate(enemy) {
   );
 }
 
-function findFaceOffCandidate(run, data) {
-  if (!run.recoilAim?.aiming) {
-    return null;
-  }
-
+function findFaceOffInteractionCandidate(run, data) {
   const config = getFaceOffConfig(data);
-  const range = config.range ?? 720;
-  const aimRadius = config.aimRadius ?? 72;
-  const aim = run.recoilAim;
-  const startX = aim.originX;
-  const startY = aim.originY;
-  const targetX = aim.targetX ?? startX + aim.shotDirX * range;
-  const targetY = aim.targetY ?? startY + aim.shotDirY * range;
+  const range = config.interactRange ?? 142;
+  const playerCenter = getCenter(run.player);
   let best = null;
-  let bestScore = Infinity;
+  let bestDistance = Infinity;
 
   for (const enemy of run.humanoidEnemies || []) {
     if (!isHumanoidFaceOffCandidate(enemy)) {
       continue;
     }
     const center = getHumanoidCenter(enemy);
-    const distance = Math.hypot(center.x - startX, center.y - startY);
+    const distance = distanceBetween(playerCenter, center);
     if (distance > range + Math.max(enemy.width, enemy.height) * 0.5) {
       continue;
     }
-    const aimDistance = distanceFromPointToRect(targetX, targetY, enemy);
-    if (aimDistance > aimRadius) {
-      continue;
-    }
-    const score = aimDistance + distance * 0.04;
-    if (score < bestScore) {
+    if (distance < bestDistance) {
       best = enemy;
-      bestScore = score;
+      bestDistance = distance;
     }
   }
 
@@ -1940,30 +2015,9 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
   const run = state.run;
   const faceOff = run.faceOff;
   if (!faceOff?.active) {
-    const candidate = findFaceOffCandidate(run, data);
-    const acquireDuration = Math.max(0.1, getFaceOffConfig(data).acquireDuration ?? faceOff.acquireDuration ?? 1);
-    faceOff.acquireDuration = acquireDuration;
-
-    if (!candidate) {
-      faceOff.acquireTargetId = null;
-      faceOff.acquireTimer = 0;
-      faceOff.acquireProgress = 0;
-      return false;
-    }
-
-    if (faceOff.acquireTargetId !== candidate.id) {
-      faceOff.acquireTargetId = candidate.id;
-      faceOff.acquireTimer = 0;
-      faceOff.acquireProgress = 0;
-      return false;
-    }
-
-    faceOff.acquireTimer = Math.min(acquireDuration, (faceOff.acquireTimer ?? 0) + dt);
-    faceOff.acquireProgress = clamp(faceOff.acquireTimer / acquireDuration, 0, 1);
-    if (faceOff.acquireProgress >= 1) {
-      enterFaceOff(run, data, candidate, state);
-      return true;
-    }
+    faceOff.acquireTargetId = null;
+    faceOff.acquireTimer = 0;
+    faceOff.acquireProgress = 0;
     return false;
   }
 
@@ -2325,6 +2379,95 @@ function distanceFromPointToRect(pointX, pointY, rect) {
   return Math.hypot(pointX - nearestX, pointY - nearestY);
 }
 
+function getHumanoidStaggerMax(enemy) {
+  return Math.max(1, Number(enemy?.staggerMax ?? 100));
+}
+
+function resetHumanoidStagger(enemy) {
+  if (!enemy) {
+    return;
+  }
+  enemy.stagger = 0;
+  enemy.staggerDecayTimer = 0;
+  enemy.staggerBreakTimer = 0;
+  enemy.staggerKnockbackVx = 0;
+}
+
+function breakHumanoidStagger(run, enemy, aim) {
+  const direction = Math.sign(aim.shotDirX)
+    || Math.sign(enemy.x + enemy.width * 0.5 - (run.player.x + run.player.width * 0.5))
+    || enemy.facing
+    || 1;
+  enemy.stagger = 0;
+  enemy.staggerDecayTimer = 0;
+  enemy.staggerBreakTimer = Math.max(enemy.staggerBreakTimer ?? 0, enemy.staggerBreakDuration ?? 0.42);
+  enemy.staggerKnockbackVx = direction * Math.max(0, enemy.staggerKnockbackSpeed ?? 280);
+  enemy.trigger = 0;
+  enemy.attackCooldown = Math.max(enemy.attackCooldown ?? 0, enemy.staggerAttackLockDuration ?? 0.65);
+  enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.2);
+  enemy.active = true;
+  spawnDirectedParticles(
+    run,
+    enemy.x + enemy.width * 0.5,
+    enemy.y + enemy.height * 0.42,
+    12,
+    "#e7f47e",
+    direction,
+    -0.2,
+    360,
+    0.64,
+  );
+  pushNotice(run, "Humanoid guard stagger broken.");
+}
+
+function applyHumanoidStaggerDamage(run, enemy, weaponStats, aim) {
+  const staggerDamage = Math.max(0, Number(weaponStats.staggerDamage ?? 0));
+  if (staggerDamage <= 0 || enemy.state === "knockedDown") {
+    return false;
+  }
+
+  const staggerMax = getHumanoidStaggerMax(enemy);
+  enemy.stagger = clamp((enemy.stagger ?? 0) + staggerDamage, 0, staggerMax);
+  enemy.staggerDecayTimer = Math.max(0, enemy.staggerDecayDelay ?? 1);
+  if (enemy.stagger >= staggerMax && (enemy.hp ?? 0) > 0) {
+    breakHumanoidStagger(run, enemy, aim);
+    return true;
+  }
+  return false;
+}
+
+function updateHumanoidStaggerState(enemy, data, dt) {
+  enemy.staggerBreakTimer = Math.max(0, (enemy.staggerBreakTimer ?? 0) - dt);
+  if ((enemy.staggerBreakTimer ?? 0) > 0) {
+    enemy.trigger = 0;
+    const knockback = enemy.staggerKnockbackVx ?? 0;
+    if (Math.abs(knockback) > 0.5) {
+      const maxX = Math.max(0, (data.world?.width ?? enemy.x + enemy.width) - enemy.width);
+      enemy.x = clamp(enemy.x + knockback * dt, 0, maxX);
+      enemy.staggerKnockbackVx = approach(
+        knockback,
+        0,
+        Math.max(0, enemy.staggerKnockbackFriction ?? 860) * dt,
+      );
+    }
+    return;
+  }
+  enemy.staggerKnockbackVx = 0;
+
+  if ((enemy.stagger ?? 0) <= 0) {
+    enemy.stagger = 0;
+    enemy.staggerDecayTimer = 0;
+    return;
+  }
+
+  if ((enemy.staggerDecayTimer ?? 0) > 0) {
+    enemy.staggerDecayTimer = Math.max(0, enemy.staggerDecayTimer - dt);
+    return;
+  }
+
+  enemy.stagger = Math.max(0, (enemy.stagger ?? 0) - Math.max(0, enemy.staggerDecayRate ?? 35) * dt);
+}
+
 function killHumanoidEnemy(run, enemy, message = "Face-off target killed.") {
   if (!enemy) {
     return;
@@ -2336,6 +2479,7 @@ function killHumanoidEnemy(run, enemy, message = "Face-off target killed.") {
   enemy.outcome = "kill";
   enemy.trigger = 0;
   enemy.staggerTimer = 0;
+  resetHumanoidStagger(enemy);
   spawnParticles(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.42, 18, "#ffd6ba");
   if (message) {
     pushNotice(run, message);
@@ -2369,6 +2513,7 @@ function knockDownHumanoidEnemy(run, data, enemy) {
   enemy.facing = awayFromPlayer;
   enemy.exhaustionHits = 0;
   enemy.staggerTimer = enemy.knockdownStaggerDuration ?? 0.45;
+  resetHumanoidStagger(enemy);
   enemy.hitFlash = 0.2;
   spawnParticles(run, center.x, center.y, 12, "#dce7ec");
   pushNotice(run, "Humanoid target knocked down.");
@@ -2398,65 +2543,206 @@ function applyKnockedDownRecoilHit(run, enemy, aim) {
   }
 }
 
-function applyRecoilShotDamage(run, data, weaponStats, aim) {
-  const drones = run.hostileDrones || [];
+function getSegmentRectHitT(startX, startY, endX, endY, rect, padding = 0) {
+  const expanded = {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
+  const dx = endX - startX;
+  const dy = endY - startY;
+  let tMin = 0;
+  let tMax = 1;
+  const sides = [
+    [-dx, startX - expanded.x],
+    [dx, expanded.x + expanded.width - startX],
+    [-dy, startY - expanded.y],
+    [dy, expanded.y + expanded.height - startY],
+  ];
 
-  const shotLength = weaponStats.range ?? 520;
-  const hitRadius = weaponStats.hitRadius ?? 42;
-  const damage = weaponStats.droneDamage ?? weaponStats.damage ?? 2;
-  const humanoidDamage = weaponStats.humanoidDamage ?? 50;
-  const startX = aim.originX;
-  const startY = aim.originY;
-  const endX = startX + aim.shotDirX * shotLength;
-  const endY = startY + aim.shotDirY * shotLength;
-
-  drones.forEach((drone) => {
-    if (isEntityDisabled(drone) || drone.dead) {
-      return;
+  for (const [p, q] of sides) {
+    if (Math.abs(p) < EPSILON) {
+      if (q < 0) {
+        return null;
+      }
+      continue;
     }
+    const t = q / p;
+    if (p < 0) {
+      tMin = Math.max(tMin, t);
+    } else {
+      tMax = Math.min(tMax, t);
+    }
+    if (tMin > tMax) {
+      return null;
+    }
+  }
 
+  return tMax >= 0 && tMin <= 1 ? clamp(tMin, 0, 1) : null;
+}
+
+function spawnPlayerBullet(run, weaponStats, aim) {
+  const speed = weaponStats.projectileSpeed ?? (weaponStats.type === "shotgun" ? 2050 : 2450);
+  const range = weaponStats.range ?? 520;
+  const startOffset = 18;
+  run.playerBullets = run.playerBullets || [];
+  run.playerBullets.push({
+    id: `player-bullet-${Math.round((run.time ?? 0) * 1000)}-${run.playerBullets.length}`,
+    x: aim.originX + aim.shotDirX * startOffset,
+    y: aim.originY + aim.shotDirY * startOffset,
+    prevX: aim.originX,
+    prevY: aim.originY,
+    dirX: aim.shotDirX,
+    dirY: aim.shotDirY,
+    speed,
+    range,
+    traveled: 0,
+    radius: weaponStats.projectileRadius ?? 4,
+    hitRadius: weaponStats.hitRadius ?? 42,
+    damage: weaponStats.damage ?? 2,
+    droneDamage: weaponStats.droneDamage ?? weaponStats.damage ?? 2,
+    humanoidDamage: weaponStats.humanoidDamage ?? 50,
+    weaponStats,
+    life: Math.max(0.08, range / speed + 0.12),
+    duration: Math.max(0.08, range / speed + 0.12),
+    color: weaponStats.type === "shotgun" ? "#ffd6ba" : "#e9f7ff",
+  });
+}
+
+function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
+  let best = null;
+  const consider = (hit) => {
+    if (hit && (!best || hit.t < best.t)) {
+      best = hit;
+    }
+  };
+
+  for (const platform of data.platforms || []) {
+    const t = getSegmentRectHitT(startX, startY, endX, endY, platform, bullet.radius ?? 0);
+    if (t !== null) {
+      consider({ type: "world", target: platform, t });
+    }
+  }
+
+  for (const drone of run.hostileDrones || []) {
+    if (isEntityDisabled(drone) || drone.dead) {
+      continue;
+    }
+    const padding = (bullet.hitRadius ?? 0) + Math.max(drone.width, drone.height) * 0.22;
+    const t = getSegmentRectHitT(startX, startY, endX, endY, drone, padding);
+    if (t !== null) {
+      consider({ type: "drone", target: drone, t });
+    }
+  }
+
+  for (const enemy of run.humanoidEnemies || []) {
+    if (!isHumanoidFaceOffAvailable(enemy) || !isHumanoidInFaceOffScope(enemy)) {
+      continue;
+    }
+    const padding = (bullet.hitRadius ?? 0) + Math.max(enemy.width, enemy.height) * 0.18;
+    const t = getSegmentRectHitT(startX, startY, endX, endY, enemy, padding);
+    if (t !== null) {
+      consider({ type: "humanoid", target: enemy, t });
+    }
+  }
+
+  return best;
+}
+
+function applyPlayerBulletHit(run, data, bullet, hit) {
+  const hitX = lerp(bullet.prevX, bullet.x, hit.t);
+  const hitY = lerp(bullet.prevY, bullet.y, hit.t);
+  const aim = {
+    shotDirX: bullet.dirX,
+    shotDirY: bullet.dirY,
+  };
+
+  if (hit.type === "world") {
+    spawnDirectedParticles(run, hitX, hitY, 6, "#dce7ec", -bullet.dirX, -bullet.dirY, 220, 0.9);
+    return;
+  }
+
+  if (hit.type === "drone") {
+    const drone = hit.target;
+    const damage = bullet.droneDamage ?? bullet.damage ?? 2;
     const centerX = drone.x + drone.width * 0.5;
     const centerY = drone.y + drone.height * 0.5;
-    const distance = distanceFromPointToSegment(centerX, centerY, startX, startY, endX, endY);
-    if (distance > hitRadius + Math.max(drone.width, drone.height) * 0.35) {
-      return;
-    }
-
     drone.active = true;
     drone.hp = Math.max(0, drone.hp - damage);
     drone.hitFlash = 0.16;
-    drone.vx += aim.shotDirX * 180;
-    drone.vy += aim.shotDirY * 100;
-    spawnDirectedParticles(run, centerX, centerY, 9, "#87e1ff", aim.shotDirX, aim.shotDirY, 340, 0.76);
+    drone.vx += bullet.dirX * 180;
+    drone.vy += bullet.dirY * 100;
+    spawnDamageNumber(run, centerX, centerY - 10, damage, "#87e1ff");
+    spawnDirectedParticles(run, hitX, hitY, 11, "#87e1ff", bullet.dirX, bullet.dirY, 360, 0.8);
     if (drone.hp === 0) {
+      spawnDamageNumber(run, centerX, centerY - 28, 0, "#f5f8fb", "DOWN");
       destroyHostileDrone(run, drone);
     }
-  });
+    return;
+  }
 
-  (run.humanoidEnemies || []).forEach((enemy) => {
-    if (!isHumanoidFaceOffAvailable(enemy) || !isHumanoidInFaceOffScope(enemy)) {
-      return;
-    }
-    const padding = hitRadius + Math.max(enemy.width, enemy.height) * 0.18;
-    if (!lineIntersectsRect(startX, startY, endX, endY, enemy, padding)) {
-      return;
-    }
-
+  if (hit.type === "humanoid") {
+    const enemy = hit.target;
     if (enemy.state === "knockedDown") {
       applyKnockedDownRecoilHit(run, enemy, aim);
+      spawnDamageNumber(run, hitX, hitY - 16, bullet.humanoidDamage ?? 0, "#ffd6ba", "HIT");
       return;
     }
 
+    const damage = bullet.humanoidDamage ?? 50;
     enemy.active = true;
     enemy.state = enemy.state === "patrol" ? "combat" : enemy.state;
-    enemy.hp = Math.max(0, (enemy.hp ?? enemy.maxHp ?? 100) - humanoidDamage);
-    enemy.hitFlash = 0.18;
+    enemy.hp = Math.max(0, (enemy.hp ?? enemy.maxHp ?? 100) - damage);
+    enemy.hitFlash = 0.2;
     enemy.trigger = 0;
-    spawnDirectedParticles(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.46, 10, "#ffd6ba", aim.shotDirX, aim.shotDirY, 360, 0.72);
+    spawnDamageNumber(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.26, damage, "#ffd6ba");
+    spawnDirectedParticles(run, hitX, hitY, 13, "#ffd6ba", bullet.dirX, bullet.dirY, 390, 0.78);
     if (enemy.hp <= 0) {
       knockDownHumanoidEnemy(run, data, enemy);
+      spawnDamageNumber(run, enemy.x + enemy.width * 0.5, enemy.y - 16, 0, "#f5f8fb", "KNOCKDOWN");
+      return;
     }
-  });
+    applyHumanoidStaggerDamage(run, enemy, bullet.weaponStats || {}, aim);
+  }
+}
+
+function updateFocusState(run, state, dt) {
+  const player = run.player;
+  run.focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  run.focus = clamp(Number(run.focus ?? run.focusMax), 0, run.focusMax);
+  run.focusDepleted = Boolean(run.focusDepleted);
+  if (run.focusDepleted && run.focus >= run.focusMax * FOCUS_REENTRY_RATIO) {
+    run.focusDepleted = false;
+  }
+
+  const requested = BULLET_TIME_KEYS.some((key) => isPressed(state, key));
+  const wasActive = Boolean(run.focusActive);
+  const canStart = (
+    !run.focusDepleted &&
+    (wasActive ? run.focus > 0 : run.focus > FOCUS_MIN_TO_START)
+  );
+  const active = Boolean(requested && canStart);
+
+  if (active) {
+    run.focus = Math.max(0, run.focus - FOCUS_DRAIN_PER_SECOND * dt);
+    if (run.focus <= 0) {
+      run.focus = 0;
+      run.focusDepleted = true;
+    }
+  } else {
+    run.focus = Math.min(run.focusMax, run.focus + FOCUS_RECOVER_PER_SECOND * dt);
+  }
+
+  run.focusActive = Boolean(active && run.focus > 0);
+  player.recoilFocusActive = run.focusActive;
+  player.recoilFocusBlend = approach(
+    player.recoilFocusBlend ?? 0,
+    run.focusActive ? 1 : 0,
+    dt * (run.focusActive ? 12 : 9),
+  );
+
+  return run.focusActive;
 }
 
 function getWeaponTargetCenter(target) {
@@ -2605,6 +2891,34 @@ function getBarrierRect(barrier) {
 }
 
 function updateWeaponProjectiles(run, data, dt) {
+  run.playerBullets = (run.playerBullets || []).filter((bullet) => {
+    bullet.life -= dt;
+    if (bullet.life <= 0 || bullet.traveled >= bullet.range) {
+      return false;
+    }
+
+    const step = Math.min((bullet.speed ?? 2200) * dt, (bullet.range ?? 0) - (bullet.traveled ?? 0));
+    bullet.prevX = bullet.x;
+    bullet.prevY = bullet.y;
+    bullet.x += bullet.dirX * step;
+    bullet.y += bullet.dirY * step;
+    bullet.traveled = (bullet.traveled ?? 0) + step;
+
+    const hit = findPlayerBulletHit(run, data, bullet, bullet.prevX, bullet.prevY, bullet.x, bullet.y);
+    if (hit) {
+      applyPlayerBulletHit(run, data, bullet, hit);
+      return false;
+    }
+
+    return (
+      bullet.traveled < bullet.range &&
+      bullet.x >= -80 &&
+      bullet.y >= -80 &&
+      bullet.x <= data.world.width + 80 &&
+      bullet.y <= data.world.height + 80
+    );
+  });
+
   run.weaponBarriers = (run.weaponBarriers || []).filter((barrier) => {
     barrier.life -= dt;
     return barrier.life > 0;
@@ -2703,7 +3017,8 @@ function updateRecoilAim(run, data, state, dt) {
   const recoilDirX = -shotDirX;
   const recoilDirY = -shotDirY;
   const aiming = Boolean(state.mouse?.secondaryDown && canAimWeapon(player));
-  const active = Boolean(aiming && !player.onGround);
+  const active = Boolean(run.focusActive);
+  const edgePan = getAimCameraEdgePan(state.mouse);
   const aimFacing = Math.abs(shotDirX) > 0.08
     ? Math.sign(shotDirX)
     : (player.recoilAimFacing || player.facing || 1);
@@ -2733,13 +3048,15 @@ function updateRecoilAim(run, data, state, dt) {
     active,
     aiming,
     focusBlend: player.recoilFocusBlend,
-    canFire: aiming && canFireSelectedWeapon(run, data, player),
+    canFire: canFireSelectedWeapon(run, data, player),
     originX: origin.x,
     originY: origin.y,
     targetX: target.x,
     targetY: target.y,
     aimFacing,
     aimPitch,
+    edgePanX: edgePan.x,
+    edgePanY: edgePan.y,
     shotDirX,
     shotDirY,
     recoilDirX,
@@ -2747,32 +3064,66 @@ function updateRecoilAim(run, data, state, dt) {
   };
 }
 
-function performRecoilShot(player, run, data, config) {
-  if (!run.recoilAim?.aiming) {
+function performRecoilShot(player, run, data, config, state = null) {
+  if (!run.recoilAim || !canAimWeapon(player)) {
+    if (state) {
+      pushInputTrace(state, "shotBlock:aim", {
+        hasAim: Number(Boolean(run.recoilAim)),
+        canAim: Number(canAimWeapon(player)),
+      });
+    }
     return false;
   }
 
   const context = getSelectedArmContext(run, data);
   if ((context.arm.magazine ?? 0) <= 0) {
+    if (state) {
+      pushInputTrace(state, "shotBlock:mag", { mag: context.arm.magazine ?? 0 });
+    }
     pushNotice(run, `${context.stats.label} empty. Press R.`, 1.4);
     spawnParticles(run, run.recoilAim.originX, run.recoilAim.originY, 3, "#d5e7ef");
     return false;
   }
   if ((context.arm.reloadTimer ?? 0) > 0) {
+    if (state) {
+      pushInputTrace(state, "shotBlock:reload", { reload: (context.arm.reloadTimer ?? 0).toFixed(2) });
+    }
     pushNotice(run, `${context.stats.label} reloading`, 1.1);
     return false;
   }
   const airActionCost = player.onGround ? 0 : context.stats.airActionCost;
   if (!canAimWeapon(player) || (context.arm.fireCooldownTimer ?? 0) > 0) {
+    if (state) {
+      pushInputTrace(state, "shotBlock:cool", {
+        canAim: Number(canAimWeapon(player)),
+        cd: (context.arm.fireCooldownTimer ?? 0).toFixed(2),
+      });
+    }
     return false;
   }
   if ((player.recoilShotCharges ?? 0) < airActionCost) {
+    if (state) {
+      pushInputTrace(state, "shotBlock:charge", {
+        charges: player.recoilShotCharges ?? 0,
+        cost: airActionCost,
+      });
+    }
     pushNotice(run, "No air action charge.", 1.1);
     return false;
   }
 
   const aim = run.recoilAim;
-  const spread = context.stats.spread ?? 0;
+  if (state) {
+    pushInputTrace(state, "shotGo", {
+      aim: Number(Boolean(aim.aiming)),
+      focus: Number(Boolean(run.focusActive)),
+      mag: context.arm.magazine ?? 0,
+      cd: (context.arm.fireCooldownTimer ?? 0).toFixed(2),
+    });
+  }
+  const aimed = Boolean(aim.aiming);
+  const spreadMultiplier = (aimed ? 0.65 : 2.65) * (run.focusActive ? 0.75 : 1);
+  const spread = (context.stats.spread ?? 0) * spreadMultiplier;
   if (spread > 0.001) {
     const shotAngle = Math.atan2(aim.shotDirY, aim.shotDirX) + (Math.random() - 0.5) * spread;
     aim.shotDirX = Math.cos(shotAngle);
@@ -2838,7 +3189,7 @@ function performRecoilShot(player, run, data, config) {
     duration: 0.2,
     weaponType: context.stats.type,
   });
-  applyRecoilShotDamage(run, data, context.stats, aim);
+  spawnPlayerBullet(run, context.stats, aim);
   spawnWeaponModuleEffects(run, data, aim, context.stats);
   pushAfterimage(run, player);
   for (let index = 0; index < 4; index += 1) {
@@ -2852,8 +3203,8 @@ function performRecoilShot(player, run, data, config) {
   spawnDirectedParticles(run, aim.originX, aim.originY, 12, "#e9f7ff", aim.shotDirX, aim.shotDirY, 520, 0.68);
   spawnDirectedParticles(run, aim.originX, aim.originY, 7, "#93eaff", recoilX, recoilY, 260, 0.9);
   pushNotice(run, `${context.stats.label} fired`, 1.15);
-  run.recoilAim.active = false;
-  player.recoilFocusActive = false;
+  run.recoilAim.active = Boolean(run.focusActive);
+  player.recoilFocusActive = Boolean(run.focusActive);
   return true;
 }
 
@@ -3355,9 +3706,15 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   if (recoilShotPressed) {
-    const firedRecoilShot = performRecoilShot(player, run, data, config);
+    pushInputTrace(state, "playerShotInput", {
+      aim: Number(Boolean(run.recoilAim?.aiming)),
+      focus: Number(Boolean(run.focusActive)),
+      face: Number(Boolean(run.faceOff?.active)),
+    });
+    const firedRecoilShot = performRecoilShot(player, run, data, config, state);
     if (firedRecoilShot && state.mouse) {
       state.mouse.primaryDown = false;
+      state.mouse.primaryJustPressed = false;
     }
   }
 
@@ -4597,6 +4954,7 @@ function markHumanoidEscaped(run, enemy) {
   enemy.active = false;
   enemy.trigger = 0;
   enemy.escapeTargetX = null;
+  resetHumanoidStagger(enemy);
   pushNotice(run, "Knocked-down target escaped.");
 }
 
@@ -4643,6 +5001,11 @@ function updateHumanoidEnemies(run, data, dt) {
 
     if (enemy.state === "knockedDown") {
       updateKnockedDownHumanoid(run, data, enemy, dt);
+      continue;
+    }
+
+    updateHumanoidStaggerState(enemy, data, dt);
+    if ((enemy.staggerBreakTimer ?? 0) > 0) {
       continue;
     }
 
@@ -5041,6 +5404,19 @@ function getInteractionTargets(run, data) {
   const playerCenter = getCenter(run.player);
   const targets = [];
 
+  const faceOffEnemy = findFaceOffInteractionCandidate(run, data);
+  if (faceOffEnemy) {
+    const center = getHumanoidCenter(faceOffEnemy);
+    targets.push({
+      id: faceOffEnemy.id,
+      kind: "faceOff",
+      enemy: faceOffEnemy,
+      text: "E: Face-off",
+      x: center.x,
+      y: faceOffEnemy.y - 14,
+    });
+  }
+
   const gate = data.extractionGate;
   if (gate) {
     const gateRect = createRect(gate.x, gate.y, gate.width, gate.height);
@@ -5264,6 +5640,8 @@ function installLevelRuntimeState(run, data, savedState = null) {
   });
   run.loot = fresh.loot;
   run.enemyShots = [];
+  run.playerBullets = [];
+  run.damageNumbers = [];
   run.faceOff = fresh.faceOff;
   run.prompt = "";
   run.promptWorld = null;
@@ -5314,6 +5692,8 @@ function clearLevelTransitionEffects(run) {
     run.recoilAim.aiming = false;
   }
   run.enemyShots = [];
+  run.playerBullets = [];
+  run.damageNumbers = [];
   run.attackFx = [];
   run.recoilFx = [];
   run.weaponMissiles = [];
@@ -5396,7 +5776,7 @@ function transitionToRouteExit(state, data, routeExit) {
   saveCurrentGame(state, data);
 }
 
-function updateInteractions(state, data, interactionPressed) {
+function updateInteractions(state, data, canInteract) {
   const run = state.run;
   run.prompt = "";
   run.promptWorld = null;
@@ -5445,7 +5825,19 @@ function updateInteractions(state, data, interactionPressed) {
   run.prompt = nearest.text;
   run.promptWorld = { x: nearest.x, y: nearest.y };
 
-  if (!interactionPressed) {
+  if (!canInteract) {
+    return;
+  }
+
+  if (nearest.kind === "faceOff") {
+    if (!consumeEitherPress(state, FACE_OFF_ENTRY_KEYS)) {
+      return;
+    }
+    enterFaceOff(run, data, nearest.enemy, state);
+    return;
+  }
+
+  if (!consumeEitherPress(state, INTERACT_KEYS)) {
     return;
   }
 
@@ -5545,8 +5937,27 @@ function updateExpedition(state, data, dt) {
   } else {
     updateRecoilAim(run, data, state, dt);
   }
+  const queuedRecoilShotPressed = !lootWasActive && Boolean(state.mouse?.primaryJustPressed);
+  const reserveRecoilShotForWeapon = queuedRecoilShotPressed && Boolean(run.recoilAim?.aiming);
+  if (queuedRecoilShotPressed || state.mouse?.secondaryDown || run.recoilAim?.aiming || run.focusActive) {
+    pushInputTrace(state, "preFace", {
+      pj: Number(Boolean(state.mouse?.primaryJustPressed)),
+      sec: Number(Boolean(state.mouse?.secondaryDown)),
+      aim: Number(Boolean(run.recoilAim?.aiming)),
+      focus: Number(Boolean(run.focusActive)),
+      face: Number(Boolean(run.faceOff?.active)),
+      reserve: Number(Boolean(reserveRecoilShotForWeapon)),
+    });
+  }
+  if (reserveRecoilShotForWeapon && state.mouse) {
+    state.mouse.primaryJustPressed = false;
+  }
   const faceOffTimeScale = clamp(getFaceOffConfig(data).timeScale ?? 0.08, 0.02, 0.25);
-  if ((run.faceOff?.active || !lootWasActive) && updateFaceOff(state, data, dt, dt * faceOffTimeScale)) {
+  if (
+    !reserveRecoilShotForWeapon &&
+    (run.faceOff?.active || !lootWasActive) &&
+    updateFaceOff(state, data, dt, dt * faceOffTimeScale)
+  ) {
     if (run.recoilAim) {
       run.recoilAim.active = true;
     }
@@ -5558,29 +5969,35 @@ function updateExpedition(state, data, dt) {
     setStatus(state, run.faceOff?.message ? `Face-off: ${run.faceOff.message}` : "Face-off");
     return;
   }
-  const focusTimeScale = run.recoilAim?.active
-    ? clamp(data.player.movement.recoilShotFocusTimeScale ?? 0.22, 0.05, 1)
+  const focusActive = updateFocusState(run, state, dt);
+  const focusTimeScale = focusActive
+    ? clamp(data.player.movement.focusTimeScale ?? FOCUS_TIME_SCALE, 0.05, 1)
     : 1;
   const simDt = dt * focusTimeScale;
-  let interactionPressed = consumeEitherPress(state, INTERACT_KEYS);
   let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
-  const recoilShotPressed = !lootWasActive && Boolean(state.mouse?.primaryJustPressed);
+  const recoilShotPressed = reserveRecoilShotForWeapon || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
+  if (recoilShotPressed || queuedRecoilShotPressed) {
+    pushInputTrace(state, "shotQueued", {
+      shot: Number(Boolean(recoilShotPressed)),
+      reserve: Number(Boolean(reserveRecoilShotForWeapon)),
+      pj: Number(Boolean(state.mouse?.primaryJustPressed)),
+    });
+  }
   if (state.mouse) {
     state.mouse.primaryJustPressed = false;
+    state.mouse.secondaryJustPressed = false;
   }
 
   const lootActive = lootWasActive ? updateLootInteraction(state, data, simDt) : false;
   if (lootWasActive) {
-    interactionPressed = false;
     attackPressed = false;
   } else {
     updatePlayer(run, data, state, simDt, {
       attackPressed,
-      interactionPressed,
+      interactionPressed: false,
       recoilShotPressed,
     });
     if (run.player.movementState === MOVEMENT_STATES.DASH) {
-      interactionPressed = false;
       attackPressed = false;
     }
   }
@@ -5597,7 +6014,7 @@ function updateExpedition(state, data, dt) {
     run.prompt = "";
     run.promptWorld = null;
   } else {
-    updateInteractions(state, data, interactionPressed && run.player.canInteract);
+    updateInteractions(state, data, run.player.canInteract);
   }
   if (state.scene !== SCENES.EXPEDITION) {
     return;

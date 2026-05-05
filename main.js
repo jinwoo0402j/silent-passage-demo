@@ -1,10 +1,10 @@
-import { GAME_DATA } from "./level-data.js?v=20260501-run-start-v1";
+import { GAME_DATA } from "./level-data.js?v=20260505-faceoff-e-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260503-level-manifest-v1";
+} from "./level-store.js?v=20260505-faceoff-e-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,10 +13,10 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260501-run-start-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260503-level-manifest-v1";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260501-run-start-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260503-level-manifest-v1";
+import { renderGame } from "./render.js?v=20260505-player-bullets-v1";
+import { saveCurrentGame } from "./save-game.js?v=20260505-reflex-focus-v3";
+import { SCENES, createInitialState, createRunState } from "./state.js?v=20260505-player-bullets-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260505-player-bullets-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -53,6 +53,68 @@ Object.assign(faceOffDebugPanel.style, {
   textShadow: "0 1px 2px rgba(0,0,0,0.75)",
 });
 document.body.appendChild(faceOffDebugPanel);
+const inputTraceDownloadButton = document.createElement("button");
+inputTraceDownloadButton.type = "button";
+inputTraceDownloadButton.textContent = "Input Log";
+inputTraceDownloadButton.title = "Download input trace log";
+Object.assign(inputTraceDownloadButton.style, {
+  position: "fixed",
+  left: "10px",
+  bottom: "calc(46vh + 28px)",
+  zIndex: "100000",
+  display: "none",
+  padding: "8px 10px",
+  border: "1px solid rgba(147,234,255,0.5)",
+  borderRadius: "6px",
+  color: "#dff7ff",
+  background: "rgba(0, 0, 0, 0.78)",
+  font: "700 12px/1 Consolas, 'Cascadia Mono', monospace",
+  cursor: "pointer",
+});
+document.body.appendChild(inputTraceDownloadButton);
+const inputTracePanel = document.createElement("section");
+inputTracePanel.setAttribute("aria-label", "Input trace output");
+Object.assign(inputTracePanel.style, {
+  position: "fixed",
+  inset: "48px 48px auto auto",
+  zIndex: "100001",
+  display: "none",
+  width: "min(720px, calc(100vw - 96px))",
+  maxHeight: "calc(100vh - 96px)",
+  padding: "12px",
+  border: "1px solid rgba(147,234,255,0.52)",
+  borderRadius: "8px",
+  background: "rgba(0,0,0,0.88)",
+  boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+});
+const inputTraceTextArea = document.createElement("textarea");
+inputTraceTextArea.readOnly = true;
+Object.assign(inputTraceTextArea.style, {
+  width: "100%",
+  height: "min(520px, calc(100vh - 174px))",
+  resize: "vertical",
+  margin: "0 0 10px",
+  padding: "10px",
+  border: "1px solid rgba(255,255,255,0.22)",
+  borderRadius: "6px",
+  color: "#dff7ff",
+  background: "rgba(4,10,16,0.94)",
+  font: "12px/1.4 Consolas, 'Cascadia Mono', monospace",
+});
+const inputTraceCloseButton = document.createElement("button");
+inputTraceCloseButton.type = "button";
+inputTraceCloseButton.textContent = "Close";
+Object.assign(inputTraceCloseButton.style, {
+  padding: "8px 10px",
+  border: "1px solid rgba(255,255,255,0.28)",
+  borderRadius: "6px",
+  color: "#dff7ff",
+  background: "rgba(15,52,70,0.72)",
+  font: "700 12px/1 Consolas, 'Cascadia Mono', monospace",
+  cursor: "pointer",
+});
+inputTracePanel.append(inputTraceTextArea, inputTraceCloseButton);
+document.body.appendChild(inputTracePanel);
 const CROW_TUNING_FIELDS = [
   { key: "width", label: "Crow Width", min: 36, max: 320, step: 1 },
   { key: "height", label: "Crow Height", min: 24, max: 220, step: 1 },
@@ -97,11 +159,78 @@ const state = createInitialState(runtimeData);
 window.__faceOffState = state;
 window.__faceOffData = runtimeData;
 bindInput(state);
+inputTraceDownloadButton.addEventListener("click", () => {
+  downloadInputTrace(state);
+});
+inputTraceCloseButton.addEventListener("click", () => {
+  inputTracePanel.style.display = "none";
+});
 
 let lastFrame = performance.now();
 
 function formatNumber(value, digits = 3) {
   return Number.isFinite(value) ? Number(value).toFixed(digits) : String(value);
+}
+
+function pushInputTrace(currentState, label, details = {}) {
+  const debug = currentState.debug || (currentState.debug = {});
+  const trace = Array.isArray(debug.inputTrace) ? debug.inputTrace : [];
+  const frame = Number.isFinite(currentState.debugFrame) ? currentState.debugFrame : 0;
+  const fields = Object.entries(details)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(" ");
+  trace.push(`#${frame} ${label}${fields ? ` ${fields}` : ""}`);
+  debug.inputTrace = trace.slice(-500);
+  window.__inputTraceText = debug.inputTrace.join("\n");
+}
+
+function getInputTraceDownloadText(currentState) {
+  const run = currentState.run;
+  const mouse = currentState.mouse || {};
+  const aim = run?.recoilAim || {};
+  const lines = [
+    "FACE-OFF INPUT TRACE",
+    `generatedAt=${new Date().toISOString()}`,
+    `frame=${currentState.debugFrame ?? 0}`,
+    `scene=${currentState.scene}`,
+    `status=${currentState.statusText ?? ""}`,
+    `mouse primary=${Boolean(mouse.primaryDown)} justPrimary=${Boolean(mouse.primaryJustPressed)} secondary=${Boolean(mouse.secondaryDown)} justSecondary=${Boolean(mouse.secondaryJustPressed)}`,
+    `aim active=${Boolean(aim.active)} aiming=${Boolean(aim.aiming)} focus=${Boolean(run?.focusActive)} faceOff=${Boolean(run?.faceOff?.active)}`,
+    "",
+    ...(currentState.debug?.inputTrace || []),
+  ];
+  return lines.join("\n");
+}
+
+function downloadInputTrace(currentState) {
+  const text = getInputTraceDownloadText(currentState);
+  window.__inputTraceText = text;
+  try {
+    localStorage.setItem("face-off-input-trace", text);
+  } catch {
+    // Best-effort debug capture.
+  }
+  inputTraceTextArea.value = text;
+  inputTracePanel.style.display = "block";
+  inputTraceTextArea.focus();
+  inputTraceTextArea.select();
+  inputTraceDownloadButton.textContent = "Log Ready";
+  setTimeout(() => {
+    inputTraceDownloadButton.textContent = "Input Log";
+  }, 1400);
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  link.href = url;
+  link.download = `face-off-input-trace-${stamp}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function updateFaceOffDebugPanel(currentState, now, error = null) {
@@ -115,6 +244,7 @@ function updateFaceOffDebugPanel(currentState, now, error = null) {
     currentState.debug?.active
   );
   faceOffDebugPanel.hidden = !shouldShow;
+  inputTraceDownloadButton.style.display = shouldShow ? "block" : "none";
   if (!shouldShow) {
     return;
   }
@@ -138,6 +268,8 @@ function updateFaceOffDebugPanel(currentState, now, error = null) {
     `aftermath=${faceOffEnemy?.state ?? "-"} exhaustion=${faceOffEnemy?.exhaustionHits ?? 0}/${faceOffEnemy?.exhaustionLimit ?? 2} hover=${faceOff?.hoverPart ?? "-"} selected=${faceOff?.selectedPart ?? "-"}`,
     `loot=${Boolean(run?.loot?.active)} liveEdit=${Boolean(currentState.liveEdit?.active)} recoilAim=${Boolean(run?.recoilAim?.active)} secondary=${Boolean(currentState.mouse?.secondaryDown)}`,
     `mouse=${formatNumber(currentState.mouse?.screenX ?? 0, 1)},${formatNumber(currentState.mouse?.screenY ?? 0, 1)} primary=${Boolean(currentState.mouse?.primaryDown)} justPrimary=${Boolean(currentState.mouse?.primaryJustPressed)}`,
+    "INPUT TRACE RECENT",
+    ...(currentState.debug?.inputTrace || []).slice(-32),
     `pressed=[${pressed}] just=[${justPressed}]`,
     error ? `ERROR=${error?.stack || error?.message || String(error)}` : "",
   ].filter(Boolean).join("\n");
@@ -640,12 +772,23 @@ function bindUi(currentDom, currentState, data) {
       currentState.mouse.primaryJustPressed = true;
     }
     currentState.mouse.primaryDown = true;
+    pushInputTrace(currentState, "markP", {
+      p: Number(currentState.mouse.primaryDown),
+      pj: Number(currentState.mouse.primaryJustPressed),
+      s: Number(currentState.mouse.secondaryDown),
+    });
   };
   const markSecondaryMouseDown = () => {
     if (!currentState.mouse.secondaryDown) {
       currentState.mouse.secondaryJustPressed = true;
     }
     currentState.mouse.secondaryDown = true;
+    pushInputTrace(currentState, "markS", {
+      p: Number(currentState.mouse.primaryDown),
+      pj: Number(currentState.mouse.primaryJustPressed),
+      s: Number(currentState.mouse.secondaryDown),
+      sj: Number(currentState.mouse.secondaryJustPressed),
+    });
   };
   const clearMouseButtons = () => {
     currentState.mouse.primaryDown = false;
@@ -655,18 +798,61 @@ function bindUi(currentDom, currentState, data) {
     stopMapOverlayDrag();
     releaseAimPointerLock();
   };
+  const clearPrimaryMouseButton = () => {
+    currentState.mouse.primaryDown = false;
+  };
+  const releasePrimaryMouseButton = () => {
+    currentState.mouse.primaryDown = false;
+  };
+  const releaseMouseButtons = () => {
+    currentState.mouse.primaryDown = false;
+    currentState.mouse.secondaryDown = false;
+    currentState.mouse.secondaryJustPressed = false;
+    stopMapOverlayDrag();
+    releaseAimPointerLock();
+  };
   const syncMouseButtonsFromEvent = (event) => {
     if (typeof event.buttons !== "number") {
       return;
     }
     if (event.buttons === 0) {
-      clearMouseButtons();
+      if (currentState.mouse.secondaryDown && event.button !== 2) {
+        clearPrimaryMouseButton();
+        pushInputTrace(currentState, "sync0KeepS", {
+          b: event.button,
+          bs: event.buttons,
+          pj: Number(currentState.mouse.primaryJustPressed),
+        });
+        return;
+      }
+      releaseMouseButtons();
+      pushInputTrace(currentState, "sync0Release", {
+        b: event.button,
+        bs: event.buttons,
+        pj: Number(currentState.mouse.primaryJustPressed),
+      });
       return;
     }
-    if ((event.buttons & 1) !== 0) {
+    const primaryPressed = (event.buttons & 1) !== 0;
+    const secondaryPressed = (event.buttons & 2) !== 0;
+    if (primaryPressed && !currentState.mouse.primaryDown) {
+      pushInputTrace(currentState, "syncPrimaryEdge", {
+        b: event.button,
+        bs: event.buttons,
+        pj: Number(currentState.mouse.primaryJustPressed),
+        s: Number(currentState.mouse.secondaryDown),
+      });
       markPrimaryMouseDown();
+    } else if (!primaryPressed && currentState.mouse.primaryDown) {
+      pushInputTrace(currentState, "syncPrimaryRelease", {
+        b: event.button,
+        bs: event.buttons,
+        pj: Number(currentState.mouse.primaryJustPressed),
+        s: Number(currentState.mouse.secondaryDown),
+      });
+      releasePrimaryMouseButton();
     }
-    if ((event.buttons & 2) !== 0) {
+    if (secondaryPressed) {
       markSecondaryMouseDown();
     }
   };
@@ -684,6 +870,15 @@ function bindUi(currentDom, currentState, data) {
     const buttons = typeof event.buttons === "number" ? event.buttons : 0;
     const secondaryPressed = event.button === 2 || (buttons & 2) !== 0;
     const primaryPressed = event.button === 0 || (buttons & 1) !== 0;
+    pushInputTrace(currentState, `down:${event.type}`, {
+      b: event.button,
+      bs: buttons,
+      pp: Number(primaryPressed),
+      sp: Number(secondaryPressed),
+      p: Number(currentState.mouse.primaryDown),
+      pj: Number(currentState.mouse.primaryJustPressed),
+      s: Number(currentState.mouse.secondaryDown),
+    });
     if (!primaryPressed && !secondaryPressed) {
       return false;
     }
@@ -1004,16 +1199,20 @@ function bindUi(currentDom, currentState, data) {
       stopMapOverlayDrag();
     }
     const primaryReleaseDuringFocus = event.button === 0 && currentState.mouse.secondaryDown;
-    if (primaryReleaseDuringFocus && !currentState.mouse.primaryDown) {
-      markPrimaryMouseDown();
-    }
+    pushInputTrace(currentState, `up:${event.type}`, {
+      b: event.button,
+      bs: typeof event.buttons === "number" ? event.buttons : "?",
+      prf: Number(primaryReleaseDuringFocus),
+      pj: Number(currentState.mouse.primaryJustPressed),
+      s: Number(currentState.mouse.secondaryDown),
+    });
     if (event.buttons === 0 && !primaryReleaseDuringFocus) {
-      clearMouseButtons();
+      releaseMouseButtons();
     } else if (event.buttons !== 0) {
       syncMouseButtonsFromEvent(event);
     }
     if (event.button === 0) {
-      currentState.mouse.primaryDown = false;
+      releasePrimaryMouseButton();
     }
     if (event.button === 2) {
       currentState.mouse.secondaryDown = false;
@@ -1036,18 +1235,22 @@ function bindUi(currentDom, currentState, data) {
       stopMapOverlayDrag();
     }
     const primaryReleaseDuringFocus = event.button === 0 && currentState.mouse.secondaryDown;
-    if (primaryReleaseDuringFocus && !currentState.mouse.primaryDown) {
-      markPrimaryMouseDown();
-    }
+    pushInputTrace(currentState, `up:${event.type}`, {
+      b: event.button,
+      bs: typeof event.buttons === "number" ? event.buttons : "?",
+      prf: Number(primaryReleaseDuringFocus),
+      pj: Number(currentState.mouse.primaryJustPressed),
+      s: Number(currentState.mouse.secondaryDown),
+    });
     if (event.buttons === 0 && !primaryReleaseDuringFocus) {
-      clearMouseButtons();
+      releaseMouseButtons();
       return;
     }
     if (event.buttons !== 0) {
       syncMouseButtonsFromEvent(event);
     }
     if (event.button === 0) {
-      currentState.mouse.primaryDown = false;
+      releasePrimaryMouseButton();
     }
     if (event.button === 2) {
       currentState.mouse.secondaryDown = false;

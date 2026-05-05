@@ -234,7 +234,12 @@ export const GAME_DATA = {
       "braceZoom": 0.36,
       "directionLerp": 2.5,
       "focusLerp": 4,
-      "zoomLerp": 1.5
+      "zoomLerp": 1.5,
+      "mousePanAlways": true,
+      "aimPanMaxX": 0.36,
+      "aimPanMaxY": 0.27,
+      "aimPanLerp": 8.25,
+      "aimPanReturnLerp": 7.5
     },
     "duskAt": 9999,
     "nightAt": 19999,
@@ -361,6 +366,7 @@ export const GAME_DATA = {
       "range": 540,
       "hitRadius": 44,
       "knockdownPower": 1.15,
+      "staggerDamage": 60,
       "airActionCost": 1
     },
     "pistol-arm-a": {
@@ -379,6 +385,7 @@ export const GAME_DATA = {
       "range": 620,
       "hitRadius": 22,
       "knockdownPower": 0.45,
+      "staggerDamage": 20,
       "airActionCost": 0
     }
   },
@@ -429,8 +436,7 @@ export const GAME_DATA = {
       "label": "Knockdown Booster",
       "shortLabel": "KDN",
       "effects": {
-        "knockdownMultiplier": 1.22,
-        "humanoidDamageBonus": 4
+        "knockdownMultiplier": 1.22
       }
     }
   },
@@ -449,7 +455,7 @@ export const GAME_DATA = {
       "right": {
         "armId": "pistol-arm-a",
         "magazine": null,
-        "modules": ["magazine-extender", "homing-micro-missile", "knockdown-booster"]
+        "modules": ["magazine-extender", "knockdown-booster"]
       }
     }
   },
@@ -807,13 +813,20 @@ export const GAME_DATA = {
       "y": 1800,
       "width": 58,
       "height": 104,
-      "maxHp": 100,
+      "maxHp": 160,
       "disableThreshold": 100,
       "damage": 14,
       "fireRange": 620,
       "triggerRate": 1,
       "timelineShotDamage": 12,
       "knockdownEnabled": true,
+      "staggerMax": 100,
+      "staggerDecayDelay": 1,
+      "staggerDecayRate": 35,
+      "staggerBreakDuration": 0.42,
+      "staggerAttackLockDuration": 0.65,
+      "staggerKnockbackSpeed": 280,
+      "staggerKnockbackFriction": 860,
       "crawlSpeed": 42,
       "escapeDistance": 360,
       "exhaustionLimit": 2,
