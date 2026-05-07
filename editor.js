@@ -32,6 +32,8 @@ const TOOL_IDS = {
   ENTRANCE: "entrance",
   ROUTE_EXIT: "routeExit",
   GATE: "gate",
+  ENEMY: "enemy",
+  DRONE: "drone",
 };
 
 const TOOL_SHORTCUTS = {
@@ -54,6 +56,8 @@ const TOOL_SHORTCUTS = {
   Numpad7: TOOL_IDS.ROUTE_EXIT,
   Digit8: TOOL_IDS.GATE,
   Numpad8: TOOL_IDS.GATE,
+  KeyH: TOOL_IDS.ENEMY,
+  KeyO: TOOL_IDS.DRONE,
 };
 
 const TOOL_SHORTCUT_LABELS = {
@@ -67,6 +71,8 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.ENTRANCE]: "6",
   [TOOL_IDS.ROUTE_EXIT]: "7",
   [TOOL_IDS.GATE]: "8",
+  [TOOL_IDS.ENEMY]: "H",
+  [TOOL_IDS.DRONE]: "O",
 };
 
 const TOOL_HINTS = {
@@ -84,6 +90,9 @@ TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
 
 TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
 TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
+
+TOOL_HINTS[TOOL_IDS.ENEMY] = "Click to place a humanoid enemy";
+TOOL_HINTS[TOOL_IDS.DRONE] = "Click to place a hostile drone";
 
 const PLAYER_RENDER_GROUPS = [
   ["idle", "Idle"],
@@ -516,6 +525,10 @@ const COLORS = {
   spawn: "rgba(147, 234, 255, 0.9)",
   sign: "rgba(239, 248, 252, 0.94)",
   lantern: "rgba(231, 244, 126, 0.88)",
+  enemy: "rgba(255, 125, 147, 0.9)",
+  enemyFill: "rgba(255, 125, 147, 0.13)",
+  drone: "rgba(255, 190, 102, 0.9)",
+  droneFill: "rgba(255, 190, 102, 0.13)",
 };
 
 const IMAGE_CACHE = new Map();
@@ -817,6 +830,8 @@ function prepareEditorData(data) {
   data.braceWalls = data.braceWalls || [];
   data.entrances = data.entrances || [];
   data.routeExits = data.routeExits || [];
+  data.humanoidEnemies = data.humanoidEnemies || [];
+  data.hostileDrones = data.hostileDrones || [];
   ensureEditorMapRooms(data);
   if (data.entrances.length === 0) {
     data.entrances.push({
@@ -1319,6 +1334,14 @@ function getPropRect(prop) {
   };
 }
 
+function getEnemyRect(enemy) {
+  return enemy;
+}
+
+function getDroneRect(drone) {
+  return drone;
+}
+
 function getBraceWallRect(wall) {
   return wall;
 }
@@ -1337,6 +1360,12 @@ function getSelectedEntity(editor) {
 
   if (editor.selected.kind === "prop") {
     return editor.data.props[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "enemy") {
+    return editor.data.humanoidEnemies[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "drone") {
+    return editor.data.hostileDrones[editor.selected.index] || null;
   }
   if (editor.selected.kind === "spawn") {
     return editor.data.player.spawn;
@@ -1443,6 +1472,14 @@ function getSelectionRect(editor, selection = editor.selected) {
     const prop = editor.data.props[selection.index];
     return prop ? getPropRect(prop) : null;
   }
+  if (selection.kind === "enemy") {
+    const enemy = editor.data.humanoidEnemies[selection.index];
+    return enemy ? getEnemyRect(enemy) : null;
+  }
+  if (selection.kind === "drone") {
+    const drone = editor.data.hostileDrones[selection.index];
+    return drone ? getDroneRect(drone) : null;
+  }
   if (selection.kind === "spawn") {
     return getSpawnRect(editor.data);
   }
@@ -1480,6 +1517,14 @@ function getSelectionOrigin(editor, selection = editor.selected) {
   }
   if (selection.kind === "prop") {
     const entity = editor.data.props[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "enemy") {
+    const entity = editor.data.humanoidEnemies[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "drone") {
+    const entity = editor.data.hostileDrones[selection.index];
     return entity ? { x: entity.x, y: entity.y } : null;
   }
   if (selection.kind === "spawn") {
@@ -1533,6 +1578,16 @@ function describeSelection(editor) {
 
   if (!editor.selected) {
     return `선택 없음 · 스냅 ${editor.snap}`;
+  }
+
+  if (editor.selected.kind === "enemy") {
+    const enemy = editor.data.humanoidEnemies[editor.selected.index];
+    return enemy ? `Enemy ${editor.selected.index + 1} - ${enemy.label || enemy.id || "humanoid"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "drone") {
+    const drone = editor.data.hostileDrones[editor.selected.index];
+    return drone ? `Drone ${editor.selected.index + 1} - ${drone.id || "hostile drone"}` : "No selection";
   }
 
   if (isMultiSelection(editor.selected)) {
@@ -1594,6 +1649,8 @@ function canDeleteSelection(selection) {
     item.kind === "platform"
     || item.kind === "braceWall"
     || item.kind === "prop"
+    || item.kind === "enemy"
+    || item.kind === "drone"
     || item.kind === "routeExit"
     || (item.kind === "entrance" && item.index > 0)
   ));
@@ -1690,6 +1747,32 @@ function renderSelectionFields(editor, dom) {
     if (entity.kind === "sign") {
       addText("문구", "text", entity.text || "");
     }
+  } else if (editor.selected.kind === "enemy") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 12 });
+    addNumber("Height", "height", entity.height, { min: 12 });
+    addNumber("HP", "maxHp", entity.maxHp ?? 140, { min: 1 });
+    addNumber("Damage", "damage", entity.damage ?? 12, { min: 0 });
+    addNumber("Fire Range", "fireRange", entity.fireRange ?? 760, { min: 0 });
+    addNumber("Patrol L", "patrol.left", entity.patrol?.left ?? entity.x);
+    addNumber("Patrol R", "patrol.right", entity.patrol?.right ?? entity.x + 220);
+  } else if (editor.selected.kind === "drone") {
+    addText("ID", "id", entity.id || "");
+    addSelect("Visual", "visualKind", entity.visualKind || "crow", [
+      { value: "crow", label: "Crow" },
+    ]);
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 12 });
+    addNumber("Height", "height", entity.height, { min: 12 });
+    addNumber("HP", "maxHp", entity.maxHp ?? 2, { min: 1 });
+    addNumber("Damage", "damage", entity.damage ?? 10, { min: 0 });
+    addNumber("Fire Range", "fireRange", entity.fireRange ?? 760, { min: 0 });
+    addNumber("Patrol L", "patrol.left", entity.patrol?.left ?? entity.x);
+    addNumber("Patrol R", "patrol.right", entity.patrol?.right ?? entity.x + 360);
   } else if (editor.selected.kind === "spawn") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -1937,6 +2020,18 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.humanoidEnemies || []).forEach((enemy, index) => {
+    if (rectsIntersect(rect, getEnemyRect(enemy))) {
+      items.push({ kind: "enemy", index });
+    }
+  });
+
+  (editor.data.hostileDrones || []).forEach((drone, index) => {
+    if (rectsIntersect(rect, getDroneRect(drone))) {
+      items.push({ kind: "drone", index });
+    }
+  });
+
   editor.data.platforms.forEach((platform, index) => {
     if (rectsIntersect(rect, platform)) {
       items.push({ kind: "platform", index });
@@ -1969,6 +2064,18 @@ function hitTest(editor, point) {
   for (let index = editor.data.props.length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, getPropRect(editor.data.props[index]))) {
       return { kind: "prop", index };
+    }
+  }
+
+  for (let index = (editor.data.hostileDrones || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getDroneRect(editor.data.hostileDrones[index]))) {
+      return { kind: "drone", index };
+    }
+  }
+
+  for (let index = (editor.data.humanoidEnemies || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getEnemyRect(editor.data.humanoidEnemies[index]))) {
+      return { kind: "enemy", index };
     }
   }
 
@@ -2017,6 +2124,12 @@ function deleteSelection(editor, dom) {
   const propIndexes = new Set(
     items.filter((item) => item.kind === "prop").map((item) => item.index),
   );
+  const enemyIndexes = new Set(
+    items.filter((item) => item.kind === "enemy").map((item) => item.index),
+  );
+  const droneIndexes = new Set(
+    items.filter((item) => item.kind === "drone").map((item) => item.index),
+  );
   const routeExitIndexes = new Set(
     items.filter((item) => item.kind === "routeExit").map((item) => item.index),
   );
@@ -2028,6 +2141,8 @@ function deleteSelection(editor, dom) {
     platformIndexes.size === 0
     && braceWallIndexes.size === 0
     && propIndexes.size === 0
+    && enemyIndexes.size === 0
+    && droneIndexes.size === 0
     && routeExitIndexes.size === 0
     && entranceIndexes.size === 0
   ) {
@@ -2039,6 +2154,8 @@ function deleteSelection(editor, dom) {
   editor.data.platforms = editor.data.platforms.filter((_, index) => !platformIndexes.has(index));
   editor.data.braceWalls = editor.data.braceWalls.filter((_, index) => !braceWallIndexes.has(index));
   editor.data.props = editor.data.props.filter((_, index) => !propIndexes.has(index));
+  editor.data.humanoidEnemies = editor.data.humanoidEnemies.filter((_, index) => !enemyIndexes.has(index));
+  editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !droneIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
   editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
 
@@ -2124,6 +2241,7 @@ function applySelectionField(editor, dom, field, value) {
     || field === "prompt"
     || field === "id"
     || field === "label"
+    || field === "visualKind"
     || field === "toLevelId"
     || field === "toEntranceId"
   ) {
@@ -2159,6 +2277,26 @@ function applySelectionField(editor, dom, field, value) {
 
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
+    return;
+  }
+
+  if (field.includes(".")) {
+    const [group, key] = field.split(".");
+    if (!group || !key) {
+      return;
+    }
+    const currentGroup = entity[group] && typeof entity[group] === "object" ? entity[group] : {};
+    if (currentGroup[key] === numericValue) {
+      return;
+    }
+    pushUndo(editor);
+    entity[group] = {
+      ...currentGroup,
+      [key]: numericValue,
+    };
+    renderSelectionFields(editor, dom);
+    markDirty(editor, dom);
+    queueRender(editor, dom);
     return;
   }
 
@@ -2266,6 +2404,38 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     }
     entity.x = snappedX;
     entity.y = snappedY;
+  } else if (selection.kind === "enemy") {
+    const entity = editor.data.humanoidEnemies[selection.index];
+    if (!entity) {
+      return;
+    }
+    const deltaX = snappedX - entity.x;
+    entity.x = snappedX;
+    entity.y = snappedY;
+    if (entity.patrol) {
+      if (Number.isFinite(entity.patrol.left)) {
+        entity.patrol.left += deltaX;
+      }
+      if (Number.isFinite(entity.patrol.right)) {
+        entity.patrol.right += deltaX;
+      }
+    }
+  } else if (selection.kind === "drone") {
+    const entity = editor.data.hostileDrones[selection.index];
+    if (!entity) {
+      return;
+    }
+    const deltaX = snappedX - entity.x;
+    entity.x = snappedX;
+    entity.y = snappedY;
+    if (entity.patrol) {
+      if (Number.isFinite(entity.patrol.left)) {
+        entity.patrol.left += deltaX;
+      }
+      if (Number.isFinite(entity.patrol.right)) {
+        entity.patrol.right += deltaX;
+      }
+    }
   } else if (selection.kind === "spawn") {
     editor.data.player.spawn.x = snappedX;
     editor.data.player.spawn.y = snappedY;
@@ -2453,6 +2623,98 @@ function placeRouteExitAt(editor, dom, point) {
   markDirty(editor, dom);
 }
 
+function placeEnemyAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 58;
+  const height = 104;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const enemy = {
+    id: `enemy-${Date.now()}`,
+    type: "humanoidEnemy",
+    label: "Enemy",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    maxHp: 140,
+    damage: 12,
+    fireRange: 760,
+    triggerRate: 10,
+    rangedProjectile: true,
+    projectileDamage: 12,
+    projectileSpeed: 820,
+    projectileRadius: 8,
+    projectileLife: 2.1,
+    projectileColor: "#ffbe66",
+    knockdownEnabled: true,
+    patrol: {
+      left: snapped.x - 110,
+      right: snapped.x + 220,
+    },
+  };
+  editor.data.humanoidEnemies.push(enemy);
+  setSelection(editor, dom, { kind: "enemy", index: editor.data.humanoidEnemies.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeDroneAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 144;
+  const height = 92;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height / 2,
+  }, editor.snap);
+  const drone = {
+    id: `crow-${Date.now()}`,
+    type: "hostileDrone",
+    visualKind: "crow",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    maxHp: 2,
+    damage: 10,
+    diveDamage: 12,
+    speed: 205,
+    acceleration: 6.4,
+    activationRadius: 920,
+    preferredRange: 285,
+    hoverOffsetY: 138,
+    fireRange: 760,
+    initialCooldown: 2.4,
+    fireCooldown: 9,
+    telegraphDuration: 0.58,
+    beamLife: 0.12,
+    beamLength: 860,
+    beamRadius: 18,
+    diveSpeed: 1040,
+    diveMaxDuration: 0.68,
+    diveRecoverTime: 0.36,
+    flapRate: 14,
+    flapAmplitude: 18,
+    solidInsetX: 8,
+    solidInsetY: 7,
+    damageInsetX: 5,
+    damageInsetY: 5,
+    bobSeed: Math.round((Date.now() % 1000) / 100) / 10,
+    diveAttack: true,
+    solid: true,
+    physicsSolid: true,
+    braceTarget: true,
+    patrol: {
+      left: snapped.x - 180,
+      right: snapped.x + 360,
+    },
+  };
+  editor.data.hostileDrones.push(drone);
+  setSelection(editor, dom, { kind: "drone", index: editor.data.hostileDrones.length - 1 });
+  markDirty(editor, dom);
+}
+
 function placeGateAt(editor, dom, point) {
   pushUndo(editor);
   const gate = editor.data.extractionGate || {
@@ -2583,6 +2845,18 @@ function handlePointerDown(editor, dom, event) {
 
   if (editor.tool === TOOL_IDS.ROUTE_EXIT) {
     placeRouteExitAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.ENEMY) {
+    placeEnemyAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.DRONE) {
+    placeDroneAt(editor, dom, world);
     queueRender(editor, dom);
     return;
   }
@@ -3554,6 +3828,75 @@ function drawProps(ctx, editor) {
   });
 }
 
+function drawPatrolRange(ctx, editor, entity, y, color) {
+  if (!entity.patrol || !Number.isFinite(entity.patrol.left) || !Number.isFinite(entity.patrol.right)) {
+    return;
+  }
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5 / editor.view.zoom;
+  ctx.setLineDash([10 / editor.view.zoom, 8 / editor.view.zoom]);
+  ctx.beginPath();
+  ctx.moveTo(entity.patrol.left, y);
+  ctx.lineTo(entity.patrol.right, y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(entity.patrol.left, y, 4 / editor.view.zoom, 0, Math.PI * 2);
+  ctx.arc(entity.patrol.right, y, 4 / editor.view.zoom, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHumanoidEnemies(ctx, editor) {
+  (editor.data.humanoidEnemies || []).forEach((enemy, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "enemy", index });
+    drawPatrolRange(ctx, editor, enemy, enemy.y + enemy.height + 12 / editor.view.zoom, "rgba(255, 125, 147, 0.48)");
+    ctx.fillStyle = COLORS.enemyFill;
+    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.enemy;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(enemy.x, enemy.y, enemy.width, enemy.height);
+    ctx.fillStyle = COLORS.enemy;
+    ctx.beginPath();
+    ctx.arc(enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.22, Math.max(5, enemy.width * 0.18), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(enemy.label || enemy.id || "Enemy", enemy.x + enemy.width / 2, enemy.y - 10 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+}
+
+function drawHostileDrones(ctx, editor) {
+  (editor.data.hostileDrones || []).forEach((drone, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "drone", index });
+    drawPatrolRange(ctx, editor, drone, drone.y + drone.height + 12 / editor.view.zoom, "rgba(255, 190, 102, 0.48)");
+    ctx.fillStyle = COLORS.droneFill;
+    ctx.fillRect(drone.x, drone.y, drone.width, drone.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.drone;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(drone.x, drone.y, drone.width, drone.height);
+    ctx.fillStyle = COLORS.drone;
+    ctx.beginPath();
+    ctx.ellipse(
+      drone.x + drone.width * 0.5,
+      drone.y + drone.height * 0.5,
+      Math.max(8, drone.width * 0.28),
+      Math.max(6, drone.height * 0.22),
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(drone.id || "Drone", drone.x + drone.width / 2, drone.y - 10 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+}
+
 function getPlayerPreviewFrame(editor) {
   const pose = editor.previewPose;
   const poseConfig = getPlayerPoseConfig(editor.data, pose);
@@ -3877,6 +4220,8 @@ function renderEditor(editor, dom) {
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawProps(ctx, editor);
+  drawHumanoidEnemies(ctx, editor);
+  drawHostileDrones(ctx, editor);
   drawRouteExits(ctx, editor);
   drawEntrances(ctx, editor);
   drawSpawn(ctx, editor);
