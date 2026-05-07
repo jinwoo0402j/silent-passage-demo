@@ -1112,6 +1112,48 @@ function collidesWithPlatforms(rect, data, run = null) {
   return getCollisionPlatforms(data, run).some((platform) => rectsOverlap(rect, platform));
 }
 
+function getPlayerCapsuleRadius(rect, config) {
+  const configuredRadius = config.playerCapsuleRadius;
+  const fallbackRadius = rect.width * (config.playerCapsuleRadiusRatio ?? 0.48);
+  return clamp(
+    Number.isFinite(configuredRadius) ? configuredRadius : fallbackRadius,
+    2,
+    Math.max(2, Math.min(rect.width, rect.height) * 0.5),
+  );
+}
+
+function playerCapsuleOverlapsRect(rect, platform, config) {
+  if (config.playerCapsuleCollision === false) {
+    return rectsOverlap(rect, platform);
+  }
+  if (!rectsOverlap(rect, platform)) {
+    return false;
+  }
+
+  const radius = getPlayerCapsuleRadius(rect, config);
+  const capsuleX = rect.x + rect.width * 0.5;
+  const segmentTop = rect.y + radius;
+  const segmentBottom = rect.y + rect.height - radius;
+  const segmentMinY = Math.min(segmentTop, segmentBottom);
+  const segmentMaxY = Math.max(segmentTop, segmentBottom);
+  const platformRight = platform.x + platform.width;
+  const platformBottom = platform.y + platform.height;
+
+  const closestX = clamp(capsuleX, platform.x, platformRight);
+  const closestSegmentY = clamp(platform.y + platform.height * 0.5, segmentMinY, segmentMaxY);
+  const closestY = clamp(closestSegmentY, platform.y, platformBottom);
+  const dx = capsuleX - closestX;
+  const dy = closestSegmentY - closestY;
+
+  return dx * dx + dy * dy < radius * radius - EPSILON;
+}
+
+function collidesWithPlayerMovementPlatforms(rect, data, config, run = null) {
+  return getCollisionPlatforms(data, run).some((platform) => (
+    playerCapsuleOverlapsRect(rect, platform, config)
+  ));
+}
+
 function canOccupyRect(rect, data, run = null) {
   return (
     rect.x >= 0 &&
@@ -1119,6 +1161,16 @@ function canOccupyRect(rect, data, run = null) {
     rect.x + rect.width <= data.world.width &&
     rect.y + rect.height <= data.world.height &&
     !collidesWithPlatforms(rect, data, run)
+  );
+}
+
+function canOccupyPlayerMovementRect(rect, data, config, run = null) {
+  return (
+    rect.x >= 0 &&
+    rect.y >= 0 &&
+    rect.x + rect.width <= data.world.width &&
+    rect.y + rect.height <= data.world.height &&
+    !collidesWithPlayerMovementPlatforms(rect, data, config, run)
   );
 }
 
@@ -1387,7 +1439,7 @@ function tryJumpCornerCorrection(player, data, config, run = null) {
         height: player.height,
       };
 
-      if (canOccupyRect(candidate, data, run)) {
+      if (canOccupyPlayerMovementRect(candidate, data, config, run)) {
         player.x = candidate.x;
         return true;
       }
@@ -1416,7 +1468,7 @@ function tryDashCornerCorrection(player, data, resolvedX, direction, config, run
     ];
 
     for (const candidate of candidates) {
-      if (canOccupyRect(candidate, data, run)) {
+      if (canOccupyPlayerMovementRect(candidate, data, config, run)) {
         player.x = candidate.x;
         player.y = candidate.y;
         return true;
@@ -1448,7 +1500,7 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
   let slopeSeamPlatform = null;
 
   for (const platform of getCollisionPlatforms(data, run)) {
-    if (!rectsOverlap(player, platform)) {
+    if (!playerCapsuleOverlapsRect(player, platform, config)) {
       continue;
     }
 
@@ -1547,7 +1599,7 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
 
   for (const platform of getCollisionPlatforms(data, run)) {
     const catchDynamicTop = shouldCatchDynamicTop(player, platform, previousY);
-    if (!catchDynamicTop && !rectsOverlap(player, platform)) {
+    if (!catchDynamicTop && !playerCapsuleOverlapsRect(player, platform, config)) {
       continue;
     }
 
