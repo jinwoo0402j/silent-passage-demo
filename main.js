@@ -1,11 +1,10 @@
-import { GAME_DATA } from "./level-data.js?v=20260505-faceoff-e-v1";
+import { GAME_DATA } from "./level-data.js?v=20260507-slope-slide-physics-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-  shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260505-level-source-v2";
+} from "./level-store.js?v=20260507-slope-slide-physics-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -14,10 +13,18 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260505-player-bullets-v1";
+import { renderGame } from "./render.js?v=20260507-slope-slide-physics-v1";
 import { saveCurrentGame } from "./save-game.js?v=20260505-level-source-v2";
-import { SCENES, createInitialState, createRunState } from "./state.js?v=20260505-player-bullets-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260505-rmb-bullet-time-v1";
+import {
+  MOVEMENT_STATES,
+  SCENES,
+  computeArmWeaponStats,
+  createInitialState,
+  createLevelRuntimeState,
+  createRunState,
+  ensureWeaponLoadoutState,
+} from "./state.js?v=20260507-slope-slide-physics-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260507-slope-slide-physics-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -32,6 +39,35 @@ const movementTuningResetButton = document.getElementById("movementTuningResetBu
 const sceneActionButton = document.getElementById("sceneActionButton");
 const touchControls = document.getElementById("touchControls");
 const touchButtons = Array.from(document.querySelectorAll(".touch-button"));
+const stageShell = document.querySelector(".stage-shell");
+const testDebugButton = document.createElement("button");
+testDebugButton.id = "testDebugButton";
+testDebugButton.className = "test-debug-button";
+testDebugButton.type = "button";
+testDebugButton.textContent = "TEST *";
+testDebugButton.title = "* 키로 테스트 디버그 패널 토글";
+const testDebugPanel = document.createElement("section");
+testDebugPanel.id = "testDebugPanel";
+testDebugPanel.className = "test-debug-panel";
+testDebugPanel.hidden = true;
+testDebugPanel.innerHTML = `
+  <div class="test-debug-header">
+    <div>
+      <p class="test-debug-eyebrow">Test Debug</p>
+      <h2>테스트 디버그</h2>
+    </div>
+    <button class="test-debug-close" type="button" data-test-action="close">닫기</button>
+  </div>
+  <div class="test-debug-actions">
+    <button type="button" data-test-action="maxAmmo">탄환 최대로 수정</button>
+    <button type="button" data-test-action="restartRun">다시 시작하기</button>
+    <button type="button" data-test-action="resetLevel">레벨 처음으로 돌아가기</button>
+    <button type="button" data-test-action="respawnEnemies">맵의 적 전부 리스폰</button>
+    <button type="button" data-test-action="equipArSniper">AR / 스나이퍼 장착</button>
+    <button type="button" data-test-action="equipShotgunMachinegun">샷건 / 머신건 장착</button>
+  </div>
+`;
+stageShell?.append(testDebugButton, testDebugPanel);
 const faceOffDebugPanel = document.createElement("pre");
 faceOffDebugPanel.setAttribute("aria-label", "Face-off debug");
 Object.assign(faceOffDebugPanel.style, {
@@ -136,6 +172,8 @@ const dom = {
   ctx,
   liveEditButton,
   debugButton,
+  testDebugButton,
+  testDebugPanel,
   movementTuningButton,
   movementTuningPanel,
   movementTuningFields,
@@ -149,7 +187,7 @@ const dom = {
 
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
 const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
-  applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+  applyLevelOverride: true,
 });
 const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
 applySprintTuning(
@@ -333,7 +371,7 @@ function jumpToExpedition(currentState, data) {
 function openLevelEditor(data, currentState) {
   saveRuntimeOverride(data, currentState);
   const levelId = encodeURIComponent(data.currentLevelId || data.defaultLevelId || "movement-lab-01");
-  window.location.href = `./editor.html?level=${levelId}`;
+  window.location.href = `./editor.html?level=${levelId}&localOverride=1`;
 }
 
 function getCanvasPoint(targetCanvas, event) {
@@ -438,6 +476,27 @@ function syncDebugButton(currentDom, currentState) {
   currentDom.debugButton.classList.toggle("is-active", currentState.debug.active);
   currentDom.debugButton.setAttribute("aria-pressed", currentState.debug.active ? "true" : "false");
   currentDom.debugButton.title = "B, F3, ` 으로 토글";
+}
+
+function syncTestDebugPanel(currentDom, currentState) {
+  const active = Boolean(currentState.testDebug?.active);
+  if (currentDom.testDebugPanel) {
+    currentDom.testDebugPanel.hidden = !active;
+  }
+  if (currentDom.testDebugButton) {
+    currentDom.testDebugButton.classList.toggle("is-active", active);
+    currentDom.testDebugButton.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function setTestDebugPanelOpen(currentDom, currentState, active) {
+  currentState.testDebug = currentState.testDebug || {};
+  currentState.testDebug.active = Boolean(active);
+  if (currentState.testDebug.active && currentDom.movementTuningPanel) {
+    currentDom.movementTuningPanel.hidden = true;
+    syncMovementTuningButton(currentDom);
+  }
+  syncTestDebugPanel(currentDom, currentState);
 }
 
 function syncMovementTuningButton(currentDom) {
@@ -622,6 +681,259 @@ function syncMovementTuningToRun(currentState, data) {
   } else {
     player.recoilShotCharges = clampValue(player.recoilShotCharges, 0, player.recoilShotMaxCharges);
   }
+}
+
+function ensureExpeditionRun(currentState, data) {
+  if (currentState.scene === SCENES.EXPEDITION && currentState.run) {
+    return currentState.run;
+  }
+  currentState.resultSummary = null;
+  currentState.liveEdit.active = false;
+  currentState.run = createRunState(data, currentState.meta);
+  currentState.scene = SCENES.EXPEDITION;
+  currentState.sceneTimer = 0;
+  return currentState.run;
+}
+
+function setRunNotice(currentState, message) {
+  currentState.statusText = message;
+  if (currentState.run) {
+    currentState.run.message = message;
+    currentState.run.noticeTimer = 1.8;
+  }
+}
+
+function clearRunActionEffects(run) {
+  if (!run) {
+    return;
+  }
+  run.enemyShots = [];
+  run.playerBullets = [];
+  run.damageNumbers = [];
+  run.dodgeSlowTimer = 0;
+  run.dodgeSlowDuration = 0;
+  run.dodgeFx = [];
+  run.attackFx = [];
+  run.recoilFx = [];
+  run.weaponMissiles = [];
+  run.weaponBarriers = [];
+  run.particles = [];
+  run.afterimages = [];
+  run.recoilFocusAfterimages = [];
+  run.recoilFocusAfterimageTimer = 0;
+  if (run.recoilAim) {
+    run.recoilAim.active = false;
+    run.recoilAim.aiming = false;
+  }
+  if (run.faceOff) {
+    run.faceOff.active = false;
+    run.faceOff.acquireTargetId = null;
+    run.faceOff.acquireTimer = 0;
+    run.faceOff.acquireProgress = 0;
+  }
+}
+
+function resetPlayerToLevelStart(run, data) {
+  const entrance = (data.entrances || []).find((entry) => entry.id === "start")
+    || (data.entrances || [])[0]
+    || data.player.spawn;
+  const player = run.player;
+  player.x = Number.isFinite(entrance?.x) ? entrance.x : data.player.spawn.x;
+  player.y = Number.isFinite(entrance?.y) ? entrance.y : data.player.spawn.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.facing = Math.sign(entrance?.facing ?? player.facing ?? 1) || 1;
+  player.onGround = true;
+  player.wasOnGround = true;
+  player.movementState = MOVEMENT_STATES.GROUNDED;
+  player.attackCooldown = 0;
+  player.attackWindow = 0;
+  player.attackHits = new Set();
+  player.lightActive = false;
+  player.dashTimer = 0;
+  player.dashCooldownTimer = 0;
+  player.dashDirection = 0;
+  player.slideTimer = 0;
+  player.hoverActive = false;
+  player.hoverBoostActive = false;
+  player.wallSliding = false;
+  player.wallRunActive = false;
+  player.braceHolding = false;
+  player.braceHoldActive = false;
+  player.braceReleaseTimer = 0;
+  player.recoilShotTimer = 0;
+  player.recoilShotActive = false;
+  player.recoilShotAirborne = false;
+  player.recoilShotFacing = player.facing || 1;
+  player.recoilShotPitch = 0;
+  player.recoilSpinTimer = 0;
+  player.recoilFocusActive = false;
+  player.recoilFocusBlend = 0;
+}
+
+function snapCameraToPlayer(currentDom, run, data) {
+  const config = data.world.camera || {};
+  const zoom = getCameraZoom(data, { run });
+  const viewportWidth = currentDom.canvas.width / zoom;
+  const viewportHeight = currentDom.canvas.height / zoom;
+  const focusX = config.lookAheadEnabled ? (config.neutralFocusX ?? 0.5) : (run.cameraFocusX ?? 0.5);
+  const focusY = config.lookAheadEnabled ? (config.neutralFocusY ?? 0.5) : (run.cameraFocusY ?? 0.5);
+  const targetX = run.player.x + run.player.width * 0.5 - viewportWidth * focusX;
+  const targetY = run.player.y + run.player.height * 0.5 - viewportHeight * focusY;
+  const maxX = Math.max(0, data.world.width - viewportWidth);
+  const maxY = Math.max(0, data.world.height - viewportHeight);
+  run.cameraZoom = zoom;
+  run.cameraFocusX = focusX;
+  run.cameraFocusY = focusY;
+  run.cameraX = clampValue(targetX, 0, maxX);
+  run.cameraY = clampValue(targetY, 0, maxY);
+  run.cameraTargetX = run.cameraX;
+  run.cameraTargetY = run.cameraY;
+  run.cameraTargetZoom = zoom;
+  run.cameraLookDirection = run.player.facing || 1;
+  run.cameraLookAhead = 0;
+  run.cameraSpeedRatio = 0;
+  run.cameraFallHoldTimer = 0;
+  run.cameraFallRatio = 0;
+  run.cameraFallTargetYOffset = 0;
+}
+
+function fillDebugAmmo(currentState, data) {
+  const run = ensureExpeditionRun(currentState, data);
+  const weapons = ensureWeaponLoadoutState(run, data);
+  Object.values(weapons.arms || {}).forEach((arm) => {
+    const stats = computeArmWeaponStats(data, arm);
+    arm.magazine = stats.magazineSize;
+    arm.reloadTimer = 0;
+    arm.reloadDuration = 0;
+    arm.fireCooldownTimer = 0;
+    weapons.reserveAmmo[stats.ammoType] = Math.max(999, weapons.reserveAmmo[stats.ammoType] ?? 0);
+  });
+  syncMovementTuningToRun(currentState, data);
+  if (run.player) {
+    run.player.dashCharges = run.player.dashMaxCount;
+    run.player.dashAvailable = true;
+    run.player.recoilShotCharges = run.player.recoilShotMaxCharges;
+    run.player.recoilShotCooldownTimer = 0;
+  }
+  setRunNotice(currentState, "테스트: 탄환 최대");
+  saveCurrentGame(currentState, data);
+}
+
+function restartDebugRun(currentDom, currentState, data) {
+  currentState.resultSummary = null;
+  currentState.liveEdit.active = false;
+  currentState.run = createRunState(data, currentState.meta);
+  currentState.scene = SCENES.EXPEDITION;
+  currentState.sceneTimer = 0;
+  snapCameraToPlayer(currentDom, currentState.run, data);
+  setRunNotice(currentState, "테스트: 다시 시작");
+  saveCurrentGame(currentState, data);
+}
+
+function resetDebugLevel(currentDom, currentState, data) {
+  const run = ensureExpeditionRun(currentState, data);
+  const fresh = createLevelRuntimeState(data);
+  const currentLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId;
+  if (currentLevelId && run.levelStates) {
+    delete run.levelStates[currentLevelId];
+  }
+  run.interactables = fresh.interactables;
+  run.lootCrates = fresh.lootCrates;
+  run.loot = fresh.loot;
+  run.encounters = fresh.encounters;
+  run.threats = fresh.threats;
+  run.hostileDrones = fresh.hostileDrones;
+  run.humanoidEnemies = fresh.humanoidEnemies;
+  run.faceOff = fresh.faceOff;
+  clearRunActionEffects(run);
+  resetPlayerToLevelStart(run, data);
+  snapCameraToPlayer(currentDom, run, data);
+  setRunNotice(currentState, "테스트: 레벨 처음으로 이동");
+  saveCurrentGame(currentState, data);
+}
+
+function respawnDebugEnemies(currentState, data) {
+  const run = ensureExpeditionRun(currentState, data);
+  const fresh = createLevelRuntimeState(data);
+  run.encounters = fresh.encounters;
+  run.threats = fresh.threats;
+  run.hostileDrones = fresh.hostileDrones;
+  run.humanoidEnemies = fresh.humanoidEnemies;
+  run.faceOff = fresh.faceOff;
+  clearRunActionEffects(run);
+  setRunNotice(currentState, "테스트: 맵 적 리스폰");
+  saveCurrentGame(currentState, data);
+}
+
+function equipDebugWeaponPreset(currentState, data, preset) {
+  const run = ensureExpeditionRun(currentState, data);
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const presets = {
+    arSniper: {
+      label: "AR / 스나이퍼",
+      selectedSide: "left",
+      arms: {
+        left: { armId: "ar-arm-a", modules: ["spread-reducer", "magazine-extender"] },
+        right: { armId: "sniper-arm-a", modules: ["recoil-amplifier"] },
+      },
+    },
+    shotgunMachinegun: {
+      label: "샷건 / 머신건",
+      selectedSide: "right",
+      arms: {
+        left: { armId: "shotgun-arm-a", modules: ["recoil-amplifier", "impact-barrier", "spread-reducer"] },
+        right: { armId: "machinegun-arm-a", modules: ["magazine-extender", "spread-reducer"] },
+      },
+    },
+  };
+  const next = presets[preset];
+  if (!next) {
+    return;
+  }
+
+  ["left", "right"].forEach((side) => {
+    const armPreset = next.arms[side];
+    const arm = weapons.arms[side] || {};
+    arm.side = side;
+    arm.armId = armPreset.armId;
+    arm.modules = [...armPreset.modules];
+    arm.reloadTimer = 0;
+    arm.reloadDuration = 0;
+    arm.fireCooldownTimer = 0;
+    const stats = computeArmWeaponStats(data, arm);
+    arm.magazine = stats.magazineSize;
+    weapons.reserveAmmo[stats.ammoType] = Math.max(weapons.reserveAmmo[stats.ammoType] ?? 0, stats.magazineSize * 6);
+    weapons.arms[side] = arm;
+  });
+
+  weapons.selectedSide = next.selectedSide;
+  setRunNotice(currentState, `테스트: ${next.label} 장착`);
+  saveCurrentGame(currentState, data);
+}
+
+function runTestDebugAction(currentDom, currentState, data, action) {
+  if (action === "close") {
+    setTestDebugPanelOpen(currentDom, currentState, false);
+    return;
+  }
+  if (action === "maxAmmo") {
+    fillDebugAmmo(currentState, data);
+  } else if (action === "restartRun") {
+    restartDebugRun(currentDom, currentState, data);
+  } else if (action === "resetLevel") {
+    resetDebugLevel(currentDom, currentState, data);
+  } else if (action === "respawnEnemies") {
+    respawnDebugEnemies(currentState, data);
+  } else if (action === "equipArSniper") {
+    equipDebugWeaponPreset(currentState, data, "arSniper");
+  } else if (action === "equipShotgunMachinegun") {
+    equipDebugWeaponPreset(currentState, data, "shotgunMachinegun");
+  }
+}
+
+function isTestDebugToggleKey(event) {
+  return event.code === "NumpadMultiply" || event.key === "*";
 }
 
 function syncBrowserControls(currentDom, currentState) {
@@ -819,7 +1131,7 @@ function bindUi(currentDom, currentState, data) {
       return;
     }
     if (event.buttons === 0) {
-      if (currentState.mouse.secondaryDown && event.button !== 2) {
+      if (currentState.mouse.secondaryDown && event.button === 0) {
         clearPrimaryMouseButton();
         pushInputTrace(currentState, "sync0KeepS", {
           b: event.button,
@@ -963,6 +1275,18 @@ function bindUi(currentDom, currentState, data) {
     syncDebugButton(currentDom, currentState);
   });
 
+  currentDom.testDebugButton?.addEventListener("click", () => {
+    setTestDebugPanelOpen(currentDom, currentState, !currentState.testDebug?.active);
+  });
+
+  currentDom.testDebugPanel?.addEventListener("click", (event) => {
+    const action = event.target?.dataset?.testAction;
+    if (!action) {
+      return;
+    }
+    runTestDebugAction(currentDom, currentState, data, action);
+  });
+
   currentDom.liveEditButton?.addEventListener("click", () => {
     if (!isLiveEditAvailable(currentState, data)) {
       currentDom.liveEditButton.classList.remove("is-flash");
@@ -982,7 +1306,11 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.movementTuningButton?.addEventListener("click", () => {
-    setMovementTuningPanelOpen(currentDom, currentDom.movementTuningPanel.hidden);
+    const nextOpen = currentDom.movementTuningPanel.hidden;
+    if (nextOpen) {
+      setTestDebugPanelOpen(currentDom, currentState, false);
+    }
+    setMovementTuningPanelOpen(currentDom, nextOpen);
   });
 
   currentDom.movementTuningCloseButton?.addEventListener("click", () => {
@@ -1070,6 +1398,16 @@ function bindUi(currentDom, currentState, data) {
     }
     syncMouseFromEvent(event);
     syncMouseButtonsFromEvent(event);
+    if (currentState.scene === SCENES.EXPEDITION && currentState.run && !currentState.liveEdit.active && !isMapOverlayActive()) {
+      currentDom.canvas.style.cursor = "none";
+    }
+  });
+
+  currentDom.canvas.addEventListener("pointerleave", () => {
+    currentState.mouse.onCanvas = false;
+    if (!currentState.liveEdit.active) {
+      currentDom.canvas.style.cursor = "";
+    }
   });
 
   currentDom.canvas.addEventListener("pointerdown", (event) => {
@@ -1167,7 +1505,7 @@ function bindUi(currentDom, currentState, data) {
     }
 
     if (!currentState.liveEdit.active) {
-      currentDom.canvas.style.cursor = "";
+      currentDom.canvas.style.cursor = "none";
       return;
     }
 
@@ -1322,6 +1660,16 @@ function bindUi(currentDom, currentState, data) {
       return;
     }
 
+    if (isTestDebugToggleKey(event)) {
+      event.preventDefault();
+      if (event.repeat) {
+        return;
+      }
+      consumeShortcutState(currentState, code);
+      setTestDebugPanelOpen(currentDom, currentState, !currentState.testDebug?.active);
+      return;
+    }
+
     if (code === "KeyB") {
       event.preventDefault();
       consumeShortcutState(currentState, code);
@@ -1333,7 +1681,11 @@ function bindUi(currentDom, currentState, data) {
     if (code === "KeyT") {
       event.preventDefault();
       consumeShortcutState(currentState, code);
-      setMovementTuningPanelOpen(currentDom, currentDom.movementTuningPanel.hidden);
+      const nextOpen = currentDom.movementTuningPanel.hidden;
+      if (nextOpen) {
+        setTestDebugPanelOpen(currentDom, currentState, false);
+      }
+      setMovementTuningPanelOpen(currentDom, nextOpen);
     }
   });
 }
@@ -1432,6 +1784,7 @@ function frame(now) {
     syncAimPointerLock(dom, state);
     syncLiveEditButton(dom, state, runtimeData);
     syncDebugButton(dom, state);
+    syncTestDebugPanel(dom, state);
     syncMovementTuningButton(dom);
     syncBrowserControls(dom, state);
     renderGame(dom, state, runtimeData);
@@ -1446,6 +1799,7 @@ function frame(now) {
 bindUi(dom, state, runtimeData);
 syncLiveEditButton(dom, state, runtimeData);
 syncDebugButton(dom, state);
+syncTestDebugPanel(dom, state);
 syncMovementTuningButton(dom);
 syncBrowserControls(dom, state);
 window.addEventListener("beforeunload", () => {

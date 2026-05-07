@@ -170,6 +170,101 @@ canvas {
   color: #eefdff;
 }
 
+.test-debug-button {
+  position: absolute;
+  top: 206px;
+  right: 18px;
+  z-index: 4;
+  min-width: 108px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 190, 102, 0.28);
+  border-radius: 14px;
+  background: rgba(31, 22, 8, 0.66);
+  color: rgba(255, 238, 204, 0.96);
+  font: 800 12px "Segoe UI", sans-serif;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.test-debug-button:hover,
+.test-debug-button.is-active {
+  border-color: rgba(255, 190, 102, 0.7);
+  background: rgba(78, 46, 12, 0.88);
+}
+
+.test-debug-panel {
+  position: absolute;
+  top: 252px;
+  right: 18px;
+  z-index: 6;
+  width: 286px;
+  padding: 14px;
+  border: 1px solid rgba(255, 190, 102, 0.26);
+  border-radius: 16px;
+  background: rgba(7, 12, 18, 0.9);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+}
+
+.test-debug-panel[hidden] {
+  display: none;
+}
+
+.test-debug-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.test-debug-eyebrow {
+  margin: 0 0 4px;
+  color: rgba(255, 210, 150, 0.72);
+  font: 800 10px/1 "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.test-debug-header h2 {
+  margin: 0;
+  color: #fff2dc;
+  font: 800 16px/1.15 "Segoe UI", sans-serif;
+}
+
+.test-debug-close,
+.test-debug-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 248, 251, 0.92);
+  font: 800 12px/1 "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.test-debug-close {
+  padding: 8px 10px;
+}
+
+.test-debug-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.test-debug-actions button {
+  width: 100%;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+.test-debug-actions button:hover,
+.test-debug-close:hover {
+  border-color: rgba(255, 190, 102, 0.5);
+  background: rgba(255, 190, 102, 0.14);
+}
+
 .movement-tuning-button {
   position: absolute;
   top: 160px;
@@ -197,6 +292,8 @@ canvas {
 body.is-map-overlay-active .app-links,
 body.is-map-overlay-active .live-edit-button,
 body.is-map-overlay-active .debug-button,
+body.is-map-overlay-active .test-debug-button,
+body.is-map-overlay-active .test-debug-panel,
 body.is-map-overlay-active .movement-tuning-button,
 body.is-map-overlay-active .touch-controls {
   opacity: 0;
@@ -205,7 +302,7 @@ body.is-map-overlay-active .touch-controls {
 
 .movement-tuning-panel {
   position: absolute;
-  top: 206px;
+  top: 252px;
   right: 18px;
   z-index: 5;
   display: flex;
@@ -472,11 +569,26 @@ body.is-map-overlay-active .touch-controls {
     font-size: 11px;
   }
 
-  .movement-tuning-panel {
+  .test-debug-button {
     top: 176px;
     right: 10px;
+    min-width: 96px;
+    padding: 9px 12px;
+    font-size: 11px;
+  }
+
+  .test-debug-panel {
+    top: 216px;
+    right: 10px;
+    width: min(286px, calc(100vw - 20px));
+    padding: 12px;
+  }
+
+  .movement-tuning-panel {
+    top: 258px;
+    right: 10px;
     width: min(300px, calc(100vw - 20px));
-    max-height: calc(100% - 190px);
+    max-height: calc(100% - 272px);
     padding: 14px;
   }
 

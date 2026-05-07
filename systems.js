@@ -7,8 +7,8 @@ import {
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260505-player-bullets-v1";
-import { loadRuntimeLevelData } from "./level-store.js?v=20260505-level-source-v2";
+} from "./state.js?v=20260507-slope-slide-physics-v1";
+import { loadRuntimeLevelData } from "./level-store.js?v=20260507-slope-slide-physics-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -342,18 +342,20 @@ function spawnDirectedParticles(run, x, y, amount, color, directionX, directionY
   }
 }
 
-function spawnDamageNumber(run, x, y, amount, color = "#f5f8fb", label = null) {
+function spawnDamageNumber(run, x, y, amount, color = "#f5f8fb", label = null, options = {}) {
   run.damageNumbers = run.damageNumbers || [];
   run.damageNumbers.push({
     x,
     y,
     vx: (Math.random() - 0.5) * 24,
-    vy: -72 - Math.random() * 28,
+    vy: options.vy ?? (-72 - Math.random() * 28),
     amount: Math.round(amount),
     label,
     color,
-    life: 0.72,
-    duration: 0.72,
+    critical: Boolean(options.critical),
+    scale: options.scale ?? 1,
+    life: options.duration ?? 0.72,
+    duration: options.duration ?? 0.72,
   });
 }
 
@@ -470,6 +472,13 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
     number.y += (number.vy ?? 0) * visualDt;
     number.vy = (number.vy ?? 0) + 84 * visualDt;
     return number.life > 0;
+  });
+
+  run.dodgeSlowTimer = Math.max(0, (run.dodgeSlowTimer ?? 0) - visualDt);
+  run.dodgeFx = (run.dodgeFx || []).filter((effect) => {
+    effect.life -= visualDt;
+    effect.y -= 42 * visualDt;
+    return effect.life > 0;
   });
 
   run.afterimages = run.afterimages.filter((image) => {
@@ -1036,11 +1045,35 @@ function getDynamicCollisionSolids(run) {
     .filter(Boolean);
 }
 
+function isSlopePlatform(platform) {
+  return platform?.kind === "slope";
+}
+
+function getSlopeSurfaceY(platform, worldX) {
+  const t = clamp((worldX - platform.x) / Math.max(1, platform.width), 0, 1);
+  return platform.slopeDirection === "up-right"
+    ? platform.y + platform.height * (1 - t)
+    : platform.y + platform.height * t;
+}
+
+function getSlopeDownhillDirection(platform) {
+  return platform.slopeDirection === "up-right" ? -1 : 1;
+}
+
+function getSlopePlatforms(data) {
+  return (data.platforms || []).filter((platform) => isSlopePlatform(platform));
+}
+
+function getSolidLevelPlatforms(data) {
+  return (data.platforms || []).filter((platform) => !isSlopePlatform(platform));
+}
+
 function getCollisionPlatforms(data, run = null) {
+  const solids = getSolidLevelPlatforms(data);
   if (!run) {
-    return data.platforms;
+    return solids;
   }
-  return [...data.platforms, ...getDynamicCollisionSolids(run)];
+  return [...solids, ...getDynamicCollisionSolids(run)];
 }
 
 function collidesWithPlatforms(rect, data, run = null) {
@@ -1190,14 +1223,44 @@ function tryStartSlide(player, data, config, moveAxis) {
   }
 
   const direction = Math.sign(player.vx) || moveAxis || player.facing || 1;
+  const slopeDirection = player.groundSlopeDirection ?? 0;
+  const isUphill = slopeDirection !== 0 && Math.sign(direction) !== Math.sign(slopeDirection);
+  if (isUphill && speed < (config.slideUphillStartMinSpeed ?? minSpeed * 1.35)) {
+    return false;
+  }
   setPlayerHeight(player, player.crouchHeight);
-  player.slideTimer = (config.slideDurationMs ?? 0) / 1000;
   player.slideDirection = direction;
-  player.slideSpeed = Math.max(speed, minSpeed) * (config.slideSpeedMultiplier ?? 1);
+  player.slideTimer = ((config.slideDurationMs ?? 0) / 1000)
+    * (isUphill ? (config.slideUphillStartTimerMultiplier ?? 0.32) : 1);
+  player.slideSpeed = Math.max(speed, minSpeed)
+    * (config.slideSpeedMultiplier ?? 1)
+    * (isUphill ? (config.slideUphillStartSpeedMultiplier ?? 0.58) : 1);
   player.vx = player.slideDirection * player.slideSpeed;
   player.facing = player.slideDirection;
   player.crouchBlocked = false;
   return true;
+}
+
+function getSlideSlopeRelation(player) {
+  const slopeDirection = player.groundSlopeDirection ?? 0;
+  const slideDirection = player.slideDirection || Math.sign(player.vx) || player.facing || 1;
+  if (slopeDirection === 0 || slideDirection === 0) {
+    return "flat";
+  }
+  return Math.sign(slideDirection) === Math.sign(slopeDirection) ? "downhill" : "uphill";
+}
+
+function decaySlideTimer(player, config, dt) {
+  if (player.slideTimer <= 0) {
+    return;
+  }
+  const relation = getSlideSlopeRelation(player);
+  const drainMultiplier = relation === "downhill"
+    ? (config.slideDownhillTimerDrainMultiplier ?? 0.32)
+    : relation === "uphill"
+      ? (config.slideUphillTimerDrainMultiplier ?? 3.4)
+      : 1;
+  player.slideTimer = Math.max(0, player.slideTimer - dt * drainMultiplier);
 }
 
 function updateSlide(player, config, dt) {
@@ -1205,8 +1268,23 @@ function updateSlide(player, config, dt) {
     return false;
   }
 
-  player.slideSpeed = Math.max(0, player.slideSpeed - (config.slideFriction ?? 0) * dt);
-  if (player.slideSpeed <= 0) {
+  const relation = getSlideSlopeRelation(player);
+  if (relation === "downhill") {
+    const downhillFriction = config.slideDownhillFriction ?? 0;
+    player.slideSpeed = Math.min(
+      config.slideSlopeMaxSpeed ?? 1780,
+      Math.max(0, player.slideSpeed - downhillFriction * dt) + (config.slideSlopeAccel ?? 520) * dt,
+    );
+  } else {
+    const friction = relation === "uphill"
+      ? (config.slideUphillFriction ?? (config.slideFriction ?? 0) * 2.1)
+      : (config.slideFriction ?? 0);
+    player.slideSpeed = Math.max(0, player.slideSpeed - friction * dt);
+  }
+  if (
+    player.slideSpeed <= 0 ||
+    (relation === "uphill" && player.slideSpeed <= (config.slideUphillStopSpeed ?? 420))
+  ) {
     clearSlide(player);
     return false;
   }
@@ -1216,7 +1294,18 @@ function updateSlide(player, config, dt) {
   return true;
 }
 
-function armSlideJumpCarry(player, config) {
+function getSlideJumpSpeed(player) {
+  return Math.max(Math.abs(player.vx ?? 0), Math.abs(player.slideSpeed ?? 0));
+}
+
+function isSlideJumpBoostReady(player, config) {
+  return Boolean(
+    player.slideTimer > 0 &&
+    getSlideJumpSpeed(player) >= (config.slideJumpBoostMinSpeed ?? config.slideJumpMinSpeed ?? 0)
+  );
+}
+
+function armSlideJumpCarry(player, run, config) {
   const direction = player.slideDirection || Math.sign(player.vx) || player.facing || 1;
   const speed = Math.max(
     Math.abs(player.vx),
@@ -1227,6 +1316,29 @@ function armSlideJumpCarry(player, config) {
   player.sprintJumpCarryTimer = (config.slideJumpCarryMs ?? config.sprintJumpCarryMs ?? 0) / 1000;
   player.sprintJumpCarrySpeed = direction * speed;
   player.slideJumpBoostActive = true;
+  spawnDirectedParticles(
+    run,
+    player.x + player.width * 0.5,
+    player.y + player.height - 4,
+    22,
+    "#e9f7ff",
+    -direction,
+    0.34,
+    560,
+    1.05,
+  );
+  spawnDirectedParticles(
+    run,
+    player.x + player.width * 0.5,
+    player.y + player.height - 2,
+    12,
+    "#e7f47e",
+    -direction,
+    0.08,
+    480,
+    0.72,
+  );
+  pushAfterimage(run, player);
   clearSlide(player);
 }
 
@@ -1295,7 +1407,9 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
     dashBlocked: false,
     dashCornerCorrected: false,
     jumpCornerCorrected: false,
+    slopeDownhillDirection: 0,
   };
+  player.groundSlopeDirection = 0;
 
   const previousX = player.x;
   player.x += player.vx * dt;
@@ -1423,6 +1537,48 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
     }
   }
 
+  if (player.vy >= -EPSILON) {
+    const footX = clamp(
+      player.x + player.width * 0.5 + Math.sign(player.vx || player.facing || 1) * player.width * 0.18,
+      player.x + 2,
+      player.x + player.width - 2,
+    );
+    const currentFootY = player.y + player.height;
+    const previousFootY = previousY + player.height;
+    let bestSlope = null;
+    let bestSurfaceY = Number.POSITIVE_INFINITY;
+
+    for (const platform of getSlopePlatforms(data)) {
+      if (
+        player.x + player.width <= platform.x ||
+        player.x >= platform.x + platform.width ||
+        footX < platform.x ||
+        footX > platform.x + platform.width
+      ) {
+        continue;
+      }
+      const surfaceY = getSlopeSurfaceY(platform, footX);
+      const snapDistance = config.slopeSnapDistance ?? 34;
+      if (
+        currentFootY >= surfaceY - snapDistance &&
+        previousFootY <= surfaceY + snapDistance &&
+        surfaceY < bestSurfaceY
+      ) {
+        bestSlope = platform;
+        bestSurfaceY = surfaceY;
+      }
+    }
+
+    if (bestSlope) {
+      contacts.landingSpeed = player.vy;
+      player.y = bestSurfaceY - player.height;
+      player.vy = 0;
+      contacts.onGround = true;
+      contacts.slopeDownhillDirection = getSlopeDownhillDirection(bestSlope);
+      player.groundSlopeDirection = contacts.slopeDownhillDirection;
+    }
+  }
+
   if (player.y < 0) {
     player.y = 0;
     player.vy = 0;
@@ -1439,7 +1595,11 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
 }
 
 function damagePlayer(run, amount, direction, sourceText) {
-  if (run.player.invulnTimer > 0 || (run.player.dashTimer > 0 && run.player.dashInvulnerable)) {
+  if (
+    run.player.invulnTimer > 0 ||
+    (run.player.dashTimer > 0 && run.player.dashInvulnerable) ||
+    (run.player.slideTimer > 0 && run.player.slideInvulnerable)
+  ) {
     return;
   }
   if (run.loot?.active) {
@@ -1451,6 +1611,76 @@ function damagePlayer(run, amount, direction, sourceText) {
   run.player.vy = -260;
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+}
+
+function isPlayerDashDodging(player) {
+  return Boolean(player.dashTimer > 0 && player.dashInvulnerable);
+}
+
+function isPlayerSlideDodging(player) {
+  return Boolean(player.slideTimer > 0 && player.slideInvulnerable);
+}
+
+function isPlayerRunDodging(player, data) {
+  const runSpeed = getMovementConfig(data).runSpeed ?? 440;
+  return Boolean(
+    player.onGround &&
+    player.height === player.standHeight &&
+    (
+      player.sprintActive ||
+      Math.abs(player.vx ?? 0) >= runSpeed * 0.62
+    )
+  );
+}
+
+function pushDodgeSandevistanAfterimages(run, shot) {
+  const player = run.player;
+  const direction = Math.sign(player.vx || player.facing || 1) || 1;
+  const shotDirX = Math.sign(shot.vx || shot.dirX || -direction) || -direction;
+  const offsets = [-52, -30, -12, 14, 34];
+  offsets.forEach((offset, index) => {
+    pushRecoilFocusAfterimage(run, {
+      ...player,
+      recoilFocusActive: true,
+      recoilFocusBlend: 1,
+      recoilAimFacing: player.recoilAimFacing || player.facing || 1,
+      recoilDirX: -shotDirX,
+      recoilDirY: 0,
+    }, {
+      offsetX: offset * direction,
+      offsetY: (index - 2) * -2,
+      life: 0.34 + index * 0.025,
+    });
+  });
+}
+
+function triggerProjectileDodge(run, shot, label = "DODGE") {
+  if (shot.dodgeTriggered) {
+    return;
+  }
+  shot.dodgeTriggered = true;
+  run.dodgeSlowDuration = 0.42;
+  run.dodgeSlowTimer = Math.max(run.dodgeSlowTimer ?? 0, run.dodgeSlowDuration);
+  run.dodgeFx = run.dodgeFx || [];
+  run.dodgeFx.push({
+    x: run.player.x + run.player.width * 0.5,
+    y: run.player.y + run.player.height * 0.42,
+    label,
+    life: 0.42,
+    duration: 0.42,
+  });
+  pushDodgeSandevistanAfterimages(run, shot);
+  spawnDirectedParticles(
+    run,
+    shot.x,
+    shot.y,
+    12,
+    "#e9f7ff",
+    -(shot.vx || shot.dirX || 1),
+    -(shot.vy || shot.dirY || 0),
+    320,
+    0.95,
+  );
 }
 
 function destroyHostileDrone(run, drone) {
@@ -1756,7 +1986,7 @@ function enterFaceOff(run, data, enemy, state) {
   faceOff.triggerLimit = getFaceOffConfig(data).triggerLimit ?? 4.5;
   faceOff.result = null;
   faceOff.resultTimer = 0;
-  faceOff.message = "KNOCKDOWN";
+  faceOff.message = "";
   setFaceOffEnemyLine(
     run,
     data,
@@ -2257,12 +2487,30 @@ function getReserveAmmo(context) {
   return Math.max(0, Math.floor(Number(context.weapons.reserveAmmo?.[context.stats.ammoType] ?? 0)));
 }
 
+function isAutomaticWeaponContext(context) {
+  return context?.stats?.fireMode === "auto";
+}
+
+function isSelectedWeaponAutomatic(run, data) {
+  return isAutomaticWeaponContext(getSelectedArmContext(run, data));
+}
+
 function canAimWeapon(player) {
   return Boolean(player.height === player.standHeight && player.dashTimer === 0);
 }
 
+function canFireWeaponPose(player) {
+  return Boolean(
+    player.dashTimer === 0 &&
+    (
+      player.height === player.standHeight ||
+      (player.onGround && player.slideTimer > 0)
+    )
+  );
+}
+
 function canFireSelectedWeapon(run, data, player) {
-  if (!canAimWeapon(player)) {
+  if (!canFireWeaponPose(player)) {
     return false;
   }
   const context = getSelectedArmContext(run, data);
@@ -2592,6 +2840,34 @@ function getSegmentRectHitT(startX, startY, endX, endY, rect, padding = 0) {
   return tMax >= 0 && tMin <= 1 ? clamp(tMin, 0, 1) : null;
 }
 
+function getHumanoidBulletHitZones(enemy) {
+  const cx = enemy.x + enemy.width * 0.5;
+  const height = Math.max(1, enemy.height);
+  const headHeight = clamp(height * 0.3, 28, 34);
+  const headWidth = clamp(enemy.width * 0.62, 32, 38);
+  const bodyTop = enemy.y + headHeight - 2;
+  return [
+    {
+      id: "head",
+      critical: true,
+      priority: 2,
+      x: cx - headWidth * 0.5,
+      y: enemy.y,
+      width: headWidth,
+      height: headHeight,
+    },
+    {
+      id: "body",
+      critical: false,
+      priority: 1,
+      x: enemy.x + enemy.width * 0.1,
+      y: bodyTop,
+      width: enemy.width * 0.8,
+      height: Math.max(12, enemy.y + enemy.height - bodyTop),
+    },
+  ];
+}
+
 function spawnPlayerBullet(run, weaponStats, aim) {
   const speed = weaponStats.projectileSpeed ?? (weaponStats.type === "shotgun" ? 2050 : 2450);
   const range = weaponStats.range ?? 520;
@@ -2623,7 +2899,12 @@ function spawnPlayerBullet(run, weaponStats, aim) {
 function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
   let best = null;
   const consider = (hit) => {
-    if (hit && (!best || hit.t < best.t)) {
+    if (
+      hit &&
+      (!best ||
+        hit.t < best.t - 0.001 ||
+        (Math.abs(hit.t - best.t) <= 0.001 && (hit.priority ?? 0) > (best.priority ?? 0)))
+    ) {
       best = hit;
     }
   };
@@ -2650,10 +2931,29 @@ function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
     if (!isHumanoidFaceOffAvailable(enemy) || !isHumanoidInFaceOffScope(enemy)) {
       continue;
     }
-    const padding = (bullet.hitRadius ?? 0) + Math.max(enemy.width, enemy.height) * 0.18;
-    const t = getSegmentRectHitT(startX, startY, endX, endY, enemy, padding);
-    if (t !== null) {
-      consider({ type: "humanoid", target: enemy, t });
+
+    if (enemy.state === "knockedDown") {
+      const padding = (bullet.hitRadius ?? 0) + Math.max(enemy.width, enemy.height) * 0.18;
+      const t = getSegmentRectHitT(startX, startY, endX, endY, enemy, padding);
+      if (t !== null) {
+        consider({ type: "humanoid", target: enemy, t, part: "body", critical: false, priority: 1 });
+      }
+      continue;
+    }
+
+    const zonePadding = Math.max(2, (bullet.radius ?? 0) + (bullet.hitRadius ?? 0) * 0.08);
+    for (const zone of getHumanoidBulletHitZones(enemy)) {
+      const t = getSegmentRectHitT(startX, startY, endX, endY, zone, zonePadding);
+      if (t !== null) {
+        consider({
+          type: "humanoid",
+          target: enemy,
+          t,
+          part: zone.id,
+          critical: zone.critical,
+          priority: zone.priority,
+        });
+      }
     }
   }
 
@@ -2694,23 +2994,44 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
 
   if (hit.type === "humanoid") {
     const enemy = hit.target;
+    const critical = Boolean(hit.critical);
     if (enemy.state === "knockedDown") {
       applyKnockedDownRecoilHit(run, enemy, aim);
       spawnDamageNumber(run, hitX, hitY - 16, bullet.humanoidDamage ?? 0, "#ffd6ba", "HIT");
       return;
     }
 
-    const damage = bullet.humanoidDamage ?? 50;
+    const baseDamage = bullet.humanoidDamage ?? 50;
+    const headshotMultiplier = bullet.weaponStats?.headshotMultiplier ?? 2;
+    const damage = critical ? baseDamage * headshotMultiplier : baseDamage;
+    const damageColor = critical ? "#ff334f" : "#ffd6ba";
     enemy.active = true;
     enemy.state = enemy.state === "patrol" ? "combat" : enemy.state;
     enemy.hp = Math.max(0, (enemy.hp ?? enemy.maxHp ?? 100) - damage);
-    enemy.hitFlash = 0.2;
+    enemy.hitFlash = critical ? 0.32 : 0.2;
     enemy.trigger = 0;
-    spawnDamageNumber(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.26, damage, "#ffd6ba");
-    spawnDirectedParticles(run, hitX, hitY, 13, "#ffd6ba", bullet.dirX, bullet.dirY, 390, 0.78);
+    spawnDamageNumber(
+      run,
+      enemy.x + enemy.width * 0.5,
+      critical ? enemy.y - 8 : enemy.y + enemy.height * 0.26,
+      damage,
+      damageColor,
+      null,
+      critical ? { critical: true, duration: 0.9, scale: 1.18, vy: -86 } : {},
+    );
+    spawnDirectedParticles(
+      run,
+      hitX,
+      hitY,
+      critical ? 20 : 13,
+      damageColor,
+      bullet.dirX,
+      bullet.dirY,
+      critical ? 470 : 390,
+      0.78,
+    );
     if (enemy.hp <= 0) {
       knockDownHumanoidEnemy(run, data, enemy);
-      spawnDamageNumber(run, enemy.x + enemy.width * 0.5, enemy.y - 16, 0, "#f5f8fb", "KNOCKDOWN");
       return;
     }
     applyHumanoidStaggerDamage(run, enemy, bullet.weaponStats || {}, aim);
@@ -3080,11 +3401,11 @@ function updateRecoilAim(run, data, state, dt) {
 }
 
 function performRecoilShot(player, run, data, config, state = null) {
-  if (!run.recoilAim || !canAimWeapon(player)) {
+  if (!run.recoilAim || !canFireWeaponPose(player)) {
     if (state) {
       pushInputTrace(state, "shotBlock:aim", {
         hasAim: Number(Boolean(run.recoilAim)),
-        canAim: Number(canAimWeapon(player)),
+        canAim: Number(canFireWeaponPose(player)),
       });
     }
     return false;
@@ -3095,7 +3416,7 @@ function performRecoilShot(player, run, data, config, state = null) {
     if (state) {
       pushInputTrace(state, "shotBlock:mag", { mag: context.arm.magazine ?? 0 });
     }
-    pushNotice(run, `${context.stats.label} empty. Press R.`, 1.4);
+    startReloadSelectedArm(run, data);
     spawnParticles(run, run.recoilAim.originX, run.recoilAim.originY, 3, "#d5e7ef");
     return false;
   }
@@ -3107,10 +3428,10 @@ function performRecoilShot(player, run, data, config, state = null) {
     return false;
   }
   const airActionCost = player.onGround ? 0 : context.stats.airActionCost;
-  if (!canAimWeapon(player) || (context.arm.fireCooldownTimer ?? 0) > 0) {
+  if (!canFireWeaponPose(player) || (context.arm.fireCooldownTimer ?? 0) > 0) {
     if (state) {
       pushInputTrace(state, "shotBlock:cool", {
-        canAim: Number(canAimWeapon(player)),
+        canAim: Number(canFireWeaponPose(player)),
         cd: (context.arm.fireCooldownTimer ?? 0).toFixed(2),
       });
     }
@@ -3153,17 +3474,31 @@ function performRecoilShot(player, run, data, config, state = null) {
   const recoilX = aim.recoilDirX;
   const recoilY = aim.recoilDirY;
   const firedAirborne = !player.onGround;
+  const verticalPoseThreshold = config.recoilAimVerticalPoseThreshold ?? 0.45;
+  const shotFacing = Math.abs(aim.shotDirX) > 0.08
+    ? Math.sign(aim.shotDirX)
+    : (player.recoilAimFacing || player.facing || 1);
+  const shotPitch = aim.shotDirY < -verticalPoseThreshold
+    ? -1
+    : aim.shotDirY > verticalPoseThreshold
+      ? 1
+      : 0;
 
   clearBraceHold(player);
   clearWallRun(player);
-  clearSlide(player);
   clearHover(player);
   context.arm.magazine = Math.max(0, Math.floor(context.arm.magazine ?? 0) - 1);
   context.arm.fireCooldownTimer = context.stats.fireCooldown;
+  if (context.arm.magazine <= 0) {
+    startReloadSelectedArm(run, data);
+  }
   player.recoilShotCharges = Math.max(0, player.recoilShotCharges - (firedAirborne ? airActionCost : 0));
-  player.recoilShotCooldownTimer = context.arm.fireCooldownTimer;
-  player.recoilShotTimer = 0.16;
+  player.recoilShotCooldownTimer = Math.max(context.arm.fireCooldownTimer ?? 0, context.arm.reloadTimer ?? 0);
+  player.recoilShotTimer = Math.max(0.04, (config.recoilAirShotPoseMs ?? 160) / 1000);
   player.recoilShotActive = true;
+  player.recoilShotAirborne = firedAirborne;
+  player.recoilShotFacing = shotFacing;
+  player.recoilShotPitch = shotPitch;
   if (firedAirborne) {
     const spinLoopCount = Math.max(1, Math.floor(config.recoilSpinLoopCount ?? 1));
     player.recoilSpinDuration = ((config.recoilSpinDurationMs ?? 220) / 1000) * spinLoopCount;
@@ -3183,7 +3518,7 @@ function performRecoilShot(player, run, data, config, state = null) {
   player.coyoteTimer = 0;
   player.jumpBufferTimer = 0;
   if (Math.abs(aim.shotDirX) > 0.08) {
-    player.recoilAimFacing = Math.sign(aim.shotDirX);
+    player.recoilAimFacing = shotFacing;
     player.facing = player.recoilAimFacing;
   }
   player.wallJumpLockTimer = 0;
@@ -3483,12 +3818,14 @@ function performBraceVault(player, run, config, wall, moveAxis) {
   pushNotice(run, "벽 반동");
 }
 
-function updateMovementVfx(run, dt) {
+function updateMovementVfx(run, data, dt) {
   const player = run.player;
+  const config = getMovementConfig(data);
 
   player.wallSlideDustTimer = Math.max(0, player.wallSlideDustTimer - dt);
   player.dashTrailTimer = Math.max(0, player.dashTrailTimer - dt);
   player.hoverParticleTimer = Math.max(0, player.hoverParticleTimer - dt);
+  player.slideFrictionFxTimer = Math.max(0, (player.slideFrictionFxTimer ?? 0) - dt);
 
   if (player.dashTimer > 0 && player.dashTrailTimer === 0) {
     player.dashTrailTimer = 0.03;
@@ -3499,6 +3836,33 @@ function updateMovementVfx(run, dt) {
     player.wallSlideDustTimer = 0.08;
     const offsetX = player.wallDirection === 1 ? player.x + player.width : player.x;
     spawnParticles(run, offsetX, player.y + player.height - 4, 2, "#9bbad1");
+  }
+
+  if (player.slideTimer > 0 && player.onGround && isSlideJumpBoostReady(player, config) && player.slideFrictionFxTimer === 0) {
+    const direction = player.slideDirection || Math.sign(player.vx) || player.facing || 1;
+    player.slideFrictionFxTimer = 0.035;
+    spawnDirectedParticles(
+      run,
+      player.x + player.width * 0.5 - direction * player.width * 0.28,
+      player.y + player.height - 3,
+      4,
+      "#f4dda6",
+      -direction,
+      -0.08,
+      340,
+      0.62,
+    );
+    spawnDirectedParticles(
+      run,
+      player.x + player.width * 0.5 - direction * player.width * 0.12,
+      player.y + player.height - 2,
+      2,
+      "#dce7ec",
+      -direction,
+      0.05,
+      220,
+      0.46,
+    );
   }
 
   if (player.hoverActive && !player.onGround && player.hoverParticleTimer === 0) {
@@ -3549,6 +3913,8 @@ function updatePlayer(run, data, state, dt, input) {
   const wasWallSliding = player.wallSliding;
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
 
+  player.dashInvulnerable = config.dashInvulnerable;
+  player.slideInvulnerable = config.slideInvulnerable ?? true;
   player.wasOnGround = player.onGround;
   player.crouchRequested = crouchHeld;
   player.attackCooldown = Math.max(0, player.attackCooldown - dt);
@@ -3563,7 +3929,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
   player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
-  player.slideTimer = Math.max(0, player.slideTimer - dt);
+  decaySlideTimer(player, config, dt);
   player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
   player.wallSlideGraceTimer = Math.max(0, player.wallSlideGraceTimer - dt);
   player.speedRetentionTimer = Math.max(0, player.speedRetentionTimer - dt);
@@ -3726,8 +4092,9 @@ function updatePlayer(run, data, state, dt, input) {
       focus: Number(Boolean(run.focusActive)),
       face: Number(Boolean(run.faceOff?.active)),
     });
+    const keepPrimaryHeld = isSelectedWeaponAutomatic(run, data);
     const firedRecoilShot = performRecoilShot(player, run, data, config, state);
-    if (firedRecoilShot && state.mouse) {
+    if (firedRecoilShot && state.mouse && !keepPrimaryHeld) {
       state.mouse.primaryDown = false;
       state.mouse.primaryJustPressed = false;
     }
@@ -3838,7 +4205,7 @@ function updatePlayer(run, data, state, dt, input) {
       player.bufferedLandingJumpActive = true;
     }
 
-    updateMovementVfx(run, dt);
+    updateMovementVfx(run, data, dt);
     player.jumpHeldLastFrame = jumpHeld;
     setMovementState(player);
     return;
@@ -3904,7 +4271,7 @@ function updatePlayer(run, data, state, dt, input) {
         refillDashFromGround(player, config);
       }
 
-      updateMovementVfx(run, dt);
+      updateMovementVfx(run, data, dt);
       player.jumpHeldLastFrame = jumpHeld;
       setMovementState(player);
       return;
@@ -3927,14 +4294,21 @@ function updatePlayer(run, data, state, dt, input) {
     updateWallRun(player, config, dt);
   } else if (canGroundJump) {
     const slideJumping = player.slideTimer > 0;
-    if (slideJumping) {
-      armSlideJumpCarry(player, config);
+    const slideJumpBoostReady = slideJumping && isSlideJumpBoostReady(player, config);
+    if (slideJumpBoostReady) {
+      armSlideJumpCarry(player, run, config);
+      tryExitCrouch(player, data);
+    } else if (slideJumping) {
+      clearSlide(player);
       tryExitCrouch(player, data);
     }
     if (!slideJumping && player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
       armSprintJumpCarry(player, config);
     }
-    performJump(player, run, config.jumpVelocity);
+    const jumpVelocity = slideJumping
+      ? -Math.abs(config.jumpVelocity ?? data.player.jumpVelocity ?? -900) * (slideJumpBoostReady ? (config.slideJumpVerticalMultiplier ?? 1.18) : 1)
+      : config.jumpVelocity;
+    performJump(player, run, jumpVelocity);
     applySprintJumpCarry(player);
     applyDashJumpCarry(player, config);
   }
@@ -4213,7 +4587,7 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   player.canInteract = true;
-  updateMovementVfx(run, dt);
+  updateMovementVfx(run, data, dt);
   player.jumpHeldLastFrame = jumpHeld;
   setMovementState(player);
 }
@@ -5003,6 +5377,32 @@ function updateKnockedDownHumanoid(run, data, enemy, dt) {
   }
 }
 
+function fireHumanoidProjectile(run, enemy, playerCenter) {
+  run.enemyShots = run.enemyShots || [];
+  const originX = enemy.x + enemy.width * 0.5 + (enemy.facing || 1) * enemy.width * 0.32;
+  const originY = enemy.y + enemy.height * 0.38;
+  const dx = playerCenter.x - originX;
+  const dy = playerCenter.y - originY;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  const speed = enemy.projectileSpeed ?? 760;
+  run.enemyShots.push({
+    id: `${enemy.id}-round-${Math.round((run.time ?? 0) * 1000)}-${run.enemyShots.length}`,
+    type: "humanoidBullet",
+    x: originX,
+    y: originY,
+    prevX: originX,
+    prevY: originY,
+    vx: (dx / length) * speed,
+    vy: (dy / length) * speed,
+    radius: enemy.projectileRadius ?? 8,
+    damage: enemy.projectileDamage ?? enemy.damage ?? 12,
+    life: enemy.projectileLife ?? 2.2,
+    duration: enemy.projectileLife ?? 2.2,
+    color: enemy.projectileColor || "#ff9fb4",
+  });
+  enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.08);
+}
+
 function updateHumanoidEnemies(run, data, dt) {
   const enemies = run.humanoidEnemies || [];
   if (!enemies.length) {
@@ -5052,7 +5452,11 @@ function updateHumanoidEnemies(run, data, dt) {
       enemy.trigger = clamp((enemy.trigger ?? 0) + (enemy.triggerRate ?? 1) * dt * 0.35, 0, getFaceOffConfig(data).triggerLimit ?? 4.5);
       if (enemy.trigger >= (getFaceOffConfig(data).triggerLimit ?? 4.5) && enemy.attackCooldown === 0) {
         const direction = enemy.x >= player.x ? -1 : 1;
-        damagePlayer(run, enemy.damage ?? 12, direction, "Gunman shot.");
+        if (enemy.rangedProjectile) {
+          fireHumanoidProjectile(run, enemy, playerCenter);
+        } else {
+          damagePlayer(run, enemy.damage ?? 12, direction, "Gunman shot.");
+        }
         enemy.attackCooldown = enemy.fireCooldown ?? 1.5;
         enemy.trigger = 0;
       }
@@ -5060,6 +5464,40 @@ function updateHumanoidEnemies(run, data, dt) {
       enemy.trigger = Math.max(0, (enemy.trigger ?? 0) - dt * 0.75);
     }
   }
+}
+
+function getProjectileDodgeRect(player) {
+  return createRect(
+    player.x - 78,
+    player.y - 58,
+    player.width + 156,
+    player.height + 116,
+  );
+}
+
+function handleProjectileDodge(run, data, shot, shotRect, hitPlayer) {
+  const player = run.player;
+  const dashDodge = isPlayerDashDodging(player);
+  const slideDodge = isPlayerSlideDodging(player);
+  if (dashDodge || slideDodge) {
+    const dodgeRect = getProjectileDodgeRect(player);
+    const nearInvuln =
+      hitPlayer ||
+      lineIntersectsRect(shot.prevX ?? shot.x, shot.prevY ?? shot.y, shot.x, shot.y, dodgeRect, (shot.radius ?? 0) + 18);
+    if (nearInvuln) {
+      triggerProjectileDodge(run, shot, dashDodge ? "DASH" : "SLIDE");
+      return hitPlayer ? "consumed" : "none";
+    }
+  }
+
+  if (!hitPlayer && !shot.dodgeTriggered && isPlayerRunDodging(player, data)) {
+    const dodgeRect = getProjectileDodgeRect(player);
+    if (lineIntersectsRect(shot.prevX ?? shot.x, shot.prevY ?? shot.y, shot.x, shot.y, dodgeRect, (shot.radius ?? 0) + 24)) {
+      triggerProjectileDodge(run, shot, player.sprintActive ? "SPRINT" : "RUN");
+    }
+  }
+
+  return "none";
 }
 
 function updateEnemyShots(run, data, dt) {
@@ -5082,6 +5520,8 @@ function updateEnemyShots(run, data, dt) {
     }
 
     shot.life -= dt;
+    shot.prevX = shot.x;
+    shot.prevY = shot.y;
     shot.x += shot.vx * dt;
     shot.y += shot.vy * dt;
 
@@ -5111,8 +5551,16 @@ function updateEnemyShots(run, data, dt) {
       return false;
     }
 
-    if (rectsOverlap(shotRect, player)) {
-      damagePlayer(run, shot.damage, Math.sign(shot.vx) || 1, "Crow shot hit.");
+    const hitPlayer = rectsOverlap(shotRect, player) ||
+      lineIntersectsRect(shot.prevX ?? shot.x, shot.prevY ?? shot.y, shot.x, shot.y, player, shot.radius ?? 0);
+    const dodgeResult = handleProjectileDodge(run, data, shot, shotRect, hitPlayer);
+    if (dodgeResult === "consumed") {
+      spawnParticles(run, shot.x, shot.y, 8, "#e9f7ff");
+      return false;
+    }
+
+    if (hitPlayer) {
+      damagePlayer(run, shot.damage, Math.sign(shot.vx) || 1, shot.type === "humanoidBullet" ? "Rifle shot hit." : "Crow shot hit.");
       spawnParticles(run, shot.x, shot.y, 8, "#ff9fb4");
       return false;
     }
@@ -5698,6 +6146,9 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.braceReleaseTimer = 0;
   player.recoilShotTimer = 0;
   player.recoilShotActive = false;
+  player.recoilShotAirborne = false;
+  player.recoilShotFacing = player.facing || 1;
+  player.recoilShotPitch = 0;
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
 }
@@ -5956,8 +6407,13 @@ function updateExpedition(state, data, dt) {
   } else {
     updateRecoilAim(run, data, state, dt);
   }
-  const queuedRecoilShotPressed = !lootWasActive && Boolean(state.mouse?.primaryJustPressed);
-  const reserveRecoilShotForWeapon = queuedRecoilShotPressed && Boolean(run.recoilAim?.aiming);
+  const selectedWeaponAutomatic = !lootWasActive && isSelectedWeaponAutomatic(run, data);
+  const heldAutoFire = selectedWeaponAutomatic
+    && Boolean(state.mouse?.primaryDown)
+    && canFireWeaponPose(run.player);
+  const queuedRecoilShotPressed = !lootWasActive && (Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
+  const reserveRecoilShotForWeapon = queuedRecoilShotPressed
+    && (Boolean(run.recoilAim?.aiming) || selectedWeaponAutomatic);
   if (queuedRecoilShotPressed || state.mouse?.secondaryDown || run.recoilAim?.aiming || run.focusActive) {
     pushInputTrace(state, "preFace", {
       pj: Number(Boolean(state.mouse?.primaryJustPressed)),
@@ -5992,7 +6448,8 @@ function updateExpedition(state, data, dt) {
   const focusTimeScale = focusActive
     ? clamp(data.player.movement.focusTimeScale ?? FOCUS_TIME_SCALE, 0.05, 1)
     : 1;
-  const simDt = dt * focusTimeScale;
+  const dodgeTimeScale = (run.dodgeSlowTimer ?? 0) > 0 ? 0.38 : 1;
+  const simDt = dt * focusTimeScale * dodgeTimeScale;
   let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
   const recoilShotPressed = reserveRecoilShotForWeapon || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
   if (recoilShotPressed || queuedRecoilShotPressed) {
@@ -6125,7 +6582,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Digit1", "Digit2", "KeyA", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (!state.pressed.has(event.code)) {

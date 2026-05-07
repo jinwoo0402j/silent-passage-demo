@@ -26,6 +26,8 @@ const PLAYER_RENDER_FIELDS = [
   "dashHeightRatio",
   "crouchWidthRatio",
   "crouchHeightRatio",
+  "slideShotWidthRatio",
+  "slideShotHeightRatio",
   "wallJumpWidthRatio",
   "wallJumpHeightRatio",
   "wallSlideWidthRatio",
@@ -43,6 +45,7 @@ const PLAYER_RENDER_FIELDS = [
   "fallAnchorX",
   "dashAnchorX",
   "crouchAnchorX",
+  "slideShotAnchorX",
   "wallJumpAnchorX",
   "wallSlideAnchorX",
   "wallRunAnchorX",
@@ -480,13 +483,23 @@ function sanitizePlatform(platform, index, basePlatform = null) {
     color: DEFAULT_PLATFORM_COLOR,
   };
 
-  return {
+  const kind = safeString(platform?.kind, fallback.kind || "solid");
+  const next = {
     x: safeNumber(platform?.x, fallback.x),
     y: safeNumber(platform?.y, fallback.y),
     width: safeNumber(platform?.width, fallback.width, 12),
     height: safeNumber(platform?.height, fallback.height, 12),
     color: safeString(platform?.color, fallback.color || DEFAULT_PLATFORM_COLOR),
   };
+  if (kind === "slope") {
+    next.kind = "slope";
+    next.slopeDirection = ["up-right", "down-right"].includes(platform?.slopeDirection)
+      ? platform.slopeDirection
+      : ["up-right", "down-right"].includes(fallback.slopeDirection)
+        ? fallback.slopeDirection
+        : "down-right";
+  }
+  return next;
 }
 
 function sanitizeProp(prop, index, baseProp = null) {
@@ -604,6 +617,8 @@ function sanitizePlayerRender(render, baseRender) {
     dashHeightRatio: safeNumber(render?.dashHeightRatio, baseRender.dashHeightRatio, 0.1),
     crouchWidthRatio: safeNumber(render?.crouchWidthRatio, baseRender.crouchWidthRatio, 0.1),
     crouchHeightRatio: safeNumber(render?.crouchHeightRatio, baseRender.crouchHeightRatio, 0.1),
+    slideShotWidthRatio: safeNumber(render?.slideShotWidthRatio, baseRender.slideShotWidthRatio, 0.1),
+    slideShotHeightRatio: safeNumber(render?.slideShotHeightRatio, baseRender.slideShotHeightRatio, 0.1),
     wallJumpWidthRatio: safeNumber(render?.wallJumpWidthRatio, baseRender.wallJumpWidthRatio, 0.1),
     wallJumpHeightRatio: safeNumber(render?.wallJumpHeightRatio, baseRender.wallJumpHeightRatio, 0.1),
     wallSlideWidthRatio: safeNumber(render?.wallSlideWidthRatio, baseRender.wallSlideWidthRatio, 0.1),
@@ -621,6 +636,7 @@ function sanitizePlayerRender(render, baseRender) {
     fallAnchorX: safeRange(render?.fallAnchorX, baseRender.fallAnchorX, 0, 1),
     dashAnchorX: safeRange(render?.dashAnchorX, baseRender.dashAnchorX, 0, 1),
     crouchAnchorX: safeRange(render?.crouchAnchorX, baseRender.crouchAnchorX, 0, 1),
+    slideShotAnchorX: safeRange(render?.slideShotAnchorX, baseRender.slideShotAnchorX, 0, 1),
     wallJumpAnchorX: safeRange(render?.wallJumpAnchorX, baseRender.wallJumpAnchorX, 0, 1),
     wallSlideAnchorX: safeRange(render?.wallSlideAnchorX, baseRender.wallSlideAnchorX, 0, 1),
     wallRunAnchorX: safeRange(render?.wallRunAnchorX, baseRender.wallRunAnchorX, 0, 1),
@@ -698,6 +714,8 @@ export function extractEditableLevelData(data) {
     routeExits: (data.routeExits || []).map((exit) => extractRouteExit(exit)),
     extractionGate: extractExtractionGate(data.extractionGate),
     platforms: (data.platforms || []).map((platform) => ({
+      kind: platform.kind,
+      slopeDirection: platform.slopeDirection,
       x: platform.x,
       y: platform.y,
       width: platform.width,
@@ -716,6 +734,7 @@ export function extractEditableLevelData(data) {
       width: wall.width,
       height: wall.height,
     })),
+    humanoidEnemies: (data.humanoidEnemies || []).map((enemy) => safeRecord(enemy)),
     hostileDrones: (data.hostileDrones || []).map((drone) => extractHostileDrone(drone)),
     lootTables: safeRecord(data.lootTables),
     lootCrates: (data.lootCrates || []).map((crate) => extractLootCrate(crate)),
@@ -787,6 +806,9 @@ export function normalizeEditableLevelData(raw, baseData) {
     braceWalls: Array.isArray(source.braceWalls)
       ? source.braceWalls.map((wall, index) => sanitizeBraceWall(wall, index, fallback.braceWalls?.[index]))
       : (fallback.braceWalls || []).map((wall, index) => sanitizeBraceWall(wall, index)),
+    humanoidEnemies: Array.isArray(source.humanoidEnemies)
+      ? source.humanoidEnemies.map((enemy, index) => safeRecord(enemy, fallback.humanoidEnemies?.[index] || {}))
+      : (fallback.humanoidEnemies || []).map((enemy) => safeRecord(enemy)),
     hostileDrones: Array.isArray(source.hostileDrones)
       ? source.hostileDrones.map((drone, index) => sanitizeHostileDrone(drone, index, fallback.hostileDrones?.[index]))
       : (fallback.hostileDrones || []).map((drone, index) => sanitizeHostileDrone(drone, index)),
@@ -853,6 +875,7 @@ export function mergeLevelData(baseData, override) {
   next.platforms = normalized.platforms;
   next.props = normalized.props;
   next.braceWalls = normalized.braceWalls;
+  next.humanoidEnemies = normalized.humanoidEnemies;
   next.hostileDrones = normalized.hostileDrones;
   next.lootTables = normalized.lootTables;
   next.lootCrates = normalized.lootCrates;
@@ -1069,6 +1092,8 @@ export function getLevelSummaries(baseData) {
         groundY: safeNumber(effective.world?.groundY, 0),
       },
       platforms: (effective.platforms || []).map((platform) => ({
+        kind: platform.kind,
+        slopeDirection: platform.slopeDirection,
         x: platform.x,
         y: platform.y,
         width: platform.width,

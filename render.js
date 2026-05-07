@@ -871,6 +871,53 @@ function drawWorldMegastructures(ctx, run) {
 }
 
 function drawPlatformMass(ctx, platform, theme) {
+  if (platform.kind === "slope") {
+    const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+    gradient.addColorStop(0, "rgba(212, 230, 236, 0.28)");
+    gradient.addColorStop(0.36, "rgba(112, 130, 139, 0.5)");
+    gradient.addColorStop(1, "rgba(25, 38, 46, 0.86)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    if (platform.slopeDirection === "up-right") {
+      ctx.moveTo(platform.x, platform.y + platform.height);
+      ctx.lineTo(platform.x + platform.width, platform.y);
+      ctx.lineTo(platform.x + platform.width, platform.y + platform.height);
+    } else {
+      ctx.moveTo(platform.x, platform.y);
+      ctx.lineTo(platform.x + platform.width, platform.y + platform.height);
+      ctx.lineTo(platform.x, platform.y + platform.height);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(241, 249, 252, 0.38)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (platform.slopeDirection === "up-right") {
+      ctx.moveTo(platform.x, platform.y + platform.height);
+      ctx.lineTo(platform.x + platform.width, platform.y);
+    } else {
+      ctx.moveTo(platform.x, platform.y);
+      ctx.lineTo(platform.x + platform.width, platform.y + platform.height);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.16)";
+    ctx.lineWidth = 1;
+    for (let offset = 32; offset < platform.width; offset += 42) {
+      const x = platform.x + offset;
+      const t = offset / Math.max(1, platform.width);
+      const y = platform.slopeDirection === "up-right"
+        ? platform.y + platform.height * (1 - t)
+        : platform.y + platform.height * t;
+      ctx.beginPath();
+      ctx.moveTo(x, y + 6);
+      ctx.lineTo(x, platform.y + platform.height - 4);
+      ctx.stroke();
+    }
+    return;
+  }
+
   const topGradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
   topGradient.addColorStop(0, "rgba(212, 230, 236, 0.24)");
   topGradient.addColorStop(0.18, "rgba(112, 130, 139, 0.46)");
@@ -2216,7 +2263,8 @@ function drawEnemyShots(ctx, run) {
     const speed = Math.max(1, Math.hypot(shot.vx, shot.vy));
     const dirX = shot.vx / speed;
     const dirY = shot.vy / speed;
-    ctx.strokeStyle = "rgba(135, 225, 255, 0.52)";
+    const shotColor = shot.color || "#ff9fb4";
+    ctx.strokeStyle = shot.type === "humanoidBullet" ? "rgba(255, 190, 102, 0.58)" : "rgba(135, 225, 255, 0.52)";
     ctx.lineWidth = 5;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -2224,8 +2272,8 @@ function drawEnemyShots(ctx, run) {
     ctx.lineTo(shot.x, shot.y);
     ctx.stroke();
 
-    ctx.fillStyle = "rgba(255, 159, 180, 0.94)";
-    ctx.shadowColor = "rgba(135, 225, 255, 0.8)";
+    ctx.fillStyle = shotColor;
+    ctx.shadowColor = shot.type === "humanoidBullet" ? "rgba(255, 190, 102, 0.82)" : "rgba(135, 225, 255, 0.8)";
     ctx.shadowBlur = 14;
     ctx.beginPath();
     ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2);
@@ -2234,12 +2282,39 @@ function drawEnemyShots(ctx, run) {
   ctx.restore();
 }
 
+function getRecoilShotPose(player) {
+  if (player.slideTimer > 0 && player.onGround) {
+    return "slideShot";
+  }
+  if (!player.recoilShotAirborne) {
+    return "recoilShot";
+  }
+  if (player.recoilShotPitch === -1) {
+    return "recoilAirShotUp";
+  }
+  if (player.recoilShotPitch === 1) {
+    return "recoilAirShotDown";
+  }
+  return "recoilAirShot";
+}
+
+function isRecoilDirectionalPose(pose) {
+  return pose === "recoilShot"
+    || pose === "recoilAirShot"
+    || pose === "recoilAirShotUp"
+    || pose === "recoilAirShotDown"
+    || pose === "slideShot"
+    || pose === "recoilFocus"
+    || pose === "recoilFocusUp"
+    || pose === "recoilFocusDown";
+}
+
 function getPlayerPose(player) {
+  if (player.recoilShotActive) {
+    return getRecoilShotPose(player);
+  }
   if (player.recoilSpinTimer > 0 && !player.onGround) {
     return "recoilSpin";
-  }
-  if (player.recoilShotActive) {
-    return "recoilShot";
   }
   if (player.recoilFocusActive || (player.recoilFocusBlend ?? 0) > 0.12) {
     if (player.recoilAimPitch === -1) {
@@ -2358,11 +2433,35 @@ function getPlayerPoseConfig(data, pose) {
       heightRatio: renderConfig.slideHeightRatio ?? renderConfig.crouchHeightRatio ?? renderConfig.heightRatio ?? 1,
       anchorX: renderConfig.slideAnchorX ?? renderConfig.crouchAnchorX ?? 0.42,
     },
+    slideShot: {
+      assetKey: renderConfig.slideShotAssetKey || renderConfig.slideAssetKey || renderConfig.recoilShotAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.slideShotWidthRatio ?? renderConfig.slideWidthRatio ?? renderConfig.crouchWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.slideShotHeightRatio ?? renderConfig.slideHeightRatio ?? renderConfig.crouchHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.slideShotAnchorX ?? renderConfig.slideAnchorX ?? 0.36,
+    },
     recoilShot: {
       assetKey: renderConfig.recoilShotAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
       widthRatio: renderConfig.recoilShotWidthRatio ?? renderConfig.jumpWidthRatio ?? renderConfig.widthRatio ?? 1,
       heightRatio: renderConfig.recoilShotHeightRatio ?? renderConfig.jumpHeightRatio ?? renderConfig.heightRatio ?? 1,
       anchorX: renderConfig.recoilShotAnchorX ?? renderConfig.jumpAnchorX ?? 0.38,
+    },
+    recoilAirShot: {
+      assetKey: renderConfig.recoilAirShotAssetKey || renderConfig.recoilShotAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilAirShotWidthRatio ?? renderConfig.recoilShotWidthRatio ?? renderConfig.jumpWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilAirShotHeightRatio ?? renderConfig.recoilShotHeightRatio ?? renderConfig.jumpHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilAirShotAnchorX ?? renderConfig.recoilShotAnchorX ?? renderConfig.jumpAnchorX ?? 0.38,
+    },
+    recoilAirShotUp: {
+      assetKey: renderConfig.recoilAirShotUpAssetKey || renderConfig.recoilFocusUpAssetKey || renderConfig.recoilShotAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilAirShotUpWidthRatio ?? renderConfig.recoilFocusUpWidthRatio ?? renderConfig.recoilShotWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilAirShotUpHeightRatio ?? renderConfig.recoilFocusUpHeightRatio ?? renderConfig.recoilShotHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilAirShotUpAnchorX ?? renderConfig.recoilFocusUpAnchorX ?? renderConfig.recoilShotAnchorX ?? 0.34,
+    },
+    recoilAirShotDown: {
+      assetKey: renderConfig.recoilAirShotDownAssetKey || renderConfig.recoilFocusDownAssetKey || renderConfig.recoilShotAssetKey || renderConfig.jumpAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.recoilAirShotDownWidthRatio ?? renderConfig.recoilFocusDownWidthRatio ?? renderConfig.recoilShotWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.recoilAirShotDownHeightRatio ?? renderConfig.recoilFocusDownHeightRatio ?? renderConfig.recoilShotHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.recoilAirShotDownAnchorX ?? renderConfig.recoilFocusDownAnchorX ?? renderConfig.recoilShotAnchorX ?? 0.34,
     },
     recoilSpin: {
       assetKey: renderConfig.recoilSpinAssetKey || renderConfig.recoilShotAssetKey || renderConfig.fallAssetKey || fallbackAssetKey,
@@ -2491,10 +2590,24 @@ function getPlayerSpriteFrame(player, data, pose, time = 0) {
     scaleX = 1.03;
     scaleY = 0.98;
     rotation = 0.015;
-  } else if (pose === "recoilShot") {
+  } else if (pose === "slideShot") {
+    yLift = -8;
+    scaleX = 1.03;
+    scaleY = 0.98;
+    const aimFacing = player.recoilShotFacing || player.recoilAimFacing || player.facing || 1;
+    rotation = aimFacing === -1 ? 0.012 : -0.012;
+  } else if (pose === "recoilShot" || pose === "recoilAirShot") {
     yLift = 1;
-    const aimFacing = player.recoilAimFacing || player.facing || 1;
+    const aimFacing = player.recoilShotFacing || player.recoilAimFacing || player.facing || 1;
     rotation = aimFacing === -1 ? 0.035 : -0.035;
+  } else if (pose === "recoilAirShotUp") {
+    yLift = 1;
+    const aimFacing = player.recoilShotFacing || player.recoilAimFacing || player.facing || 1;
+    rotation = aimFacing === -1 ? -0.015 : 0.015;
+  } else if (pose === "recoilAirShotDown") {
+    yLift = 1;
+    const aimFacing = player.recoilShotFacing || player.recoilAimFacing || player.facing || 1;
+    rotation = aimFacing === -1 ? 0.015 : -0.015;
   } else if (pose === "recoilSpin") {
     yLift = 1;
     const duration = Math.max(0.001, player.recoilSpinDuration || 0.22);
@@ -2524,8 +2637,12 @@ function getPlayerSpriteFrame(player, data, pose, time = 0) {
 
   const footX = player.x + player.width * 0.5;
   const footY = player.y + player.height + yLift;
-  const facing = (pose === "recoilFocus" || pose === "recoilFocusUp" || pose === "recoilFocusDown" || pose === "recoilShot")
-    ? (player.recoilAimFacing || player.facing || 1)
+  const facing = isRecoilDirectionalPose(pose)
+    ? (
+        pose === "recoilShot" || pose === "recoilAirShot" || pose === "recoilAirShotUp" || pose === "recoilAirShotDown" || pose === "slideShot"
+          ? (player.recoilShotFacing || player.recoilAimFacing || player.facing || 1)
+          : (player.recoilAimFacing || player.facing || 1)
+      )
     : pose === "recoilSpin"
       ? (player.recoilSpinFacing || player.facing || 1)
     : player.facing;
@@ -3058,21 +3175,106 @@ function drawWeaponModulesWorld(ctx, run) {
 function drawDamageNumbers(ctx, run) {
   (run.damageNumbers || []).forEach((number) => {
     const ratio = clamp((number.life ?? 0) / Math.max(0.001, number.duration ?? 0.7), 0, 1);
-    const text = number.label || `-${number.amount ?? 0}`;
+    const hasAmount = Math.abs(number.amount ?? 0) > 0;
+    const text = number.label && hasAmount ? `${number.label} ${number.amount}` : number.label || `-${number.amount ?? 0}`;
+    const critical = Boolean(number.critical);
+    const scale = number.scale ?? 1;
     ctx.save();
     ctx.globalAlpha = Math.min(1, ratio * 1.45);
-    ctx.font = number.label ? "800 15px 'Segoe UI', sans-serif" : "800 18px 'Segoe UI', sans-serif";
+    ctx.font = critical
+      ? `900 ${Math.round(22 * scale)}px 'Segoe UI', sans-serif`
+      : number.label
+        ? `800 ${Math.round(15 * scale)}px 'Segoe UI', sans-serif`
+        : `800 ${Math.round(18 * scale)}px 'Segoe UI', sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "rgba(3, 6, 10, 0.8)";
+    ctx.lineWidth = critical ? 6 : 4;
+    ctx.strokeStyle = critical ? "rgba(32, 0, 7, 0.92)" : "rgba(3, 6, 10, 0.8)";
     ctx.strokeText(text, number.x, number.y);
     ctx.fillStyle = number.color || "#f5f8fb";
     ctx.shadowColor = number.color || "rgba(245, 248, 251, 0.78)";
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = critical ? 18 : 8;
     ctx.fillText(text, number.x, number.y);
     ctx.restore();
   });
+}
+
+function drawDodgeFx(ctx, run) {
+  (run.dodgeFx || []).forEach((effect) => {
+    const ratio = clamp((effect.life ?? 0) / Math.max(0.001, effect.duration ?? 0.4), 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = Math.min(1, ratio * 1.4);
+    ctx.font = "900 18px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "rgba(2, 5, 10, 0.9)";
+    ctx.strokeText(effect.label || "DODGE", effect.x, effect.y);
+    ctx.fillStyle = "#e9f7ff";
+    ctx.shadowColor = "rgba(135, 225, 255, 0.95)";
+    ctx.shadowBlur = 18;
+    ctx.fillText(effect.label || "DODGE", effect.x, effect.y);
+    ctx.restore();
+  });
+}
+
+function drawProjectileDodgeOverlay(ctx, run, data) {
+  const duration = Math.max(0.001, run.dodgeSlowDuration ?? 0.32);
+  const ratio = clamp((run.dodgeSlowTimer ?? 0) / duration, 0, 1);
+  if (ratio <= 0.01) {
+    return;
+  }
+
+  const eased = 1 - Math.pow(1 - ratio, 2);
+  ctx.save();
+  ctx.fillStyle = `rgba(1, 5, 13, ${0.32 * eased})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.globalCompositeOperation = "screen";
+  const pulse = 0.55 + Math.sin((run.time ?? 0) * 28) * 0.45;
+  const leftEdge = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.42, 0);
+  leftEdge.addColorStop(0, `rgba(72, 132, 255, ${0.16 * eased})`);
+  leftEdge.addColorStop(0.48, `rgba(135, 225, 255, ${0.08 * eased})`);
+  leftEdge.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = leftEdge;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const rightEdge = ctx.createLinearGradient(SCREEN_WIDTH, 0, SCREEN_WIDTH * 0.58, 0);
+  rightEdge.addColorStop(0, `rgba(135, 225, 255, ${0.14 * eased})`);
+  rightEdge.addColorStop(0.54, `rgba(72, 132, 255, ${0.065 * eased})`);
+  rightEdge.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = rightEdge;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const cameraZoom = getRunCameraZoom(run, data);
+  const playerX = (run.player.x - run.cameraX + run.player.width * 0.5) * cameraZoom;
+  const playerY = (run.player.y - run.cameraY + run.player.height * 0.48) * cameraZoom;
+  const aura = ctx.createRadialGradient(playerX, playerY, 12, playerX, playerY, 210);
+  aura.addColorStop(0, `rgba(175, 234, 255, ${0.24 * eased})`);
+  aura.addColorStop(0.36, `rgba(72, 132, 255, ${0.14 * eased})`);
+  aura.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = aura;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.strokeStyle = `rgba(135, 225, 255, ${0.28 * eased})`;
+  ctx.lineWidth = 2 + pulse * 1.2;
+  ctx.beginPath();
+  ctx.moveTo(SCREEN_WIDTH * 0.5 - 72, SCREEN_HEIGHT * 0.5);
+  ctx.lineTo(SCREEN_WIDTH * 0.5 - 18, SCREEN_HEIGHT * 0.5);
+  ctx.moveTo(SCREEN_WIDTH * 0.5 + 18, SCREEN_HEIGHT * 0.5);
+  ctx.lineTo(SCREEN_WIDTH * 0.5 + 72, SCREEN_HEIGHT * 0.5);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(231, 244, 126, ${0.16 * eased})`;
+  ctx.lineWidth = 1.4;
+  for (let index = 0; index < 3; index += 1) {
+    const y = SCREEN_HEIGHT * (0.36 + index * 0.12) + Math.sin((run.time ?? 0) * 20 + index) * 7;
+    ctx.beginPath();
+    ctx.moveTo(SCREEN_WIDTH * 0.24, y);
+    ctx.lineTo(SCREEN_WIDTH * 0.76, y - 18);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawRecoilAimWorld(ctx, run) {
@@ -3881,14 +4083,14 @@ function drawFaceOffTimeline(ctx, theme, faceOff, enemy) {
   const y = 34;
   const exhaustion = `${enemy?.exhaustionHits ?? 0}/${Math.max(1, enemy?.exhaustionLimit ?? 2)}`;
   const chips = [
-    { label: "KNOCKDOWN", width: 142, danger: true },
+    { label: "TARGET DOWN", width: 142, danger: true },
     { label: "도주 중지", width: 126 },
     { label: `탈진 ${exhaustion}`, width: 116 },
     { label: "R: 놓아주기", width: 142 },
     { label: "ESC / 우클릭 취소", width: 176 },
   ];
   const displayChips = [
-    { label: "KNOCKDOWN", width: 142, danger: true },
+    { label: "TARGET DOWN", width: 142, danger: true },
     { label: "CRAWL PAUSED", width: 142 },
     { label: `EXHAUST ${exhaustion}`, width: 132 },
     { label: "Q: RELEASE", width: 126 },
@@ -4188,6 +4390,276 @@ function drawFaceOffAcquireGauge(ctx, state) {
   ctx.moveTo(x, y + 14);
   ctx.lineTo(x, y + 34);
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawAimCursorBulletPip(ctx, x, y, filled, warning, angle = 0, scale = 1) {
+  const length = 10 * scale;
+  const width = 4.2 * scale;
+  const radius = width * 0.5;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(-length * 0.5 + radius, -width * 0.5);
+  ctx.lineTo(length * 0.5 - radius, -width * 0.5);
+  ctx.quadraticCurveTo(length * 0.5, -width * 0.5, length * 0.5, 0);
+  ctx.quadraticCurveTo(length * 0.5, width * 0.5, length * 0.5 - radius, width * 0.5);
+  ctx.lineTo(-length * 0.5 + radius, width * 0.5);
+  ctx.quadraticCurveTo(-length * 0.5, width * 0.5, -length * 0.5, 0);
+  ctx.quadraticCurveTo(-length * 0.5, -width * 0.5, -length * 0.5 + radius, -width * 0.5);
+  ctx.closePath();
+
+  if (filled) {
+    ctx.fillStyle = warning ? "rgba(255, 170, 102, 0.92)" : "rgba(245, 248, 251, 0.94)";
+    ctx.shadowColor = warning ? "rgba(255, 130, 84, 0.52)" : "rgba(135, 225, 255, 0.45)";
+    ctx.shadowBlur = 6 * scale;
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = warning ? "rgba(255, 126, 146, 0.58)" : "rgba(135, 225, 255, 0.28)";
+    ctx.lineWidth = 1.15 * scale;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function getAimCursorProfile(stats) {
+  const ui = stats.aimUi || stats.type || "pistol";
+  if (ui === "scope" || ui === "sniper") {
+    return { kind: "scope", accent: "255, 71, 92", cool: "245, 248, 251", radius: 26, pipLimit: 5, pipSpacing: 15 };
+  }
+  if (ui === "rifle" || ui === "ar") {
+    return { kind: "rifle", accent: "135, 225, 255", cool: "139, 255, 207", radius: 20, pipLimit: 12, pipSpacing: 10 };
+  }
+  if (ui === "heavy" || ui === "machinegun") {
+    return { kind: "heavy", accent: "255, 190, 102", cool: "245, 248, 251", radius: 24, pipLimit: 14, pipSpacing: 8 };
+  }
+  if (ui === "scatter" || ui === "shotgun") {
+    return { kind: "scatter", accent: "255, 170, 102", cool: "135, 225, 255", radius: 23, pipLimit: 8, pipSpacing: 13 };
+  }
+  return { kind: "pistol", accent: "135, 225, 255", cool: "245, 248, 251", radius: 18, pipLimit: 10, pipSpacing: 12 };
+}
+
+function drawAimCursorWeaponFrame(ctx, x, y, profile, radius, aiming, accent, cool, white, empty, pulse) {
+  const bracketAlpha = aiming ? 0.84 : 0.58;
+  ctx.strokeStyle = `rgba(${accent}, ${bracketAlpha})`;
+  ctx.lineWidth = profile.kind === "heavy" ? 2.4 : 1.8;
+
+  if (profile.kind === "scope") {
+    ctx.strokeStyle = `rgba(${accent}, ${empty ? 0.72 : 0.82})`;
+    ctx.lineWidth = 1.35;
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${white}, 0.66)`;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(x - 46, y);
+    ctx.lineTo(x - 8, y);
+    ctx.moveTo(x + 8, y);
+    ctx.lineTo(x + 46, y);
+    ctx.moveTo(x, y - 46);
+    ctx.lineTo(x, y - 8);
+    ctx.moveTo(x, y + 8);
+    ctx.lineTo(x, y + 46);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(${accent}, ${0.72 + pulse * 0.2})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (profile.kind === "rifle") {
+    ctx.strokeStyle = `rgba(${accent}, ${bracketAlpha})`;
+    ctx.lineWidth = 1.65;
+    ctx.beginPath();
+    ctx.moveTo(x - 35, y - 9);
+    ctx.lineTo(x - 12, y - 9);
+    ctx.moveTo(x + 12, y - 9);
+    ctx.lineTo(x + 35, y - 9);
+    ctx.moveTo(x - 35, y + 9);
+    ctx.lineTo(x - 12, y + 9);
+    ctx.moveTo(x + 12, y + 9);
+    ctx.lineTo(x + 35, y + 9);
+    ctx.moveTo(x, y - 30);
+    ctx.lineTo(x, y - 12);
+    ctx.moveTo(x, y + 12);
+    ctx.lineTo(x, y + 30);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${cool}, 0.5)`;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, -0.7, 0.7);
+    ctx.arc(x, y, radius, Math.PI - 0.7, Math.PI + 0.7);
+    ctx.stroke();
+    return;
+  }
+
+  if (profile.kind === "heavy") {
+    const outer = aiming ? 38 : 34;
+    const inner = empty ? 10 : 8;
+    ctx.strokeStyle = `rgba(${accent}, ${bracketAlpha})`;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(x - outer, y - 14);
+    ctx.lineTo(x - inner, y - 14);
+    ctx.moveTo(x + inner, y - 14);
+    ctx.lineTo(x + outer, y - 14);
+    ctx.moveTo(x - outer, y + 14);
+    ctx.lineTo(x - inner, y + 14);
+    ctx.moveTo(x + inner, y + 14);
+    ctx.lineTo(x + outer, y + 14);
+    ctx.moveTo(x - outer, y - 14);
+    ctx.lineTo(x - outer, y + 14);
+    ctx.moveTo(x + outer, y - 14);
+    ctx.lineTo(x + outer, y + 14);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${white}, 0.52)`;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.arc(x, y, radius - 5, 0, Math.PI * 2);
+    ctx.stroke();
+    return;
+  }
+
+  if (profile.kind === "scatter") {
+    ctx.strokeStyle = `rgba(${cool}, ${aiming ? 0.52 : 0.34})`;
+    ctx.lineWidth = 1.25;
+    for (let index = 0; index < 4; index += 1) {
+      const start = index * Math.PI * 0.5 + 0.22;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, start, start + Math.PI * 0.5 - 0.44);
+      ctx.stroke();
+    }
+  }
+
+  const armInner = empty ? 8 : 7;
+  const armOuter = aiming ? 34 : 29;
+  ctx.strokeStyle = `rgba(${accent}, ${bracketAlpha})`;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(x - armOuter, y);
+  ctx.lineTo(x - armInner, y);
+  ctx.moveTo(x + armInner, y);
+  ctx.lineTo(x + armOuter, y);
+  ctx.moveTo(x, y - armOuter);
+  ctx.lineTo(x, y - armInner);
+  ctx.moveTo(x, y + armInner);
+  ctx.lineTo(x, y + armOuter);
+  ctx.stroke();
+}
+
+function drawAimCursorHud(ctx, state, data) {
+  const run = state.run;
+  const mouse = state.mouse || {};
+  if (
+    state.scene !== SCENES.EXPEDITION ||
+    !run ||
+    mouse.onCanvas === false ||
+    state.liveEdit?.active ||
+    run.mapOverlay?.active ||
+    run.loot?.active ||
+    run.faceOff?.active
+  ) {
+    return;
+  }
+
+  const hud = getSelectedArmHud(run, data);
+  const x = clamp(mouse.screenX ?? SCREEN_WIDTH / 2, 8, SCREEN_WIDTH - 8);
+  const y = clamp(mouse.screenY ?? SCREEN_HEIGHT / 2, 8, SCREEN_HEIGHT - 8);
+  const magazineSize = Math.max(1, Math.floor(hud.stats.magazineSize ?? 1));
+  const magazine = clamp(Math.floor(hud.magazine ?? 0), 0, magazineSize);
+  const reloading = (hud.arm.reloadTimer ?? 0) > 0;
+  const reloadProgress = reloading
+    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
+    : 1;
+  const empty = magazine <= 0;
+  const aiming = Boolean(run.recoilAim?.aiming || run.focusActive);
+  const profile = getAimCursorProfile(hud.stats);
+  const pulse = 0.5 + Math.sin((state.pulse ?? 0) * (reloading ? 15 : 8)) * 0.5;
+  const radius = profile.radius + (aiming ? 3 : 0);
+  const accent = empty ? "255, 126, 146" : reloading ? "255, 190, 102" : profile.accent;
+  const cool = profile.cool;
+  const white = "245, 248, 251";
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  const glow = ctx.createRadialGradient(x, y, 2, x, y, radius + 28);
+  glow.addColorStop(0, `rgba(${accent}, ${0.16 + pulse * 0.08})`);
+  glow.addColorStop(0.42, `rgba(${accent}, ${0.07 + pulse * 0.04})`);
+  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(x, y, radius + 28, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawAimCursorWeaponFrame(ctx, x, y, profile, radius, aiming, accent, cool, white, empty, pulse);
+
+  if (reloading) {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.13)";
+    ctx.lineWidth = 4.8;
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 7, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = `rgba(${accent}, ${0.78 + pulse * 0.18})`;
+    ctx.shadowColor = `rgba(${accent}, 0.52)`;
+    ctx.shadowBlur = 10;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * reloadProgress);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.strokeStyle = `rgba(${white}, ${empty ? 0.42 : 0.76})`;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(x, y, empty ? 3.8 : 2.6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = `rgba(${white}, ${empty ? 0.26 : 0.88})`;
+  ctx.beginPath();
+  ctx.arc(x, y, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  const pipCount = Math.min(magazineSize, profile.pipLimit);
+  const pipSpacing = profile.pipSpacing;
+  const startX = x - (pipCount - 1) * pipSpacing * 0.5;
+  const pipY = y + radius + 19;
+  for (let index = 0; index < pipCount; index += 1) {
+    const sourceIndex = magazineSize <= pipCount
+      ? index
+      : Math.floor(index * magazineSize / pipCount);
+    const filled = sourceIndex < magazine;
+    const pipX = startX + index * pipSpacing;
+    const pipAngle = -0.18 + (index / Math.max(1, pipCount - 1)) * 0.36;
+    drawAimCursorBulletPip(ctx, pipX, pipY + Math.abs(index - (pipCount - 1) / 2) * 0.55, filled, empty || reloading, pipAngle, filled ? 1 : 0.92);
+  }
+
+  if (magazineSize > pipCount) {
+    ctx.fillStyle = `rgba(${cool}, 0.34)`;
+    const dotX = startX + pipCount * pipSpacing + 4;
+    ctx.beginPath();
+    ctx.arc(dotX, pipY, 1.8, 0, Math.PI * 2);
+    ctx.arc(dotX + 6, pipY, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (empty) {
+    ctx.strokeStyle = `rgba(${accent}, ${0.72 + pulse * 0.2})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y - 7);
+    ctx.lineTo(x + 7, y + 7);
+    ctx.moveTo(x + 7, y - 7);
+    ctx.lineTo(x - 7, y + 7);
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
@@ -4671,6 +5143,7 @@ function renderExpedition(ctx, state, data) {
   drawWeaponModulesWorld(ctx, run);
   drawParticles(ctx, run);
   drawDamageNumbers(ctx, run);
+  drawDodgeFx(ctx, run);
   drawDebugWorldOverlay(ctx, state, data);
   drawLiveEditWorldOverlay(ctx, state, data);
   drawWorldPrompt(ctx, run, theme);
@@ -4678,6 +5151,7 @@ function renderExpedition(ctx, state, data) {
 
   drawRecoilFocusOverlay(ctx, run, data);
   drawDarknessOverlay(ctx, run, data);
+  drawProjectileDodgeOverlay(ctx, run, data);
   drawFaceOffEntryTransition(ctx, run, data);
   ctx.save();
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
@@ -4687,6 +5161,7 @@ function renderExpedition(ctx, state, data) {
 
   drawHudV5(ctx, state, data);
   drawLootOverlayV2(ctx, state, data, theme);
+  drawAimCursorHud(ctx, state, data);
   drawFaceOffAcquireGauge(ctx, state);
   drawFaceOffOverlay(ctx, state, data, theme);
   drawDebugCameraOverlay(ctx, state, data);

@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260505-faceoff-e-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260507-slope-slide-physics-v1";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -15,8 +15,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-  shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260505-level-source-v2";
+} from "./level-store.js?v=20260507-slope-slide-physics-v1";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -24,6 +23,8 @@ const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
 const TOOL_IDS = {
   SELECT: "select",
   PLATFORM: "platform",
+  SLOPE_DOWN: "slopeDown",
+  SLOPE_UP: "slopeUp",
   BRACE_WALL: "braceWall",
   SIGN: "sign",
   LANTERN: "lantern",
@@ -38,6 +39,9 @@ const TOOL_SHORTCUTS = {
   Numpad1: TOOL_IDS.SELECT,
   Digit2: TOOL_IDS.PLATFORM,
   Numpad2: TOOL_IDS.PLATFORM,
+  Digit9: TOOL_IDS.SLOPE_DOWN,
+  Numpad9: TOOL_IDS.SLOPE_DOWN,
+  KeyU: TOOL_IDS.SLOPE_UP,
   Digit3: TOOL_IDS.BRACE_WALL,
   Numpad3: TOOL_IDS.BRACE_WALL,
   Digit4: TOOL_IDS.SIGN,
@@ -55,6 +59,8 @@ const TOOL_SHORTCUTS = {
 const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.SELECT]: "1",
   [TOOL_IDS.PLATFORM]: "2",
+  [TOOL_IDS.SLOPE_DOWN]: "9",
+  [TOOL_IDS.SLOPE_UP]: "U",
   [TOOL_IDS.BRACE_WALL]: "3",
   [TOOL_IDS.SIGN]: "4",
   [TOOL_IDS.SPAWN]: "5",
@@ -66,6 +72,8 @@ const TOOL_SHORTCUT_LABELS = {
 const TOOL_HINTS = {
   [TOOL_IDS.SELECT]: "선택 후 드래그",
   [TOOL_IDS.PLATFORM]: "드래그로 플랫폼 생성",
+  [TOOL_IDS.SLOPE_DOWN]: "드래그로 오른쪽 내리막 경사로 생성",
+  [TOOL_IDS.SLOPE_UP]: "드래그로 오른쪽 오르막 경사로 생성",
   [TOOL_IDS.SIGN]: "클릭으로 표지 배치",
   [TOOL_IDS.LANTERN]: "클릭으로 랜턴 배치",
   [TOOL_IDS.SPAWN]: "클릭으로 스폰 이동",
@@ -540,6 +548,36 @@ function getDefaultPlatform(scale) {
   };
 }
 
+function isSlopeTool(tool) {
+  return tool === TOOL_IDS.SLOPE_DOWN || tool === TOOL_IDS.SLOPE_UP;
+}
+
+function getSlopeDirectionForTool(tool) {
+  return tool === TOOL_IDS.SLOPE_UP ? "up-right" : "down-right";
+}
+
+function getPlatformSlopeDirection(platform) {
+  return platform?.slopeDirection === "up-right" ? "up-right" : "down-right";
+}
+
+function getPreviewPlatformRect(editor) {
+  if (!editor.preview || editor.preview.kind !== "platform") {
+    return null;
+  }
+  const scale = getScaleConfig(editor.data);
+  const defaultPlatform = getDefaultPlatform(scale);
+  const x = Math.min(editor.preview.start.x, editor.preview.end.x);
+  const y = Math.min(editor.preview.start.y, editor.preview.end.y);
+  return {
+    x,
+    y,
+    width: Math.max(12, Math.abs(editor.preview.end.x - editor.preview.start.x) || defaultPlatform.width),
+    height: Math.max(12, Math.abs(editor.preview.end.y - editor.preview.start.y) || defaultPlatform.height),
+    kind: editor.preview.platformKind || "solid",
+    slopeDirection: editor.preview.slopeDirection || "down-right",
+  };
+}
+
 function getPlayerRenderConfig(data) {
   return data.player?.render || {};
 }
@@ -737,6 +775,7 @@ function getEditorDom() {
     expandAllButton: document.getElementById("expandAllButton"),
     fitViewButton: document.getElementById("fitViewButton"),
     resetButton: document.getElementById("resetButton"),
+    playLevelLink: document.getElementById("playLevelLink"),
     statusLabel: document.getElementById("statusLabel"),
     toolHint: document.getElementById("toolHint"),
     viewLabel: document.getElementById("viewLabel"),
@@ -794,7 +833,7 @@ function prepareEditorData(data) {
 
 function createEditorState() {
   const data = prepareEditorData(createRuntimeGameData(GAME_DATA, null, {
-    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+    applyLevelOverride: true,
   }));
   const scale = getScaleConfig(data);
 
@@ -1102,6 +1141,10 @@ function renderLevelControls(editor, dom) {
   if (dom.deleteLevelButton) {
     dom.deleteLevelButton.disabled = !localOnly;
     dom.deleteLevelButton.textContent = localOnly ? "Delete Local" : "Built-in Protected";
+  }
+  if (dom.playLevelLink) {
+    const encodedLevelId = encodeURIComponent(currentLevelId || editor.data.defaultLevelId || "movement-lab-01");
+    dom.playLevelLink.href = `./index.html?level=${encodedLevelId}&directLevel=1&localOverride=1`;
   }
 }
 
@@ -1515,7 +1558,8 @@ function describeSelection(editor) {
     if (!platform) {
       return "선택 없음";
     }
-    return `플랫폼 ${editor.selected.index + 1} · ${formatTiles(platform.width, scale.tileSize)} × ${formatTiles(platform.height, scale.tileSize)}`;
+    const platformLabel = platform.kind === "slope" ? "경사로" : "플랫폼";
+    return `${platformLabel} ${editor.selected.index + 1} · ${formatTiles(platform.width, scale.tileSize)} × ${formatTiles(platform.height, scale.tileSize)}`;
   }
 
   if (editor.selected.kind === "braceWall") {
@@ -1620,6 +1664,16 @@ function renderSelectionFields(editor, dom) {
   };
 
   if (editor.selected.kind === "platform") {
+    addSelect("Type", "kind", entity.kind || "solid", [
+      { value: "solid", label: "Solid block" },
+      { value: "slope", label: "Slope block" },
+    ]);
+    if (entity.kind === "slope") {
+      addSelect("Slope", "slopeDirection", getPlatformSlopeDirection(entity), [
+        { value: "down-right", label: "Down right" },
+        { value: "up-right", label: "Up right" },
+      ]);
+    }
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
     addNumber("가로", "width", entity.width, { min: 12 });
@@ -2064,6 +2118,8 @@ function applySelectionField(editor, dom, field, value) {
 
   if (
     field === "color"
+    || field === "kind"
+    || field === "slopeDirection"
     || field === "text"
     || field === "prompt"
     || field === "id"
@@ -2075,7 +2131,20 @@ function applySelectionField(editor, dom, field, value) {
       return;
     }
     pushUndo(editor);
-    entity[field] = value;
+    if (field === "kind") {
+      if (value === "slope") {
+        entity.kind = "slope";
+        entity.slopeDirection = getPlatformSlopeDirection(entity);
+      } else {
+        delete entity.kind;
+        delete entity.slopeDirection;
+      }
+    } else if (field === "slopeDirection") {
+      entity.slopeDirection = value === "up-right" ? "up-right" : "down-right";
+      entity.kind = "slope";
+    } else {
+      entity[field] = value;
+    }
     if (editor.selected?.kind === "routeExit" && field === "toLevelId") {
       const entrances = getLevelEntranceOptions(value);
       if (!entrances.some((entrance) => entrance.id === entity.toEntranceId)) {
@@ -2270,22 +2339,22 @@ function createPlatformFromPreview(editor, dom) {
 
   pushUndo(editor);
 
-  const scale = getScaleConfig(editor.data);
-  const defaults = getDefaultPlatform(scale);
-  const start = editor.preview.start;
-  const end = editor.preview.end;
-  const deltaX = end.x - start.x;
-  const deltaY = end.y - start.y;
-  const width = Math.abs(deltaX);
-  const height = Math.abs(deltaY);
+  const rect = getPreviewPlatformRect(editor);
+  if (!rect) {
+    return;
+  }
 
   const platform = {
-    x: Math.min(start.x, end.x),
-    y: Math.min(start.y, end.y),
-    width: Math.max(12, width || defaults.width),
-    height: Math.max(12, height || defaults.height),
-    color: defaults.color,
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    color: getDefaultPlatform(getScaleConfig(editor.data)).color,
   };
+  if (rect.kind === "slope") {
+    platform.kind = "slope";
+    platform.slopeDirection = getPlatformSlopeDirection(rect);
+  }
 
   editor.data.platforms.push(platform);
   setSelection(editor, dom, { kind: "platform", index: editor.data.platforms.length - 1 });
@@ -2460,11 +2529,13 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
-  if (editor.tool === TOOL_IDS.PLATFORM) {
+  if (editor.tool === TOOL_IDS.PLATFORM || isSlopeTool(editor.tool)) {
     editor.preview = {
       kind: "platform",
       start: snapped,
       end: snapped,
+      platformKind: isSlopeTool(editor.tool) ? "slope" : "solid",
+      slopeDirection: getSlopeDirectionForTool(editor.tool),
     };
     editor.drag = {
       kind: "previewPlatform",
@@ -2674,7 +2745,7 @@ function loadEditorLevel(editor, dom, levelId, options = {}) {
     saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
   }
   editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
-    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl() || isLocalOnlyLevel(GAME_DATA, levelId),
+    applyLevelOverride: true,
   }));
   editor.snap = getScaleConfig(editor.data).subTileSize;
   editor.preview = null;
@@ -3351,18 +3422,76 @@ function drawCameraGuide(ctx, editor) {
   ctx.restore();
 }
 
+function drawPlatformBlock(ctx, editor, platform, selected) {
+  ctx.fillStyle = platform.color || "#54697b";
+  ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+  ctx.fillRect(platform.x, platform.y, platform.width, Math.max(2, platform.height * 0.18));
+
+  ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 255, 255, 0.12)";
+  ctx.lineWidth = (selected ? 3 : 1.2) / editor.view.zoom;
+  ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+}
+
+function drawSlopePlatform(ctx, editor, platform, selected, options = {}) {
+  const fill = options.fill || platform.color || "#54697b";
+  const stroke = options.stroke || (selected ? COLORS.accent : "rgba(255, 255, 255, 0.18)");
+  const slopeDirection = getPlatformSlopeDirection(platform);
+
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  if (slopeDirection === "up-right") {
+    ctx.moveTo(platform.x, platform.y + platform.height);
+    ctx.lineTo(platform.x + platform.width, platform.y);
+    ctx.lineTo(platform.x + platform.width, platform.y + platform.height);
+  } else {
+    ctx.moveTo(platform.x, platform.y);
+    ctx.lineTo(platform.x + platform.width, platform.y + platform.height);
+    ctx.lineTo(platform.x, platform.y + platform.height);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.14)";
+  ctx.beginPath();
+  if (slopeDirection === "up-right") {
+    ctx.moveTo(platform.x + platform.width, platform.y);
+    ctx.lineTo(platform.x + platform.width, platform.y + Math.max(4, platform.height * 0.16));
+    ctx.lineTo(platform.x + Math.max(6, platform.width * 0.12), platform.y + platform.height);
+  } else {
+    ctx.moveTo(platform.x, platform.y);
+    ctx.lineTo(platform.x + Math.max(6, platform.width * 0.12), platform.y + platform.height);
+    ctx.lineTo(platform.x, platform.y + platform.height);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = (selected ? 3 : 1.6) / editor.view.zoom;
+  ctx.beginPath();
+  if (slopeDirection === "up-right") {
+    ctx.moveTo(platform.x, platform.y + platform.height);
+    ctx.lineTo(platform.x + platform.width, platform.y);
+  } else {
+    ctx.moveTo(platform.x, platform.y);
+    ctx.lineTo(platform.x + platform.width, platform.y + platform.height);
+  }
+  ctx.stroke();
+
+  ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 255, 255, 0.1)";
+  ctx.lineWidth = (selected ? 2 : 1) / editor.view.zoom;
+  ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+}
+
 function drawPlatforms(ctx, editor) {
   editor.data.platforms.forEach((platform, index) => {
     const selected = isSelectionItemSelected(editor.selected, { kind: "platform", index });
-    ctx.fillStyle = platform.color || "#54697b";
-    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
-
-    ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
-    ctx.fillRect(platform.x, platform.y, platform.width, Math.max(2, platform.height * 0.18));
-
-    ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 255, 255, 0.12)";
-    ctx.lineWidth = (selected ? 3 : 1.2) / editor.view.zoom;
-    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+    if (platform.kind === "slope") {
+      drawSlopePlatform(ctx, editor, platform, selected);
+      return;
+    }
+    drawPlatformBlock(ctx, editor, platform, selected);
   });
 }
 
@@ -3578,17 +3707,22 @@ function drawSelectionOutline(ctx, editor) {
 
 function drawPreview(ctx, editor) {
   if (editor.preview?.kind === "platform") {
-    const scale = getScaleConfig(editor.data);
-    const defaultPlatform = getDefaultPlatform(scale);
-    const x = Math.min(editor.preview.start.x, editor.preview.end.x);
-    const y = Math.min(editor.preview.start.y, editor.preview.end.y);
-    const width = Math.max(12, Math.abs(editor.preview.end.x - editor.preview.start.x) || defaultPlatform.width);
-    const height = Math.max(12, Math.abs(editor.preview.end.y - editor.preview.start.y) || defaultPlatform.height);
-    ctx.fillStyle = "rgba(147, 234, 255, 0.16)";
-    ctx.fillRect(x, y, width, height);
-    ctx.strokeStyle = COLORS.accentAlt;
-    ctx.lineWidth = 2 / editor.view.zoom;
-    ctx.strokeRect(x, y, width, height);
+    const rect = getPreviewPlatformRect(editor);
+    if (rect?.kind === "slope") {
+      drawSlopePlatform(ctx, editor, {
+        ...rect,
+        color: "rgba(147, 234, 255, 0.16)",
+      }, false, {
+        fill: "rgba(147, 234, 255, 0.16)",
+        stroke: COLORS.accentAlt,
+      });
+    } else if (rect) {
+      ctx.fillStyle = "rgba(147, 234, 255, 0.16)";
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.strokeStyle = COLORS.accentAlt;
+      ctx.lineWidth = 2 / editor.view.zoom;
+      ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    }
   }
 
   if (editor.preview?.kind === "braceWall") {

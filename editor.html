@@ -68,6 +68,8 @@
           <div class="tool-grid" id="toolButtons">
             <button type="button" class="tool-button is-active" data-tool="select">선택</button>
             <button type="button" class="tool-button" data-tool="platform">플랫폼</button>
+            <button type="button" class="tool-button" data-tool="slopeDown">Slope v</button>
+            <button type="button" class="tool-button" data-tool="slopeUp">Slope ^</button>
             <button type="button" class="tool-button" data-tool="braceWall">벽 짚기</button>
             <button type="button" class="tool-button" data-tool="sign">표지판</button>
             <button type="button" class="tool-button" data-tool="lantern">랜턴</button>
@@ -193,7 +195,7 @@
             <button type="button" class="ghost-button" id="importButton">JSON 불러오기</button>
             <button type="button" class="ghost-button" id="fitViewButton">전체 보기</button>
             <button type="button" class="ghost-button" id="resetButton">초기화</button>
-            <a class="ghost-button link-button" href="./index.html">게임으로</a>
+            <a class="ghost-button link-button" id="playLevelLink" href="./index.html">게임으로</a>
             <input id="importInput" type="file" accept="application/json,.json" hidden>
           </div>
           <p class="status-label" id="statusLabel">저장 준비</p>
@@ -236,6 +238,6 @@
     </section>
   </main>
 
-  <script type="module" src="./editor.js?v=20260505-level-source-v2"></script>
+  <script type="module" src="./editor.js?v=20260507-slope-slide-physics-v1"></script>
 </body>
 </html>
