@@ -482,19 +482,22 @@ function sanitizePlatform(platform, index, basePlatform = null) {
     height: 32,
     color: DEFAULT_PLATFORM_COLOR,
   };
+  const source = platform && typeof platform === "object" ? platform : null;
 
-  const kind = safeString(platform?.kind, fallback.kind || "solid");
+  const kind = source
+    ? safeString(source.kind, "solid")
+    : safeString(fallback.kind, "solid");
   const next = {
-    x: safeNumber(platform?.x, fallback.x),
-    y: safeNumber(platform?.y, fallback.y),
-    width: safeNumber(platform?.width, fallback.width, 12),
-    height: safeNumber(platform?.height, fallback.height, 12),
-    color: safeString(platform?.color, fallback.color || DEFAULT_PLATFORM_COLOR),
+    x: safeNumber(source?.x, fallback.x),
+    y: safeNumber(source?.y, fallback.y),
+    width: safeNumber(source?.width, fallback.width, 12),
+    height: safeNumber(source?.height, fallback.height, 12),
+    color: safeString(source?.color, fallback.color || DEFAULT_PLATFORM_COLOR),
   };
   if (kind === "slope") {
     next.kind = "slope";
-    next.slopeDirection = ["up-right", "down-right"].includes(platform?.slopeDirection)
-      ? platform.slopeDirection
+    next.slopeDirection = ["up-right", "down-right"].includes(source?.slopeDirection)
+      ? source.slopeDirection
       : ["up-right", "down-right"].includes(fallback.slopeDirection)
         ? fallback.slopeDirection
         : "down-right";

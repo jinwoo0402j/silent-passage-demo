@@ -2258,6 +2258,10 @@ function applySelectionField(editor, dom, field, value) {
         delete entity.slopeDirection;
       }
     } else if (field === "slopeDirection") {
+      if (editor.selected?.kind !== "platform" || entity.kind !== "slope") {
+        renderSelectionFields(editor, dom);
+        return;
+      }
       entity.slopeDirection = value === "up-right" ? "up-right" : "down-right";
       entity.kind = "slope";
     } else {
