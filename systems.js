@@ -1092,6 +1092,44 @@ function isSlopePlatformSeamPassThrough(player, platform, data, side, config) {
   return false;
 }
 
+function getConnectedSlopePlatformSeamX(slope, platform, config) {
+  if (!slope || !platform || platform.dynamicEntityId) {
+    return null;
+  }
+
+  const seamTolerance = config.slopePlatformSeamTolerancePx ?? 8;
+  const checks = [
+    { slopeX: slope.x, platformX: platform.x },
+    { slopeX: slope.x, platformX: platform.x + platform.width },
+    { slopeX: slope.x + slope.width, platformX: platform.x },
+    { slopeX: slope.x + slope.width, platformX: platform.x + platform.width },
+  ];
+
+  for (const check of checks) {
+    if (
+      Math.abs(check.slopeX - check.platformX) <= seamTolerance &&
+      Math.abs(getSlopeSurfaceY(slope, check.slopeX) - platform.y) <= seamTolerance
+    ) {
+      return (check.slopeX + check.platformX) * 0.5;
+    }
+  }
+
+  return null;
+}
+
+function shouldHoldSolidGroundAtSlopeSeam(player, slope, groundPlatform, footX, config) {
+  const seamX = getConnectedSlopePlatformSeamX(slope, groundPlatform, config);
+  if (seamX === null) {
+    return false;
+  }
+
+  const holdDistance = config.slopePlatformSeamHoldDistance ?? Math.max(12, player.width * 0.4);
+  return (
+    Math.abs(footX - seamX) <= holdDistance ||
+    (seamX >= player.x - holdDistance && seamX <= player.x + player.width + holdDistance)
+  );
+}
+
 function getSlopePlatforms(data) {
   return (data.platforms || []).filter((platform) => isSlopePlatform(platform));
 }
@@ -1112,46 +1150,13 @@ function collidesWithPlatforms(rect, data, run = null) {
   return getCollisionPlatforms(data, run).some((platform) => rectsOverlap(rect, platform));
 }
 
-function getPlayerCapsuleRadius(rect, config) {
-  const configuredRadius = config.playerCapsuleRadius;
-  const fallbackRadius = rect.width * (config.playerCapsuleRadiusRatio ?? 0.48);
-  return clamp(
-    Number.isFinite(configuredRadius) ? configuredRadius : fallbackRadius,
-    2,
-    Math.max(2, Math.min(rect.width, rect.height) * 0.5),
-  );
-}
-
-function playerCapsuleOverlapsRect(rect, platform, config) {
-  if (config.playerCapsuleCollision === false) {
-    return rectsOverlap(rect, platform);
-  }
-  if (!rectsOverlap(rect, platform)) {
-    return false;
-  }
-
-  const radius = getPlayerCapsuleRadius(rect, config);
-  const capsuleX = rect.x + rect.width * 0.5;
-  const segmentTop = rect.y + radius;
-  const segmentBottom = rect.y + rect.height - radius;
-  const segmentMinY = Math.min(segmentTop, segmentBottom);
-  const segmentMaxY = Math.max(segmentTop, segmentBottom);
-  const platformRight = platform.x + platform.width;
-  const platformBottom = platform.y + platform.height;
-
-  const closestX = clamp(capsuleX, platform.x, platformRight);
-  const closestSegmentY = clamp(platform.y + platform.height * 0.5, segmentMinY, segmentMaxY);
-  const closestY = clamp(closestSegmentY, platform.y, platformBottom);
-  const dx = capsuleX - closestX;
-  const dy = closestSegmentY - closestY;
-
-  return dx * dx + dy * dy < radius * radius - EPSILON;
-}
-
-function collidesWithPlayerMovementPlatforms(rect, data, config, run = null) {
-  return getCollisionPlatforms(data, run).some((platform) => (
-    playerCapsuleOverlapsRect(rect, platform, config)
-  ));
+function getPlayerSlopeProbeXs(player) {
+  const centerX = player.x + player.width * 0.5;
+  const direction = Math.sign(player.vx || player.facing || 1);
+  const probeOffset = player.width * 0.36;
+  const leadingX = clamp(centerX + direction * probeOffset, player.x + 2, player.x + player.width - 2);
+  const trailingX = clamp(centerX - direction * probeOffset, player.x + 2, player.x + player.width - 2);
+  return [leadingX, centerX, trailingX];
 }
 
 function canOccupyRect(rect, data, run = null) {
@@ -1161,16 +1166,6 @@ function canOccupyRect(rect, data, run = null) {
     rect.x + rect.width <= data.world.width &&
     rect.y + rect.height <= data.world.height &&
     !collidesWithPlatforms(rect, data, run)
-  );
-}
-
-function canOccupyPlayerMovementRect(rect, data, config, run = null) {
-  return (
-    rect.x >= 0 &&
-    rect.y >= 0 &&
-    rect.x + rect.width <= data.world.width &&
-    rect.y + rect.height <= data.world.height &&
-    !collidesWithPlayerMovementPlatforms(rect, data, config, run)
   );
 }
 
@@ -1439,7 +1434,7 @@ function tryJumpCornerCorrection(player, data, config, run = null) {
         height: player.height,
       };
 
-      if (canOccupyPlayerMovementRect(candidate, data, config, run)) {
+      if (canOccupyRect(candidate, data, run)) {
         player.x = candidate.x;
         return true;
       }
@@ -1468,7 +1463,7 @@ function tryDashCornerCorrection(player, data, resolvedX, direction, config, run
     ];
 
     for (const candidate of candidates) {
-      if (canOccupyPlayerMovementRect(candidate, data, config, run)) {
+      if (canOccupyRect(candidate, data, run)) {
         player.x = candidate.x;
         player.y = candidate.y;
         return true;
@@ -1479,7 +1474,7 @@ function tryDashCornerCorrection(player, data, resolvedX, direction, config, run
   return false;
 }
 
-function resolvePlayerCollisions(player, data, dt, config, run = null) {
+function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
   const contacts = {
     onGround: false,
     hitHead: false,
@@ -1500,7 +1495,7 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
   let slopeSeamPlatform = null;
 
   for (const platform of getCollisionPlatforms(data, run)) {
-    if (!playerCapsuleOverlapsRect(player, platform, config)) {
+    if (!rectsOverlap(player, platform)) {
       continue;
     }
 
@@ -1596,10 +1591,11 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
   const previousY = player.y;
   player.y += player.vy * dt;
   player.onGround = false;
+  let groundPlatform = null;
 
   for (const platform of getCollisionPlatforms(data, run)) {
     const catchDynamicTop = shouldCatchDynamicTop(player, platform, previousY);
-    if (!catchDynamicTop && !playerCapsuleOverlapsRect(player, platform, config)) {
+    if (!catchDynamicTop && !rectsOverlap(player, platform)) {
       continue;
     }
 
@@ -1609,6 +1605,7 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
       player.vy = 0;
       contacts.onGround = true;
       contacts.groundEntityId = platform.dynamicEntityId ?? null;
+      groundPlatform = platform;
     } else if (previousY >= platform.y + platform.height - EPSILON) {
       if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
         contacts.jumpCornerCorrected = true;
@@ -1626,6 +1623,7 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
         player.vy = 0;
         contacts.onGround = true;
         contacts.groundEntityId = platform.dynamicEntityId ?? null;
+        groundPlatform = platform;
       } else {
         if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
           contacts.jumpCornerCorrected = true;
@@ -1652,38 +1650,41 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
       player.vy = 0;
       contacts.onGround = true;
       contacts.groundEntityId = slopeSeamPlatform.dynamicEntityId ?? null;
+      groundPlatform = slopeSeamPlatform;
     }
   }
 
   if (player.vy >= -EPSILON) {
-    const footX = clamp(
-      player.x + player.width * 0.5 + Math.sign(player.vx || player.facing || 1) * player.width * 0.18,
-      player.x + 2,
-      player.x + player.width - 2,
-    );
+    const footProbeXs = getPlayerSlopeProbeXs(player);
     const currentFootY = player.y + player.height;
     const previousFootY = previousY + player.height;
     let bestSlope = null;
     let bestSurfaceY = Number.POSITIVE_INFINITY;
 
     for (const platform of getSlopePlatforms(data)) {
-      if (
-        player.x + player.width <= platform.x ||
-        player.x >= platform.x + platform.width ||
-        footX < platform.x ||
-        footX > platform.x + platform.width
-      ) {
+      if (player.x + player.width <= platform.x || player.x >= platform.x + platform.width) {
         continue;
       }
-      const surfaceY = getSlopeSurfaceY(platform, footX);
-      const snapDistance = config.slopeSnapDistance ?? 34;
-      if (
-        currentFootY >= surfaceY - snapDistance &&
-        previousFootY <= surfaceY + snapDistance &&
-        surfaceY < bestSurfaceY
-      ) {
-        bestSlope = platform;
-        bestSurfaceY = surfaceY;
+
+      for (const footX of footProbeXs) {
+        if (footX < platform.x || footX > platform.x + platform.width) {
+          continue;
+        }
+        const surfaceY = getSlopeSurfaceY(platform, footX);
+        const snapDistance = config.slopeSnapDistance ?? 34;
+        const catchDistance = config.slopeCatchDistance ?? Math.max(
+          snapDistance,
+          Math.abs(player.vy * dt) + player.width * 0.35,
+        );
+        if (
+          !shouldHoldSolidGroundAtSlopeSeam(player, platform, groundPlatform, footX, config) &&
+          currentFootY >= surfaceY - snapDistance &&
+          previousFootY <= surfaceY + catchDistance &&
+          surfaceY < bestSurfaceY
+        ) {
+          bestSlope = platform;
+          bestSurfaceY = surfaceY;
+        }
       }
     }
 
@@ -1707,6 +1708,64 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
     player.y = data.world.height - player.height;
     player.vy = 0;
     contacts.onGround = true;
+  }
+
+  return contacts;
+}
+
+function mergePlayerCollisionContacts(total, step) {
+  total.hitHead = total.hitHead || step.hitHead;
+  total.wallLeft = total.wallLeft || step.wallLeft;
+  total.wallRight = total.wallRight || step.wallRight;
+  total.dashBlocked = total.dashBlocked || step.dashBlocked;
+  total.dashCornerCorrected = total.dashCornerCorrected || step.dashCornerCorrected;
+  total.jumpCornerCorrected = total.jumpCornerCorrected || step.jumpCornerCorrected;
+  if (step.onGround) {
+    total.onGround = true;
+    total.groundEntityId = step.groundEntityId ?? null;
+    total.slopeDownhillDirection = step.slopeDownhillDirection;
+  }
+  total.wallEntityId = step.wallEntityId ?? total.wallEntityId;
+  if (step.landingSpeed !== 0) {
+    total.landingSpeed = step.landingSpeed;
+  }
+}
+
+function resolvePlayerCollisions(player, data, dt, config, run = null) {
+  const contacts = {
+    onGround: false,
+    hitHead: false,
+    wallLeft: false,
+    wallRight: false,
+    groundEntityId: null,
+    wallEntityId: null,
+    landingSpeed: 0,
+    dashBlocked: false,
+    dashCornerCorrected: false,
+    jumpCornerCorrected: false,
+    slopeDownhillDirection: 0,
+  };
+
+  const maxStepDistance = config.playerCollisionMaxStepPx ?? 10;
+  const maxSubsteps = config.playerCollisionMaxSubsteps ?? 8;
+  const travelDistance = Math.max(Math.abs(player.vx * dt), Math.abs(player.vy * dt));
+  const substeps = clamp(
+    Math.ceil(travelDistance / Math.max(1, maxStepDistance)),
+    1,
+    maxSubsteps,
+  );
+  const stepDt = dt / substeps;
+
+  for (let index = 0; index < substeps; index += 1) {
+    const stepContacts = resolvePlayerCollisionStep(player, data, stepDt, config, run);
+    mergePlayerCollisionContacts(contacts, stepContacts);
+    if (
+      (stepContacts.wallLeft || stepContacts.wallRight) &&
+      Math.abs(player.vx) <= EPSILON &&
+      Math.abs(player.vy) <= EPSILON
+    ) {
+      break;
+    }
   }
 
   return contacts;
