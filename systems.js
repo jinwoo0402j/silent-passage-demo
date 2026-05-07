@@ -1060,6 +1060,38 @@ function getSlopeDownhillDirection(platform) {
   return platform.slopeDirection === "up-right" ? -1 : 1;
 }
 
+function isSlopePlatformSeamPassThrough(player, platform, data, side, config) {
+  if (platform.dynamicEntityId) {
+    return false;
+  }
+
+  const seamTolerance = config.slopePlatformSeamTolerancePx ?? 8;
+  const snapDistance = config.slopeSnapDistance ?? 34;
+  const platformSideX = side === "left" ? platform.x : platform.x + platform.width;
+  const playerFootY = player.y + player.height;
+
+  if (
+    playerFootY < platform.y - snapDistance ||
+    playerFootY > platform.y + seamTolerance ||
+    player.y >= platform.y + platform.height - EPSILON
+  ) {
+    return false;
+  }
+
+  for (const slope of getSlopePlatforms(data)) {
+    const slopeSideX = side === "left" ? slope.x + slope.width : slope.x;
+    const slopeSideY = getSlopeSurfaceY(slope, slopeSideX);
+    if (
+      Math.abs(slopeSideX - platformSideX) <= seamTolerance &&
+      Math.abs(slopeSideY - platform.y) <= seamTolerance
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function getSlopePlatforms(data) {
   return (data.platforms || []).filter((platform) => isSlopePlatform(platform));
 }
@@ -1413,6 +1445,7 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
 
   const previousX = player.x;
   player.x += player.vx * dt;
+  let slopeSeamPlatform = null;
 
   for (const platform of getCollisionPlatforms(data, run)) {
     if (!rectsOverlap(player, platform)) {
@@ -1420,6 +1453,10 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
     }
 
     if (previousX + player.width <= platform.x + EPSILON) {
+      if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config)) {
+        slopeSeamPlatform = platform;
+        continue;
+      }
       const resolvedX = platform.x - player.width;
       if (
         player.dashTimer > 0 &&
@@ -1433,6 +1470,10 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
       contacts.wallRight = true;
       contacts.wallEntityId = platform.dynamicEntityId ?? null;
     } else if (previousX >= platform.x + platform.width - EPSILON) {
+      if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config)) {
+        slopeSeamPlatform = platform;
+        continue;
+      }
       const resolvedX = platform.x + platform.width;
       if (
         player.dashTimer > 0 &&
@@ -1449,6 +1490,10 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
       const pushLeft = player.x + player.width - platform.x;
       const pushRight = platform.x + platform.width - player.x;
       if (pushLeft < pushRight) {
+        if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config)) {
+          slopeSeamPlatform = platform;
+          continue;
+        }
         const resolvedX = player.x - pushLeft;
         if (
           player.dashTimer > 0 &&
@@ -1462,6 +1507,10 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
         contacts.wallRight = true;
         contacts.wallEntityId = platform.dynamicEntityId ?? null;
       } else {
+        if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config)) {
+          slopeSeamPlatform = platform;
+          continue;
+        }
         const resolvedX = player.x + pushRight;
         if (
           player.dashTimer > 0 &&
@@ -1534,6 +1583,23 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
         player.vy = 0;
         contacts.hitHead = true;
       }
+    }
+  }
+
+  if (!contacts.onGround && slopeSeamPlatform && player.vy >= -EPSILON) {
+    const seamTolerance = config.slopePlatformSeamTolerancePx ?? 8;
+    const snapDistance = config.slopeSnapDistance ?? 34;
+    const footY = player.y + player.height;
+    if (
+      hasHorizontalOverlapWithPadding(player, slopeSeamPlatform, seamTolerance) &&
+      footY >= slopeSeamPlatform.y - snapDistance &&
+      footY <= slopeSeamPlatform.y + seamTolerance
+    ) {
+      contacts.landingSpeed = player.vy;
+      player.y = slopeSeamPlatform.y - player.height;
+      player.vy = 0;
+      contacts.onGround = true;
+      contacts.groundEntityId = slopeSeamPlatform.dynamicEntityId ?? null;
     }
   }
 
