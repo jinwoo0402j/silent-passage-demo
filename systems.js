@@ -5614,6 +5614,128 @@ function fireHumanoidProjectile(run, enemy, playerCenter) {
   enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.08);
 }
 
+function ensureHumanoidGroundState(enemy) {
+  if (!Number.isFinite(enemy.vx)) {
+    enemy.vx = 0;
+  }
+  if (!Number.isFinite(enemy.vy)) {
+    enemy.vy = 0;
+  }
+  if (!Number.isFinite(enemy.patrolDirection) || enemy.patrolDirection === 0) {
+    enemy.patrolDirection = 1;
+  }
+  if (!Number.isFinite(enemy.patrolCenterX)) {
+    enemy.patrolCenterX = enemy.x + enemy.width * 0.5;
+  }
+  if (!Number.isFinite(enemy.patrolRadius)) {
+    const centerX = enemy.patrolCenterX;
+    const leftCenter = Number.isFinite(enemy.patrol?.left)
+      ? enemy.patrol.left + enemy.width * 0.5
+      : centerX - (enemy.defaultPatrolRadius ?? 180);
+    const rightCenter = Number.isFinite(enemy.patrol?.right)
+      ? enemy.patrol.right + enemy.width * 0.5
+      : centerX + (enemy.defaultPatrolRadius ?? 180);
+    enemy.patrolRadius = Math.max(
+      enemy.minPatrolRadius ?? 48,
+      Math.abs(centerX - leftCenter),
+      Math.abs(rightCenter - centerX),
+    );
+  }
+}
+
+function getHumanoidGroundYAt(data, worldX, footY, maxDrop, lift = 8) {
+  let bestY = Number.POSITIVE_INFINITY;
+  for (const platform of data.platforms || []) {
+    if (worldX < platform.x || worldX > platform.x + platform.width) {
+      continue;
+    }
+    const surfaceY = isSlopePlatform(platform)
+      ? getSlopeSurfaceY(platform, worldX)
+      : platform.y;
+    if (surfaceY >= footY - lift && surfaceY <= footY + maxDrop && surfaceY < bestY) {
+      bestY = surfaceY;
+    }
+  }
+  return Number.isFinite(bestY) ? bestY : null;
+}
+
+function hasHumanoidGroundAhead(enemy, data, direction) {
+  if (!enemy.onGround || direction === 0) {
+    return true;
+  }
+  const probeDistance = enemy.cliffProbeDistance ?? Math.max(10, enemy.width * 0.35);
+  const maxDrop = enemy.cliffProbeDrop ?? Math.max(18, enemy.height * 0.55);
+  const footY = enemy.y + enemy.height;
+  const edgeX = direction > 0 ? enemy.x + enemy.width : enemy.x;
+  return getHumanoidGroundYAt(data, edgeX + direction * probeDistance, footY, maxDrop) !== null;
+}
+
+function isHumanoidWallAhead(enemy, data, direction) {
+  if (direction === 0) {
+    return false;
+  }
+  const probeDistance = enemy.wallProbeDistance ?? Math.max(4, enemy.width * 0.12);
+  const probe = {
+    x: enemy.x + direction * probeDistance,
+    y: enemy.y + 4,
+    width: enemy.width,
+    height: Math.max(1, enemy.height - 8),
+  };
+  return getCollisionPlatforms(data).some((platform) => (
+    !isSlopePlatform(platform) &&
+    rectsOverlap(probe, platform)
+  ));
+}
+
+function getHumanoidPatrolDirection(enemy, data) {
+  ensureHumanoidGroundState(enemy);
+  let direction = Math.sign(enemy.patrolDirection || enemy.facing || 1) || 1;
+  const centerX = enemy.x + enemy.width * 0.5;
+  const leftLimit = enemy.patrolCenterX - enemy.patrolRadius;
+  const rightLimit = enemy.patrolCenterX + enemy.patrolRadius;
+
+  if (centerX <= leftLimit) {
+    direction = 1;
+  } else if (centerX >= rightLimit) {
+    direction = -1;
+  }
+
+  if (isHumanoidWallAhead(enemy, data, direction) || !hasHumanoidGroundAhead(enemy, data, direction)) {
+    direction *= -1;
+  }
+
+  enemy.patrolDirection = direction;
+  return direction;
+}
+
+function updateHumanoidGroundPhysics(enemy, data, dt, direction = 0) {
+  ensureHumanoidGroundState(enemy);
+  const config = getMovementConfig(data);
+  const desiredDirection = Math.sign(direction) || 0;
+  const maxFallSpeed = enemy.maxFallSpeed ?? config.maxFallSpeed ?? 1600;
+  const speed = Math.max(0, enemy.patrolSpeed ?? enemy.speed ?? 70);
+
+  enemy.vx = enemy.onGround ? desiredDirection * speed : 0;
+  enemy.vy = Math.min(maxFallSpeed, (enemy.vy ?? 0) + (data.world?.gravity ?? 0) * dt);
+
+  const contacts = resolvePlayerCollisions(enemy, data, dt, config, null);
+  enemy.onGround = contacts.onGround;
+  enemy.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+  if (contacts.onGround) {
+    enemy.vy = 0;
+  }
+  if (
+    desiredDirection !== 0 &&
+    ((contacts.wallLeft && desiredDirection < 0) || (contacts.wallRight && desiredDirection > 0))
+  ) {
+    enemy.patrolDirection = -desiredDirection;
+    enemy.vx = 0;
+  }
+  if (desiredDirection !== 0) {
+    enemy.facing = desiredDirection;
+  }
+}
+
 function updateHumanoidEnemies(run, data, dt) {
   const enemies = run.humanoidEnemies || [];
   if (!enemies.length) {
@@ -5645,19 +5767,12 @@ function updateHumanoidEnemies(run, data, dt) {
     enemy.facing = playerCenter.x >= center.x ? 1 : -1;
 
     if (!enemy.active) {
-      enemy.x += (enemy.patrolDirection || 1) * (enemy.patrolSpeed ?? 70) * dt;
-      if (enemy.patrol) {
-        if (enemy.x <= enemy.patrol.left) {
-          enemy.x = enemy.patrol.left;
-          enemy.patrolDirection = 1;
-        }
-        if (enemy.x >= enemy.patrol.right) {
-          enemy.x = enemy.patrol.right;
-          enemy.patrolDirection = -1;
-        }
-      }
+      const direction = getHumanoidPatrolDirection(enemy, data);
+      updateHumanoidGroundPhysics(enemy, data, dt, direction);
       continue;
     }
+
+    updateHumanoidGroundPhysics(enemy, data, dt, 0);
 
     if (distance < (enemy.fireRange ?? 620)) {
       enemy.trigger = clamp((enemy.trigger ?? 0) + (enemy.triggerRate ?? 1) * dt * 0.35, 0, getFaceOffConfig(data).triggerLimit ?? 4.5);
