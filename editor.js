@@ -32,6 +32,7 @@ const TOOL_IDS = {
   ENTRANCE: "entrance",
   ROUTE_EXIT: "routeExit",
   GATE: "gate",
+  CRATE: "crate",
   ENEMY: "enemy",
   DRONE: "drone",
 };
@@ -56,6 +57,7 @@ const TOOL_SHORTCUTS = {
   Numpad7: TOOL_IDS.ROUTE_EXIT,
   Digit8: TOOL_IDS.GATE,
   Numpad8: TOOL_IDS.GATE,
+  KeyC: TOOL_IDS.CRATE,
   KeyH: TOOL_IDS.ENEMY,
   KeyO: TOOL_IDS.DRONE,
 };
@@ -71,6 +73,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.ENTRANCE]: "6",
   [TOOL_IDS.ROUTE_EXIT]: "7",
   [TOOL_IDS.GATE]: "8",
+  [TOOL_IDS.CRATE]: "C",
   [TOOL_IDS.ENEMY]: "H",
   [TOOL_IDS.DRONE]: "O",
 };
@@ -91,6 +94,7 @@ TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
 TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
 TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
 
+TOOL_HINTS[TOOL_IDS.CRATE] = "Click to place a loot crate";
 TOOL_HINTS[TOOL_IDS.ENEMY] = "Click to place a humanoid enemy";
 TOOL_HINTS[TOOL_IDS.DRONE] = "Click to place a hostile drone";
 
@@ -525,6 +529,8 @@ const COLORS = {
   spawn: "rgba(147, 234, 255, 0.9)",
   sign: "rgba(239, 248, 252, 0.94)",
   lantern: "rgba(231, 244, 126, 0.88)",
+  crate: "rgba(147, 234, 255, 0.9)",
+  crateFill: "rgba(147, 234, 255, 0.13)",
   enemy: "rgba(255, 125, 147, 0.9)",
   enemyFill: "rgba(255, 125, 147, 0.13)",
   drone: "rgba(255, 190, 102, 0.9)",
@@ -830,6 +836,7 @@ function prepareEditorData(data) {
   data.braceWalls = data.braceWalls || [];
   data.entrances = data.entrances || [];
   data.routeExits = data.routeExits || [];
+  data.lootCrates = data.lootCrates || [];
   data.humanoidEnemies = data.humanoidEnemies || [];
   data.hostileDrones = data.hostileDrones || [];
   ensureEditorMapRooms(data);
@@ -1342,6 +1349,10 @@ function getDroneRect(drone) {
   return drone;
 }
 
+function getLootCrateRect(crate) {
+  return crate;
+}
+
 function getBraceWallRect(wall) {
   return wall;
 }
@@ -1366,6 +1377,9 @@ function getSelectedEntity(editor) {
   }
   if (editor.selected.kind === "drone") {
     return editor.data.hostileDrones[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "crate") {
+    return editor.data.lootCrates[editor.selected.index] || null;
   }
   if (editor.selected.kind === "spawn") {
     return editor.data.player.spawn;
@@ -1480,6 +1494,10 @@ function getSelectionRect(editor, selection = editor.selected) {
     const drone = editor.data.hostileDrones[selection.index];
     return drone ? getDroneRect(drone) : null;
   }
+  if (selection.kind === "crate") {
+    const crate = editor.data.lootCrates[selection.index];
+    return crate ? getLootCrateRect(crate) : null;
+  }
   if (selection.kind === "spawn") {
     return getSpawnRect(editor.data);
   }
@@ -1525,6 +1543,10 @@ function getSelectionOrigin(editor, selection = editor.selected) {
   }
   if (selection.kind === "drone") {
     const entity = editor.data.hostileDrones[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "crate") {
+    const entity = editor.data.lootCrates[selection.index];
     return entity ? { x: entity.x, y: entity.y } : null;
   }
   if (selection.kind === "spawn") {
@@ -1590,11 +1612,17 @@ function describeSelection(editor) {
     return drone ? `Drone ${editor.selected.index + 1} - ${drone.id || "hostile drone"}` : "No selection";
   }
 
+  if (editor.selected.kind === "crate") {
+    const crate = editor.data.lootCrates[editor.selected.index];
+    return crate ? `Crate ${editor.selected.index + 1} - ${crate.label || crate.id || "loot crate"}` : "No selection";
+  }
+
   if (isMultiSelection(editor.selected)) {
     const items = getSelectionItems(editor.selected);
     const platformCount = items.filter((item) => item.kind === "platform").length;
     const braceWallCount = items.filter((item) => item.kind === "braceWall").length;
     const propCount = items.filter((item) => item.kind === "prop").length;
+    const crateCount = items.filter((item) => item.kind === "crate").length;
     const parts = [];
     if (braceWallCount > 0) {
       parts.push(`벽 짚기 ${braceWallCount}`);
@@ -1604,6 +1632,9 @@ function describeSelection(editor) {
     }
     if (propCount > 0) {
       parts.push(`소품 ${propCount}`);
+    }
+    if (crateCount > 0) {
+      parts.push(`Crate ${crateCount}`);
     }
     return `${items.length}개 선택${parts.length ? ` · ${parts.join(", ")}` : ""}`;
   }
@@ -1649,6 +1680,7 @@ function canDeleteSelection(selection) {
     item.kind === "platform"
     || item.kind === "braceWall"
     || item.kind === "prop"
+    || item.kind === "crate"
     || item.kind === "enemy"
     || item.kind === "drone"
     || item.kind === "routeExit"
@@ -1773,6 +1805,16 @@ function renderSelectionFields(editor, dom) {
     addNumber("Fire Range", "fireRange", entity.fireRange ?? 760, { min: 0 });
     addNumber("Patrol L", "patrol.left", entity.patrol?.left ?? entity.x);
     addNumber("Patrol R", "patrol.right", entity.patrol?.right ?? entity.x + 360);
+  } else if (editor.selected.kind === "crate") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addText("Prompt", "prompt", entity.prompt || "");
+    addText("Loot Table", "lootTable", entity.lootTable || "streetCache");
+    addNumber("Search Time", "searchTime", entity.searchTime ?? 0.75, { min: 0, step: 0.05 });
   } else if (editor.selected.kind === "spawn") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2032,6 +2074,12 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.lootCrates || []).forEach((crate, index) => {
+    if (rectsIntersect(rect, getLootCrateRect(crate))) {
+      items.push({ kind: "crate", index });
+    }
+  });
+
   editor.data.platforms.forEach((platform, index) => {
     if (rectsIntersect(rect, platform)) {
       items.push({ kind: "platform", index });
@@ -2076,6 +2124,12 @@ function hitTest(editor, point) {
   for (let index = (editor.data.humanoidEnemies || []).length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, getEnemyRect(editor.data.humanoidEnemies[index]))) {
       return { kind: "enemy", index };
+    }
+  }
+
+  for (let index = (editor.data.lootCrates || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getLootCrateRect(editor.data.lootCrates[index]))) {
+      return { kind: "crate", index };
     }
   }
 
@@ -2130,6 +2184,9 @@ function deleteSelection(editor, dom) {
   const droneIndexes = new Set(
     items.filter((item) => item.kind === "drone").map((item) => item.index),
   );
+  const crateIndexes = new Set(
+    items.filter((item) => item.kind === "crate").map((item) => item.index),
+  );
   const routeExitIndexes = new Set(
     items.filter((item) => item.kind === "routeExit").map((item) => item.index),
   );
@@ -2143,6 +2200,7 @@ function deleteSelection(editor, dom) {
     && propIndexes.size === 0
     && enemyIndexes.size === 0
     && droneIndexes.size === 0
+    && crateIndexes.size === 0
     && routeExitIndexes.size === 0
     && entranceIndexes.size === 0
   ) {
@@ -2156,6 +2214,7 @@ function deleteSelection(editor, dom) {
   editor.data.props = editor.data.props.filter((_, index) => !propIndexes.has(index));
   editor.data.humanoidEnemies = editor.data.humanoidEnemies.filter((_, index) => !enemyIndexes.has(index));
   editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !droneIndexes.has(index));
+  editor.data.lootCrates = editor.data.lootCrates.filter((_, index) => !crateIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
   editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
 
@@ -2242,6 +2301,7 @@ function applySelectionField(editor, dom, field, value) {
     || field === "id"
     || field === "label"
     || field === "visualKind"
+    || field === "lootTable"
     || field === "toLevelId"
     || field === "toEntranceId"
   ) {
@@ -2440,6 +2500,13 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
         entity.patrol.right += deltaX;
       }
     }
+  } else if (selection.kind === "crate") {
+    const entity = editor.data.lootCrates[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
   } else if (selection.kind === "spawn") {
     editor.data.player.spawn.x = snappedX;
     editor.data.player.spawn.y = snappedY;
@@ -2719,6 +2786,46 @@ function placeDroneAt(editor, dom, point) {
   markDirty(editor, dom);
 }
 
+function createDefaultCrateItem(crateId) {
+  return {
+    id: `${crateId}-item-1`,
+    name: "Field supplies",
+    rarity: "common",
+    type: "material",
+    quantity: 1,
+    value: 12,
+    weight: 1,
+    lootTime: 0.35,
+    revealDelay: 0,
+  };
+}
+
+function placeLootCrateAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 78;
+  const height = 50;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const crateId = `loot-crate-${Date.now()}`;
+  const crate = {
+    id: crateId,
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    label: "Supply cache",
+    prompt: "E: Open cache",
+    lootTable: "streetCache",
+    searchTime: 0.75,
+    items: [createDefaultCrateItem(crateId)],
+  };
+  editor.data.lootCrates.push(crate);
+  setSelection(editor, dom, { kind: "crate", index: editor.data.lootCrates.length - 1 });
+  markDirty(editor, dom);
+}
+
 function placeGateAt(editor, dom, point) {
   pushUndo(editor);
   const gate = editor.data.extractionGate || {
@@ -2861,6 +2968,12 @@ function handlePointerDown(editor, dom, event) {
 
   if (editor.tool === TOOL_IDS.DRONE) {
     placeDroneAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.CRATE) {
+    placeLootCrateAt(editor, dom, world);
     queueRender(editor, dom);
     return;
   }
@@ -3901,6 +4014,32 @@ function drawHostileDrones(ctx, editor) {
   });
 }
 
+function drawLootCrates(ctx, editor) {
+  (editor.data.lootCrates || []).forEach((crate, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "crate", index });
+    ctx.fillStyle = COLORS.crateFill;
+    ctx.fillRect(crate.x, crate.y, crate.width, crate.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.crate;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(crate.x, crate.y, crate.width, crate.height);
+
+    ctx.strokeStyle = "rgba(147, 234, 255, 0.42)";
+    ctx.lineWidth = 1.5 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(crate.x + 8 / editor.view.zoom, crate.y + crate.height * 0.32);
+    ctx.lineTo(crate.x + crate.width - 8 / editor.view.zoom, crate.y + crate.height * 0.32);
+    ctx.moveTo(crate.x + crate.width * 0.5, crate.y + 4 / editor.view.zoom);
+    ctx.lineTo(crate.x + crate.width * 0.5, crate.y + crate.height - 4 / editor.view.zoom);
+    ctx.stroke();
+
+    ctx.fillStyle = COLORS.crate;
+    ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(crate.label || crate.id || "Crate", crate.x + crate.width / 2, crate.y - 10 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+}
+
 function getPlayerPreviewFrame(editor) {
   const pose = editor.previewPose;
   const poseConfig = getPlayerPoseConfig(editor.data, pose);
@@ -4224,6 +4363,7 @@ function renderEditor(editor, dom) {
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawProps(ctx, editor);
+  drawLootCrates(ctx, editor);
   drawHumanoidEnemies(ctx, editor);
   drawHostileDrones(ctx, editor);
   drawRouteExits(ctx, editor);

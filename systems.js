@@ -1288,6 +1288,7 @@ function clearSlide(player) {
   player.slideTimer = 0;
   player.slideDirection = 0;
   player.slideSpeed = 0;
+  player.slideGroundGraceTimer = 0;
 }
 
 function tryStartSlide(player, data, config, moveAxis) {
@@ -1317,6 +1318,7 @@ function tryStartSlide(player, data, config, moveAxis) {
   player.vx = player.slideDirection * player.slideSpeed;
   player.facing = player.slideDirection;
   player.crouchBlocked = false;
+  player.slideGroundGraceTimer = (config.slideGroundGraceMs ?? 90) / 1000;
   return true;
 }
 
@@ -4107,6 +4109,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
   decaySlideTimer(player, config, dt);
+  player.slideGroundGraceTimer = Math.max(0, (player.slideGroundGraceTimer ?? 0) - dt);
   player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
   player.wallSlideGraceTimer = Math.max(0, player.wallSlideGraceTimer - dt);
   player.speedRetentionTimer = Math.max(0, player.speedRetentionTimer - dt);
@@ -4142,6 +4145,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (player.slideTimer === 0) {
     player.slideDirection = 0;
     player.slideSpeed = 0;
+    player.slideGroundGraceTimer = 0;
   }
   if (player.speedRetentionTimer === 0) {
     player.retainedSpeed = 0;
@@ -4746,6 +4750,7 @@ function updatePlayer(run, data, state, dt, input) {
     if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
       // Slide startup already resized the player and preserved the incoming speed.
     } else if (player.slideTimer > 0) {
+      player.slideGroundGraceTimer = (config.slideGroundGraceMs ?? 90) / 1000;
       player.crouchBlocked = false;
     } else if (crouchHeld) {
       tryEnterCrouch(player, data);
@@ -4755,7 +4760,13 @@ function updatePlayer(run, data, state, dt, input) {
   } else {
     player.crouchBlocked = false;
     if (player.slideTimer > 0) {
-      clearSlide(player);
+      if ((player.slideGroundGraceTimer ?? 0) > 0 && player.vy >= -EPSILON) {
+        player.onGround = true;
+        player.coyoteTimer = config.coyoteTimeMs / 1000;
+        player.wallSliding = false;
+      } else {
+        clearSlide(player);
+      }
     }
     if (player.wallDirection !== 0) {
       player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
