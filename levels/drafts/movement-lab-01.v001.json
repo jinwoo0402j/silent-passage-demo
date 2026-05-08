@@ -91,9 +91,23 @@
       "slideDurationMs": 720,
       "slideFriction": 110,
       "slideSpeedMultiplier": 1.21,
+      "slideInvulnerable": true,
       "slideJumpCarryMs": 650,
+      "slideJumpBoostMinSpeed": 1080,
       "slideJumpMinSpeed": 1190,
       "slideJumpSpeedMultiplier": 0.88,
+      "slideJumpVerticalMultiplier": 1.2,
+      "slideSlopeAccel": 900,
+      "slideSlopeMaxSpeed": 2100,
+      "slideDownhillFriction": 8,
+      "slideDownhillTimerDrainMultiplier": 0.28,
+      "slideUphillFriction": 2450,
+      "slideUphillTimerDrainMultiplier": 3.8,
+      "slideUphillStartMinSpeed": 1040,
+      "slideUphillStartSpeedMultiplier": 0.52,
+      "slideUphillStartTimerMultiplier": 0.28,
+      "slideUphillStopSpeed": 540,
+      "slopeSnapDistance": 34,
       "hoverFallSpeed": 150,
       "hoverGravityMultiplier": 0.16,
       "hoverStartMaxFallSpeed": 220,
@@ -155,6 +169,7 @@
       "recoilShotRecoilLookAhead": 0.18,
       "recoilShotRecoilUpLookAhead": 0.2,
       "recoilShotCameraHoldMs": 240,
+      "recoilAirShotPoseMs": 160,
       "recoilSpinDurationMs": 220,
       "recoilSpinLoopCount": 2,
       "recoilAimVerticalPoseThreshold": 0.45
@@ -176,6 +191,8 @@
       "dashHeightRatio": 0.89,
       "crouchWidthRatio": 1,
       "crouchHeightRatio": 1.542,
+      "slideShotWidthRatio": 1.12,
+      "slideShotHeightRatio": 1.32,
       "wallJumpWidthRatio": 1,
       "wallJumpHeightRatio": 1.56,
       "wallSlideWidthRatio": 1,
@@ -193,6 +210,7 @@
       "fallAnchorX": 0.46,
       "dashAnchorX": 0.51,
       "crouchAnchorX": 0.52,
+      "slideShotAnchorX": 0.34,
       "wallJumpAnchorX": 0.34,
       "wallSlideAnchorX": 0.38,
       "wallRunAnchorX": 0.34,
@@ -256,7 +274,15 @@
   "faceOff": {
     "enemyLineCharDelay": 0.045,
     "enemyLineHoldDuration": 0.85,
-    "choiceSlideDuration": 0.32
+    "choiceSlideDuration": 0.32,
+    "targetAimScale": 1.62,
+    "targetAimTop": 128,
+    "targetAimPivotY": 362,
+    "targetAimPanMax": 330,
+    "targetAimAssistY": 386,
+    "targetArtAimHeight": 1160,
+    "targetArtAimY": 18,
+    "targetArtPanMultiplier": 0.82
   },
   "map": {
     "rooms": [
@@ -517,6 +543,51 @@
       "width": 160,
       "height": 496,
       "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 3936,
+      "y": 2672,
+      "width": 160,
+      "height": 48,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 4096,
+      "y": 2720,
+      "width": 192,
+      "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 4960,
+      "y": 2960,
+      "width": 352,
+      "height": 48,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 5312,
+      "y": 3008,
+      "width": 224,
+      "height": 48,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 2704,
+      "y": 1872,
+      "width": 96,
+      "height": 192,
+      "color": "#54697b"
     }
   ],
   "props": [],
@@ -529,13 +600,81 @@
       "height": 736
     }
   ],
+  "humanoidEnemies": [
+    {
+      "id": "rifle-sentry-01",
+      "type": "humanoidEnemy",
+      "label": "Rifle sentry",
+      "x": 2188,
+      "y": 1784,
+      "width": 58,
+      "height": 104,
+      "maxHp": 140,
+      "damage": 12,
+      "fireRange": 760,
+      "initialCooldown": 1.1,
+      "fireCooldown": 1.65,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "staggerMax": 90,
+      "staggerDecayDelay": 0.9,
+      "staggerDecayRate": 36,
+      "staggerBreakDuration": 0.38,
+      "staggerAttackLockDuration": 0.58,
+      "staggerKnockbackSpeed": 230,
+      "staggerKnockbackFriction": 820,
+      "crawlSpeed": 38,
+      "escapeDistance": 300,
+      "exhaustionLimit": 2,
+      "knockdownStaggerDuration": 0.58,
+      "patrol": {
+        "left": 2088,
+        "right": 2308
+      }
+    },
+    {
+      "id": "arc-enemy-1778263984956",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 1344,
+      "y": 1856,
+      "width": 58,
+      "height": 104,
+      "maxHp": 140,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 1234,
+        "right": 1564
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    }
+  ],
   "hostileDrones": [
     {
       "id": "crow-01",
       "type": "hostileDrone",
       "visualKind": "crow",
-      "x": 4536,
-      "y": 1244,
+      "x": 4552,
+      "y": 1500,
       "width": 231,
       "height": 106,
       "maxHp": 2,
@@ -570,8 +709,8 @@
       "physicsSolid": true,
       "braceTarget": true,
       "patrol": {
-        "left": 4426,
-        "right": 4836
+        "left": 4442,
+        "right": 4852
       }
     },
     {
@@ -688,8 +827,8 @@
   "lootCrates": [
     {
       "id": "crate-street-01",
-      "x": 996,
-      "y": 1790,
+      "x": 948,
+      "y": 1918,
       "width": 78,
       "height": 50,
       "label": "거리 보급함",
@@ -699,8 +838,8 @@
     },
     {
       "id": "crate-rooftop-01",
-      "x": 7904,
-      "y": 892,
+      "x": 7472,
+      "y": 1964,
       "width": 82,
       "height": 52,
       "label": "추락 보관함",

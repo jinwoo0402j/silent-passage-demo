@@ -274,7 +274,15 @@
   "faceOff": {
     "enemyLineCharDelay": 0.045,
     "enemyLineHoldDuration": 0.85,
-    "choiceSlideDuration": 0.32
+    "choiceSlideDuration": 0.32,
+    "targetAimScale": 1.38,
+    "targetAimTop": 92,
+    "targetAimPivotY": 338,
+    "targetAimPanMax": 270,
+    "targetAimAssistY": 354,
+    "targetArtAimHeight": 980,
+    "targetArtAimY": -18,
+    "targetArtPanMultiplier": 0.82
   },
   "map": {
     "rooms": [
@@ -1029,15 +1037,6 @@
     {
       "kind": "slope",
       "slopeDirection": "down-right",
-      "x": 5808,
-      "y": 2144,
-      "width": 768,
-      "height": 128,
-      "color": "#54697b"
-    },
-    {
-      "kind": "slope",
-      "slopeDirection": "down-right",
       "x": 4192,
       "y": 2032,
       "width": 272,
@@ -1051,15 +1050,6 @@
       "y": 2064,
       "width": 288,
       "height": 80,
-      "color": "#54697b"
-    },
-    {
-      "kind": "slope",
-      "slopeDirection": "up-right",
-      "x": 6064,
-      "y": 2144,
-      "width": 512,
-      "height": 128,
       "color": "#54697b"
     },
     {
@@ -1306,7 +1296,7 @@
     {
       "kind": "slope",
       "slopeDirection": "up-right",
-      "x": 2928,
+      "x": 2736,
       "y": 3328,
       "width": 960,
       "height": 384,
@@ -1377,48 +1367,6 @@
       "color": "#54697b"
     },
     {
-      "x": 4928,
-      "y": 3392,
-      "width": 192,
-      "height": 192,
-      "color": "#54697b"
-    },
-    {
-      "x": 5296,
-      "y": 2784,
-      "width": 192,
-      "height": 192,
-      "color": "#54697b"
-    },
-    {
-      "x": 4944,
-      "y": 2784,
-      "width": 192,
-      "height": 192,
-      "color": "#54697b"
-    },
-    {
-      "x": 5296,
-      "y": 3392,
-      "width": 192,
-      "height": 192,
-      "color": "#54697b"
-    },
-    {
-      "x": 4848,
-      "y": 3104,
-      "width": 160,
-      "height": 192,
-      "color": "#54697b"
-    },
-    {
-      "x": 5408,
-      "y": 3104,
-      "width": 208,
-      "height": 192,
-      "color": "#54697b"
-    },
-    {
       "x": 5808,
       "y": 3152,
       "width": 768,
@@ -1461,10 +1409,142 @@
       "color": "#54697b"
     },
     {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 5024,
+      "y": 3664,
+      "width": 368,
+      "height": 48,
+      "color": "#54697b"
+    },
+    {
+      "x": 5392,
+      "y": 3664,
+      "width": 224,
+      "height": 48,
+      "color": "#54697b"
+    },
+    {
+      "x": 4928,
+      "y": 3488,
+      "width": 192,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5296,
+      "y": 3392,
+      "width": 192,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 4848,
+      "y": 3200,
+      "width": 160,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5408,
+      "y": 3104,
+      "width": 208,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5296,
+      "y": 2784,
+      "width": 192,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 4944,
+      "y": 2880,
+      "width": 192,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 5808,
+      "y": 2064,
+      "width": 352,
+      "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 6160,
+      "y": 2064,
+      "width": 416,
+      "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "x": 5808,
+      "y": 2144,
+      "width": 192,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6000,
+      "y": 2144,
+      "width": 192,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6192,
+      "y": 2144,
+      "width": 192,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6384,
+      "y": 2144,
+      "width": 192,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3216,
+      "y": 736,
+      "width": 208,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
       "x": 1392,
       "y": 2176,
-      "width": 48,
-      "height": 256,
+      "width": 80,
+      "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "x": 6576,
+      "y": 480,
+      "width": 192,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 6544,
+      "y": 1056,
+      "width": 32,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 6768,
+      "y": 1248,
+      "width": 32,
+      "height": 96,
       "color": "#54697b"
     }
   ],
@@ -1530,7 +1610,7 @@
     {
       "kind": "backgroundTile",
       "x": 6576,
-      "y": 352,
+      "y": 768,
       "width": 192,
       "height": 1792,
       "color": "#4f6f7d"
@@ -1647,38 +1727,101 @@
   ],
   "humanoidEnemies": [
     {
-      "id": "enemy-1778173719215",
+      "id": "arc-enemy-1778264061272",
       "type": "humanoidEnemy",
-      "label": "Enemy",
-      "x": 5824,
-      "y": 1856,
-      "width": 58,
-      "height": 104,
-      "maxHp": 140,
-      "damage": 12,
-      "fireRange": 760,
-      "triggerRate": 10,
-      "rangedProjectile": true,
-      "projectileDamage": 12,
-      "projectileSpeed": 820,
-      "projectileRadius": 8,
-      "projectileLife": 2.1,
-      "projectileColor": "#ffbe66",
-      "knockdownEnabled": true,
-      "patrol": {
-        "left": 5714,
-        "right": 6044
-      }
-    },
-    {
-      "id": "enemy-1778238018149",
-      "type": "humanoidEnemy",
-      "label": "Enemy",
-      "x": 3024,
+      "label": "Arc gunman",
+      "x": 3008,
       "y": 1504,
       "width": 58,
       "height": 104,
       "maxHp": 140,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 2898,
+        "right": 3228
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "arc-enemy-1778264064008",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 5824,
+      "y": 1824,
+      "width": 58,
+      "height": 104,
+      "maxHp": 140,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 5714,
+        "right": 6044
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "arc-enemy-1778264358307",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 6640,
+      "y": 2432,
+      "width": 58,
+      "height": 104,
+      "maxHp": 140,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 6530,
+        "right": 6860
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "enemy-1778265642506",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 3760,
+      "y": 2400,
+      "width": 58,
+      "height": 104,
+      "maxHp": 140,
       "damage": 12,
       "fireRange": 760,
       "triggerRate": 10,
@@ -1690,16 +1833,16 @@
       "projectileColor": "#ffbe66",
       "knockdownEnabled": true,
       "patrol": {
-        "left": 2914,
-        "right": 3244
+        "left": 3650,
+        "right": 3980
       }
     },
     {
-      "id": "enemy-1778239942435",
+      "id": "enemy-1778267200589",
       "type": "humanoidEnemy",
       "label": "Enemy",
       "x": 5184,
-      "y": 3584,
+      "y": 3552,
       "width": 58,
       "height": 104,
       "maxHp": 140,
@@ -1900,8 +2043,8 @@
     },
     {
       "id": "loot-crate-1778233076408",
-      "x": 6640,
-      "y": 1008,
+      "x": 4704,
+      "y": 1600,
       "width": 78,
       "height": 50,
       "label": "Supply cache",
@@ -1924,8 +2067,8 @@
     },
     {
       "id": "loot-crate-1778237927512",
-      "x": 7584,
-      "y": 560,
+      "x": 5680,
+      "y": 304,
       "width": 78,
       "height": 50,
       "label": "Supply cache",
@@ -1972,8 +2115,8 @@
     },
     {
       "id": "loot-crate-1778239995699",
-      "x": 5408,
-      "y": 3664,
+      "x": 5520,
+      "y": 3600,
       "width": 78,
       "height": 50,
       "label": "Supply cache",
@@ -1996,8 +2139,8 @@
     },
     {
       "id": "loot-crate-1778241055254",
-      "x": 4960,
-      "y": 2736,
+      "x": 4992,
+      "y": 2832,
       "width": 78,
       "height": 50,
       "label": "Supply cache",

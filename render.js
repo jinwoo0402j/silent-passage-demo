@@ -2279,7 +2279,11 @@ function drawEnemyShots(ctx, run) {
     const dirX = shot.vx / speed;
     const dirY = shot.vy / speed;
     const shotColor = shot.color || "#ff9fb4";
-    ctx.strokeStyle = shot.type === "humanoidBullet" ? "rgba(255, 190, 102, 0.58)" : "rgba(135, 225, 255, 0.52)";
+    ctx.strokeStyle = shot.type === "humanoidArc"
+      ? "rgba(246, 211, 111, 0.6)"
+      : shot.type === "humanoidBullet"
+        ? "rgba(255, 190, 102, 0.58)"
+        : "rgba(135, 225, 255, 0.52)";
     ctx.lineWidth = 5;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -2288,7 +2292,11 @@ function drawEnemyShots(ctx, run) {
     ctx.stroke();
 
     ctx.fillStyle = shotColor;
-    ctx.shadowColor = shot.type === "humanoidBullet" ? "rgba(255, 190, 102, 0.82)" : "rgba(135, 225, 255, 0.8)";
+    ctx.shadowColor = shot.type === "humanoidArc"
+      ? "rgba(246, 211, 111, 0.82)"
+      : shot.type === "humanoidBullet"
+        ? "rgba(255, 190, 102, 0.82)"
+        : "rgba(135, 225, 255, 0.8)";
     ctx.shadowBlur = 14;
     ctx.beginPath();
     ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2);
@@ -4140,11 +4148,50 @@ function addFaceOffRoundRectPath(ctx, x, y, width, height, radius) {
   }
 }
 
-function drawFaceOffTargetBackdrop(ctx, data) {
+function getFaceOffTargetFrame() {
   const width = 650;
   const height = 612;
-  const x = SCREEN_WIDTH / 2 - width / 2;
-  const y = 74;
+  return {
+    x: SCREEN_WIDTH / 2 - width / 2,
+    y: 74,
+    width,
+    height,
+  };
+}
+
+function getFaceOffAimPan(data, mouseY, screenHeight = SCREEN_HEIGHT) {
+  const config = data.faceOff || {};
+  const pivotY = config.targetAimPivotY ?? 362;
+  const lowerTravel = Math.max(1, screenHeight - pivotY);
+  return clamp((mouseY - pivotY) / lowerTravel, 0, 1) * (config.targetAimPanMax ?? 330);
+}
+
+function getFaceOffTargetZones(data, mouseY, screenWidth = SCREEN_WIDTH, screenHeight = SCREEN_HEIGHT) {
+  const config = data.faceOff || {};
+  const scale = config.targetAimScale ?? 1.62;
+  const cx = screenWidth / 2;
+  const top = (config.targetAimTop ?? 128) - getFaceOffAimPan(data, mouseY, screenHeight);
+  const zone = (id, label, x, y, width, height, shape = "rect") => ({
+    id,
+    label,
+    x: cx + x * scale,
+    y: top + y * scale,
+    width: width * scale,
+    height: height * scale,
+    shape,
+  });
+  return [
+    zone("head", "HEAD", -45, 0, 90, 86, "ellipse"),
+    zone("torso", "TORSO", -74, 98, 148, 190),
+    zone("leftArm", "L ARM", -158, 116, 68, 170),
+    zone("rightArm", "R ARM", 90, 116, 68, 170),
+    zone("leftLeg", "L LEG", -78, 287, 64, 205),
+    zone("rightLeg", "R LEG", 14, 287, 64, 205),
+  ];
+}
+
+function drawFaceOffTargetBackdrop(ctx, data) {
+  const { x, y, width, height } = getFaceOffTargetFrame();
   const hasBackdropOverride = Object.prototype.hasOwnProperty.call(data.faceOff || {}, "targetBackdropAssetKey");
   const assetKey = hasBackdropOverride ? data.faceOff?.targetBackdropAssetKey : data.faceOff?.targetArtAssetKey;
   const src = assetKey ? data.art?.[assetKey]?.src : null;
@@ -4214,7 +4261,7 @@ function drawFaceOffTargetBackdrop(ctx, data) {
   ctx.restore();
 }
 
-function drawFaceOffTargetArt(ctx, data) {
+function drawFaceOffTargetArt(ctx, data, faceOff) {
   const assetKey = data.faceOff?.targetArtAssetKey;
   const src = assetKey ? data.art?.[assetKey]?.src : null;
   const image = getImageAsset(src);
@@ -4227,12 +4274,17 @@ function drawFaceOffTargetArt(ctx, data) {
   const sy = clamp(crop.sy ?? 0.02, 0, 0.95) * image.naturalHeight;
   const sw = clamp(crop.sw ?? 0.36, 0.05, 1) * image.naturalWidth;
   const sh = clamp(crop.sh ?? 0.94, 0.05, 1) * image.naturalHeight;
-  const drawH = 708;
+  const mouseY = faceOff?.aimY ?? SCREEN_HEIGHT * 0.5;
+  const drawH = data.faceOff?.targetArtAimHeight ?? 1160;
   const drawW = drawH * (sw / Math.max(1, sh));
   const x = SCREEN_WIDTH / 2 - drawW / 2;
-  const y = 46;
+  const y = (data.faceOff?.targetArtAimY ?? -28) - getFaceOffAimPan(data, mouseY) * (data.faceOff?.targetArtPanMultiplier ?? 0.82);
+  const frame = getFaceOffTargetFrame();
 
   ctx.save();
+  ctx.beginPath();
+  addFaceOffRoundRectPath(ctx, frame.x, frame.y, frame.width, frame.height, 8);
+  ctx.clip();
   ctx.globalAlpha = 0.95;
   ctx.shadowColor = "rgba(0,0,0,0.48)";
   ctx.shadowBlur = 16;
@@ -4252,20 +4304,12 @@ function drawFaceOffTargetArt(ctx, data) {
 }
 
 function drawFaceOffSilhouette(ctx, theme, data, faceOff) {
-  const cx = SCREEN_WIDTH / 2;
-  const top = 138;
   const selected = faceOff.selectedPart;
   const hover = faceOff.hoverPart;
+  const aimY = faceOff.aimY ?? SCREEN_HEIGHT * 0.5;
   drawFaceOffTargetBackdrop(ctx, data);
-  const hasTargetArt = drawFaceOffTargetArt(ctx, data);
-  const zones = [
-    { id: "head", label: "머리", x: cx - 45, y: top, width: 90, height: 86, shape: "ellipse" },
-    { id: "torso", label: "몸통", x: cx - 74, y: top + 98, width: 148, height: 190 },
-    { id: "leftArm", label: "왼팔", x: cx - 158, y: top + 116, width: 68, height: 170 },
-    { id: "rightArm", label: "오른 팔", x: cx + 90, y: top + 116, width: 68, height: 170 },
-    { id: "leftLeg", label: "왼 다리", x: cx - 78, y: top + 287, width: 64, height: 205 },
-    { id: "rightLeg", label: "오른 다리", x: cx + 14, y: top + 287, width: 64, height: 205 },
-  ];
+  const hasTargetArt = drawFaceOffTargetArt(ctx, data, faceOff);
+  const zones = getFaceOffTargetZones(data, aimY);
 
   ctx.save();
   ctx.shadowColor = hasTargetArt ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.12)";

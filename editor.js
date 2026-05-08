@@ -35,6 +35,7 @@ const TOOL_IDS = {
   GATE: "gate",
   CRATE: "crate",
   ENEMY: "enemy",
+  ARTILLERY_ENEMY: "artilleryEnemy",
   DRONE: "drone",
 };
 
@@ -61,6 +62,7 @@ const TOOL_SHORTCUTS = {
   Numpad8: TOOL_IDS.GATE,
   KeyC: TOOL_IDS.CRATE,
   KeyH: TOOL_IDS.ENEMY,
+  KeyJ: TOOL_IDS.ARTILLERY_ENEMY,
   KeyO: TOOL_IDS.DRONE,
 };
 
@@ -78,6 +80,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.GATE]: "8",
   [TOOL_IDS.CRATE]: "C",
   [TOOL_IDS.ENEMY]: "H",
+  [TOOL_IDS.ARTILLERY_ENEMY]: "J",
   [TOOL_IDS.DRONE]: "O",
 };
 
@@ -100,6 +103,7 @@ TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
 
 TOOL_HINTS[TOOL_IDS.CRATE] = "Click to place a loot crate";
 TOOL_HINTS[TOOL_IDS.ENEMY] = "Click to place a humanoid enemy";
+TOOL_HINTS[TOOL_IDS.ARTILLERY_ENEMY] = "Click to place an arcing humanoid enemy";
 TOOL_HINTS[TOOL_IDS.DRONE] = "Click to place a hostile drone";
 
 const PLAYER_RENDER_GROUPS = [
@@ -1826,6 +1830,14 @@ function renderSelectionFields(editor, dom) {
     addNumber("HP", "maxHp", entity.maxHp ?? 140, { min: 1 });
     addNumber("Damage", "damage", entity.damage ?? 12, { min: 0 });
     addNumber("Fire Range", "fireRange", entity.fireRange ?? 760, { min: 0 });
+    addSelect("Attack", "attackPattern", entity.attackPattern || (entity.projectileArc ? "arc" : "rifle"), [
+      { value: "rifle", label: "Rifle" },
+      { value: "arc", label: "Arc" },
+    ]);
+    if (entity.attackPattern === "arc" || entity.projectileArc) {
+      addNumber("Arc Gravity", "projectileGravity", entity.projectileGravity ?? 1692, { min: 1 });
+      addNumber("Flight Time", "projectileFlightTime", entity.projectileFlightTime ?? 1.05, { min: 0.2, step: 0.05 });
+    }
     addNumber("Patrol L", "patrol.left", entity.patrol?.left ?? entity.x);
     addNumber("Patrol R", "patrol.right", entity.patrol?.right ?? entity.x + 220);
   } else if (editor.selected.kind === "drone") {
@@ -2339,6 +2351,7 @@ function applySelectionField(editor, dom, field, value) {
     || field === "label"
     || field === "visualKind"
     || field === "lootTable"
+    || field === "attackPattern"
     || field === "toLevelId"
     || field === "toEntranceId"
   ) {
@@ -2361,6 +2374,9 @@ function applySelectionField(editor, dom, field, value) {
       }
       entity.slopeDirection = value === "up-right" ? "up-right" : "down-right";
       entity.kind = "slope";
+    } else if (field === "attackPattern") {
+      entity.attackPattern = value === "arc" ? "arc" : "rifle";
+      entity.projectileArc = entity.attackPattern === "arc";
     } else {
       entity[field] = value;
     }
@@ -2756,7 +2772,7 @@ function placeRouteExitAt(editor, dom, point) {
   markDirty(editor, dom);
 }
 
-function placeEnemyAt(editor, dom, point) {
+function placeEnemyAt(editor, dom, point, options = {}) {
   pushUndo(editor);
   const width = 58;
   const height = 104;
@@ -2788,6 +2804,22 @@ function placeEnemyAt(editor, dom, point) {
       right: snapped.x + 220,
     },
   };
+  if (options.attackPattern === "arc") {
+    enemy.id = `arc-enemy-${Date.now()}`;
+    enemy.label = "Arc gunman";
+    enemy.attackPattern = "arc";
+    enemy.projectileArc = true;
+    enemy.damage = 14;
+    enemy.fireRange = 840;
+    enemy.fireCooldown = 2.1;
+    enemy.projectileDamage = 14;
+    enemy.projectileSpeed = 620;
+    enemy.projectileRadius = 10;
+    enemy.projectileLife = 3.2;
+    enemy.projectileGravity = 1692;
+    enemy.projectileFlightTime = 1.05;
+    enemy.projectileColor = "#f6d36f";
+  }
   editor.data.humanoidEnemies.push(enemy);
   setSelection(editor, dom, { kind: "enemy", index: editor.data.humanoidEnemies.length - 1 });
   markDirty(editor, dom);
@@ -3037,6 +3069,12 @@ function handlePointerDown(editor, dom, event) {
 
   if (editor.tool === TOOL_IDS.ENEMY) {
     placeEnemyAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.ARTILLERY_ENEMY) {
+    placeEnemyAt(editor, dom, world, { attackPattern: "arc" });
     queueRender(editor, dom);
     return;
   }
@@ -4091,6 +4129,13 @@ function drawHumanoidEnemies(ctx, editor) {
     ctx.beginPath();
     ctx.arc(enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.22, Math.max(5, enemy.width * 0.18), 0, Math.PI * 2);
     ctx.fill();
+    if (enemy.attackPattern === "arc" || enemy.projectileArc) {
+      ctx.strokeStyle = "#f6d36f";
+      ctx.lineWidth = 2 / editor.view.zoom;
+      ctx.beginPath();
+      ctx.arc(enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.38, enemy.width * 0.42, Math.PI * 1.12, Math.PI * 1.88);
+      ctx.stroke();
+    }
     ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
     ctx.textAlign = "center";
     ctx.fillText(enemy.label || enemy.id || "Enemy", enemy.x + enemy.width / 2, enemy.y - 10 / editor.view.zoom);

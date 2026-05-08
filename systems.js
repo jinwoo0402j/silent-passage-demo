@@ -2172,7 +2172,7 @@ function enterFaceOff(run, data, enemy, state) {
   faceOff.cursorAssistStartX = state.mouse?.screenX ?? CAMERA_SCREEN_WIDTH / 2;
   faceOff.cursorAssistStartY = state.mouse?.screenY ?? CAMERA_SCREEN_HEIGHT / 2;
   faceOff.cursorAssistTargetX = CAMERA_SCREEN_WIDTH / 2;
-  faceOff.cursorAssistTargetY = 138 + 98 + 190 * 0.5;
+  faceOff.cursorAssistTargetY = getFaceOffConfig(data).targetAimAssistY ?? 386;
   faceOff.timeline = 0;
   faceOff.triggerLimit = getFaceOffConfig(data).triggerLimit ?? 4.5;
   faceOff.result = null;
@@ -2256,22 +2256,40 @@ function finishFaceOff(run, enemy, result, message) {
   }
 }
 
+function getFaceOffAimPan(data, mouseY, screenHeight = CAMERA_SCREEN_HEIGHT) {
+  const config = getFaceOffConfig(data);
+  const pivotY = config.targetAimPivotY ?? 362;
+  const lowerTravel = Math.max(1, screenHeight - pivotY);
+  return clamp((mouseY - pivotY) / lowerTravel, 0, 1) * (config.targetAimPanMax ?? 330);
+}
+
+function getFaceOffTargetZones(data, mouseY, screenWidth = CAMERA_SCREEN_WIDTH, screenHeight = CAMERA_SCREEN_HEIGHT) {
+  const config = getFaceOffConfig(data);
+  const scale = config.targetAimScale ?? 1.62;
+  const cx = screenWidth / 2;
+  const top = (config.targetAimTop ?? 128) - getFaceOffAimPan(data, mouseY, screenHeight);
+  const zone = (id, x, y, width, height) => ({
+    id,
+    x: cx + x * scale,
+    y: top + y * scale,
+    width: width * scale,
+    height: height * scale,
+  });
+  return [
+    zone("head", -45, 0, 90, 86),
+    zone("torso", -74, 98, 148, 190),
+    zone("leftArm", -158, 116, 68, 170),
+    zone("rightArm", 90, 116, 68, 170),
+    zone("leftLeg", -78, 287, 64, 205),
+    zone("rightLeg", 14, 287, 64, 205),
+  ];
+}
+
 function getFaceOffPartAtMouse(state, data) {
   const mouse = state.mouse || {};
   const mx = mouse.screenX ?? CAMERA_SCREEN_WIDTH / 2;
   const my = mouse.screenY ?? CAMERA_SCREEN_HEIGHT / 2;
-  const cx = CAMERA_SCREEN_WIDTH / 2;
-  const top = 138;
-  const head = { id: "head", x: cx - 45, y: top, width: 90, height: 86 };
-  const torso = { id: "torso", x: cx - 74, y: top + 98, width: 148, height: 190 };
-  const zones = [
-    head,
-    torso,
-    { id: "leftArm", x: cx - 158, y: top + 116, width: 68, height: 170 },
-    { id: "rightArm", x: cx + 90, y: top + 116, width: 68, height: 170 },
-    { id: "leftLeg", x: cx - 78, y: top + 287, width: 64, height: 205 },
-    { id: "rightLeg", x: cx + 14, y: top + 287, width: 64, height: 205 },
-  ];
+  const zones = getFaceOffTargetZones(data, my);
   const hit = zones.find((zone) => (
     mx >= zone.x &&
     mx <= zone.x + zone.width &&
@@ -2450,6 +2468,8 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
   faceOff.shotShakeTimer = Math.max(0, (faceOff.shotShakeTimer ?? 0) - dt);
   faceOff.shotFlashTimer = Math.max(0, (faceOff.shotFlashTimer ?? 0) - dt);
   updateFaceOffCursorAssist(state, faceOff, dt);
+  faceOff.aimX = state.mouse?.screenX ?? CAMERA_SCREEN_WIDTH / 2;
+  faceOff.aimY = state.mouse?.screenY ?? CAMERA_SCREEN_HEIGHT / 2;
 
   const cancelByMouse = Boolean(state.mouse?.secondaryJustPressed);
   const cancelPressed = consumeEitherPress(state, FACE_OFF_CANCEL_KEYS) || cancelByMouse;
@@ -5614,6 +5634,45 @@ function fireHumanoidProjectile(run, enemy, playerCenter) {
   enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.08);
 }
 
+function fireHumanoidArcProjectile(run, data, enemy, playerCenter) {
+  run.enemyShots = run.enemyShots || [];
+  const originX = enemy.x + enemy.width * 0.5 + (enemy.facing || 1) * enemy.width * 0.28;
+  const originY = enemy.y + enemy.height * 0.22;
+  const targetX = playerCenter.x;
+  const targetY = playerCenter.y - (enemy.arcTargetLift ?? 8);
+  const dx = targetX - originX;
+  const dy = targetY - originY;
+  const gravity = Math.max(1, enemy.projectileGravity ?? (data.world?.gravity ?? 2350) * 0.72);
+  const speed = Math.max(1, enemy.projectileSpeed ?? 620);
+  const minFlight = Math.max(0.2, enemy.projectileMinFlightTime ?? 0.55);
+  const maxFlight = Math.max(minFlight, enemy.projectileMaxFlightTime ?? 1.7);
+  const flightTime = clamp(
+    enemy.projectileFlightTime ?? Math.abs(dx) / speed,
+    minFlight,
+    maxFlight,
+  );
+  const vx = dx / flightTime;
+  const vy = (dy - 0.5 * gravity * flightTime * flightTime) / flightTime;
+
+  run.enemyShots.push({
+    id: `${enemy.id}-arc-${Math.round((run.time ?? 0) * 1000)}-${run.enemyShots.length}`,
+    type: "humanoidArc",
+    x: originX,
+    y: originY,
+    prevX: originX,
+    prevY: originY,
+    vx,
+    vy,
+    gravity,
+    radius: enemy.projectileRadius ?? 10,
+    damage: enemy.projectileDamage ?? enemy.damage ?? 14,
+    life: enemy.projectileLife ?? 3.2,
+    duration: enemy.projectileLife ?? 3.2,
+    color: enemy.projectileColor || "#f6d36f",
+  });
+  enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.1);
+}
+
 function ensureHumanoidGroundState(enemy) {
   if (!Number.isFinite(enemy.vx)) {
     enemy.vx = 0;
@@ -5778,7 +5837,9 @@ function updateHumanoidEnemies(run, data, dt) {
       enemy.trigger = clamp((enemy.trigger ?? 0) + (enemy.triggerRate ?? 1) * dt * 0.35, 0, getFaceOffConfig(data).triggerLimit ?? 4.5);
       if (enemy.trigger >= (getFaceOffConfig(data).triggerLimit ?? 4.5) && enemy.attackCooldown === 0) {
         const direction = enemy.x >= player.x ? -1 : 1;
-        if (enemy.rangedProjectile) {
+        if (enemy.attackPattern === "arc" || enemy.projectileArc) {
+          fireHumanoidArcProjectile(run, data, enemy, playerCenter);
+        } else if (enemy.rangedProjectile) {
           fireHumanoidProjectile(run, enemy, playerCenter);
         } else {
           damagePlayer(run, enemy.damage ?? 12, direction, "Gunman shot.");
@@ -5848,6 +5909,9 @@ function updateEnemyShots(run, data, dt) {
     shot.life -= dt;
     shot.prevX = shot.x;
     shot.prevY = shot.y;
+    if (Number.isFinite(shot.gravity)) {
+      shot.vy += shot.gravity * dt;
+    }
     shot.x += shot.vx * dt;
     shot.y += shot.vy * dt;
 
@@ -5886,7 +5950,7 @@ function updateEnemyShots(run, data, dt) {
     }
 
     if (hitPlayer) {
-      damagePlayer(run, shot.damage, Math.sign(shot.vx) || 1, shot.type === "humanoidBullet" ? "Rifle shot hit." : "Crow shot hit.");
+      damagePlayer(run, shot.damage, Math.sign(shot.vx) || 1, shot.type === "humanoidArc" ? "Arc shot hit." : shot.type === "humanoidBullet" ? "Rifle shot hit." : "Crow shot hit.");
       spawnParticles(run, shot.x, shot.y, 8, "#ff9fb4");
       return false;
     }
