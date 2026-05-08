@@ -1048,6 +1048,9 @@ function drawBraceWalls(ctx, data, theme) {
 
 function drawProps(ctx, data, pulse, theme) {
   data.props.forEach((prop) => {
+    if (prop.kind === "backgroundTile") {
+      return;
+    }
     if (prop.kind === "lantern") {
       const glow = 0.18 + Math.sin(pulse * 2 + prop.x * 0.02) * 0.06;
       ctx.fillStyle = `rgba(231, 244, 126, ${glow})`;
@@ -1078,6 +1081,18 @@ function drawProps(ctx, data, pulse, theme) {
       ctx.lineTo(prop.x, prop.y + 22);
       ctx.stroke();
     }
+  });
+}
+
+function drawBackgroundTiles(ctx, data) {
+  data.props.forEach((prop) => {
+    if (prop.kind !== "backgroundTile") {
+      return;
+    }
+    ctx.fillStyle = prop.color || "#4f6f7d";
+    ctx.globalAlpha = 0.72;
+    ctx.fillRect(prop.x, prop.y, Math.max(8, prop.width || 64), Math.max(8, prop.height || 64));
+    ctx.globalAlpha = 1;
   });
 }
 
@@ -5097,6 +5112,7 @@ function renderExpedition(ctx, state, data) {
   ctx.scale(cameraZoom, cameraZoom);
   drawWorldMegastructures(ctx, run);
   drawGroundShine(ctx);
+  drawBackgroundTiles(ctx, data);
   drawTerrain(ctx, data);
   drawGate(ctx, data, theme);
   drawRouteExits(ctx, data, theme);

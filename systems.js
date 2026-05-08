@@ -1008,6 +1008,18 @@ function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
   return lerp(config.runSpeed, config.sprintSpeed ?? config.runSpeed, player.sprintCharge);
 }
 
+function isMovingDownhillOnSlope(player, moveAxis) {
+  const downhillDirection = player.groundSlopeDirection ?? 0;
+  return Boolean(
+    player.onGround &&
+    player.height === player.standHeight &&
+    player.slideTimer <= 0 &&
+    moveAxis !== 0 &&
+    downhillDirection !== 0 &&
+    Math.sign(moveAxis) === Math.sign(downhillDirection)
+  );
+}
+
 function getHostileAirborneSolidRect(entity) {
   if (
     isEntityDisabled(entity) ||
@@ -4520,9 +4532,14 @@ function updatePlayer(run, data, state, dt, input) {
   } else if (player.slideTimer > 0 && player.onGround && updateSlide(player, config, dt)) {
     player.crouchBlocked = false;
   } else {
+    const downhillSprintActive = isMovingDownhillOnSlope(player, moveAxis);
     const baseTargetSpeed = player.height === player.crouchHeight && player.onGround
       ? moveAxis * config.runSpeed * config.crouchSpeedMultiplier
-      : moveAxis * getSprintTargetSpeed(player, config, moveAxis, sprintHeld && player.sprintPrimed);
+      : moveAxis * (
+        downhillSprintActive
+          ? (config.sprintSpeed ?? config.runSpeed)
+          : getSprintTargetSpeed(player, config, moveAxis, sprintHeld && player.sprintPrimed)
+      );
     const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
       ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
       : baseTargetSpeed;
@@ -4772,6 +4789,12 @@ function updatePlayer(run, data, state, dt, input) {
       player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
       player.wallGraceDirection = player.wallDirection;
     }
+  }
+
+  if (isMovingDownhillOnSlope(player, moveAxis)) {
+    player.sprintActive = true;
+    player.sprintDirection = moveAxis;
+    player.sprintCharge = Math.max(player.sprintCharge, config.slopeDownhillSprintCharge ?? 0.18);
   }
 
   player.canInteract = true;

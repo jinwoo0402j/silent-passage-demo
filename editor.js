@@ -26,6 +26,7 @@ const TOOL_IDS = {
   SLOPE_DOWN: "slopeDown",
   SLOPE_UP: "slopeUp",
   BRACE_WALL: "braceWall",
+  BACKGROUND_TILE: "backgroundTile",
   SIGN: "sign",
   LANTERN: "lantern",
   SPAWN: "spawn",
@@ -47,6 +48,7 @@ const TOOL_SHORTCUTS = {
   KeyU: TOOL_IDS.SLOPE_UP,
   Digit3: TOOL_IDS.BRACE_WALL,
   Numpad3: TOOL_IDS.BRACE_WALL,
+  KeyB: TOOL_IDS.BACKGROUND_TILE,
   Digit4: TOOL_IDS.SIGN,
   Numpad4: TOOL_IDS.SIGN,
   Digit5: TOOL_IDS.SPAWN,
@@ -68,6 +70,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.SLOPE_DOWN]: "9",
   [TOOL_IDS.SLOPE_UP]: "U",
   [TOOL_IDS.BRACE_WALL]: "3",
+  [TOOL_IDS.BACKGROUND_TILE]: "B",
   [TOOL_IDS.SIGN]: "4",
   [TOOL_IDS.SPAWN]: "5",
   [TOOL_IDS.ENTRANCE]: "6",
@@ -90,6 +93,7 @@ const TOOL_HINTS = {
 };
 
 TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
+TOOL_HINTS[TOOL_IDS.BACKGROUND_TILE] = "Drag to place a non-colliding background tile";
 
 TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
 TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
@@ -529,6 +533,7 @@ const COLORS = {
   spawn: "rgba(147, 234, 255, 0.9)",
   sign: "rgba(239, 248, 252, 0.94)",
   lantern: "rgba(231, 244, 126, 0.88)",
+  backgroundTileStroke: "rgba(147, 234, 255, 0.46)",
   crate: "rgba(147, 234, 255, 0.9)",
   crateFill: "rgba(147, 234, 255, 0.13)",
   enemy: "rgba(255, 125, 147, 0.9)",
@@ -594,6 +599,21 @@ function getPreviewPlatformRect(editor) {
     height: Math.max(12, Math.abs(editor.preview.end.y - editor.preview.start.y) || defaultPlatform.height),
     kind: editor.preview.platformKind || "solid",
     slopeDirection: editor.preview.slopeDirection || "down-right",
+  };
+}
+
+function getPreviewBackgroundTileRect(editor) {
+  if (!editor.preview || editor.preview.kind !== "backgroundTile") {
+    return null;
+  }
+  const scale = getScaleConfig(editor.data);
+  const x = Math.min(editor.preview.start.x, editor.preview.end.x);
+  const y = Math.min(editor.preview.start.y, editor.preview.end.y);
+  return {
+    x,
+    y,
+    width: Math.max(8, Math.abs(editor.preview.end.x - editor.preview.start.x) || scale.tileSize * 2),
+    height: Math.max(8, Math.abs(editor.preview.end.y - editor.preview.start.y) || scale.tileSize * 2),
   };
 }
 
@@ -1324,6 +1344,15 @@ function syncStartEntranceToSpawn(editor) {
 }
 
 function getPropRect(prop) {
+  if (prop.kind === "backgroundTile") {
+    return {
+      x: prop.x,
+      y: prop.y,
+      width: Math.max(8, Number(prop.width) || 64),
+      height: Math.max(8, Number(prop.height) || 64),
+    };
+  }
+
   if (prop.kind === "sign") {
     return {
       x: prop.x - 44,
@@ -1658,6 +1687,9 @@ function describeSelection(editor) {
 
   if (editor.selected.kind === "prop") {
     const prop = editor.data.props[editor.selected.index];
+    if (prop?.kind === "backgroundTile") {
+      return `Background tile ${editor.selected.index + 1}`;
+    }
     return prop?.kind === "sign"
       ? `표지 ${editor.selected.index + 1}`
       : `랜턴 ${editor.selected.index + 1}`;
@@ -1778,6 +1810,11 @@ function renderSelectionFields(editor, dom) {
     addNumber("Y", "y", entity.y);
     if (entity.kind === "sign") {
       addText("문구", "text", entity.text || "");
+    }
+    if (entity.kind === "backgroundTile") {
+      addNumber("Width", "width", entity.width, { min: 8 });
+      addNumber("Height", "height", entity.height, { min: 8 });
+      addColor("Color", "color", entity.color || "#4f6f7d");
     }
   } else if (editor.selected.kind === "enemy") {
     addText("ID", "id", entity.id || "");
@@ -2624,6 +2661,31 @@ function createBraceWallFromPreview(editor, dom) {
   markDirty(editor, dom);
 }
 
+function createBackgroundTileFromPreview(editor, dom) {
+  if (!editor.preview || editor.preview.kind !== "backgroundTile") {
+    return;
+  }
+
+  pushUndo(editor);
+
+  const rect = getPreviewBackgroundTileRect(editor);
+  if (!rect) {
+    return;
+  }
+
+  const prop = {
+    kind: "backgroundTile",
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    color: "#4f6f7d",
+  };
+  editor.data.props.push(prop);
+  setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
+  markDirty(editor, dom);
+}
+
 function placeProp(editor, dom, kind, point) {
   pushUndo(editor);
   const snapped = snapPoint(point, editor.snap);
@@ -2930,6 +2992,19 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
+  if (editor.tool === TOOL_IDS.BACKGROUND_TILE) {
+    editor.preview = {
+      kind: "backgroundTile",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewBackgroundTile",
+    };
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.tool === TOOL_IDS.SIGN) {
     placeProp(editor, dom, "sign", world);
     queueRender(editor, dom);
@@ -3069,6 +3144,12 @@ function handlePointerMove(editor, dom, event) {
   if (editor.drag.kind === "previewBraceWall" && editor.preview) {
     editor.preview.end = snapPoint(world, editor.snap);
     queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.drag.kind === "previewBackgroundTile" && editor.preview) {
+    editor.preview.end = snapPoint(world, editor.snap);
+    queueRender(editor, dom);
   }
 }
 
@@ -3094,6 +3175,11 @@ function handlePointerUp(editor, dom) {
 
   if (editor.drag?.kind === "previewBraceWall") {
     createBraceWallFromPreview(editor, dom);
+    editor.preview = null;
+  }
+
+  if (editor.drag?.kind === "previewBackgroundTile") {
+    createBackgroundTileFromPreview(editor, dom);
     editor.preview = null;
   }
 
@@ -3469,6 +3555,12 @@ function snapEntireLevelToScale(editor, dom) {
     ...prop,
     x: snapValue(prop.x, step),
     y: snapValue(prop.y, step),
+    ...(prop.kind === "backgroundTile"
+      ? {
+        width: Math.max(step, snapValue(prop.width, step)),
+        height: Math.max(step, snapValue(prop.height, step)),
+      }
+      : {}),
   }));
 
   editor.snap = step;
@@ -3908,6 +4000,9 @@ function drawBraceWalls(ctx, editor) {
 
 function drawProps(ctx, editor) {
   editor.data.props.forEach((prop, index) => {
+    if (prop.kind === "backgroundTile") {
+      return;
+    }
     const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
     if (prop.kind === "sign") {
       ctx.fillStyle = "rgba(11, 23, 35, 0.92)";
@@ -3942,6 +4037,23 @@ function drawProps(ctx, editor) {
       ctx.arc(prop.x, prop.y - 4, 14, 0, Math.PI * 2);
       ctx.stroke();
     }
+  });
+}
+
+function drawBackgroundTiles(ctx, editor) {
+  editor.data.props.forEach((prop, index) => {
+    if (prop.kind !== "backgroundTile") {
+      return;
+    }
+    const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
+    const rect = getPropRect(prop);
+    ctx.fillStyle = prop.color || "#4f6f7d";
+    ctx.globalAlpha = 0.72;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.backgroundTileStroke;
+    ctx.lineWidth = (selected ? 3 : 1.5) / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
   });
 }
 
@@ -4223,6 +4335,17 @@ function drawPreview(ctx, editor) {
     ctx.strokeRect(x, y, width, height);
   }
 
+  if (editor.preview?.kind === "backgroundTile") {
+    const rect = getPreviewBackgroundTileRect(editor);
+    if (rect) {
+      ctx.fillStyle = "rgba(79, 111, 125, 0.42)";
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.strokeStyle = COLORS.accentAlt;
+      ctx.lineWidth = 2 / editor.view.zoom;
+      ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    }
+  }
+
   if (editor.preview?.kind === "marquee") {
     const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
     ctx.fillStyle = "rgba(147, 234, 255, 0.08)";
@@ -4360,6 +4483,7 @@ function renderEditor(editor, dom) {
   drawGrid(ctx, editor);
   drawWorldBounds(ctx, editor);
   drawCameraGuide(ctx, editor);
+  drawBackgroundTiles(ctx, editor);
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawProps(ctx, editor);

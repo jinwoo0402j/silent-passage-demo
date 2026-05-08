@@ -8,7 +8,7 @@ export const LEVEL_OVERRIDES_VERSION = 3;
 
 const DEFAULT_PLATFORM_COLOR = "#4b6075";
 const DEFAULT_SIGN_TEXT = "표지";
-const VALID_PROP_KINDS = new Set(["sign", "lantern"]);
+const VALID_PROP_KINDS = new Set(["sign", "lantern", "backgroundTile"]);
 const PLAYER_RENDER_FIELDS = [
   "widthRatio",
   "heightRatio",
@@ -514,18 +514,31 @@ function sanitizeProp(prop, index, baseProp = null) {
   };
   const kind = VALID_PROP_KINDS.has(prop?.kind) ? prop.kind : fallback.kind;
 
-  return kind === "sign"
-    ? {
+  if (kind === "sign") {
+    return {
       kind,
       x: safeNumber(prop?.x, fallback.x),
       y: safeNumber(prop?.y, fallback.y),
       text: safeString(prop?.text, fallback.text || DEFAULT_SIGN_TEXT),
-    }
-    : {
+    };
+  }
+
+  if (kind === "backgroundTile") {
+    return {
       kind,
       x: safeNumber(prop?.x, fallback.x),
       y: safeNumber(prop?.y, fallback.y),
+      width: safeNumber(prop?.width, fallback.width || 64, 8),
+      height: safeNumber(prop?.height, fallback.height || 64, 8),
+      color: safeString(prop?.color, fallback.color || "#4f6f7d"),
     };
+  }
+
+  return {
+    kind,
+    x: safeNumber(prop?.x, fallback.x),
+    y: safeNumber(prop?.y, fallback.y),
+  };
 }
 
 function sanitizeBraceWall(wall, index, baseWall = null) {
@@ -725,11 +738,22 @@ export function extractEditableLevelData(data) {
       height: platform.height,
       color: platform.color,
     })),
-    props: (data.props || []).map((prop) => (
-      prop.kind === "sign"
-        ? { kind: prop.kind, x: prop.x, y: prop.y, text: prop.text }
-        : { kind: prop.kind, x: prop.x, y: prop.y }
-    )),
+    props: (data.props || []).map((prop) => {
+      if (prop.kind === "sign") {
+        return { kind: prop.kind, x: prop.x, y: prop.y, text: prop.text };
+      }
+      if (prop.kind === "backgroundTile") {
+        return {
+          kind: prop.kind,
+          x: prop.x,
+          y: prop.y,
+          width: prop.width,
+          height: prop.height,
+          color: prop.color,
+        };
+      }
+      return { kind: prop.kind, x: prop.x, y: prop.y };
+    }),
     braceWalls: (data.braceWalls || []).map((wall) => ({
       id: wall.id,
       x: wall.x,
