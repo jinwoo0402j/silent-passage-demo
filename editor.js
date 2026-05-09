@@ -19,6 +19,8 @@ import {
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
+const ZIP_LINE_CONNECT_RANGE = 640;
+const ZIP_LINE_MAX_CONNECTIONS = 2;
 
 const TOOL_IDS = {
   SELECT: "select",
@@ -28,6 +30,7 @@ const TOOL_IDS = {
   BRACE_WALL: "braceWall",
   BACKGROUND_TILE: "backgroundTile",
   TEMPORARY_BLOCK: "temporaryBlock",
+  ZIP_LINE: "zipLine",
   SIGN: "sign",
   LANTERN: "lantern",
   SPAWN: "spawn",
@@ -53,6 +56,7 @@ const TOOL_SHORTCUTS = {
   Numpad3: TOOL_IDS.BRACE_WALL,
   KeyB: TOOL_IDS.BACKGROUND_TILE,
   KeyT: TOOL_IDS.TEMPORARY_BLOCK,
+  KeyZ: TOOL_IDS.ZIP_LINE,
   Digit4: TOOL_IDS.SIGN,
   Numpad4: TOOL_IDS.SIGN,
   Digit5: TOOL_IDS.SPAWN,
@@ -78,6 +82,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.BRACE_WALL]: "3",
   [TOOL_IDS.BACKGROUND_TILE]: "B",
   [TOOL_IDS.TEMPORARY_BLOCK]: "T",
+  [TOOL_IDS.ZIP_LINE]: "Z",
   [TOOL_IDS.SIGN]: "4",
   [TOOL_IDS.SPAWN]: "5",
   [TOOL_IDS.ENTRANCE]: "6",
@@ -104,6 +109,7 @@ const TOOL_HINTS = {
 TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
 TOOL_HINTS[TOOL_IDS.BACKGROUND_TILE] = "Drag to place a non-colliding background tile";
 TOOL_HINTS[TOOL_IDS.TEMPORARY_BLOCK] = "Drag to place a shoot-open temporary block";
+TOOL_HINTS[TOOL_IDS.ZIP_LINE] = "Click to place a zipline node and auto-connect nearby nodes";
 
 TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
 TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
@@ -866,14 +872,49 @@ function ensureEditorMapRooms(data) {
   return data.map.rooms;
 }
 
+function ensureEditorZipLineNodes(data) {
+  data.zipLineNodes = data.zipLineNodes || [];
+  data.zipLines = data.zipLines || [];
+  data.zipLineNodes.forEach((node, index) => {
+    node.id = node.id || `zipline-node-${index + 1}`;
+    node.connectRange = Math.max(1, Number(node.connectRange ?? ZIP_LINE_CONNECT_RANGE));
+  });
+  data.zipLines.forEach((zipLine, index) => {
+    if (!zipLine.startNodeId && zipLine.start) {
+      const node = {
+        id: `${zipLine.id || `zipline-${index + 1}`}-start`,
+        x: zipLine.start.x,
+        y: zipLine.start.y,
+        connectRange: ZIP_LINE_CONNECT_RANGE,
+      };
+      data.zipLineNodes.push(node);
+      zipLine.startNodeId = node.id;
+    }
+    if (!zipLine.endNodeId && zipLine.end) {
+      const node = {
+        id: `${zipLine.id || `zipline-${index + 1}`}-end`,
+        x: zipLine.end.x,
+        y: zipLine.end.y,
+        connectRange: ZIP_LINE_CONNECT_RANGE,
+      };
+      data.zipLineNodes.push(node);
+      zipLine.endNodeId = node.id;
+    }
+    syncZipLineEndpointsFromNodes(data, zipLine);
+  });
+}
+
 function prepareEditorData(data) {
   data.braceWalls = data.braceWalls || [];
   data.temporaryBlocks = data.temporaryBlocks || [];
+  data.zipLineNodes = data.zipLineNodes || [];
+  data.zipLines = data.zipLines || [];
   data.entrances = data.entrances || [];
   data.routeExits = data.routeExits || [];
   data.lootCrates = data.lootCrates || [];
   data.humanoidEnemies = data.humanoidEnemies || [];
   data.hostileDrones = data.hostileDrones || [];
+  ensureEditorZipLineNodes(data);
   ensureEditorMapRooms(data);
   if (data.entrances.length === 0) {
     data.entrances.push({
@@ -1429,6 +1470,131 @@ function getTemporaryBlockRect(block) {
   return block;
 }
 
+function getZipLineNodeRect(node) {
+  if (!node) {
+    return null;
+  }
+  return {
+    x: node.x - 14,
+    y: node.y - 14,
+    width: 28,
+    height: 28,
+  };
+}
+
+function getZipLineRect(zipLine) {
+  if (!zipLine?.start || !zipLine?.end) {
+    return null;
+  }
+  const minX = Math.min(zipLine.start.x, zipLine.end.x);
+  const minY = Math.min(zipLine.start.y, zipLine.end.y);
+  const maxX = Math.max(zipLine.start.x, zipLine.end.x);
+  const maxY = Math.max(zipLine.start.y, zipLine.end.y);
+  return {
+    x: minX - 16,
+    y: minY - 16,
+    width: Math.max(32, maxX - minX + 32),
+    height: Math.max(32, maxY - minY + 32),
+  };
+}
+
+function getPointToSegmentDistance(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq <= 0.0001) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+  const t = clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSq, 0, 1);
+  const nearestX = start.x + dx * t;
+  const nearestY = start.y + dy * t;
+  return Math.hypot(point.x - nearestX, point.y - nearestY);
+}
+
+function pointNearZipLine(point, zipLine, tolerance = 14) {
+  if (!zipLine?.start || !zipLine?.end) {
+    return false;
+  }
+  return getPointToSegmentDistance(point, zipLine.start, zipLine.end) <= tolerance;
+}
+
+function getZipLineNodeById(data, nodeId) {
+  return (data.zipLineNodes || []).find((node) => node.id === nodeId) || null;
+}
+
+function syncZipLineEndpointsFromNodes(data, zipLine) {
+  const startNode = getZipLineNodeById(data, zipLine.startNodeId);
+  const endNode = getZipLineNodeById(data, zipLine.endNodeId);
+  if (startNode) {
+    zipLine.start = { x: startNode.x, y: startNode.y };
+  }
+  if (endNode) {
+    zipLine.end = { x: endNode.x, y: endNode.y };
+  }
+}
+
+function syncZipLinesForNode(data, nodeId) {
+  (data.zipLines || []).forEach((zipLine) => {
+    if (zipLine.startNodeId === nodeId || zipLine.endNodeId === nodeId) {
+      syncZipLineEndpointsFromNodes(data, zipLine);
+    }
+  });
+}
+
+function getZipLineNodeDegree(data, nodeId) {
+  return (data.zipLines || []).filter((zipLine) => (
+    zipLine.startNodeId === nodeId || zipLine.endNodeId === nodeId
+  )).length;
+}
+
+function hasZipLineConnection(data, leftId, rightId) {
+  return (data.zipLines || []).some((zipLine) => (
+    (zipLine.startNodeId === leftId && zipLine.endNodeId === rightId)
+    || (zipLine.startNodeId === rightId && zipLine.endNodeId === leftId)
+  ));
+}
+
+function areZipLineNodesWithinRange(leftNode, rightNode) {
+  if (!leftNode || !rightNode) {
+    return false;
+  }
+  const connectRange = Math.min(
+    Number(leftNode.connectRange ?? ZIP_LINE_CONNECT_RANGE),
+    Number(rightNode.connectRange ?? ZIP_LINE_CONNECT_RANGE),
+  );
+  return Math.hypot(rightNode.x - leftNode.x, rightNode.y - leftNode.y) <= connectRange;
+}
+
+function pruneOutOfRangeZipLineConnections(data) {
+  const before = (data.zipLines || []).length;
+  data.zipLines = (data.zipLines || []).filter((zipLine) => {
+    const startNode = getZipLineNodeById(data, zipLine.startNodeId);
+    const endNode = getZipLineNodeById(data, zipLine.endNodeId);
+    if (!areZipLineNodesWithinRange(startNode, endNode)) {
+      return false;
+    }
+    syncZipLineEndpointsFromNodes(data, zipLine);
+    return true;
+  });
+  return data.zipLines.length !== before;
+}
+
+function findNearestConnectableZipLineNode(data, sourceNode) {
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  (data.zipLineNodes || []).forEach((node, index) => {
+    if (node.id === sourceNode.id || getZipLineNodeDegree(data, node.id) >= ZIP_LINE_MAX_CONNECTIONS) {
+      return;
+    }
+    const distance = Math.hypot(node.x - sourceNode.x, node.y - sourceNode.y);
+    if (areZipLineNodesWithinRange(sourceNode, node) && distance < bestDistance) {
+      best = { node, index };
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
 function getSelectedEntity(editor) {
   if (!editor.selected || isMultiSelection(editor.selected)) {
     return null;
@@ -1442,6 +1608,12 @@ function getSelectedEntity(editor) {
   }
   if (editor.selected.kind === "temporaryBlock") {
     return editor.data.temporaryBlocks[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "zipLine") {
+    return editor.data.zipLines[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "zipLineNode") {
+    return editor.data.zipLineNodes[editor.selected.index] || null;
   }
 
   if (editor.selected.kind === "prop") {
@@ -1499,7 +1671,7 @@ function normalizeSelection(selection) {
       continue;
     }
 
-    const key = `${item.kind}:${item.index ?? ""}`;
+    const key = `${item.kind}:${item.index ?? ""}:${item.node ?? ""}`;
     if (seen.has(key)) {
       continue;
     }
@@ -1522,6 +1694,7 @@ function isSelectionItemSelected(selection, candidate) {
   return getSelectionItems(selection).some((item) => (
     item.kind === candidate.kind
     && item.index === candidate.index
+    && (candidate.node === undefined || item.node === candidate.node)
   ));
 }
 
@@ -1560,6 +1733,14 @@ function getSelectionRect(editor, selection = editor.selected) {
   if (selection.kind === "temporaryBlock") {
     const block = editor.data.temporaryBlocks[selection.index];
     return block ? getTemporaryBlockRect(block) : null;
+  }
+  if (selection.kind === "zipLine") {
+    const zipLine = editor.data.zipLines[selection.index];
+    return zipLine ? getZipLineRect(zipLine) : null;
+  }
+  if (selection.kind === "zipLineNode") {
+    const node = editor.data.zipLineNodes[selection.index];
+    return node ? getZipLineNodeRect(node) : null;
   }
   if (selection.kind === "prop") {
     const prop = editor.data.props[selection.index];
@@ -1615,6 +1796,14 @@ function getSelectionOrigin(editor, selection = editor.selected) {
   if (selection.kind === "temporaryBlock") {
     const entity = editor.data.temporaryBlocks[selection.index];
     return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "zipLine") {
+    const zipLine = editor.data.zipLines[selection.index];
+    return zipLine?.start ? { x: zipLine.start.x, y: zipLine.start.y } : null;
+  }
+  if (selection.kind === "zipLineNode") {
+    const node = editor.data.zipLineNodes[selection.index];
+    return node ? { x: node.x, y: node.y } : null;
   }
   if (selection.kind === "prop") {
     const entity = editor.data.props[selection.index];
@@ -1751,6 +1940,21 @@ function describeSelection(editor) {
     return `Temp Block ${editor.selected.index + 1} - ${formatTiles(block.width, scale.tileSize)} x ${formatTiles(block.height, scale.tileSize)}`;
   }
 
+  if (editor.selected.kind === "zipLine" || editor.selected.kind === "zipLineNode") {
+    const entity = editor.selected.kind === "zipLine"
+      ? editor.data.zipLines[editor.selected.index]
+      : editor.data.zipLineNodes[editor.selected.index];
+    if (!entity) {
+      return "No selection";
+    }
+    if (editor.selected.kind === "zipLineNode") {
+      return `Zipline Node ${editor.selected.index + 1}`;
+    }
+    const start = getZipLineNodeById(editor.data, entity.startNodeId);
+    const end = getZipLineNodeById(editor.data, entity.endNodeId);
+    return `Zipline Link ${editor.selected.index + 1} - ${start?.id || "?"} -> ${end?.id || "?"}`;
+  }
+
   if (editor.selected.kind === "prop") {
     const prop = editor.data.props[editor.selected.index];
     if (prop?.kind === "backgroundTile") {
@@ -1778,6 +1982,8 @@ function canDeleteSelection(selection) {
     item.kind === "platform"
     || item.kind === "braceWall"
     || item.kind === "temporaryBlock"
+    || item.kind === "zipLine"
+    || item.kind === "zipLineNode"
     || item.kind === "prop"
     || item.kind === "crate"
     || item.kind === "enemy"
@@ -1880,6 +2086,16 @@ function renderSelectionFields(editor, dom) {
     addNumber("Height", "height", entity.height, { min: 12 });
     addNumber("Hide Time", "hideDuration", entity.hideDuration ?? 1.6, { min: 0.1, step: 0.1 });
     addColor("Color", "color", entity.color || "#5f7588");
+  } else if (editor.selected.kind === "zipLine" || editor.selected.kind === "zipLineNode") {
+    addText("ID", "id", entity.id || "");
+    if (editor.selected.kind === "zipLineNode") {
+      addNumber("X", "x", entity.x);
+      addNumber("Y", "y", entity.y);
+      addNumber("Connect Range", "connectRange", entity.connectRange ?? ZIP_LINE_CONNECT_RANGE, { min: 1 });
+    } else {
+      addNumber("Speed", "speed", entity.speed ?? 1480, { min: 1 });
+      addText("Prompt", "prompt", entity.prompt || "E: Zipline");
+    }
   } else if (editor.selected.kind === "prop") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2190,6 +2406,17 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.zipLines || []).forEach((zipLine, index) => {
+    if (rectsIntersect(rect, getZipLineRect(zipLine))) {
+      items.push({ kind: "zipLine", index });
+    }
+  });
+  (editor.data.zipLineNodes || []).forEach((node, index) => {
+    if (rectsIntersect(rect, getZipLineNodeRect(node))) {
+      items.push({ kind: "zipLineNode", index });
+    }
+  });
+
   editor.data.props.forEach((prop, index) => {
     if (rectsIntersect(rect, getPropRect(prop))) {
       items.push({ kind: "prop", index });
@@ -2279,6 +2506,19 @@ function hitTest(editor, point) {
     }
   }
 
+  for (let index = (editor.data.zipLineNodes || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getZipLineNodeRect(editor.data.zipLineNodes[index]))) {
+      return { kind: "zipLineNode", index };
+    }
+  }
+
+  for (let index = (editor.data.zipLines || []).length - 1; index >= 0; index -= 1) {
+    const zipLine = editor.data.zipLines[index];
+    if (pointNearZipLine(point, zipLine, 14 / editor.view.zoom)) {
+      return { kind: "zipLine", index };
+    }
+  }
+
   for (let index = editor.data.platforms.length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, editor.data.platforms[index])) {
       return { kind: "platform", index };
@@ -2318,6 +2558,12 @@ function deleteSelection(editor, dom) {
   const temporaryBlockIndexes = new Set(
     items.filter((item) => item.kind === "temporaryBlock").map((item) => item.index),
   );
+  const zipLineIndexes = new Set(
+    items.filter((item) => item.kind === "zipLine").map((item) => item.index),
+  );
+  const zipLineNodeIndexes = new Set(
+    items.filter((item) => item.kind === "zipLineNode").map((item) => item.index),
+  );
   const propIndexes = new Set(
     items.filter((item) => item.kind === "prop").map((item) => item.index),
   );
@@ -2341,6 +2587,8 @@ function deleteSelection(editor, dom) {
     platformIndexes.size === 0
     && braceWallIndexes.size === 0
     && temporaryBlockIndexes.size === 0
+    && zipLineIndexes.size === 0
+    && zipLineNodeIndexes.size === 0
     && propIndexes.size === 0
     && enemyIndexes.size === 0
     && droneIndexes.size === 0
@@ -2356,6 +2604,14 @@ function deleteSelection(editor, dom) {
   editor.data.platforms = editor.data.platforms.filter((_, index) => !platformIndexes.has(index));
   editor.data.braceWalls = editor.data.braceWalls.filter((_, index) => !braceWallIndexes.has(index));
   editor.data.temporaryBlocks = editor.data.temporaryBlocks.filter((_, index) => !temporaryBlockIndexes.has(index));
+  editor.data.zipLines = editor.data.zipLines.filter((_, index) => !zipLineIndexes.has(index));
+  const removedZipLineNodeIds = new Set(
+    editor.data.zipLineNodes.filter((_, index) => zipLineNodeIndexes.has(index)).map((node) => node.id),
+  );
+  editor.data.zipLines = editor.data.zipLines.filter((zipLine) => (
+    !removedZipLineNodeIds.has(zipLine.startNodeId) && !removedZipLineNodeIds.has(zipLine.endNodeId)
+  ));
+  editor.data.zipLineNodes = editor.data.zipLineNodes.filter((_, index) => !zipLineNodeIndexes.has(index));
   editor.data.props = editor.data.props.filter((_, index) => !propIndexes.has(index));
   editor.data.humanoidEnemies = editor.data.humanoidEnemies.filter((_, index) => !enemyIndexes.has(index));
   editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !droneIndexes.has(index));
@@ -2474,7 +2730,18 @@ function applySelectionField(editor, dom, field, value) {
       entity.attackPattern = value === "arc" ? "arc" : "rifle";
       entity.projectileArc = entity.attackPattern === "arc";
     } else {
+      const previousId = entity.id;
       entity[field] = value;
+      if (editor.selected?.kind === "zipLineNode" && field === "id" && previousId && previousId !== value) {
+        (editor.data.zipLines || []).forEach((zipLine) => {
+          if (zipLine.startNodeId === previousId) {
+            zipLine.startNodeId = value;
+          }
+          if (zipLine.endNodeId === previousId) {
+            zipLine.endNodeId = value;
+          }
+        });
+      }
       if (field === "visualKind") {
         ensureFlyingRangedSpawn(entity);
       }
@@ -2540,6 +2807,10 @@ function applySelectionField(editor, dom, field, value) {
   const previousY = entity.y;
   pushUndo(editor);
   entity[field] = nextValue;
+  if (editor.selected?.kind === "zipLineNode" && (field === "x" || field === "y" || field === "connectRange")) {
+    syncZipLinesForNode(editor.data, entity.id);
+    pruneOutOfRangeZipLineConnections(editor.data);
+  }
   if (
     editor.selected?.kind === "drone"
     && (field === "x" || field === "y")
@@ -2635,6 +2906,26 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     }
     entity.x = snappedX;
     entity.y = snappedY;
+  } else if (selection.kind === "zipLine") {
+    const entity = editor.data.zipLines[selection.index];
+    if (!entity) {
+      return;
+    }
+    const deltaX = snappedX - entity.start.x;
+    const deltaY = snappedY - entity.start.y;
+    entity.start.x = snappedX;
+    entity.start.y = snappedY;
+    entity.end.x += deltaX;
+    entity.end.y += deltaY;
+  } else if (selection.kind === "zipLineNode") {
+    const entity = editor.data.zipLineNodes[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+    syncZipLinesForNode(editor.data, entity.id);
+    pruneOutOfRangeZipLineConnections(editor.data);
   } else if (selection.kind === "prop") {
     const entity = editor.data.props[selection.index];
     if (!entity) {
@@ -2821,6 +3112,36 @@ function createTemporaryBlockFromPreview(editor, dom) {
   };
   editor.data.temporaryBlocks.push(block);
   setSelection(editor, dom, { kind: "temporaryBlock", index: editor.data.temporaryBlocks.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeZipLineNodeAt(editor, dom, point) {
+  pushUndo(editor);
+  const snapped = snapPoint(point, editor.snap);
+  const node = {
+    id: `zipline-node-${Date.now()}`,
+    x: snapped.x,
+    y: snapped.y,
+    connectRange: ZIP_LINE_CONNECT_RANGE,
+  };
+  const nearest = findNearestConnectableZipLineNode(editor.data, node);
+  editor.data.zipLineNodes.push(node);
+  if (
+    nearest
+    && getZipLineNodeDegree(editor.data, node.id) < ZIP_LINE_MAX_CONNECTIONS
+    && !hasZipLineConnection(editor.data, node.id, nearest.node.id)
+  ) {
+    editor.data.zipLines.push({
+      id: `zipline-${Date.now()}`,
+      startNodeId: nearest.node.id,
+      endNodeId: node.id,
+      start: { x: nearest.node.x, y: nearest.node.y },
+      end: { x: node.x, y: node.y },
+      speed: 1480,
+      prompt: "E: Zipline",
+    });
+  }
+  setSelection(editor, dom, { kind: "zipLineNode", index: editor.data.zipLineNodes.length - 1 });
   markDirty(editor, dom);
 }
 
@@ -3191,6 +3512,12 @@ function handlePointerDown(editor, dom, event) {
     editor.drag = {
       kind: "previewTemporaryBlock",
     };
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.ZIP_LINE) {
+    placeZipLineNodeAt(editor, dom, world);
     queueRender(editor, dom);
     return;
   }
@@ -3832,6 +4159,25 @@ function snapEntireLevelToScale(editor, dom) {
     height: Math.max(step, snapValue(block.height, step)),
   }));
 
+  editor.data.zipLines = (editor.data.zipLines || []).map((zipLine) => ({
+    ...zipLine,
+    start: {
+      x: snapValue(zipLine.start?.x ?? 0, step),
+      y: snapValue(zipLine.start?.y ?? 0, step),
+    },
+    end: {
+      x: snapValue(zipLine.end?.x ?? 0, step),
+      y: snapValue(zipLine.end?.y ?? 0, step),
+    },
+  }));
+  editor.data.zipLineNodes = (editor.data.zipLineNodes || []).map((node) => ({
+    ...node,
+    x: snapValue(node.x, step),
+    y: snapValue(node.y, step),
+  }));
+  editor.data.zipLines.forEach((zipLine) => syncZipLineEndpointsFromNodes(editor.data, zipLine));
+  pruneOutOfRangeZipLineConnections(editor.data);
+
   editor.data.props = editor.data.props.map((prop) => ({
     ...prop,
     x: snapValue(prop.x, step),
@@ -4310,6 +4656,54 @@ function drawTemporaryBlocks(ctx, editor) {
   });
 }
 
+function drawZipLines(ctx, editor) {
+  (editor.data.zipLines || []).forEach((zipLine, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "zipLine", index });
+    ctx.save();
+    ctx.strokeStyle = selected ? COLORS.accent : "rgba(231, 244, 126, 0.78)";
+    ctx.lineWidth = (selected ? 4 : 3) / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(zipLine.start.x, zipLine.start.y);
+    ctx.lineTo(zipLine.end.x, zipLine.end.y);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(241, 249, 252, 0.9)";
+    ctx.font = `${14 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(zipLine.id || "Zipline", (zipLine.start.x + zipLine.end.x) * 0.5, (zipLine.start.y + zipLine.end.y) * 0.5 - 12 / editor.view.zoom);
+    ctx.textAlign = "left";
+    ctx.restore();
+  });
+
+  (editor.data.zipLineNodes || []).forEach((node, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "zipLineNode", index });
+    ctx.save();
+    if (selected) {
+      ctx.strokeStyle = "rgba(147, 234, 255, 0.18)";
+      ctx.lineWidth = 1.5 / editor.view.zoom;
+      ctx.setLineDash([12 / editor.view.zoom, 8 / editor.view.zoom]);
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, (node.connectRange ?? ZIP_LINE_CONNECT_RANGE), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.fillStyle = getZipLineNodeDegree(editor.data, node.id) >= ZIP_LINE_MAX_CONNECTIONS
+      ? "rgba(231, 244, 126, 0.9)"
+      : "rgba(147, 234, 255, 0.9)";
+    ctx.strokeStyle = selected ? COLORS.accent : "rgba(255,255,255,0.82)";
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, 10 / editor.view.zoom, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "rgba(241, 249, 252, 0.9)";
+    ctx.font = `${12 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(`${getZipLineNodeDegree(editor.data, node.id)}/${ZIP_LINE_MAX_CONNECTIONS}`, node.x, node.y - 16 / editor.view.zoom);
+    ctx.textAlign = "left";
+    ctx.restore();
+  });
+}
+
 function drawProps(ctx, editor) {
   editor.data.props.forEach((prop, index) => {
     if (prop.kind === "backgroundTile") {
@@ -4692,6 +5086,20 @@ function drawPreview(ctx, editor) {
     ctx.strokeRect(rect.x, rect.y, width, height);
   }
 
+  if (editor.preview?.kind === "zipLine") {
+    ctx.strokeStyle = COLORS.accent;
+    ctx.lineWidth = 3 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(editor.preview.start.x, editor.preview.start.y);
+    ctx.lineTo(editor.preview.end.x, editor.preview.end.y);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.accentAlt;
+    ctx.beginPath();
+    ctx.arc(editor.preview.start.x, editor.preview.start.y, 10 / editor.view.zoom, 0, Math.PI * 2);
+    ctx.arc(editor.preview.end.x, editor.preview.end.y, 10 / editor.view.zoom, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   if (editor.preview?.kind === "backgroundTile") {
     const rect = getPreviewBackgroundTileRect(editor);
     if (rect) {
@@ -4844,6 +5252,7 @@ function renderEditor(editor, dom) {
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawTemporaryBlocks(ctx, editor);
+  drawZipLines(ctx, editor);
   drawProps(ctx, editor);
   drawLootCrates(ctx, editor);
   drawHumanoidEnemies(ctx, editor);

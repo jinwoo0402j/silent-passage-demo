@@ -1002,6 +1002,38 @@ function drawTemporaryBlocks(ctx, run, theme) {
   });
 }
 
+function drawZipLines(ctx, data, theme) {
+  (data.zipLines || []).forEach((zipLine) => {
+    ctx.save();
+    ctx.strokeStyle = "rgba(231, 244, 126, 0.72)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(zipLine.start.x, zipLine.start.y);
+    ctx.lineTo(zipLine.end.x, zipLine.end.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(20, 32, 42, 0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([14, 10]);
+    ctx.beginPath();
+    ctx.moveTo(zipLine.start.x, zipLine.start.y + 5);
+    ctx.lineTo(zipLine.end.x, zipLine.end.y + 5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    [["start", zipLine.start], ["end", zipLine.end]].forEach(([node, point]) => {
+      ctx.fillStyle = node === "start" ? theme.accentSecondary : theme.accent;
+      ctx.strokeStyle = "rgba(241, 249, 252, 0.74)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+    ctx.restore();
+  });
+}
+
 function drawGroundShine(ctx) {
   ctx.fillStyle = "rgba(219, 239, 176, 0.34)";
   ctx.beginPath();
@@ -2417,6 +2449,9 @@ function getPlayerPose(player) {
   }
   if (player.movementState === MOVEMENT_STATES.WALL_JUMP_LOCK) {
     return "wallJump";
+  }
+  if (player.movementState === MOVEMENT_STATES.ZIPLINE) {
+    return "sprint";
   }
   if (player.movementState === MOVEMENT_STATES.DASH) {
     return "dash";
@@ -5217,6 +5252,7 @@ function renderExpedition(ctx, state, data) {
   drawBackgroundTiles(ctx, data);
   drawTerrain(ctx, data);
   drawTemporaryBlocks(ctx, run, theme);
+  drawZipLines(ctx, data, theme);
   drawGate(ctx, data, theme);
   drawRouteExits(ctx, data, theme);
   drawBraceWalls(ctx, data, theme);

@@ -848,6 +848,8 @@ export const GAME_DATA = {
     }
   ],
   "temporaryBlocks": [],
+  "zipLineNodes": [],
+  "zipLines": [],
   "props": [],
   "braceWalls": [
     {

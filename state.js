@@ -19,6 +19,7 @@ export const MOVEMENT_STATES = {
   SLIDE: "slide",
   WALL_SLIDE: "wall_slide",
   WALL_JUMP_LOCK: "wall_jump_lock",
+  ZIPLINE: "zipline",
 };
 
 const SAVE_KEY = "rulebound-extraction-meta-v1";
@@ -583,6 +584,11 @@ export function createRunState(data, meta) {
     dashCarryActive: false,
     sprintActive: false,
     sprintJumpBoostActive: false,
+    zipLineActive: false,
+    zipLineId: null,
+    zipLineProgress: 0,
+    zipLineDirection: 1,
+    zipLineSpeed: 0,
     slideJumpBoostActive: false,
     dashJumpBoostActive: false,
     speedRetentionActive: false,

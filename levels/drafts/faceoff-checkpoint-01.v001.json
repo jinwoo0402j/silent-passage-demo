@@ -1014,13 +1014,6 @@
       "color": "#54697b"
     },
     {
-      "x": 4160,
-      "y": 320,
-      "width": 240,
-      "height": 32,
-      "color": "#54697b"
-    },
-    {
       "x": 6576,
       "y": 1056,
       "width": 192,
@@ -1714,45 +1707,17 @@
       "height": 304
     },
     {
-      "id": "brace-1778175176295",
-      "x": 6560,
-      "y": 352,
-      "width": 224,
-      "height": 128
-    },
-    {
       "id": "brace-1778175563056",
-      "x": 6784,
-      "y": 432,
+      "x": 7040,
+      "y": 464,
       "width": 256,
       "height": 144
     },
     {
-      "id": "brace-1778175568074",
-      "x": 6272,
-      "y": 320,
-      "width": 288,
-      "height": 128
-    },
-    {
       "id": "brace-1778176735264",
-      "x": 4848,
-      "y": 336,
+      "x": 5808,
+      "y": 480,
       "width": 752,
-      "height": 32
-    },
-    {
-      "id": "brace-1778190539788",
-      "x": 3888,
-      "y": 352,
-      "width": 272,
-      "height": 32
-    },
-    {
-      "id": "brace-1778190542093",
-      "x": 4400,
-      "y": 304,
-      "width": 256,
       "height": 32
     },
     {
@@ -1768,6 +1733,106 @@
       "y": 3104,
       "width": 160,
       "height": 192
+    }
+  ],
+  "zipLineNodes": [
+    {
+      "id": "zipline-node-1778346940318",
+      "x": 3872,
+      "y": 256,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1778346945643",
+      "x": 4288,
+      "y": 288,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1778346952447",
+      "x": 4672,
+      "y": 208,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1778346956915",
+      "x": 4832,
+      "y": 208,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1778346970545",
+      "x": 5248,
+      "y": 272,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1778346974474",
+      "x": 5632,
+      "y": 256,
+      "connectRange": 640
+    }
+  ],
+  "zipLines": [
+    {
+      "id": "zipline-1778346945643",
+      "startNodeId": "zipline-node-1778346940318",
+      "endNodeId": "zipline-node-1778346945643",
+      "start": {
+        "x": 3872,
+        "y": 256
+      },
+      "end": {
+        "x": 4288,
+        "y": 288
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1778346952447",
+      "startNodeId": "zipline-node-1778346945643",
+      "endNodeId": "zipline-node-1778346952447",
+      "start": {
+        "x": 4288,
+        "y": 288
+      },
+      "end": {
+        "x": 4672,
+        "y": 208
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1778346970545",
+      "startNodeId": "zipline-node-1778346956915",
+      "endNodeId": "zipline-node-1778346970545",
+      "start": {
+        "x": 4832,
+        "y": 208
+      },
+      "end": {
+        "x": 5248,
+        "y": 272
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1778346974474",
+      "startNodeId": "zipline-node-1778346970545",
+      "endNodeId": "zipline-node-1778346974474",
+      "start": {
+        "x": 5248,
+        "y": 272
+      },
+      "end": {
+        "x": 5632,
+        "y": 256
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
     }
   ],
   "humanoidEnemies": [
@@ -2038,60 +2103,6 @@
       "patrol": {
         "left": 5884,
         "right": 6424
-      }
-    },
-    {
-      "id": "flying-enemy-1778326896227",
-      "type": "hostileDrone",
-      "visualKind": "flyingRanged",
-      "x": 4240,
-      "y": 1008,
-      "width": 86,
-      "height": 62,
-      "maxHp": 3,
-      "damage": 10,
-      "diveDamage": 0,
-      "speed": 190,
-      "acceleration": 5.8,
-      "activationRadius": 780,
-      "preferredRange": 320,
-      "retreatRange": 190,
-      "leashRange": 760,
-      "returnRange": 48,
-      "hoverOffsetY": 70,
-      "fireRange": 640,
-      "initialCooldown": 0.8,
-      "fireCooldown": 1.45,
-      "telegraphDuration": 0.58,
-      "beamLife": 0.1,
-      "beamLength": 620,
-      "beamRadius": 12,
-      "diveSpeed": 1040,
-      "diveMaxDuration": 0.68,
-      "diveRecoverTime": 0.36,
-      "flapRate": 9,
-      "flapAmplitude": 10,
-      "solidInsetX": 8,
-      "solidInsetY": 7,
-      "backCatchPaddingX": 0,
-      "backCatchForgivenessY": 0,
-      "damageInsetX": 5,
-      "damageInsetY": 5,
-      "projectileDamage": 10,
-      "projectileSpeed": 720,
-      "projectileRadius": 9,
-      "projectileLife": 2.4,
-      "chaseVelocityThreshold": 36,
-      "bobSeed": 0.2,
-      "spawnX": 4240,
-      "spawnY": 1008,
-      "diveAttack": false,
-      "solid": true,
-      "physicsSolid": true,
-      "braceTarget": true,
-      "patrol": {
-        "left": 4060,
-        "right": 4600
       }
     }
   ],

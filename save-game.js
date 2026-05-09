@@ -157,6 +157,8 @@ function clearTransientRunState(run) {
     run.player.lightActive = false;
     run.player.recoilFocusActive = false;
     run.player.recoilFocusBlend = 0;
+    run.player.zipLineActive = false;
+    run.player.zipLineId = null;
   }
 }
 

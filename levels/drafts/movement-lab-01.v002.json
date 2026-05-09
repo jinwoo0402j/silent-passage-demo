@@ -632,6 +632,58 @@
       "height": 736
     }
   ],
+  "zipLineNodes": [
+    {
+      "id": "zipline-node-1778346911328",
+      "x": 6032,
+      "y": 1520,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1778347240800",
+      "x": 6624,
+      "y": 1728,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1778347254654",
+      "x": 7200,
+      "y": 1904,
+      "connectRange": 640
+    }
+  ],
+  "zipLines": [
+    {
+      "id": "zipline-1778347240800",
+      "startNodeId": "zipline-node-1778346911328",
+      "endNodeId": "zipline-node-1778347240800",
+      "start": {
+        "x": 6032,
+        "y": 1520
+      },
+      "end": {
+        "x": 6624,
+        "y": 1728
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1778347254654",
+      "startNodeId": "zipline-node-1778347240800",
+      "endNodeId": "zipline-node-1778347254654",
+      "start": {
+        "x": 6624,
+        "y": 1728
+      },
+      "end": {
+        "x": 7200,
+        "y": 1904
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    }
+  ],
   "humanoidEnemies": [
     {
       "id": "rifle-sentry-01",

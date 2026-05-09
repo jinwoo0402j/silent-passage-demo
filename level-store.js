@@ -589,6 +589,106 @@ function sanitizeBraceWall(wall, index, baseWall = null) {
   };
 }
 
+function extractZipLineNode(node = {}) {
+  return {
+    id: node.id,
+    x: node.x,
+    y: node.y,
+    connectRange: node.connectRange,
+  };
+}
+
+function sanitizeZipLineNode(node, index, baseNode = null) {
+  const fallback = baseNode || {
+    id: `zipline-node-${index + 1}`,
+    x: 420 + index * 180,
+    y: 520,
+    connectRange: 640,
+  };
+
+  return {
+    id: safeString(node?.id, fallback.id || `zipline-node-${index + 1}`),
+    x: safeNumber(node?.x, fallback.x),
+    y: safeNumber(node?.y, fallback.y),
+    connectRange: safeNumber(node?.connectRange, fallback.connectRange ?? 640, 1),
+  };
+}
+
+function extractZipLine(zipLine = {}) {
+  return {
+    id: zipLine.id,
+    startNodeId: zipLine.startNodeId,
+    endNodeId: zipLine.endNodeId,
+    start: {
+      x: zipLine.start?.x,
+      y: zipLine.start?.y,
+    },
+    end: {
+      x: zipLine.end?.x,
+      y: zipLine.end?.y,
+    },
+    speed: zipLine.speed,
+    prompt: zipLine.prompt,
+  };
+}
+
+function sanitizeZipLine(zipLine, index, baseZipLine = null) {
+  const fallback = baseZipLine || {
+    id: `zipline-${index + 1}`,
+    startNodeId: "",
+    endNodeId: "",
+    start: { x: 420 + index * 220, y: 520 },
+    end: { x: 720 + index * 220, y: 420 },
+    speed: 1480,
+    prompt: "E: Zipline",
+  };
+
+  return {
+    id: safeString(zipLine?.id, fallback.id || `zipline-${index + 1}`),
+    startNodeId: safeString(zipLine?.startNodeId, fallback.startNodeId || ""),
+    endNodeId: safeString(zipLine?.endNodeId, fallback.endNodeId || ""),
+    start: {
+      x: safeNumber(zipLine?.start?.x, fallback.start?.x ?? 420),
+      y: safeNumber(zipLine?.start?.y, fallback.start?.y ?? 520),
+    },
+    end: {
+      x: safeNumber(zipLine?.end?.x, fallback.end?.x ?? 720),
+      y: safeNumber(zipLine?.end?.y, fallback.end?.y ?? 420),
+    },
+    speed: safeNumber(zipLine?.speed, fallback.speed ?? 1480, 1),
+    prompt: safeString(zipLine?.prompt, fallback.prompt || "E: Zipline"),
+  };
+}
+
+function areZipLineNodesWithinRange(leftNode, rightNode) {
+  if (!leftNode || !rightNode) {
+    return false;
+  }
+  const connectRange = Math.min(
+    safeNumber(leftNode.connectRange, 640, 1),
+    safeNumber(rightNode.connectRange, 640, 1),
+  );
+  return Math.hypot(rightNode.x - leftNode.x, rightNode.y - leftNode.y) <= connectRange;
+}
+
+function syncAndFilterZipLines(zipLines, nodes) {
+  const nodeById = new Map((nodes || []).map((node) => [node.id, node]));
+  return (zipLines || [])
+    .map((zipLine) => {
+      const startNode = nodeById.get(zipLine.startNodeId);
+      const endNode = nodeById.get(zipLine.endNodeId);
+      if (!startNode || !endNode || !areZipLineNodesWithinRange(startNode, endNode)) {
+        return null;
+      }
+      return {
+        ...zipLine,
+        start: { x: startNode.x, y: startNode.y },
+        end: { x: endNode.x, y: endNode.y },
+      };
+    })
+    .filter(Boolean);
+}
+
 function extractHostileDrone(drone = {}) {
   const next = {
     id: drone.id,
@@ -812,6 +912,8 @@ export function extractEditableLevelData(data) {
       width: wall.width,
       height: wall.height,
     })),
+    zipLineNodes: (data.zipLineNodes || []).map((node) => extractZipLineNode(node)),
+    zipLines: (data.zipLines || []).map((zipLine) => extractZipLine(zipLine)),
     humanoidEnemies: (data.humanoidEnemies || []).map((enemy) => safeRecord(enemy)),
     hostileDrones: (data.hostileDrones || []).map((drone) => extractHostileDrone(drone)),
     lootTables: safeRecord(data.lootTables),
@@ -822,6 +924,12 @@ export function extractEditableLevelData(data) {
 export function normalizeEditableLevelData(raw, baseData) {
   const fallback = extractEditableLevelData(baseData);
   const source = raw && typeof raw === "object" ? raw : {};
+  const zipLineNodes = Array.isArray(source.zipLineNodes)
+    ? source.zipLineNodes.map((node, index) => sanitizeZipLineNode(node, index, fallback.zipLineNodes?.[index]))
+    : (fallback.zipLineNodes || []).map((node, index) => sanitizeZipLineNode(node, index));
+  const zipLines = Array.isArray(source.zipLines)
+    ? source.zipLines.map((zipLine, index) => sanitizeZipLine(zipLine, index, fallback.zipLines?.[index]))
+    : (fallback.zipLines || []).map((zipLine, index) => sanitizeZipLine(zipLine, index));
 
   return {
     version: LEVEL_DATA_VERSION,
@@ -895,6 +1003,8 @@ export function normalizeEditableLevelData(raw, baseData) {
     braceWalls: Array.isArray(source.braceWalls)
       ? source.braceWalls.map((wall, index) => sanitizeBraceWall(wall, index, fallback.braceWalls?.[index]))
       : (fallback.braceWalls || []).map((wall, index) => sanitizeBraceWall(wall, index)),
+    zipLineNodes,
+    zipLines: syncAndFilterZipLines(zipLines, zipLineNodes),
     humanoidEnemies: Array.isArray(source.humanoidEnemies)
       ? source.humanoidEnemies.map((enemy, index) => safeRecord(enemy, fallback.humanoidEnemies?.[index] || {}))
       : (fallback.humanoidEnemies || []).map((enemy) => safeRecord(enemy)),
@@ -965,6 +1075,8 @@ export function mergeLevelData(baseData, override) {
   next.temporaryBlocks = normalized.temporaryBlocks;
   next.props = normalized.props;
   next.braceWalls = normalized.braceWalls;
+  next.zipLineNodes = normalized.zipLineNodes;
+  next.zipLines = normalized.zipLines;
   next.humanoidEnemies = normalized.humanoidEnemies;
   next.hostileDrones = normalized.hostileDrones;
   next.lootTables = normalized.lootTables;
@@ -1203,6 +1315,8 @@ export function getLevelSummaries(baseData) {
         width: wall.width,
         height: wall.height,
       })),
+      zipLineNodes: (effective.zipLineNodes || []).map((node) => extractZipLineNode(node)),
+      zipLines: (effective.zipLines || []).map((zipLine) => extractZipLine(zipLine)),
       lootCrates: (effective.lootCrates || []).map((crate) => ({
         id: crate.id,
         x: crate.x,

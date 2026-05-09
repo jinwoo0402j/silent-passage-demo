@@ -2589,7 +2589,9 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
 }
 
 function setMovementState(player) {
-  if (player.dashTimer > 0) {
+  if (player.zipLineActive) {
+    player.movementState = MOVEMENT_STATES.ZIPLINE;
+  } else if (player.dashTimer > 0) {
     player.movementState = MOVEMENT_STATES.DASH;
   } else if (player.wallJumpLockTimer > 0) {
     player.movementState = MOVEMENT_STATES.WALL_JUMP_LOCK;
@@ -2614,6 +2616,14 @@ function setMovementState(player) {
   } else {
     player.movementState = MOVEMENT_STATES.GROUNDED;
   }
+}
+
+function clearZipLine(player) {
+  player.zipLineActive = false;
+  player.zipLineId = null;
+  player.zipLineProgress = 0;
+  player.zipLineDirection = 1;
+  player.zipLineSpeed = 0;
 }
 
 function clearBraceHold(player) {
@@ -4248,6 +4258,15 @@ function updatePlayer(run, data, state, dt, input) {
   }
   if (player.attackWindow === 0) {
     player.attackHits.clear();
+  }
+
+  if (player.zipLineActive) {
+    if (updateZipLineRide(player, data, run, config, dt, jumpPressed)) {
+      updateMovementVfx(run, data, dt);
+      player.jumpHeldLastFrame = jumpHeld;
+      setMovementState(player);
+      return;
+    }
   }
 
   if (!player.onGround && player.wallDirection !== 0) {
@@ -6571,6 +6590,23 @@ function getInteractionTargets(run, data) {
     }
   }
 
+  for (const zipLine of data.zipLines || []) {
+    const startDistance = distanceBetween(playerCenter, zipLine.start);
+    const endDistance = distanceBetween(playerCenter, zipLine.end);
+    const nearestNode = startDistance <= endDistance ? "start" : "end";
+    const nearestPoint = zipLine[nearestNode];
+    if (Math.min(startDistance, endDistance) < 96) {
+      targets.push({
+        id: zipLine.id,
+        kind: "zipLine",
+        zipLine,
+        text: zipLine.prompt || "E: Zipline",
+        x: nearestPoint.x,
+        y: nearestPoint.y - 18,
+      });
+    }
+  }
+
   for (const item of run.interactables) {
     if (item.used) {
       continue;
@@ -6810,6 +6846,7 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.recoilShotPitch = 0;
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
+  clearZipLine(player);
 }
 
 function clearLevelTransitionEffects(run) {
@@ -6820,6 +6857,7 @@ function clearLevelTransitionEffects(run) {
     run.recoilAim.active = false;
     run.recoilAim.aiming = false;
   }
+  clearZipLine(run.player);
   run.enemyShots = [];
   run.playerBullets = [];
   run.damageNumbers = [];
@@ -6912,6 +6950,177 @@ function transitionToRouteExit(state, data, routeExit) {
   saveCurrentGame(state, data);
 }
 
+function getZipLineProgressForPoint(zipLine, point) {
+  const dx = zipLine.end.x - zipLine.start.x;
+  const dy = zipLine.end.y - zipLine.start.y;
+  const lengthSq = Math.max(1, dx * dx + dy * dy);
+  return clamp(((point.x - zipLine.start.x) * dx + (point.y - zipLine.start.y) * dy) / lengthSq, 0, 1);
+}
+
+function getZipLinePoint(zipLine, progress) {
+  return {
+    x: lerp(zipLine.start.x, zipLine.end.x, progress),
+    y: lerp(zipLine.start.y, zipLine.end.y, progress),
+  };
+}
+
+function getZipLineVector(zipLine) {
+  const dx = zipLine.end.x - zipLine.start.x;
+  const dy = zipLine.end.y - zipLine.start.y;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  return {
+    x: dx / length,
+    y: dy / length,
+    length,
+  };
+}
+
+function getZipLineEndpointNodeId(zipLine, progress) {
+  return progress <= 0 ? zipLine.startNodeId : zipLine.endNodeId;
+}
+
+function getZipLineDirectionFromNode(zipLine, nodeId) {
+  if (zipLine.startNodeId === nodeId) {
+    return 1;
+  }
+  if (zipLine.endNodeId === nodeId) {
+    return -1;
+  }
+  return 0;
+}
+
+function getNextZipLineAtNode(data, currentZipLine, nodeId, incomingX, incomingY) {
+  if (!nodeId) {
+    return null;
+  }
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const candidate of data.zipLines || []) {
+    if (candidate.id === currentZipLine.id) {
+      continue;
+    }
+    const direction = getZipLineDirectionFromNode(candidate, nodeId);
+    if (direction === 0) {
+      continue;
+    }
+    const vector = getZipLineVector(candidate);
+    const outgoingX = vector.x * direction;
+    const outgoingY = vector.y * direction;
+    const score = incomingX * outgoingX + incomingY * outgoingY;
+    if (score > bestScore) {
+      bestScore = score;
+      best = { zipLine: candidate, direction };
+    }
+  }
+  return best;
+}
+
+function continueZipLineRideAtNode(player, data, currentZipLine, endpointProgress, config) {
+  const nodeId = getZipLineEndpointNodeId(currentZipLine, endpointProgress);
+  const vector = getZipLineVector(currentZipLine);
+  const incomingX = vector.x * (player.zipLineDirection || 1);
+  const incomingY = vector.y * (player.zipLineDirection || 1);
+  const next = getNextZipLineAtNode(data, currentZipLine, nodeId, incomingX, incomingY);
+  if (!next) {
+    return false;
+  }
+
+  player.zipLineId = next.zipLine.id;
+  player.zipLineDirection = next.direction;
+  player.zipLineProgress = next.direction > 0 ? 0 : 1;
+  player.zipLineSpeed = Math.max(
+    player.zipLineSpeed || 0,
+    next.zipLine.speed ?? 1480,
+    (config.sprintSpeed ?? config.runSpeed) * 1.18,
+  );
+  return true;
+}
+
+function beginZipLineRide(run, data, zipLine) {
+  const player = run.player;
+  const playerCenter = getCenter(player);
+  const progress = getZipLineProgressForPoint(zipLine, playerCenter);
+  const direction = player.facing >= 0 ? 1 : -1;
+  const point = getZipLinePoint(zipLine, direction > 0 ? Math.max(progress, 0) : Math.min(progress, 1));
+  player.zipLineActive = true;
+  player.zipLineId = zipLine.id;
+  player.zipLineProgress = getZipLineProgressForPoint(zipLine, point);
+  player.zipLineDirection = direction;
+  player.zipLineSpeed = Math.max(zipLine.speed ?? 1480, (data.player.movement?.sprintSpeed ?? 1180) * 1.18);
+  player.onGround = false;
+  player.wasOnGround = false;
+  player.vx = 0;
+  player.vy = 0;
+  player.x = point.x - player.width * 0.5;
+  player.y = point.y - player.height * 0.38;
+  player.facing = direction;
+  player.sprintActive = true;
+  player.sprintCharge = 1;
+  player.canInteract = false;
+  clearBraceHold(player);
+  clearWallRun(player);
+  clearHover(player);
+  clearRecoilSpin(player);
+  pushNotice(run, "Zipline engaged.");
+}
+
+function updateZipLineRide(player, data, run, config, dt, jumpPressed) {
+  const zipLine = (data.zipLines || []).find((entry) => entry.id === player.zipLineId);
+  if (!zipLine) {
+    clearZipLine(player);
+    return false;
+  }
+
+  if (jumpPressed) {
+    const direction = player.zipLineDirection || player.facing || 1;
+    const exitSpeed = Math.max(player.zipLineSpeed || 0, (config.sprintSpeed ?? config.runSpeed) * 1.05);
+    clearZipLine(player);
+    player.vx = direction * exitSpeed * 0.62;
+    player.vy = config.jumpVelocity ?? data.player.jumpVelocity ?? -900;
+    player.onGround = false;
+    player.coyoteTimer = 0;
+    player.jumpBufferTimer = 0;
+    player.facing = direction;
+    armSprintJumpCarry(player, config);
+    spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#e7f47e");
+    return false;
+  }
+
+  const dx = zipLine.end.x - zipLine.start.x;
+  const dy = zipLine.end.y - zipLine.start.y;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const direction = player.zipLineDirection || 1;
+  const speed = Math.max(player.zipLineSpeed || 0, (config.sprintSpeed ?? config.runSpeed) * 1.18);
+  const previousPoint = getZipLinePoint(zipLine, player.zipLineProgress);
+  player.zipLineProgress = clamp(player.zipLineProgress + direction * (speed * dt / length), 0, 1);
+  const point = getZipLinePoint(zipLine, player.zipLineProgress);
+  player.x = clamp(point.x - player.width * 0.5, 0, data.world.width - player.width);
+  player.y = clamp(point.y - player.height * 0.38, 0, data.world.height - player.height);
+  player.vx = (point.x - previousPoint.x) / Math.max(dt, 0.001);
+  player.vy = (point.y - previousPoint.y) / Math.max(dt, 0.001);
+  player.facing = Math.sign(player.vx) || direction;
+  player.onGround = false;
+  player.wasOnGround = false;
+  player.wallSliding = false;
+  player.wallDirection = 0;
+  player.sprintActive = true;
+  player.sprintCharge = 1;
+  player.canInteract = false;
+
+  if (player.zipLineProgress <= 0 || player.zipLineProgress >= 1) {
+    const endpointProgress = player.zipLineProgress <= 0 ? 0 : 1;
+    if (!continueZipLineRideAtNode(player, data, zipLine, endpointProgress, config)) {
+      clearZipLine(player);
+      player.vx *= 0.82;
+      player.vy = Math.max(player.vy, 120);
+      player.canInteract = true;
+    }
+  }
+
+  return true;
+}
+
 function updateInteractions(state, data, canInteract) {
   const run = state.run;
   run.prompt = "";
@@ -6984,6 +7193,11 @@ function updateInteractions(state, data, canInteract) {
 
   if (nearest.kind === "routeExit") {
     transitionToRouteExit(state, data, nearest.routeExit);
+    return;
+  }
+
+  if (nearest.kind === "zipLine") {
+    beginZipLineRide(run, data, nearest.zipLine);
     return;
   }
 
