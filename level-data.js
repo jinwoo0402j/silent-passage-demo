@@ -43,6 +43,9 @@ export const GAME_DATA = {
     "playerSprint": {
       "src": "./assets/characters/type-07a-player-sprint-sd.png?v=20260424-1"
     },
+    "playerZipline": {
+      "src": "./assets/characters/type-07a-player-zipline-sd.png?v=20260510-4"
+    },
     "playerJump": {
       "src": "./assets/characters/type-07a-player-jump-sd.png?v=20260424-2"
     },
@@ -660,6 +663,7 @@ export const GAME_DATA = {
       "idleAssetKey": "playerIdle",
       "runAssetKey": "playerRun",
       "sprintAssetKey": "playerSprint",
+      "zipLineAssetKey": "playerZipline",
       "jumpAssetKey": "playerJump",
       "fallAssetKey": "playerFall",
       "hoverAssetKey": "playerHoverDrone",
@@ -689,6 +693,8 @@ export const GAME_DATA = {
       "runHeightRatio": 1.025,
       "sprintWidthRatio": 1,
       "sprintHeightRatio": 1.013,
+      "zipLineWidthRatio": 0.95,
+      "zipLineHeightRatio": 1.02,
       "jumpWidthRatio": 1,
       "jumpHeightRatio": 1.15,
       "fallWidthRatio": 1,
@@ -736,6 +742,8 @@ export const GAME_DATA = {
       "idleAnchorX": 0.58,
       "runAnchorX": 0.651,
       "sprintAnchorX": 0.53,
+      "zipLineAnchorX": 0.42,
+      "zipLineFootAnchorY": 0.55,
       "jumpAnchorX": 0.63,
       "fallAnchorX": 0.46,
       "hoverAnchorX": 0.48,

@@ -124,6 +124,7 @@ const PLAYER_RENDER_GROUPS = [
   ["idle", "Idle"],
   ["run", "Run"],
   ["sprint", "Sprint"],
+  ["zipLine", "Zipline"],
   ["jump", "Jump"],
   ["fall", "Fall"],
   ["dash", "Dash"],
@@ -662,6 +663,13 @@ function getPlayerPoseConfig(data, pose) {
       widthRatio: renderConfig.sprintWidthRatio ?? renderConfig.runWidthRatio ?? renderConfig.widthRatio ?? 1,
       heightRatio: renderConfig.sprintHeightRatio ?? renderConfig.runHeightRatio ?? renderConfig.heightRatio ?? 1,
       anchorX: renderConfig.sprintAnchorX ?? renderConfig.runAnchorX ?? 0.18,
+    },
+    zipLine: {
+      assetKey: renderConfig.zipLineAssetKey || renderConfig.sprintAssetKey || renderConfig.runAssetKey || fallbackAssetKey,
+      widthRatio: renderConfig.zipLineWidthRatio ?? renderConfig.sprintWidthRatio ?? renderConfig.widthRatio ?? 1,
+      heightRatio: renderConfig.zipLineHeightRatio ?? renderConfig.sprintHeightRatio ?? renderConfig.heightRatio ?? 1,
+      anchorX: renderConfig.zipLineAnchorX ?? renderConfig.sprintAnchorX ?? 0.42,
+      footAnchorY: renderConfig.zipLineFootAnchorY ?? renderConfig.footAnchorY ?? 0.86,
     },
     jump: {
       assetKey: renderConfig.jumpAssetKey || renderConfig.idleAssetKey || fallbackAssetKey,

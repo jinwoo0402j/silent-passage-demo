@@ -6593,9 +6593,13 @@ function getInteractionTargets(run, data) {
   for (const zipLine of data.zipLines || []) {
     const startDistance = distanceBetween(playerCenter, zipLine.start);
     const endDistance = distanceBetween(playerCenter, zipLine.end);
+    const lineDistance = getPointToZipLineDistance(playerCenter, zipLine);
     const nearestNode = startDistance <= endDistance ? "start" : "end";
-    const nearestPoint = zipLine[nearestNode];
-    if (Math.min(startDistance, endDistance) < 96) {
+    const progress = getZipLineProgressForPoint(zipLine, playerCenter);
+    const nearestPoint = lineDistance < Math.min(startDistance, endDistance)
+      ? getZipLinePoint(zipLine, progress)
+      : zipLine[nearestNode];
+    if (Math.min(startDistance, endDistance, lineDistance) < 96) {
       targets.push({
         id: zipLine.id,
         kind: "zipLine",
@@ -6962,6 +6966,19 @@ function getZipLinePoint(zipLine, progress) {
     x: lerp(zipLine.start.x, zipLine.end.x, progress),
     y: lerp(zipLine.start.y, zipLine.end.y, progress),
   };
+}
+
+function getPointToZipLineDistance(point, zipLine) {
+  const dx = zipLine.end.x - zipLine.start.x;
+  const dy = zipLine.end.y - zipLine.start.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq <= 0.0001) {
+    return Math.hypot(point.x - zipLine.start.x, point.y - zipLine.start.y);
+  }
+  const t = clamp(((point.x - zipLine.start.x) * dx + (point.y - zipLine.start.y) * dy) / lengthSq, 0, 1);
+  const nearestX = zipLine.start.x + dx * t;
+  const nearestY = zipLine.start.y + dy * t;
+  return Math.hypot(point.x - nearestX, point.y - nearestY);
 }
 
 function getZipLineVector(zipLine) {
