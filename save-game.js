@@ -12,6 +12,7 @@ const LEVEL_STATE_KEYS = [
   "threats",
   "hostileDrones",
   "humanoidEnemies",
+  "temporaryBlocks",
 ];
 
 const RUN_SCALAR_KEYS = [

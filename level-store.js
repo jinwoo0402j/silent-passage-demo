@@ -124,6 +124,9 @@ const HOSTILE_DRONE_NUMBER_FIELDS = [
   ["acceleration", 7, 0],
   ["activationRadius", 720, 0],
   ["preferredRange", 280, 0],
+  ["retreatRange", 180, 0],
+  ["leashRange", 760, 0],
+  ["returnRange", 48, 0],
   ["hoverOffsetY", 120, -1000],
   ["fireRange", 620, 0],
   ["initialCooldown", 0.8, 0],
@@ -143,6 +146,11 @@ const HOSTILE_DRONE_NUMBER_FIELDS = [
   ["backCatchForgivenessY", 0, 0],
   ["damageInsetX", 5, 0],
   ["damageInsetY", 5, 0],
+  ["projectileDamage", 10, 0],
+  ["projectileSpeed", 720, 0],
+  ["projectileRadius", 9, 0],
+  ["projectileLife", 2.4, 0.01],
+  ["chaseVelocityThreshold", 36, 0],
   ["bobSeed", 0, null],
 ];
 const HOSTILE_DRONE_BOOLEAN_FIELDS = [
@@ -590,6 +598,8 @@ function extractHostileDrone(drone = {}) {
   HOSTILE_DRONE_NUMBER_FIELDS.forEach(([field, fallback, minimum]) => {
     next[field] = safeNumber(drone[field], fallback, minimum);
   });
+  next.spawnX = safeNumber(drone.spawnX, drone.x ?? 0);
+  next.spawnY = safeNumber(drone.spawnY, drone.y ?? 0);
   HOSTILE_DRONE_BOOLEAN_FIELDS.forEach(([field, fallback]) => {
     if (typeof drone[field] === "boolean" || typeof drone[field] !== "undefined") {
       next[field] = safeBoolean(drone[field], fallback);
@@ -621,6 +631,8 @@ function sanitizeHostileDrone(drone, index, baseDrone = null) {
   HOSTILE_DRONE_NUMBER_FIELDS.forEach(([field, fallbackValue, minimum]) => {
     next[field] = safeNumber(drone?.[field], fallback[field] ?? fallbackValue, minimum);
   });
+  next.spawnX = safeNumber(drone?.spawnX, fallback.spawnX ?? next.x);
+  next.spawnY = safeNumber(drone?.spawnY, fallback.spawnY ?? next.y);
   HOSTILE_DRONE_BOOLEAN_FIELDS.forEach(([field, fallbackValue]) => {
     next[field] = safeBoolean(drone?.[field], fallback[field] ?? fallbackValue);
   });

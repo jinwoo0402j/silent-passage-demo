@@ -8,7 +8,7 @@ import {
   hasUnlocked,
   saveMetaState,
 } from "./state.js?v=20260507-slope-slide-physics-v1";
-import { loadRuntimeLevelData } from "./level-store.js?v=20260507-slope-slide-physics-v1";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260507-slope-slide-physics-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -5015,7 +5015,7 @@ function updateAttackHits(run) {
   }
 }
 
-function updateGuard(run, dt) {
+function updateGuard(run, data, dt) {
   const guard = run.encounters.guard;
   if (isEntityDisabled(guard) || guard.state === "released") {
     return;
@@ -5029,9 +5029,10 @@ function updateGuard(run, dt) {
   const guardCenter = getCenter(guard);
   const distance = distanceBetween(playerCenter, guardCenter);
   const isMoving = Math.abs(player.vx) > 24 || Math.abs(player.vy) > 90;
-  const inDetection = distance < guard.detectionRadius;
+  const canSeePlayer = hasLineOfSightToPlayer(run, data, guardCenter, playerCenter);
+  const inDetection = distance < guard.detectionRadius && canSeePlayer;
   const inCheckpoint = rectsOverlap(player, guard.checkpointZone);
-  const canInspect = run.inventory.badge && inCheckpoint && !isMoving && !player.lightActive;
+  const canInspect = run.inventory.badge && inCheckpoint && canSeePlayer && !isMoving && !player.lightActive;
 
   if (guard.state === "patrol") {
     guard.x += guard.patrolDirection * guard.speed * dt;
@@ -5070,9 +5071,11 @@ function updateGuard(run, dt) {
       }
     }
   } else if (guard.state === "chase") {
-    guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
     const direction = playerCenter.x >= guardCenter.x ? 1 : -1;
-    guard.x += direction * guard.chaseSpeed * dt;
+    if (inDetection) {
+      guard.facing = direction;
+      guard.x += direction * guard.chaseSpeed * dt;
+    }
 
     if (canInspect) {
       guard.state = "inspect";
@@ -5092,7 +5095,7 @@ function updateGuard(run, dt) {
       guard.searchTimer = 0;
     }
 
-    if (distance < guard.attackRange && guard.attackCooldown === 0) {
+    if (canSeePlayer && distance < guard.attackRange && guard.attackCooldown === 0) {
       guard.attackCooldown = 1;
       damagePlayer(run, guard.damage, direction, "감시자 근접 타격.");
     }
@@ -5166,7 +5169,7 @@ function usePedestal(run, pedestal) {
   pushNotice(run, `${pedestal.label} 반응.`);
 }
 
-function updateRitualist(run, dt) {
+function updateRitualist(run, data, dt) {
   const ritualist = run.encounters.ritualist;
   if (isEntityDisabled(ritualist) || ritualist.state === "released") {
     return;
@@ -5179,6 +5182,7 @@ function updateRitualist(run, dt) {
   const playerCenter = getCenter(player);
   const ritualCenter = getCenter(ritualist);
   const distance = distanceBetween(playerCenter, ritualCenter);
+  const canSeePlayer = hasLineOfSightToPlayer(run, data, ritualCenter, playerCenter);
   const inArea = rectsOverlap(player, ritualist.ritualArea);
 
   if (inArea) {
@@ -5196,7 +5200,7 @@ function updateRitualist(run, dt) {
       ritualist.x += direction * ritualist.speed * dt;
     }
 
-    if (inArea && player.lightActive) {
+    if (inArea && canSeePlayer && player.lightActive) {
       upsetRitual(
         run,
         ritualist,
@@ -5207,15 +5211,17 @@ function updateRitualist(run, dt) {
     }
   } else if (ritualist.state === "hostile") {
     const direction = playerCenter.x >= ritualCenter.x ? 1 : -1;
-    ritualist.facing = direction;
-    ritualist.x += direction * ritualist.chaseSpeed * dt;
+    if (canSeePlayer) {
+      ritualist.facing = direction;
+      ritualist.x += direction * ritualist.chaseSpeed * dt;
+    }
 
-    if (distance < ritualist.attackRange && ritualist.attackCooldown === 0) {
+    if (canSeePlayer && distance < ritualist.attackRange && ritualist.attackCooldown === 0) {
       ritualist.attackCooldown = 1.1;
       damagePlayer(run, ritualist.damage, direction, "의식자 타격.");
     }
 
-    if (inArea || distance < 360) {
+    if (canSeePlayer && (inArea || distance < 360)) {
       ritualist.calmTimer = 0;
     } else {
       ritualist.calmTimer += dt;
@@ -5229,7 +5235,7 @@ function updateRitualist(run, dt) {
   }
 }
 
-function updateThreats(run, dt) {
+function updateThreats(run, data, dt) {
   for (const threat of run.threats) {
     if (isEntityDisabled(threat)) {
       continue;
@@ -5245,8 +5251,9 @@ function updateThreats(run, dt) {
     const playerCenter = getCenter(run.player);
     const threatCenter = getCenter(threat);
     const distance = distanceBetween(playerCenter, threatCenter);
+    const canSeePlayer = hasLineOfSightToPlayer(run, data, threatCenter, playerCenter);
 
-    if (distance < 340) {
+    if (canSeePlayer && distance < 340) {
       const direction = playerCenter.x >= threatCenter.x ? 1 : -1;
       threat.facing = direction;
       threat.x += direction * threat.chaseSpeed * dt;
@@ -5272,6 +5279,12 @@ function updateThreats(run, dt) {
 
 function hydrateHostileDroneState(drone) {
   const center = getCenter(drone);
+  if (!Number.isFinite(drone.spawnX)) {
+    drone.spawnX = drone.x;
+  }
+  if (!Number.isFinite(drone.spawnY)) {
+    drone.spawnY = drone.y;
+  }
   if (!Number.isFinite(drone.hp)) {
     drone.hp = drone.maxHp ?? 1;
   }
@@ -5339,6 +5352,9 @@ function createRuntimeHostileDrone(definition) {
     diveEndX: definition.x,
     diveEndY: definition.y,
     diveHasHit: false,
+    spawnX: Number.isFinite(definition.spawnX) ? definition.spawnX : definition.x,
+    spawnY: Number.isFinite(definition.spawnY) ? definition.spawnY : definition.y,
+    returningHome: false,
     aimTimer: 0,
     aimDuration: 0,
     aimDirX: -1,
@@ -5409,6 +5425,32 @@ function fireDroneBeam(run, drone) {
     hasHit: false,
   });
   spawnDirectedParticles(run, drone.aimStartX, drone.aimStartY, 7, "#87e1ff", drone.aimDirX || 1, drone.aimDirY || 0, 420, 0.22);
+}
+
+function fireFlyingRangedShot(run, drone, playerCenter) {
+  run.enemyShots = run.enemyShots || [];
+  const originX = drone.x + drone.width * 0.5;
+  const originY = drone.y + drone.height * 0.5;
+  const dx = playerCenter.x - originX;
+  const dy = playerCenter.y - originY;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  const speed = drone.projectileSpeed ?? 720;
+  run.enemyShots.push({
+    id: `${drone.id}-orb-${Math.round((run.time ?? 0) * 1000)}-${run.enemyShots.length}`,
+    type: "flyingRanged",
+    x: originX,
+    y: originY,
+    prevX: originX,
+    prevY: originY,
+    vx: (dx / length) * speed,
+    vy: (dy / length) * speed,
+    radius: drone.projectileRadius ?? 9,
+    damage: drone.projectileDamage ?? drone.damage ?? 10,
+    life: drone.projectileLife ?? 2.4,
+    duration: drone.projectileLife ?? 2.4,
+    color: drone.projectileColor || "#93eaff",
+  });
+  drone.hitFlash = Math.max(drone.hitFlash ?? 0, 0.08);
 }
 
 function startCrowDive(drone) {
@@ -5539,6 +5581,121 @@ function findTemporaryBlockLineHit(run, startX, startY, endX, endY, padding = 0)
   return null;
 }
 
+function pointInsideRect(point, rect, padding = 0) {
+  return (
+    point.x >= rect.x - padding &&
+    point.x <= rect.x + rect.width + padding &&
+    point.y >= rect.y - padding &&
+    point.y <= rect.y + rect.height + padding
+  );
+}
+
+function doesRectBlockSight(rect, from, to, padding = 0) {
+  if (!rect || pointInsideRect(from, rect, padding) || pointInsideRect(to, rect, padding)) {
+    return false;
+  }
+  return lineIntersectsRect(from.x, from.y, to.x, to.y, rect, padding);
+}
+
+function hasLineOfSightToPlayer(run, data, from, to, padding = 1) {
+  for (const platform of data.platforms || []) {
+    if (doesRectBlockSight(platform, from, to, padding)) {
+      return false;
+    }
+  }
+  for (const block of run.temporaryBlocks || []) {
+    if (!isTemporaryBlockHidden(block) && doesRectBlockSight(block, from, to, padding)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isFlyingRangedDrone(drone) {
+  return drone?.visualKind === "flyingRanged";
+}
+
+function updateFlyingRangedDrone(run, data, drone, dt, playerCenter) {
+  const center = getCenter(drone);
+  const spawnX = Number.isFinite(drone.spawnX) ? drone.spawnX : drone.x;
+  const spawnY = Number.isFinite(drone.spawnY) ? drone.spawnY : drone.y;
+  const spawnCenter = {
+    x: spawnX + drone.width * 0.5,
+    y: spawnY + drone.height * 0.5,
+  };
+  const canSeePlayer = hasLineOfSightToPlayer(run, data, center, playerCenter);
+  const distanceToPlayer = distanceBetween(center, playerCenter);
+  const distanceToSpawn = distanceBetween(center, spawnCenter);
+  const activationRadius = drone.activationRadius ?? 760;
+  const leashRange = drone.leashRange ?? 760;
+  const returnRange = drone.returnRange ?? 48;
+  const desiredRange = drone.preferredRange ?? 320;
+  const retreatRange = drone.retreatRange ?? Math.max(120, desiredRange * 0.62);
+  const playerAwayX = playerCenter.x - center.x;
+  const playerAwayY = playerCenter.y - center.y;
+  const playerAwayLength = Math.max(0.001, Math.hypot(playerAwayX, playerAwayY));
+  const dirToPlayerX = playerAwayX / playerAwayLength;
+  const dirToPlayerY = playerAwayY / playerAwayLength;
+  const playerMovingAway = (
+    (run.player.vx ?? 0) * dirToPlayerX + (run.player.vy ?? 0) * dirToPlayerY
+  ) > (drone.chaseVelocityThreshold ?? 36);
+
+  if (distanceToSpawn > leashRange) {
+    drone.returningHome = true;
+    drone.active = false;
+  } else if (canSeePlayer && distanceToPlayer < activationRadius && !drone.returningHome) {
+    drone.active = true;
+  } else if (!canSeePlayer || distanceToPlayer > activationRadius * 1.35) {
+    drone.active = false;
+  }
+
+  if (drone.returningHome && distanceToSpawn <= returnRange) {
+    drone.returningHome = false;
+  }
+
+  let targetX = spawnX;
+  let targetY = spawnY;
+  if (drone.active && canSeePlayer && !drone.returningHome) {
+    if (distanceToPlayer < retreatRange) {
+      targetX = playerCenter.x - dirToPlayerX * desiredRange - drone.width * 0.5;
+      targetY = playerCenter.y - dirToPlayerY * desiredRange - drone.height * 0.5;
+    } else if (playerMovingAway || distanceToPlayer > desiredRange * 1.18) {
+      targetX = playerCenter.x - dirToPlayerX * desiredRange - drone.width * 0.5;
+      targetY = playerCenter.y - dirToPlayerY * desiredRange - drone.height * 0.5;
+    } else {
+      targetX = drone.x;
+      targetY = drone.y;
+    }
+    drone.facing = playerCenter.x >= center.x ? 1 : -1;
+  } else {
+    drone.facing = Math.sign(spawnCenter.x - center.x) || drone.facing || 1;
+  }
+
+  const flapBob = Math.sin((run.time ?? 0) * (drone.flapRate ?? 9) + (drone.bobSeed ?? 0)) * (drone.flapAmplitude ?? 10);
+  targetX = clamp(targetX, 0, data.world.width - drone.width);
+  targetY = clamp(targetY + flapBob, 40, data.world.height - drone.height - 40);
+
+  const accel = drone.acceleration ?? 5.8;
+  const maxSpeed = drone.speed ?? 185;
+  const desiredVx = clamp((targetX - drone.x) * accel, -maxSpeed, maxSpeed);
+  const desiredVy = clamp((targetY - drone.y) * accel, -maxSpeed, maxSpeed);
+  drone.vx = lerp(drone.vx ?? 0, desiredVx, Math.min(1, dt * 6));
+  drone.vy = lerp(drone.vy ?? 0, desiredVy, Math.min(1, dt * 6));
+  drone.x = clamp(drone.x + drone.vx * dt, 0, data.world.width - drone.width);
+  drone.y = clamp(drone.y + drone.vy * dt, 40, data.world.height - drone.height - 40);
+
+  if (
+    drone.active &&
+    canSeePlayer &&
+    !drone.returningHome &&
+    distanceToPlayer < (drone.fireRange ?? 620) &&
+    drone.attackCooldown === 0
+  ) {
+    fireFlyingRangedShot(run, drone, playerCenter);
+    drone.attackCooldown = drone.fireCooldown ?? 1.45;
+  }
+}
+
 function updateHostileDrones(run, data, dt) {
   ensureHostileDrones(run, data);
   const drones = run.hostileDrones || [];
@@ -5570,12 +5727,18 @@ function updateHostileDrones(run, data, dt) {
       continue;
     }
 
+    if (isFlyingRangedDrone(drone)) {
+      updateFlyingRangedDrone(run, data, drone, dt, playerCenter);
+      continue;
+    }
+
     const droneCenter = getCenter(drone);
     const distance = distanceBetween(playerCenter, droneCenter);
+    const canSeePlayer = hasLineOfSightToPlayer(run, data, droneCenter, playerCenter);
     const activationRadius = drone.activationRadius ?? 720;
-    if (distance < activationRadius) {
+    if (canSeePlayer && distance < activationRadius) {
       drone.active = true;
-    } else if (distance > activationRadius * 1.35) {
+    } else if (!canSeePlayer || distance > activationRadius * 1.35) {
       drone.active = false;
     }
     if (!drone.active) {
@@ -5638,6 +5801,7 @@ function updateHostileDrones(run, data, dt) {
     const nextDistance = distanceBetween(playerCenter, nextCenter);
     if (
       drone.active &&
+      canSeePlayer &&
       nextDistance < (drone.fireRange ?? 620) &&
       drone.attackCooldown === 0 &&
       drone.aimTimer === 0 &&
@@ -5898,8 +6062,11 @@ function updateHumanoidEnemies(run, data, dt) {
 
     const center = getHumanoidCenter(enemy);
     const distance = distanceBetween(playerCenter, center);
-    enemy.active = enemy.active || distance < (enemy.activationRadius ?? 680);
-    enemy.facing = playerCenter.x >= center.x ? 1 : -1;
+    const canSeePlayer = hasLineOfSightToPlayer(run, data, center, playerCenter);
+    enemy.active = canSeePlayer && (enemy.active || distance < (enemy.activationRadius ?? 680));
+    if (canSeePlayer) {
+      enemy.facing = playerCenter.x >= center.x ? 1 : -1;
+    }
 
     if (!enemy.active) {
       const direction = getHumanoidPatrolDirection(enemy, data);
@@ -5909,7 +6076,7 @@ function updateHumanoidEnemies(run, data, dt) {
 
     updateHumanoidGroundPhysics(enemy, data, dt, 0);
 
-    if (distance < (enemy.fireRange ?? 620)) {
+    if (canSeePlayer && distance < (enemy.fireRange ?? 620)) {
       enemy.trigger = clamp((enemy.trigger ?? 0) + (enemy.triggerRate ?? 1) * dt * 0.35, 0, getFaceOffConfig(data).triggerLimit ?? 4.5);
       if (enemy.trigger >= (getFaceOffConfig(data).triggerLimit ?? 4.5) && enemy.attackCooldown === 0) {
         const direction = enemy.x >= player.x ? -1 : 1;
@@ -6583,6 +6750,7 @@ const LEVEL_STATE_KEYS = [
   "threats",
   "hostileDrones",
   "humanoidEnemies",
+  "temporaryBlocks",
 ];
 
 function captureLevelRuntimeState(run) {
@@ -6711,6 +6879,13 @@ function snapCameraToPlayer(run, data) {
 function transitionToRouteExit(state, data, routeExit) {
   const run = state.run;
   if (!run || !routeExit?.toLevelId) {
+    return;
+  }
+
+  if (!getLevelIds(data.__baseData || data).includes(routeExit.toLevelId)) {
+    run.message = `Route target not found: ${routeExit.toLevelId}`;
+    run.noticeTimer = 2.6;
+    setStatus(state, run.message);
     return;
   }
 
@@ -6970,9 +7145,9 @@ function updateExpedition(state, data, dt) {
   }
   updateMapExploration(run, data);
   updateTimePhase(run, data, simDt);
-  updateGuard(run, simDt);
-  updateRitualist(run, simDt);
-  updateThreats(run, simDt);
+  updateGuard(run, data, simDt);
+  updateRitualist(run, data, simDt);
+  updateThreats(run, data, simDt);
   updateHumanoidEnemies(run, data, simDt);
   updateHostileDrones(run, data, simDt);
   updateEnemyShots(run, data, simDt);

@@ -38,6 +38,7 @@ const TOOL_IDS = {
   ENEMY: "enemy",
   ARTILLERY_ENEMY: "artilleryEnemy",
   DRONE: "drone",
+  FLYING_ENEMY: "flyingEnemy",
 };
 
 const TOOL_SHORTCUTS = {
@@ -66,6 +67,7 @@ const TOOL_SHORTCUTS = {
   KeyH: TOOL_IDS.ENEMY,
   KeyJ: TOOL_IDS.ARTILLERY_ENEMY,
   KeyO: TOOL_IDS.DRONE,
+  KeyF: TOOL_IDS.FLYING_ENEMY,
 };
 
 const TOOL_SHORTCUT_LABELS = {
@@ -85,6 +87,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.ENEMY]: "H",
   [TOOL_IDS.ARTILLERY_ENEMY]: "J",
   [TOOL_IDS.DRONE]: "O",
+  [TOOL_IDS.FLYING_ENEMY]: "F",
 };
 
 const TOOL_HINTS = {
@@ -109,6 +112,7 @@ TOOL_HINTS[TOOL_IDS.CRATE] = "Click to place a loot crate";
 TOOL_HINTS[TOOL_IDS.ENEMY] = "Click to place a humanoid enemy";
 TOOL_HINTS[TOOL_IDS.ARTILLERY_ENEMY] = "Click to place an arcing humanoid enemy";
 TOOL_HINTS[TOOL_IDS.DRONE] = "Click to place a hostile drone";
+TOOL_HINTS[TOOL_IDS.FLYING_ENEMY] = "Click to place a ranged flying enemy";
 
 const PLAYER_RENDER_GROUPS = [
   ["idle", "Idle"],
@@ -1389,6 +1393,30 @@ function getDroneRect(drone) {
   return drone;
 }
 
+function isFlyingRangedDroneDefinition(entity) {
+  return entity?.visualKind === "flyingRanged";
+}
+
+function moveFlyingRangedSpawnWithDrone(entity, deltaX, deltaY, previousX = entity?.x, previousY = entity?.y) {
+  if (!isFlyingRangedDroneDefinition(entity)) {
+    return;
+  }
+  entity.spawnX = (Number.isFinite(entity.spawnX) ? entity.spawnX : previousX) + deltaX;
+  entity.spawnY = (Number.isFinite(entity.spawnY) ? entity.spawnY : previousY) + deltaY;
+}
+
+function ensureFlyingRangedSpawn(entity) {
+  if (!isFlyingRangedDroneDefinition(entity)) {
+    return;
+  }
+  if (!Number.isFinite(entity.spawnX)) {
+    entity.spawnX = entity.x;
+  }
+  if (!Number.isFinite(entity.spawnY)) {
+    entity.spawnY = entity.y;
+  }
+}
+
 function getLootCrateRect(crate) {
   return crate;
 }
@@ -1887,6 +1915,7 @@ function renderSelectionFields(editor, dom) {
     addText("ID", "id", entity.id || "");
     addSelect("Visual", "visualKind", entity.visualKind || "crow", [
       { value: "crow", label: "Crow" },
+      { value: "flyingRanged", label: "Flying ranged" },
     ]);
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -1895,6 +1924,13 @@ function renderSelectionFields(editor, dom) {
     addNumber("HP", "maxHp", entity.maxHp ?? 2, { min: 1 });
     addNumber("Damage", "damage", entity.damage ?? 10, { min: 0 });
     addNumber("Fire Range", "fireRange", entity.fireRange ?? 760, { min: 0 });
+    if (entity.visualKind === "flyingRanged") {
+      addNumber("Preferred Range", "preferredRange", entity.preferredRange ?? 320, { min: 0 });
+      addNumber("Retreat Range", "retreatRange", entity.retreatRange ?? 190, { min: 0 });
+      addNumber("Leash Range", "leashRange", entity.leashRange ?? 760, { min: 0 });
+      addNumber("Spawn X", "spawnX", entity.spawnX ?? entity.x);
+      addNumber("Spawn Y", "spawnY", entity.spawnY ?? entity.y);
+    }
     addNumber("Patrol L", "patrol.left", entity.patrol?.left ?? entity.x);
     addNumber("Patrol R", "patrol.right", entity.patrol?.right ?? entity.x + 360);
   } else if (editor.selected.kind === "crate") {
@@ -2439,6 +2475,9 @@ function applySelectionField(editor, dom, field, value) {
       entity.projectileArc = entity.attackPattern === "arc";
     } else {
       entity[field] = value;
+      if (field === "visualKind") {
+        ensureFlyingRangedSpawn(entity);
+      }
     }
     if (editor.selected?.kind === "routeExit" && field === "toLevelId") {
       const entrances = getLevelEntranceOptions(value);
@@ -2497,8 +2536,23 @@ function applySelectionField(editor, dom, field, value) {
     return;
   }
 
+  const previousX = entity.x;
+  const previousY = entity.y;
   pushUndo(editor);
   entity[field] = nextValue;
+  if (
+    editor.selected?.kind === "drone"
+    && (field === "x" || field === "y")
+    && isFlyingRangedDroneDefinition(entity)
+  ) {
+    moveFlyingRangedSpawnWithDrone(
+      entity,
+      field === "x" ? nextValue - previousX : 0,
+      field === "y" ? nextValue - previousY : 0,
+      previousX,
+      previousY,
+    );
+  }
   if (editor.selected?.kind === "spawn" && (field === "x" || field === "y")) {
     syncStartEntranceToSpawn(editor);
   }
@@ -2610,8 +2664,12 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
       return;
     }
     const deltaX = snappedX - entity.x;
+    const deltaY = snappedY - entity.y;
+    const previousX = entity.x;
+    const previousY = entity.y;
     entity.x = snappedX;
     entity.y = snappedY;
+    moveFlyingRangedSpawnWithDrone(entity, deltaX, deltaY, previousX, previousY);
     if (entity.patrol) {
       if (Number.isFinite(entity.patrol.left)) {
         entity.patrol.left += deltaX;
@@ -2914,48 +2972,59 @@ function placeEnemyAt(editor, dom, point, options = {}) {
   markDirty(editor, dom);
 }
 
-function placeDroneAt(editor, dom, point) {
+function placeDroneAt(editor, dom, point, options = {}) {
   pushUndo(editor);
-  const width = 144;
-  const height = 92;
+  const isFlyingRanged = options.visualKind === "flyingRanged";
+  const width = isFlyingRanged ? 86 : 144;
+  const height = isFlyingRanged ? 62 : 92;
   const snapped = snapPoint({
     x: point.x - width / 2,
     y: point.y - height / 2,
   }, editor.snap);
   const drone = {
-    id: `crow-${Date.now()}`,
+    id: `${isFlyingRanged ? "flying-enemy" : "crow"}-${Date.now()}`,
     type: "hostileDrone",
-    visualKind: "crow",
+    visualKind: isFlyingRanged ? "flyingRanged" : "crow",
     x: snapped.x,
     y: snapped.y,
     width,
     height,
-    maxHp: 2,
+    maxHp: isFlyingRanged ? 3 : 2,
     damage: 10,
-    diveDamage: 12,
-    speed: 205,
-    acceleration: 6.4,
-    activationRadius: 920,
-    preferredRange: 285,
-    hoverOffsetY: 138,
-    fireRange: 760,
-    initialCooldown: 2.4,
-    fireCooldown: 9,
+    diveDamage: isFlyingRanged ? 0 : 12,
+    speed: isFlyingRanged ? 190 : 205,
+    acceleration: isFlyingRanged ? 5.8 : 6.4,
+    activationRadius: isFlyingRanged ? 780 : 920,
+    preferredRange: isFlyingRanged ? 320 : 285,
+    retreatRange: isFlyingRanged ? 190 : 180,
+    leashRange: isFlyingRanged ? 760 : 760,
+    returnRange: 48,
+    spawnX: snapped.x,
+    spawnY: snapped.y,
+    hoverOffsetY: isFlyingRanged ? 70 : 138,
+    fireRange: isFlyingRanged ? 640 : 760,
+    initialCooldown: isFlyingRanged ? 0.8 : 2.4,
+    fireCooldown: isFlyingRanged ? 1.45 : 9,
     telegraphDuration: 0.58,
-    beamLife: 0.12,
-    beamLength: 860,
-    beamRadius: 18,
+    beamLife: isFlyingRanged ? 0.1 : 0.12,
+    beamLength: isFlyingRanged ? 620 : 860,
+    beamRadius: isFlyingRanged ? 12 : 18,
+    projectileDamage: 10,
+    projectileSpeed: 720,
+    projectileRadius: 9,
+    projectileLife: 2.4,
+    projectileColor: "#93eaff",
     diveSpeed: 1040,
     diveMaxDuration: 0.68,
     diveRecoverTime: 0.36,
-    flapRate: 14,
-    flapAmplitude: 18,
+    flapRate: isFlyingRanged ? 9 : 14,
+    flapAmplitude: isFlyingRanged ? 10 : 18,
     solidInsetX: 8,
     solidInsetY: 7,
     damageInsetX: 5,
     damageInsetY: 5,
     bobSeed: Math.round((Date.now() % 1000) / 100) / 10,
-    diveAttack: true,
+    diveAttack: !isFlyingRanged,
     solid: true,
     physicsSolid: true,
     braceTarget: true,
@@ -3183,6 +3252,12 @@ function handlePointerDown(editor, dom, event) {
 
   if (editor.tool === TOOL_IDS.DRONE) {
     placeDroneAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.FLYING_ENEMY) {
+    placeDroneAt(editor, dom, world, { visualKind: "flyingRanged" });
     queueRender(editor, dom);
     return;
   }
@@ -3491,8 +3566,8 @@ function saveEditorLevel(editor, dom) {
   setStatus(editor, dom, "로컬 저장 완료", "", false);
 }
 
-function createLevelExportFileName(editor) {
-  const levelId = String(
+function getLevelExportId(editor) {
+  return String(
     editor.data.currentLevelId
       || editor.data.levelId
       || editor.data.id
@@ -3503,7 +3578,45 @@ function createLevelExportFileName(editor) {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     || "level";
+}
+
+function createLevelExportFileName(editor) {
+  const levelId = getLevelExportId(editor);
+  const source = GAME_DATA.externalLevelSources?.[levelId];
+  if (source?.kind === "draft" && source.path) {
+    const fileName = String(source.path).replaceAll("\\", "/").split("/").pop();
+    if (fileName && fileName.toLowerCase().endsWith(".json")) {
+      return fileName;
+    }
+  }
   return `${levelId}.v001.json`;
+}
+
+function getDraftFileNameFromPath(path) {
+  return String(path || "").replaceAll("\\", "/").split("/").pop() || "";
+}
+
+function getDraftVersionFromFileName(fileName) {
+  const match = String(fileName || "").match(/\.v(\d+)\.json$/i);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
+function getDraftLevelIdFromFileName(fileName) {
+  const match = String(fileName || "").match(/^(.*)\.v\d+\.json$/i);
+  return match?.[1] || "";
+}
+
+function resolveManifestDraftFileName(manifest, levelId, fallbackFileName) {
+  const candidates = (manifest.drafts || [])
+    .map((path) => getDraftFileNameFromPath(path))
+    .filter((fileName) => getDraftLevelIdFromFileName(fileName) === levelId);
+
+  candidates.sort((a, b) => {
+    const versionDelta = getDraftVersionFromFileName(b) - getDraftVersionFromFileName(a);
+    return versionDelta || b.localeCompare(a);
+  });
+
+  return candidates[0] || fallbackFileName;
 }
 
 async function readLevelManifestFromDirectory(directory) {
@@ -3556,16 +3669,25 @@ async function saveLevelJsonToDraftFolder(editor, dom, fileName, json) {
       return true;
     }
     const draftsDirectory = await directory.getDirectoryHandle("drafts", { create: true });
-    const file = await draftsDirectory.getFileHandle(fileName, { create: true });
+    const manifest = await readLevelManifestFromDirectory(directory);
+    const levelId = getLevelExportId(editor);
+    const targetFileName = resolveManifestDraftFileName(manifest, levelId, fileName);
+    const file = await draftsDirectory.getFileHandle(targetFileName, { create: true });
     const writable = await file.createWritable();
     await writable.write(json);
     await writable.close();
 
-    const manifest = await readLevelManifestFromDirectory(directory);
-    manifest.drafts = Array.from(new Set([...(manifest.drafts || []), `drafts/${fileName}`])).sort();
+    const targetDraftPath = `drafts/${targetFileName}`;
+    manifest.drafts = Array.from(new Set([
+      ...(manifest.drafts || []).filter((path) => {
+        const draftFileName = getDraftFileNameFromPath(path);
+        return getDraftLevelIdFromFileName(draftFileName) !== levelId;
+      }),
+      targetDraftPath,
+    ])).sort();
     await writeLevelManifestToDirectory(directory, manifest);
 
-    setStatus(editor, dom, `Saved drafts/${fileName} and updated levels/manifest.json.`, "", editor.dirty);
+    setStatus(editor, dom, `Saved ${targetDraftPath} and updated levels/manifest.json.`, "", editor.dirty);
     return true;
   } catch (error) {
     if (error?.name !== "AbortError") {
@@ -4160,8 +4282,11 @@ function drawBraceWalls(ctx, editor) {
 function drawTemporaryBlocks(ctx, editor) {
   (editor.data.temporaryBlocks || []).forEach((block, index) => {
     const selected = isSelectionItemSelected(editor.selected, { kind: "temporaryBlock", index });
-    ctx.fillStyle = COLORS.temporaryBlockFill;
+    ctx.save();
+    ctx.globalAlpha = 0.32;
+    ctx.fillStyle = block.color || "#5f7588";
     ctx.fillRect(block.x, block.y, block.width, block.height);
+    ctx.restore();
     ctx.strokeStyle = selected ? COLORS.accent : COLORS.temporaryBlock;
     ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
     ctx.strokeRect(block.x, block.y, block.width, block.height);
@@ -4296,12 +4421,29 @@ function drawHostileDrones(ctx, editor) {
   (editor.data.hostileDrones || []).forEach((drone, index) => {
     const selected = isSelectionItemSelected(editor.selected, { kind: "drone", index });
     drawPatrolRange(ctx, editor, drone, drone.y + drone.height + 12 / editor.view.zoom, "rgba(255, 190, 102, 0.48)");
-    ctx.fillStyle = COLORS.droneFill;
+    if (drone.visualKind === "flyingRanged" && Number.isFinite(drone.spawnX) && Number.isFinite(drone.spawnY)) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(147, 234, 255, 0.28)";
+      ctx.lineWidth = 1.2 / editor.view.zoom;
+      ctx.setLineDash([8 / editor.view.zoom, 8 / editor.view.zoom]);
+      ctx.beginPath();
+      ctx.arc(
+        drone.spawnX + drone.width * 0.5,
+        drone.spawnY + drone.height * 0.5,
+        drone.leashRange ?? 760,
+        0,
+        Math.PI * 2,
+      );
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+    ctx.fillStyle = drone.visualKind === "flyingRanged" ? "rgba(147, 234, 255, 0.14)" : COLORS.droneFill;
     ctx.fillRect(drone.x, drone.y, drone.width, drone.height);
-    ctx.strokeStyle = selected ? COLORS.accent : COLORS.drone;
+    ctx.strokeStyle = selected ? COLORS.accent : (drone.visualKind === "flyingRanged" ? COLORS.accentAlt : COLORS.drone);
     ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
     ctx.strokeRect(drone.x, drone.y, drone.width, drone.height);
-    ctx.fillStyle = COLORS.drone;
+    ctx.fillStyle = drone.visualKind === "flyingRanged" ? COLORS.accentAlt : COLORS.drone;
     ctx.beginPath();
     ctx.ellipse(
       drone.x + drone.width * 0.5,
@@ -4313,9 +4455,19 @@ function drawHostileDrones(ctx, editor) {
       Math.PI * 2,
     );
     ctx.fill();
+    if (drone.visualKind === "flyingRanged") {
+      ctx.strokeStyle = COLORS.accentAlt;
+      ctx.lineWidth = 2 / editor.view.zoom;
+      ctx.beginPath();
+      ctx.moveTo(drone.x + drone.width * 0.22, drone.y + drone.height * 0.5);
+      ctx.lineTo(drone.x - drone.width * 0.12, drone.y + drone.height * 0.2);
+      ctx.moveTo(drone.x + drone.width * 0.78, drone.y + drone.height * 0.5);
+      ctx.lineTo(drone.x + drone.width * 1.12, drone.y + drone.height * 0.2);
+      ctx.stroke();
+    }
     ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
     ctx.textAlign = "center";
-    ctx.fillText(drone.id || "Drone", drone.x + drone.width / 2, drone.y - 10 / editor.view.zoom);
+    ctx.fillText(drone.id || (drone.visualKind === "flyingRanged" ? "Flying Enemy" : "Drone"), drone.x + drone.width / 2, drone.y - 10 / editor.view.zoom);
     ctx.textAlign = "left";
   });
 }

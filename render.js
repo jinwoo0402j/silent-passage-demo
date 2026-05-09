@@ -2174,7 +2174,12 @@ function drawHostileDrones(ctx, run) {
     const cx = drone.x + drone.width * 0.5;
     const cy = drone.y + drone.height * 0.5;
     const pulse = 0.5 + Math.sin((run.time ?? 0) * 8 + drone.bobSeed) * 0.5;
-    const bodyColor = drone.hitFlash > 0 ? "#f8fbfd" : drone.active ? "#17283a" : "#243646";
+    const isFlyingRanged = drone.visualKind === "flyingRanged";
+    const bodyColor = drone.hitFlash > 0
+      ? "#f8fbfd"
+      : isFlyingRanged
+        ? (drone.active ? "#173748" : "#203747")
+        : drone.active ? "#17283a" : "#243646";
     const glowColor = drone.active ? "rgba(135, 225, 255, 0.72)" : "rgba(147, 234, 255, 0.36)";
 
     ctx.save();
@@ -2198,12 +2203,20 @@ function drawHostileDrones(ctx, run) {
     ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(-drone.width * 0.38, -4);
-    ctx.lineTo(-drone.width * 0.2, -drone.height * 0.42);
-    ctx.lineTo(drone.width * 0.32, -drone.height * 0.34);
-    ctx.lineTo(drone.width * 0.48, 0);
-    ctx.lineTo(drone.width * 0.24, drone.height * 0.34);
-    ctx.lineTo(-drone.width * 0.34, drone.height * 0.28);
+    if (isFlyingRanged) {
+      ctx.moveTo(-drone.width * 0.45, 0);
+      ctx.lineTo(-drone.width * 0.12, -drone.height * 0.4);
+      ctx.lineTo(drone.width * 0.42, -drone.height * 0.16);
+      ctx.lineTo(drone.width * 0.44, drone.height * 0.14);
+      ctx.lineTo(-drone.width * 0.08, drone.height * 0.42);
+    } else {
+      ctx.moveTo(-drone.width * 0.38, -4);
+      ctx.lineTo(-drone.width * 0.2, -drone.height * 0.42);
+      ctx.lineTo(drone.width * 0.32, -drone.height * 0.34);
+      ctx.lineTo(drone.width * 0.48, 0);
+      ctx.lineTo(drone.width * 0.24, drone.height * 0.34);
+      ctx.lineTo(-drone.width * 0.34, drone.height * 0.28);
+    }
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
@@ -2218,6 +2231,16 @@ function drawHostileDrones(ctx, run) {
     ctx.shadowBlur = 0;
     ctx.fillStyle = "rgba(135, 225, 255, 0.86)";
     ctx.fillRect(-drone.width * 0.18, -drone.height * 0.2, 18, 4);
+    if (isFlyingRanged) {
+      ctx.strokeStyle = `rgba(147, 234, 255, ${0.42 + pulse * 0.28})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-drone.width * 0.16, drone.height * 0.05);
+      ctx.lineTo(-drone.width * 0.7, -drone.height * 0.22);
+      ctx.moveTo(drone.width * 0.12, drone.height * 0.05);
+      ctx.lineTo(drone.width * 0.68, -drone.height * 0.22);
+      ctx.stroke();
+    }
     ctx.fillStyle = `rgba(135, 225, 255, ${0.35 + pulse * 0.3})`;
     ctx.beginPath();
     ctx.moveTo(-drone.width * 0.44, 0);
