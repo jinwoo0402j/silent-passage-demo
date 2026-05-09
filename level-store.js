@@ -505,6 +505,28 @@ function sanitizePlatform(platform, index, basePlatform = null) {
   return next;
 }
 
+function sanitizeTemporaryBlock(block, index, baseBlock = null) {
+  const fallback = baseBlock || {
+    id: `temporary-block-${index + 1}`,
+    x: 240 + index * 120,
+    y: 720,
+    width: 96,
+    height: 96,
+    color: "#5f7588",
+    hideDuration: 1.6,
+  };
+  const source = block && typeof block === "object" ? block : {};
+  return {
+    id: safeString(source.id, fallback.id || `temporary-block-${index + 1}`),
+    x: safeNumber(source.x, fallback.x),
+    y: safeNumber(source.y, fallback.y),
+    width: safeNumber(source.width, fallback.width, 12),
+    height: safeNumber(source.height, fallback.height, 12),
+    color: safeString(source.color, fallback.color || "#5f7588"),
+    hideDuration: safeNumber(source.hideDuration, fallback.hideDuration ?? 1.6, 0.1),
+  };
+}
+
 function sanitizeProp(prop, index, baseProp = null) {
   const fallback = baseProp || {
     kind: "lantern",
@@ -746,6 +768,15 @@ export function extractEditableLevelData(data) {
       height: platform.height,
       color: platform.color,
     })),
+    temporaryBlocks: (data.temporaryBlocks || []).map((block) => ({
+      id: block.id,
+      x: block.x,
+      y: block.y,
+      width: block.width,
+      height: block.height,
+      color: block.color,
+      hideDuration: block.hideDuration,
+    })),
     props: (data.props || []).map((prop) => {
       if (prop.kind === "sign") {
         return { kind: prop.kind, x: prop.x, y: prop.y, text: prop.text };
@@ -841,6 +872,9 @@ export function normalizeEditableLevelData(raw, baseData) {
     platforms: Array.isArray(source.platforms) && source.platforms.length
       ? source.platforms.map((platform, index) => sanitizePlatform(platform, index, fallback.platforms[index]))
       : fallback.platforms.map((platform, index) => sanitizePlatform(platform, index)),
+    temporaryBlocks: Array.isArray(source.temporaryBlocks)
+      ? source.temporaryBlocks.map((block, index) => sanitizeTemporaryBlock(block, index, fallback.temporaryBlocks?.[index]))
+      : (fallback.temporaryBlocks || []).map((block, index) => sanitizeTemporaryBlock(block, index)),
     props: Array.isArray(source.props)
       ? source.props
         .filter((prop) => VALID_PROP_KINDS.has(prop?.kind))
@@ -916,6 +950,7 @@ export function mergeLevelData(baseData, override) {
   next.routeExits = normalized.routeExits;
   next.extractionGate = normalized.extractionGate ? { ...normalized.extractionGate } : null;
   next.platforms = normalized.platforms;
+  next.temporaryBlocks = normalized.temporaryBlocks;
   next.props = normalized.props;
   next.braceWalls = normalized.braceWalls;
   next.humanoidEnemies = normalized.humanoidEnemies;
@@ -1141,6 +1176,13 @@ export function getLevelSummaries(baseData) {
         y: platform.y,
         width: platform.width,
         height: platform.height,
+      })),
+      temporaryBlocks: (effective.temporaryBlocks || []).map((block) => ({
+        id: block.id,
+        x: block.x,
+        y: block.y,
+        width: block.width,
+        height: block.height,
       })),
       braceWalls: (effective.braceWalls || []).map((wall) => ({
         id: wall.id,

@@ -922,13 +922,6 @@
       "color": "#54697b"
     },
     {
-      "x": 2736,
-      "y": 2176,
-      "width": 192,
-      "height": 384,
-      "color": "#54697b"
-    },
-    {
       "x": 6576,
       "y": 2560,
       "width": 192,
@@ -1204,13 +1197,6 @@
       "color": "#54697b"
     },
     {
-      "x": 2736,
-      "y": 2944,
-      "width": 192,
-      "height": 384,
-      "color": "#54697b"
-    },
-    {
       "x": 816,
       "y": 2560,
       "width": 960,
@@ -1258,13 +1244,6 @@
     },
     {
       "x": 1968,
-      "y": 2736,
-      "width": 96,
-      "height": 192,
-      "color": "#54697b"
-    },
-    {
-      "x": 1968,
       "y": 2928,
       "width": 176,
       "height": 400,
@@ -1273,7 +1252,7 @@
     {
       "kind": "slope",
       "slopeDirection": "up-right",
-      "x": 2336,
+      "x": 2192,
       "y": 3120,
       "width": 592,
       "height": 208,
@@ -1409,15 +1388,6 @@
       "color": "#54697b"
     },
     {
-      "kind": "slope",
-      "slopeDirection": "up-right",
-      "x": 5024,
-      "y": 3664,
-      "width": 368,
-      "height": 48,
-      "color": "#54697b"
-    },
-    {
       "x": 5392,
       "y": 3664,
       "width": 224,
@@ -1546,6 +1516,81 @@
       "width": 32,
       "height": 96,
       "color": "#54697b"
+    },
+    {
+      "x": 1392,
+      "y": 2256,
+      "width": 48,
+      "height": 112,
+      "color": "#54697b"
+    },
+    {
+      "x": 2720,
+      "y": 2672,
+      "width": 64,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2736,
+      "y": 2176,
+      "width": 192,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 2784,
+      "y": 2672,
+      "width": 144,
+      "height": 656,
+      "color": "#54697b"
+    }
+  ],
+  "temporaryBlocks": [
+    {
+      "id": "temporary-block-1778319116602",
+      "x": 8496,
+      "y": 1120,
+      "width": 32,
+      "height": 192,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1778319285176",
+      "x": 5696,
+      "y": 2640,
+      "width": 32,
+      "height": 160,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1778319305867",
+      "x": 1200,
+      "y": 2144,
+      "width": 192,
+      "height": 32,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1778319311931",
+      "x": 4944,
+      "y": 2144,
+      "width": 96,
+      "height": 32,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1778319322697",
+      "x": 7920,
+      "y": 2448,
+      "width": 32,
+      "height": 112,
+      "color": "#5f7588",
+      "hideDuration": 1.6
     }
   ],
   "props": [
@@ -1859,6 +1904,30 @@
       "patrol": {
         "left": 5074,
         "right": 5404
+      }
+    },
+    {
+      "id": "enemy-1778320241692",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 2032,
+      "y": 2784,
+      "width": 58,
+      "height": 104,
+      "maxHp": 140,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 1922,
+        "right": 2252
       }
     }
   ],

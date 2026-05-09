@@ -847,6 +847,7 @@ export const GAME_DATA = {
       "color": "#54697b"
     }
   ],
+  "temporaryBlocks": [],
   "props": [],
   "braceWalls": [
     {

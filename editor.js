@@ -27,6 +27,7 @@ const TOOL_IDS = {
   SLOPE_UP: "slopeUp",
   BRACE_WALL: "braceWall",
   BACKGROUND_TILE: "backgroundTile",
+  TEMPORARY_BLOCK: "temporaryBlock",
   SIGN: "sign",
   LANTERN: "lantern",
   SPAWN: "spawn",
@@ -50,6 +51,7 @@ const TOOL_SHORTCUTS = {
   Digit3: TOOL_IDS.BRACE_WALL,
   Numpad3: TOOL_IDS.BRACE_WALL,
   KeyB: TOOL_IDS.BACKGROUND_TILE,
+  KeyT: TOOL_IDS.TEMPORARY_BLOCK,
   Digit4: TOOL_IDS.SIGN,
   Numpad4: TOOL_IDS.SIGN,
   Digit5: TOOL_IDS.SPAWN,
@@ -73,6 +75,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.SLOPE_UP]: "U",
   [TOOL_IDS.BRACE_WALL]: "3",
   [TOOL_IDS.BACKGROUND_TILE]: "B",
+  [TOOL_IDS.TEMPORARY_BLOCK]: "T",
   [TOOL_IDS.SIGN]: "4",
   [TOOL_IDS.SPAWN]: "5",
   [TOOL_IDS.ENTRANCE]: "6",
@@ -97,6 +100,7 @@ const TOOL_HINTS = {
 
 TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
 TOOL_HINTS[TOOL_IDS.BACKGROUND_TILE] = "Drag to place a non-colliding background tile";
+TOOL_HINTS[TOOL_IDS.TEMPORARY_BLOCK] = "Drag to place a shoot-open temporary block";
 
 TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
 TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
@@ -538,6 +542,8 @@ const COLORS = {
   sign: "rgba(239, 248, 252, 0.94)",
   lantern: "rgba(231, 244, 126, 0.88)",
   backgroundTileStroke: "rgba(147, 234, 255, 0.46)",
+  temporaryBlock: "rgba(147, 234, 255, 0.92)",
+  temporaryBlockFill: "rgba(147, 234, 255, 0.17)",
   crate: "rgba(147, 234, 255, 0.9)",
   crateFill: "rgba(147, 234, 255, 0.13)",
   enemy: "rgba(255, 125, 147, 0.9)",
@@ -858,6 +864,7 @@ function ensureEditorMapRooms(data) {
 
 function prepareEditorData(data) {
   data.braceWalls = data.braceWalls || [];
+  data.temporaryBlocks = data.temporaryBlocks || [];
   data.entrances = data.entrances || [];
   data.routeExits = data.routeExits || [];
   data.lootCrates = data.lootCrates || [];
@@ -1390,6 +1397,10 @@ function getBraceWallRect(wall) {
   return wall;
 }
 
+function getTemporaryBlockRect(block) {
+  return block;
+}
+
 function getSelectedEntity(editor) {
   if (!editor.selected || isMultiSelection(editor.selected)) {
     return null;
@@ -1400,6 +1411,9 @@ function getSelectedEntity(editor) {
   }
   if (editor.selected.kind === "braceWall") {
     return editor.data.braceWalls[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "temporaryBlock") {
+    return editor.data.temporaryBlocks[editor.selected.index] || null;
   }
 
   if (editor.selected.kind === "prop") {
@@ -1515,6 +1529,10 @@ function getSelectionRect(editor, selection = editor.selected) {
   if (selection.kind === "braceWall") {
     return editor.data.braceWalls[selection.index] || null;
   }
+  if (selection.kind === "temporaryBlock") {
+    const block = editor.data.temporaryBlocks[selection.index];
+    return block ? getTemporaryBlockRect(block) : null;
+  }
   if (selection.kind === "prop") {
     const prop = editor.data.props[selection.index];
     return prop ? getPropRect(prop) : null;
@@ -1564,6 +1582,10 @@ function getSelectionOrigin(editor, selection = editor.selected) {
   }
   if (selection.kind === "braceWall") {
     const entity = editor.data.braceWalls[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "temporaryBlock") {
+    const entity = editor.data.temporaryBlocks[selection.index];
     return entity ? { x: entity.x, y: entity.y } : null;
   }
   if (selection.kind === "prop") {
@@ -1654,11 +1676,15 @@ function describeSelection(editor) {
     const items = getSelectionItems(editor.selected);
     const platformCount = items.filter((item) => item.kind === "platform").length;
     const braceWallCount = items.filter((item) => item.kind === "braceWall").length;
+    const temporaryBlockCount = items.filter((item) => item.kind === "temporaryBlock").length;
     const propCount = items.filter((item) => item.kind === "prop").length;
     const crateCount = items.filter((item) => item.kind === "crate").length;
     const parts = [];
     if (braceWallCount > 0) {
       parts.push(`벽 짚기 ${braceWallCount}`);
+    }
+    if (temporaryBlockCount > 0) {
+      parts.push(`Temp Block ${temporaryBlockCount}`);
     }
     if (platformCount > 0) {
       parts.push(`플랫폼 ${platformCount}`);
@@ -1689,6 +1715,14 @@ function describeSelection(editor) {
     return `벽 짚기 ${editor.selected.index + 1} · ${formatTiles(wall.width, scale.tileSize)} × ${formatTiles(wall.height, scale.tileSize)}`;
   }
 
+  if (editor.selected.kind === "temporaryBlock") {
+    const block = editor.data.temporaryBlocks[editor.selected.index];
+    if (!block) {
+      return "No selection";
+    }
+    return `Temp Block ${editor.selected.index + 1} - ${formatTiles(block.width, scale.tileSize)} x ${formatTiles(block.height, scale.tileSize)}`;
+  }
+
   if (editor.selected.kind === "prop") {
     const prop = editor.data.props[editor.selected.index];
     if (prop?.kind === "backgroundTile") {
@@ -1715,6 +1749,7 @@ function canDeleteSelection(selection) {
   return items.length > 0 && items.every((item) => (
     item.kind === "platform"
     || item.kind === "braceWall"
+    || item.kind === "temporaryBlock"
     || item.kind === "prop"
     || item.kind === "crate"
     || item.kind === "enemy"
@@ -1809,6 +1844,14 @@ function renderSelectionFields(editor, dom) {
     addNumber("Y", "y", entity.y);
     addNumber("폭", "width", entity.width, { min: 12 });
     addNumber("높이", "height", entity.height, { min: 12 });
+  } else if (editor.selected.kind === "temporaryBlock") {
+    addText("ID", "id", entity.id || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 12 });
+    addNumber("Height", "height", entity.height, { min: 12 });
+    addNumber("Hide Time", "hideDuration", entity.hideDuration ?? 1.6, { min: 0.1, step: 0.1 });
+    addColor("Color", "color", entity.color || "#5f7588");
   } else if (editor.selected.kind === "prop") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2105,6 +2148,12 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.temporaryBlocks || []).forEach((block, index) => {
+    if (rectsIntersect(rect, getTemporaryBlockRect(block))) {
+      items.push({ kind: "temporaryBlock", index });
+    }
+  });
+
   editor.data.props.forEach((prop, index) => {
     if (rectsIntersect(rect, getPropRect(prop))) {
       items.push({ kind: "prop", index });
@@ -2188,6 +2237,12 @@ function hitTest(editor, point) {
     }
   }
 
+  for (let index = (editor.data.temporaryBlocks || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getTemporaryBlockRect(editor.data.temporaryBlocks[index]))) {
+      return { kind: "temporaryBlock", index };
+    }
+  }
+
   for (let index = editor.data.platforms.length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, editor.data.platforms[index])) {
       return { kind: "platform", index };
@@ -2224,6 +2279,9 @@ function deleteSelection(editor, dom) {
   const braceWallIndexes = new Set(
     items.filter((item) => item.kind === "braceWall").map((item) => item.index),
   );
+  const temporaryBlockIndexes = new Set(
+    items.filter((item) => item.kind === "temporaryBlock").map((item) => item.index),
+  );
   const propIndexes = new Set(
     items.filter((item) => item.kind === "prop").map((item) => item.index),
   );
@@ -2246,6 +2304,7 @@ function deleteSelection(editor, dom) {
   if (
     platformIndexes.size === 0
     && braceWallIndexes.size === 0
+    && temporaryBlockIndexes.size === 0
     && propIndexes.size === 0
     && enemyIndexes.size === 0
     && droneIndexes.size === 0
@@ -2260,6 +2319,7 @@ function deleteSelection(editor, dom) {
 
   editor.data.platforms = editor.data.platforms.filter((_, index) => !platformIndexes.has(index));
   editor.data.braceWalls = editor.data.braceWalls.filter((_, index) => !braceWallIndexes.has(index));
+  editor.data.temporaryBlocks = editor.data.temporaryBlocks.filter((_, index) => !temporaryBlockIndexes.has(index));
   editor.data.props = editor.data.props.filter((_, index) => !propIndexes.has(index));
   editor.data.humanoidEnemies = editor.data.humanoidEnemies.filter((_, index) => !enemyIndexes.has(index));
   editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !droneIndexes.has(index));
@@ -2514,6 +2574,13 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     }
     entity.x = snappedX;
     entity.y = snappedY;
+  } else if (selection.kind === "temporaryBlock") {
+    const entity = editor.data.temporaryBlocks[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
   } else if (selection.kind === "prop") {
     const entity = editor.data.props[selection.index];
     if (!entity) {
@@ -2674,6 +2741,28 @@ function createBraceWallFromPreview(editor, dom) {
 
   editor.data.braceWalls.push(wall);
   setSelection(editor, dom, { kind: "braceWall", index: editor.data.braceWalls.length - 1 });
+  markDirty(editor, dom);
+}
+
+function createTemporaryBlockFromPreview(editor, dom) {
+  if (!editor.preview || editor.preview.kind !== "temporaryBlock") {
+    return;
+  }
+
+  pushUndo(editor);
+
+  const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+  const block = {
+    id: `temporary-block-${Date.now()}`,
+    x: rect.x,
+    y: rect.y,
+    width: Math.max(12, rect.width || 96),
+    height: Math.max(12, rect.height || 96),
+    color: "#5f7588",
+    hideDuration: 1.6,
+  };
+  editor.data.temporaryBlocks.push(block);
+  setSelection(editor, dom, { kind: "temporaryBlock", index: editor.data.temporaryBlocks.length - 1 });
   markDirty(editor, dom);
 }
 
@@ -3024,6 +3113,19 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
+  if (editor.tool === TOOL_IDS.TEMPORARY_BLOCK) {
+    editor.preview = {
+      kind: "temporaryBlock",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewTemporaryBlock",
+    };
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.tool === TOOL_IDS.BACKGROUND_TILE) {
     editor.preview = {
       kind: "backgroundTile",
@@ -3185,6 +3287,12 @@ function handlePointerMove(editor, dom, event) {
     return;
   }
 
+  if (editor.drag.kind === "previewTemporaryBlock" && editor.preview) {
+    editor.preview.end = snapPoint(world, editor.snap);
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.drag.kind === "previewBackgroundTile" && editor.preview) {
     editor.preview.end = snapPoint(world, editor.snap);
     queueRender(editor, dom);
@@ -3213,6 +3321,11 @@ function handlePointerUp(editor, dom) {
 
   if (editor.drag?.kind === "previewBraceWall") {
     createBraceWallFromPreview(editor, dom);
+    editor.preview = null;
+  }
+
+  if (editor.drag?.kind === "previewTemporaryBlock") {
+    createTemporaryBlockFromPreview(editor, dom);
     editor.preview = null;
   }
 
@@ -3587,6 +3700,14 @@ function snapEntireLevelToScale(editor, dom) {
     y: snapValue(wall.y, step),
     width: Math.max(step, snapValue(wall.width, step)),
     height: Math.max(step, snapValue(wall.height, step)),
+  }));
+
+  editor.data.temporaryBlocks = (editor.data.temporaryBlocks || []).map((block) => ({
+    ...block,
+    x: snapValue(block.x, step),
+    y: snapValue(block.y, step),
+    width: Math.max(step, snapValue(block.width, step)),
+    height: Math.max(step, snapValue(block.height, step)),
   }));
 
   editor.data.props = editor.data.props.map((prop) => ({
@@ -4036,6 +4157,34 @@ function drawBraceWalls(ctx, editor) {
   });
 }
 
+function drawTemporaryBlocks(ctx, editor) {
+  (editor.data.temporaryBlocks || []).forEach((block, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "temporaryBlock", index });
+    ctx.fillStyle = COLORS.temporaryBlockFill;
+    ctx.fillRect(block.x, block.y, block.width, block.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.temporaryBlock;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(block.x, block.y, block.width, block.height);
+
+    ctx.strokeStyle = "rgba(147, 234, 255, 0.38)";
+    ctx.lineWidth = 1.5 / editor.view.zoom;
+    const slits = Math.max(2, Math.floor(block.width / 32));
+    for (let index = 0; index < slits; index += 1) {
+      const x = block.x + 10 / editor.view.zoom + index * (block.width - 20 / editor.view.zoom) / Math.max(1, slits - 1);
+      ctx.beginPath();
+      ctx.moveTo(x, block.y + 8 / editor.view.zoom);
+      ctx.lineTo(x, block.y + block.height - 8 / editor.view.zoom);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = COLORS.temporaryBlock;
+    ctx.font = `${14 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(`${block.hideDuration ?? 1.6}s`, block.x + block.width / 2, block.y - 8 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+}
+
 function drawProps(ctx, editor) {
   editor.data.props.forEach((prop, index) => {
     if (prop.kind === "backgroundTile") {
@@ -4380,6 +4529,17 @@ function drawPreview(ctx, editor) {
     ctx.strokeRect(x, y, width, height);
   }
 
+  if (editor.preview?.kind === "temporaryBlock") {
+    const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+    const width = Math.max(12, rect.width || 96);
+    const height = Math.max(12, rect.height || 96);
+    ctx.fillStyle = "rgba(147, 234, 255, 0.16)";
+    ctx.fillRect(rect.x, rect.y, width, height);
+    ctx.strokeStyle = COLORS.accentAlt;
+    ctx.lineWidth = 2 / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, width, height);
+  }
+
   if (editor.preview?.kind === "backgroundTile") {
     const rect = getPreviewBackgroundTileRect(editor);
     if (rect) {
@@ -4531,6 +4691,7 @@ function renderEditor(editor, dom) {
   drawBackgroundTiles(ctx, editor);
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
+  drawTemporaryBlocks(ctx, editor);
   drawProps(ctx, editor);
   drawLootCrates(ctx, editor);
   drawHumanoidEnemies(ctx, editor);

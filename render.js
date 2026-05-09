@@ -967,6 +967,41 @@ function drawTerrain(ctx, data) {
   }
 }
 
+function drawTemporaryBlocks(ctx, run, theme) {
+  (run.temporaryBlocks || []).forEach((block) => {
+    const hiddenTimer = block.hiddenTimer ?? 0;
+    if (hiddenTimer > 0) {
+      return;
+    }
+    const flash = clamp(Math.max(block.hitFlash ?? 0, block.respawnFlash ?? 0) / 0.22, 0, 1);
+
+    ctx.save();
+    if (flash > 0) {
+      ctx.shadowColor = theme.accentSecondary;
+      ctx.shadowBlur = 18 + flash * 18;
+    }
+
+    const gradient = ctx.createLinearGradient(block.x, block.y, block.x, block.y + block.height);
+    gradient.addColorStop(0, flash > 0 ? "rgba(147, 234, 255, 0.74)" : "rgba(171, 199, 214, 0.46)");
+    gradient.addColorStop(0.42, block.color || "#5f7588");
+    gradient.addColorStop(1, "rgba(20, 32, 42, 0.9)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(block.x, block.y, block.width, block.height);
+
+    ctx.fillStyle = "rgba(147, 234, 255, 0.16)";
+    const slitCount = Math.max(2, Math.floor(block.width / 38));
+    for (let index = 0; index < slitCount; index += 1) {
+      const x = block.x + 10 + index * (block.width - 20) / Math.max(1, slitCount - 1);
+      ctx.fillRect(x - 2, block.y + 8, 4, Math.max(8, block.height - 16));
+    }
+
+    ctx.strokeStyle = "rgba(241, 249, 252, 0.28)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(block.x, block.y, block.width, block.height);
+    ctx.restore();
+  });
+}
+
 function drawGroundShine(ctx) {
   ctx.fillStyle = "rgba(219, 239, 176, 0.34)";
   ctx.beginPath();
@@ -5158,6 +5193,7 @@ function renderExpedition(ctx, state, data) {
   drawGroundShine(ctx);
   drawBackgroundTiles(ctx, data);
   drawTerrain(ctx, data);
+  drawTemporaryBlocks(ctx, run, theme);
   drawGate(ctx, data, theme);
   drawRouteExits(ctx, data, theme);
   drawBraceWalls(ctx, data, theme);

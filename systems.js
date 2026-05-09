@@ -451,6 +451,28 @@ function updateRecoilFocusAfterimages(run, dt) {
   run.recoilFocusAfterimageTimer += RECOIL_FOCUS_AFTERIMAGE_INTERVAL;
 }
 
+function updateTemporaryBlocks(run, dt) {
+  (run.temporaryBlocks || []).forEach((block) => {
+    block.hitFlash = Math.max(0, (block.hitFlash ?? 0) - dt);
+    block.respawnFlash = Math.max(0, (block.respawnFlash ?? 0) - dt);
+    if ((block.hiddenTimer ?? 0) <= 0) {
+      return;
+    }
+
+    block.hiddenTimer = Math.max(0, block.hiddenTimer - dt);
+    if (block.hiddenTimer > 0) {
+      return;
+    }
+
+    if (run.player && rectsOverlap(run.player, block)) {
+      block.hiddenTimer = 0.08;
+      return;
+    }
+
+    block.respawnFlash = 0.22;
+  });
+}
+
 function updateEffects(run, dt, visualDt = dt, data = null) {
   run.attackFx = run.attackFx.filter((effect) => {
     effect.life -= dt;
@@ -463,6 +485,7 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
   });
 
   if (data) {
+    updateTemporaryBlocks(run, dt);
     updateWeaponProjectiles(run, data, dt);
   }
 
@@ -1048,13 +1071,35 @@ function getHostileAirborneSolidRect(entity) {
   };
 }
 
-function getDynamicCollisionSolids(run) {
-  if (!run?.hostileDrones?.length) {
-    return [];
+function isTemporaryBlockHidden(block) {
+  return (block?.hiddenTimer ?? 0) > 0;
+}
+
+function getTemporaryBlockSolidRect(block) {
+  if (!block || isTemporaryBlockHidden(block)) {
+    return null;
   }
-  return run.hostileDrones
+  return {
+    id: block.id,
+    type: "temporaryBlock",
+    x: block.x,
+    y: block.y,
+    width: block.width,
+    height: block.height,
+    dynamicEntityId: block.id,
+    dynamicEntity: block,
+    dynamicBraceTarget: false,
+  };
+}
+
+function getDynamicCollisionSolids(run) {
+  const droneSolids = (run?.hostileDrones || [])
     .map((entity) => getHostileAirborneSolidRect(entity))
     .filter(Boolean);
+  const temporaryBlockSolids = (run?.temporaryBlocks || [])
+    .map((block) => getTemporaryBlockSolidRect(block))
+    .filter(Boolean);
+  return [...droneSolids, ...temporaryBlockSolids];
 }
 
 function isSlopePlatform(platform) {
@@ -3120,6 +3165,16 @@ function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
     }
   };
 
+  for (const block of run.temporaryBlocks || []) {
+    if (isTemporaryBlockHidden(block)) {
+      continue;
+    }
+    const t = getSegmentRectHitT(startX, startY, endX, endY, block, bullet.radius ?? 0);
+    if (t !== null) {
+      consider({ type: "temporaryBlock", target: block, t, priority: 3 });
+    }
+  }
+
   for (const platform of data.platforms || []) {
     const t = getSegmentRectHitT(startX, startY, endX, endY, platform, bullet.radius ?? 0);
     if (t !== null) {
@@ -3181,6 +3236,15 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
 
   if (hit.type === "world") {
     spawnDirectedParticles(run, hitX, hitY, 6, "#dce7ec", -bullet.dirX, -bullet.dirY, 220, 0.9);
+    return;
+  }
+
+  if (hit.type === "temporaryBlock") {
+    const block = hit.target;
+    block.hiddenTimer = Math.max(0.1, block.hideDuration ?? 1.6);
+    block.hitFlash = 0.18;
+    spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "OPEN");
+    spawnDirectedParticles(run, hitX, hitY, 16, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
     return;
   }
 
@@ -5463,6 +5527,18 @@ function lineIntersectsRect(startX, startY, endX, endY, rect, padding = 0) {
   return true;
 }
 
+function findTemporaryBlockLineHit(run, startX, startY, endX, endY, padding = 0) {
+  for (const block of run.temporaryBlocks || []) {
+    if (isTemporaryBlockHidden(block)) {
+      continue;
+    }
+    if (lineIntersectsRect(startX, startY, endX, endY, block, padding)) {
+      return block;
+    }
+  }
+  return null;
+}
+
 function updateHostileDrones(run, data, dt) {
   ensureHostileDrones(run, data);
   const drones = run.hostileDrones || [];
@@ -5898,6 +5974,18 @@ function updateEnemyShots(run, data, dt) {
           spawnParticles(run, shot.endX, shot.endY, 6, "#e7f47e");
           return shot.life > 0;
         }
+        const blockingBlock = findTemporaryBlockLineHit(
+          run,
+          shot.startX,
+          shot.startY,
+          shot.endX,
+          shot.endY,
+          shot.radius ?? 0,
+        );
+        if (blockingBlock) {
+          spawnParticles(run, blockingBlock.x + blockingBlock.width * 0.5, blockingBlock.y + blockingBlock.height * 0.5, 8, "#93eaff");
+          return shot.life > 0;
+        }
         if (lineIntersectsRect(shot.startX, shot.startY, shot.endX, shot.endY, player, shot.radius ?? 0)) {
           damagePlayer(run, shot.damage, Math.sign(shot.dirX) || 1, "Crow line hit.");
           spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.5, 10, "#87e1ff");
@@ -5933,6 +6021,19 @@ function updateEnemyShots(run, data, dt) {
     );
     if (collidesWithPlatforms(shotRect, data)) {
       spawnParticles(run, shot.x, shot.y, 4, "#87e1ff");
+      return false;
+    }
+
+    const blockingBlock = findTemporaryBlockLineHit(
+      run,
+      shot.prevX ?? shot.x,
+      shot.prevY ?? shot.y,
+      shot.x,
+      shot.y,
+      shot.radius ?? 0,
+    );
+    if (blockingBlock) {
+      spawnParticles(run, shot.x, shot.y, 6, "#93eaff");
       return false;
     }
 

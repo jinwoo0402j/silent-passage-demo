@@ -588,6 +588,38 @@
       "width": 96,
       "height": 192,
       "color": "#54697b"
+    },
+    {
+      "x": 7968,
+      "y": 1744,
+      "width": 64,
+      "height": 272,
+      "color": "#54697b"
+    },
+    {
+      "x": 7776,
+      "y": 1744,
+      "width": 256,
+      "height": 48,
+      "color": "#54697b"
+    },
+    {
+      "x": 7776,
+      "y": 1792,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    }
+  ],
+  "temporaryBlocks": [
+    {
+      "id": "temporary-block-1778319897820",
+      "x": 7776,
+      "y": 1824,
+      "width": 32,
+      "height": 192,
+      "color": "#5f7588",
+      "hideDuration": 1.6
     }
   ],
   "props": [],
@@ -639,33 +671,28 @@
       }
     },
     {
-      "id": "arc-enemy-1778263984956",
+      "id": "enemy-1778318871749",
       "type": "humanoidEnemy",
-      "label": "Arc gunman",
-      "x": 1344,
+      "label": "Enemy",
+      "x": 1504,
       "y": 1856,
       "width": 58,
       "height": 104,
       "maxHp": 140,
-      "damage": 14,
-      "fireRange": 840,
+      "damage": 12,
+      "fireRange": 760,
       "triggerRate": 10,
       "rangedProjectile": true,
-      "projectileDamage": 14,
-      "projectileSpeed": 620,
-      "projectileRadius": 10,
-      "projectileLife": 3.2,
-      "projectileColor": "#f6d36f",
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
       "knockdownEnabled": true,
       "patrol": {
-        "left": 1234,
-        "right": 1564
-      },
-      "attackPattern": "arc",
-      "projectileArc": true,
-      "fireCooldown": 2.1,
-      "projectileGravity": 1692,
-      "projectileFlightTime": 1.05
+        "left": 1394,
+        "right": 1724
+      }
     }
   ],
   "hostileDrones": [

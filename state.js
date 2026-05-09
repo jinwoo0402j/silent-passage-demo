@@ -220,6 +220,22 @@ function createLootCrateState(definition, data, index) {
   };
 }
 
+function createTemporaryBlockState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `temporary-block-${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(12, Number(definition.width ?? 96)),
+    height: Math.max(12, Number(definition.height ?? 96)),
+    color: definition.color || "#5f7588",
+    hideDuration: Math.max(0.1, Number(definition.hideDuration ?? 1.6)),
+    hiddenTimer: 0,
+    hitFlash: 0,
+    respawnFlash: 0,
+  };
+}
+
 export function createLevelRuntimeState(data) {
   return {
     interactables: (data.interactables || []).map((item) => ({
@@ -227,6 +243,7 @@ export function createLevelRuntimeState(data) {
       used: false,
     })),
     lootCrates: (data.lootCrates || []).map((crate, index) => createLootCrateState(crate, data, index)),
+    temporaryBlocks: (data.temporaryBlocks || []).map((block, index) => createTemporaryBlockState(block, index)),
     loot: {
       active: false,
       crateId: null,
