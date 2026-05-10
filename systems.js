@@ -39,6 +39,7 @@ const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const CROUCH_KEYS = ["ArrowDown", "KeyS"];
 const JUMP_KEYS = ["KeyW"];
+const ZIPLINE_MOUNT_KEYS = ["KeyW"];
 const DASH_KEYS = ["Space", "KeyX"];
 const SPRINT_KEYS = ["Space"];
 const BULLET_TIME_KEYS = [];
@@ -6604,7 +6605,7 @@ function getInteractionTargets(run, data) {
         id: zipLine.id,
         kind: "zipLine",
         zipLine,
-        text: zipLine.prompt || "E: Zipline",
+        text: getZipLinePrompt(zipLine),
         x: nearestPoint.x,
         y: nearestPoint.y - 18,
       });
@@ -6665,6 +6666,64 @@ function getInteractionTargets(run, data) {
   });
 
   return targets[0] || null;
+}
+
+function getZipLinePrompt(zipLine) {
+  const prompt = zipLine?.prompt || "E: Zipline";
+  return prompt.replace(/^E\s*:/i, "W/E:");
+}
+
+function getNearestZipLineInteractionTarget(run, data) {
+  const playerCenter = getCenter(run.player);
+  let nearest = null;
+
+  for (const zipLine of data.zipLines || []) {
+    const startDistance = distanceBetween(playerCenter, zipLine.start);
+    const endDistance = distanceBetween(playerCenter, zipLine.end);
+    const lineDistance = getPointToZipLineDistance(playerCenter, zipLine);
+    const distance = Math.min(startDistance, endDistance, lineDistance);
+    if (distance >= 96) {
+      continue;
+    }
+
+    const nearestNode = startDistance <= endDistance ? "start" : "end";
+    const progress = getZipLineProgressForPoint(zipLine, playerCenter);
+    const nearestPoint = lineDistance < Math.min(startDistance, endDistance)
+      ? getZipLinePoint(zipLine, progress)
+      : zipLine[nearestNode];
+
+    if (!nearest || distance < nearest.distance) {
+      nearest = {
+        id: zipLine.id,
+        kind: "zipLine",
+        zipLine,
+        distance,
+        text: getZipLinePrompt(zipLine),
+        x: nearestPoint.x,
+        y: nearestPoint.y - 18,
+      };
+    }
+  }
+
+  return nearest;
+}
+
+function tryBeginZipLineRideFromMountInput(state, data) {
+  const run = state.run;
+  const player = run?.player;
+  if (!run || !player || player.zipLineActive || !player.canInteract) {
+    return false;
+  }
+
+  const nearest = getNearestZipLineInteractionTarget(run, data);
+  if (!nearest || !consumeEitherPress(state, ZIPLINE_MOUNT_KEYS)) {
+    return false;
+  }
+
+  run.prompt = nearest.text;
+  run.promptWorld = { x: nearest.x, y: nearest.y };
+  beginZipLineRide(run, data, nearest.zipLine);
+  return true;
 }
 
 function getEncounterOutcome(encounter) {
@@ -7365,6 +7424,7 @@ function updateExpedition(state, data, dt) {
   if (lootWasActive) {
     attackPressed = false;
   } else {
+    tryBeginZipLineRideFromMountInput(state, data);
     updatePlayer(run, data, state, simDt, {
       attackPressed,
       interactionPressed: false,
