@@ -32,7 +32,7 @@
       "zoom": 1,
       "minZoom": 0.15,
       "neutralFocusX": 0.5,
-      "neutralFocusY": 0.6,
+      "neutralFocusY": 0.55,
       "walkLookAhead": 0.15,
       "sprintLookAhead": 0.34,
       "sprintJumpLookAhead": 0.34,
@@ -63,6 +63,9 @@
       "lookAheadEnabled": true,
       "dashAffectsCamera": false,
       "braceAffectsCamera": false,
+      "boundarySlackY": 0.55,
+      "playerSafeTopY": 0.28,
+      "playerSafeBottomY": 0.68,
       "mousePanAlways": true
     }
   },
@@ -665,6 +668,23 @@
       "escapeDistance": 300,
       "exhaustionLimit": 2,
       "knockdownStaggerDuration": 0.58,
+      "parts": {
+        "arm": {
+          "hp": 36,
+          "broken": false,
+          "dropPartId": "watchman-right-arm"
+        },
+        "leg": {
+          "hp": 45,
+          "broken": false,
+          "dropPartId": null
+        },
+        "core": {
+          "hp": 80,
+          "broken": false,
+          "dropPartId": null
+        }
+      },
       "patrol": {
         "left": 2088,
         "right": 2308

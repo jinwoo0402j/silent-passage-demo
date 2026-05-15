@@ -3182,6 +3182,487 @@ function drawThreatSense(ctx, run, state) {
   ctx.restore();
 }
 
+function drawPartDrops(ctx, run) {
+  (run.interactables || []).forEach((item) => {
+    if (item.used || item.kind !== "partDrop") {
+      return;
+    }
+    const cx = item.x + item.width * 0.5;
+    const cy = item.y + item.height * 0.5;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = "rgba(223, 247, 238, 0.82)";
+    ctx.strokeStyle = "rgba(147, 234, 255, 0.72)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(item.x, item.y, item.width, item.height, 8);
+    } else {
+      ctx.rect(item.x, item.y, item.width, item.height);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "rgba(23, 45, 44, 0.9)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+function getVisibleRunParts(state, run) {
+  const partsById = new Map();
+  (Array.isArray(run?.partInventory) ? run.partInventory : []).forEach((part) => {
+    if (part?.id) {
+      partsById.set(part.id, part);
+    }
+  });
+  (Array.isArray(state.meta?.partInventory) ? state.meta.partInventory : []).forEach((part) => {
+    if (part?.id) {
+      partsById.set(part.id, partsById.get(part.id) || part);
+    }
+  });
+  return [...partsById.values()];
+}
+
+function getPartDreamTitle(data, part) {
+  return part?.dreamId ? data.dreams?.[part.dreamId]?.title || null : null;
+}
+
+function drawRunInventoryHint(ctx, state, run, theme) {
+  if (
+    run?.faceOff?.active ||
+    run?.loot?.active ||
+    run?.mapOverlay?.active ||
+    run?.inventoryOverlay?.active
+  ) {
+    return;
+  }
+  const parts = getVisibleRunParts(state, run);
+  const lootCount = Array.isArray(run?.lootInventory) ? run.lootInventory.length : 0;
+  const x = 34;
+  const y = 112;
+  const width = parts.length || lootCount ? 198 : 152;
+  const height = 36;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 9,
+    fill: "rgba(6, 13, 18, 0.48)",
+    stroke: "rgba(147, 234, 255, 0.18)",
+    innerLines: false,
+  });
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText("Tab: 인벤토리", x + 16, y + 23);
+  if (parts.length || lootCount) {
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "800 10px 'Segoe UI', sans-serif";
+    ctx.fillText(`파츠 ${parts.length} · 회수품 ${lootCount}`, x + 112, y + 23);
+  }
+}
+
+function drawInventoryTopTabs(ctx, theme, x, y) {
+  const tabs = [
+    { label: "INVENTORY", active: true, width: 124 },
+    { label: "MAP", active: false, width: 72 },
+    { label: "LOGBOOK", active: false, width: 106 },
+    { label: "SYSTEM", active: false, width: 96 },
+  ];
+  let cursorX = x;
+  tabs.forEach((tab) => {
+    drawBeveledPanel(ctx, theme, cursorX, y, tab.width, 34, {
+      cut: 8,
+      fill: tab.active ? "rgba(210, 222, 190, 0.16)" : "rgba(255,255,255,0.045)",
+      stroke: tab.active ? "rgba(231, 244, 126, 0.56)" : "rgba(255,255,255,0.12)",
+      innerLines: false,
+    });
+    ctx.fillStyle = tab.active ? "#f1f7dc" : theme.textMute;
+    ctx.font = "900 11px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(tab.label, cursorX + tab.width / 2, y + 22);
+    cursorX += tab.width + 10;
+  });
+  ctx.textAlign = "left";
+}
+
+function drawInventorySectionHeader(ctx, theme, title, meta, x, y, width) {
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 16px 'Segoe UI', sans-serif";
+  ctx.fillText(title, x, y);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(meta, x + width, y);
+  ctx.textAlign = "left";
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 12);
+  ctx.lineTo(x + width, y + 12);
+  ctx.stroke();
+}
+
+function drawInventoryLimbGlyph(ctx, x, y, size, color) {
+  ctx.save();
+  ctx.translate(x + size / 2, y + size / 2);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.18, -size * 0.32);
+  ctx.lineTo(size * 0.12, size * 0.08);
+  ctx.lineTo(size * 0.28, size * 0.34);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(-size * 0.22, -size * 0.36, size * 0.11, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(size * 0.3, size * 0.38, size * 0.09, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawInventoryItemGlyph(ctx, x, y, size, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = "rgba(255,255,255,0.06)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect?.(x + size * 0.24, y + size * 0.18, size * 0.52, size * 0.62, 5);
+  if (!ctx.roundRect) {
+    ctx.rect(x + size * 0.24, y + size * 0.18, size * 0.52, size * 0.62);
+  }
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.36, y + size * 0.38);
+  ctx.lineTo(x + size * 0.64, y + size * 0.38);
+  ctx.moveTo(x + size * 0.36, y + size * 0.52);
+  ctx.lineTo(x + size * 0.58, y + size * 0.52);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawInventoryBodySilhouette(ctx, theme, x, y, width, height) {
+  const cx = x + width * 0.5;
+  ctx.save();
+  ctx.strokeStyle = "rgba(216, 234, 230, 0.34)";
+  ctx.fillStyle = "rgba(216, 234, 230, 0.08)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, y + 52, 19, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, y + 72);
+  ctx.lineTo(cx, y + 164);
+  ctx.moveTo(cx - 48, y + 98);
+  ctx.lineTo(cx + 48, y + 98);
+  ctx.moveTo(cx - 24, y + 164);
+  ctx.lineTo(cx - 44, y + height - 18);
+  ctx.moveTo(cx + 24, y + 164);
+  ctx.lineTo(cx + 44, y + height - 18);
+  ctx.stroke();
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.globalAlpha = 0.22;
+  ctx.beginPath();
+  ctx.arc(cx + 50, y + 101, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawInventoryLoadoutSlot(ctx, theme, label, value, x, y, width, height, options = {}) {
+  const active = Boolean(options.active);
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 8,
+    fill: active ? "rgba(34, 55, 48, 0.64)" : "rgba(8, 15, 20, 0.56)",
+    stroke: active ? "rgba(231, 244, 126, 0.5)" : "rgba(255,255,255,0.14)",
+    innerLines: false,
+  });
+  ctx.fillStyle = active ? "#e7f47e" : theme.textMute;
+  ctx.font = "900 9px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x + 12, y + 17);
+  ctx.fillStyle = value ? theme.textMain : theme.textMute;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText(value || "비어 있음", x + 12, y + height - 12);
+}
+
+function drawInventoryBackpackCell(ctx, theme, item, x, y, size, options = {}) {
+  const selected = Boolean(options.selected);
+  const equipped = Boolean(options.equipped);
+  const hasItem = Boolean(item);
+  drawBeveledPanel(ctx, theme, x, y, size, size, {
+    cut: 8,
+    fill: selected ? "rgba(204, 214, 165, 0.18)" : hasItem ? "rgba(9, 18, 22, 0.76)" : "rgba(255,255,255,0.035)",
+    stroke: selected ? "rgba(231, 244, 126, 0.82)" : hasItem ? "rgba(147, 234, 255, 0.24)" : "rgba(255,255,255,0.1)",
+    glow: selected,
+    innerLines: false,
+  });
+  if (!hasItem) {
+    ctx.strokeStyle = "rgba(255,255,255,0.055)";
+    ctx.beginPath();
+    ctx.moveTo(x + 12, y + size - 12);
+    ctx.lineTo(x + size - 12, y + 12);
+    ctx.stroke();
+    return;
+  }
+  const iconColor = selected ? "#e7f47e" : theme.accentSecondary;
+  if (item.slot) {
+    drawInventoryLimbGlyph(ctx, x + 13, y + 10, size - 26, iconColor);
+  } else {
+    drawInventoryItemGlyph(ctx, x + 13, y + 10, size - 26, iconColor);
+  }
+  if (equipped) {
+    ctx.fillStyle = "#e7f47e";
+    ctx.font = "900 8px 'Segoe UI', sans-serif";
+    ctx.fillText("ON", x + 8, y + 14);
+  }
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "800 8px 'Segoe UI', sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(item.slot ? "PART" : "ITEM", x + size - 8, y + size - 8);
+  ctx.textAlign = "left";
+}
+
+function drawInventoryQuickSlot(ctx, theme, item, x, y, width, height, index) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 8,
+    fill: item ? "rgba(8, 16, 21, 0.72)" : "rgba(255,255,255,0.035)",
+    stroke: item ? "rgba(147,234,255,0.22)" : "rgba(255,255,255,0.1)",
+    innerLines: false,
+  });
+  ctx.fillStyle = item ? theme.accentSecondary : theme.textMute;
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.fillText(String(index + 1), x + 9, y + 16);
+  if (item) {
+    const label = item.name || item.label || item.id || "ITEM";
+    ctx.fillStyle = theme.textMain;
+    ctx.font = "800 11px 'Segoe UI', sans-serif";
+    ctx.fillText(label.slice(0, 12), x + 30, y + 22);
+  }
+}
+
+function drawInventoryDetailCard(ctx, theme, data, part, equipped, x, y, width, height) {
+  const fill = part ? "rgba(215, 204, 166, 0.92)" : "rgba(12, 19, 22, 0.78)";
+  const stroke = part ? "rgba(246, 235, 181, 0.68)" : "rgba(255,255,255,0.12)";
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 13,
+    fill,
+    stroke,
+    innerLines: false,
+  });
+  if (!part) {
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "900 15px 'Segoe UI', sans-serif";
+    ctx.fillText("회수한 파츠 없음", x + 20, y + 34);
+    ctx.fillStyle = theme.textMute;
+    ctx.font = "12px 'Segoe UI', sans-serif";
+    ctx.fillText("탐험에서 팔 파츠를 회수하세요", x + 20, y + 60);
+    return;
+  }
+  const residue = Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0));
+  const dreamTitle = getPartDreamTitle(data, part) || "잔몽 미확인";
+  ctx.fillStyle = "rgba(20, 30, 28, 0.9)";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(part.name || "이름 미확인", x + 20, y + 30);
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`${equipped ? "장착 중" : "회수됨"} · 기억 잔류 ${residue}`, x + 20, y + 54);
+  ctx.fillStyle = "rgba(20, 30, 28, 0.68)";
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(dreamTitle, x + 20, y + 76);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(20, 30, 28, 0.78)";
+  ctx.font = "900 11px 'Segoe UI', sans-serif";
+  ctx.fillText("쉘터에서 접합 가능", x + width - 18, y + 30);
+  ctx.textAlign = "left";
+}
+
+function drawInventoryMemoryPocket(ctx, theme, data, part, drift, stability, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: "rgba(8, 16, 20, 0.72)",
+    stroke: "rgba(231, 244, 126, 0.28)",
+    innerLines: false,
+  });
+  ctx.fillStyle = "#e7f47e";
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.fillText("MEMORY TRACE / SAFE POCKET", x + 16, y + 24);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 14px 'Segoe UI', sans-serif";
+  ctx.fillText(part ? getPartDreamTitle(data, part) || "잔몽 미확인" : "잔몽 없음", x + 16, y + 52);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(`기억 잔류 ${drift}`, x + 16, y + 80);
+  ctx.fillText(`자아 안정도 ${stability}`, x + 16, y + 102);
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(x + 16, y + height - 28, width - 32, 7);
+  ctx.fillStyle = stability < 50 ? "#ff9fb4" : "#e7f47e";
+  ctx.fillRect(x + 16, y + height - 28, (width - 32) * clamp(stability / 100, 0, 1), 7);
+}
+
+function drawRunInventoryOverlay(ctx, state, data, theme) {
+  const run = state.run;
+  if (!run?.inventoryOverlay?.active) {
+    return;
+  }
+
+  const parts = getVisibleRunParts(state, run);
+  const attachedParts = Array.isArray(state.meta?.attachedParts) ? state.meta.attachedParts : [];
+  const attachedIds = new Set(attachedParts.map((part) => part.id));
+  const attachedRightArm = attachedParts.find((part) => part.slot === "rightArm") || null;
+  const selectedPart = parts[0] || attachedRightArm || null;
+  const lootItems = Array.isArray(run.lootInventory) ? run.lootInventory : [];
+  const inventoryItems = Array.isArray(run.inventory?.items) ? run.inventory.items : [];
+  const quickItems = [...inventoryItems, ...lootItems].slice(0, 6);
+  const materials = Math.max(0, Math.round(run.materials ?? 0));
+  const drift = attachedParts.reduce((total, part) => total + Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0)), 0);
+  const stability = Math.max(0, 100 - drift);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  const haze = ctx.createRadialGradient(670, 240, 120, 670, 280, 720);
+  haze.addColorStop(0, "rgba(147,234,255,0.08)");
+  haze.addColorStop(0.58, "rgba(6,12,18,0.28)");
+  haze.addColorStop(1, "rgba(0,0,0,0.34)");
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const panelX = 56;
+  const panelY = 48;
+  const panelW = 1168;
+  const panelH = 624;
+  drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
+    cut: 24,
+    fill: "rgba(5, 10, 15, 0.9)",
+    stroke: "rgba(210, 222, 190, 0.22)",
+    glow: true,
+    innerLines: true,
+  });
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.fillText("OVERWORLD INVENTORY", panelX + 34, panelY + 30);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 28px 'Segoe UI', sans-serif";
+  ctx.fillText("인벤토리", panelX + 34, panelY + 66);
+  drawInventoryTopTabs(ctx, theme, panelX + 332, panelY + 28);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "800 11px 'Segoe UI', sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText("ESC 뒤로   TAB 닫기", panelX + panelW - 34, panelY + 50);
+  ctx.textAlign = "left";
+
+  const topY = panelY + 108;
+  const leftX = panelX + 34;
+  const leftW = 280;
+  const packX = leftX + leftW + 34;
+  const packW = 526;
+  const rightX = packX + packW + 34;
+  const rightW = panelX + panelW - rightX - 34;
+
+  drawInventorySectionHeader(ctx, theme, "BODY LOADOUT", "장착 파츠", leftX, topY, leftW);
+  drawBeveledPanel(ctx, theme, leftX, topY + 28, leftW, 392, {
+    cut: 15,
+    fill: "rgba(8, 16, 21, 0.54)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  drawInventoryBodySilhouette(ctx, theme, leftX + 82, topY + 54, 116, 236);
+  drawInventoryLoadoutSlot(ctx, theme, "HEAD", "TYPE-07A", leftX + 20, topY + 52, 102, 52);
+  drawInventoryLoadoutSlot(ctx, theme, "CORE", "기본 프레임", leftX + 20, topY + 122, 102, 52);
+  drawInventoryLoadoutSlot(ctx, theme, "R ARM", attachedRightArm?.name || "비어 있음", leftX + 142, topY + 122, 118, 62, { active: Boolean(attachedRightArm) });
+  drawInventoryLoadoutSlot(ctx, theme, "L ARM", "기본 팔", leftX + 20, topY + 260, 102, 52);
+  drawInventoryLoadoutSlot(ctx, theme, "LEGS", "기본 다리", leftX + 142, topY + 260, 118, 52);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(`자아 안정도 ${stability}`, leftX + 20, topY + 374);
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(leftX + 116, topY + 366, 138, 7);
+  ctx.fillStyle = stability < 50 ? "#ff9fb4" : "#e7f47e";
+  ctx.fillRect(leftX + 116, topY + 366, 138 * clamp(stability / 100, 0, 1), 7);
+
+  drawInventorySectionHeader(ctx, theme, "RECOVERED PARTS / BACKPACK", `파츠 ${parts.length} · 보관 ${lootItems.length}`, packX, topY, packW);
+  drawBeveledPanel(ctx, theme, packX, topY + 28, packW, 366, {
+    cut: 15,
+    fill: "rgba(8, 16, 21, 0.58)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  const cell = 64;
+  const gap = 10;
+  const gridX = packX + 24;
+  const gridY = topY + 56;
+  for (let index = 0; index < 24; index += 1) {
+    const column = index % 6;
+    const row = Math.floor(index / 6);
+    const item = parts[index] || null;
+    drawInventoryBackpackCell(
+      ctx,
+      theme,
+      item,
+      gridX + column * (cell + gap),
+      gridY + row * (cell + gap),
+      cell,
+      {
+        selected: Boolean(selectedPart && item?.id === selectedPart.id),
+        equipped: Boolean(item && attachedIds.has(item.id)),
+      }
+    );
+  }
+
+  drawInventoryDetailCard(ctx, theme, data, selectedPart, Boolean(selectedPart && attachedIds.has(selectedPart.id)), packX, topY + 416, packW, 100);
+
+  drawInventorySectionHeader(ctx, theme, "FIELD ITEMS / QUICK USE", `자재 ${materials}`, rightX, topY, rightW);
+  drawBeveledPanel(ctx, theme, rightX, topY + 28, rightW, 210, {
+    cut: 15,
+    fill: "rgba(8, 16, 21, 0.56)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  for (let index = 0; index < 6; index += 1) {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    drawInventoryQuickSlot(
+      ctx,
+      theme,
+      quickItems[index],
+      rightX + 18 + column * 112,
+      topY + 56 + row * 54,
+      98,
+      42,
+      index
+    );
+  }
+
+  drawInventoryMemoryPocket(ctx, theme, data, selectedPart, drift, stability, rightX, topY + 274, rightW, 156);
+
+  drawBeveledPanel(ctx, theme, rightX, topY + 456, rightW, 60, {
+    cut: 10,
+    fill: "rgba(255,255,255,0.04)",
+    stroke: "rgba(255,255,255,0.1)",
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText("SHELTER ACTION", rightX + 16, topY + 478);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText("장착과 잔몽은 쉘터에서 확인", rightX + 16, topY + 502);
+
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText("장착과 잔몽은 쉘터에서 확인", panelX + 34, panelY + panelH - 26);
+  ctx.textAlign = "right";
+  ctx.fillText("TAB 닫기", panelX + panelW - 34, panelY + panelH - 26);
+  ctx.textAlign = "left";
+  ctx.restore();
+}
+
 function drawAttackFx(ctx, run) {
   run.attackFx.forEach((effect) => {
     ctx.strokeStyle = `rgba(244, 239, 226, ${effect.life / 0.12})`;
@@ -4268,6 +4749,16 @@ function getFaceOffAimPan(data, mouseY, screenHeight = SCREEN_HEIGHT) {
 
 function getFaceOffTargetZones(data, mouseY, screenWidth = SCREEN_WIDTH, screenHeight = SCREEN_HEIGHT) {
   const config = data.faceOff || {};
+  if (config.sceneArmFocus) {
+    const focus = config.sceneArmFocus;
+    const armWidth = Number(focus.width ?? 166);
+    const armHeight = Number(focus.height ?? 118);
+    const armX = Number(focus.x ?? screenWidth * 0.55) - armWidth / 2;
+    const armY = Number(focus.y ?? screenHeight * 0.64) - armHeight / 2;
+    return [
+      { id: "rightArm", label: "R ARM", x: armX, y: armY, width: armWidth, height: armHeight, shape: "rect" },
+    ];
+  }
   const scale = config.targetAimScale ?? 1.62;
   const cx = screenWidth / 2;
   const top = (config.targetAimTop ?? 128) - getFaceOffAimPan(data, mouseY, screenHeight);
@@ -4449,6 +4940,84 @@ function drawFaceOffSilhouette(ctx, theme, data, faceOff) {
   });
   ctx.restore();
 
+}
+
+function mapFaceOffPartToHumanoidPart(partId) {
+  if (partId === "leftArm" || partId === "rightArm" || partId === "arm") {
+    return "arm";
+  }
+  if (partId === "leftLeg" || partId === "rightLeg" || partId === "leg") {
+    return "leg";
+  }
+  return "core";
+}
+
+function getFaceOffPartLabel(partId) {
+  const labels = {
+    head: "머리",
+    core: "중심부",
+    leftArm: "왼팔",
+    rightArm: "오른팔",
+    leftLeg: "왼다리",
+    rightLeg: "오른다리",
+    arm: "팔",
+    leg: "다리",
+  };
+  return labels[partId] || "중심부";
+}
+
+function getHumanoidPartMaxHp(partKey, part) {
+  const fallback = partKey === "arm" ? 40 : partKey === "leg" ? 45 : 80;
+  return Math.max(1, Number(part?.maxHp ?? fallback));
+}
+
+function drawFaceOffPartStatus(ctx, theme, faceOff, enemy) {
+  const selectedPart = faceOff?.selectedPart || "core";
+  const partKey = mapFaceOffPartToHumanoidPart(selectedPart);
+  const part = enemy?.parts?.[partKey] || null;
+  const maxHp = getHumanoidPartMaxHp(partKey, part);
+  const hp = clamp(Number(part?.hp ?? maxHp), 0, maxHp);
+  const ratio = part?.broken ? 0 : clamp(hp / maxHp, 0, 1);
+  const x = SCREEN_WIDTH - 382;
+  const y = 92;
+  const width = 318;
+  const height = 118;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(4, 8, 12, 0.66)",
+    stroke: part?.broken ? "rgba(147, 234, 255, 0.48)" : "rgba(255,255,255,0.2)",
+    innerLines: false,
+  });
+
+  ctx.fillStyle = "rgba(245,248,251,0.62)";
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("선택 부위", x + 18, y + 22);
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "800 19px 'Segoe UI', sans-serif";
+  ctx.fillText(getFaceOffPartLabel(selectedPart), x + 18, y + 50);
+
+  const gaugeX = x + 18;
+  const gaugeY = y + 66;
+  const gaugeW = width - 36;
+  const gaugeH = 9;
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(gaugeX, gaugeY, gaugeW, gaugeH);
+  ctx.fillStyle = part?.broken ? theme.accentSecondary : theme.accent;
+  ctx.fillRect(gaugeX, gaugeY, gaugeW * ratio, gaugeH);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  const statusLine = partKey === "arm"
+    ? `팔 흔적 내구 ${Math.ceil(hp)} / ${maxHp}`
+    : `${getFaceOffPartLabel(partKey)} 흔적 내구 ${Math.ceil(hp)} / ${maxHp}`;
+  ctx.fillText(statusLine, x + 18, y + 94);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = part?.broken ? theme.accentSecondary : "rgba(245,248,251,0.58)";
+  ctx.fillText(part?.broken ? "파츠 회수 신호 감지" : "손상 누적 중", x + width - 18, y + 94);
 }
 
 function drawFaceOffCrosshair(ctx, state) {
@@ -5100,6 +5669,344 @@ function drawFaceOffEnemySpeech(ctx, theme, faceOff) {
   ctx.restore();
 }
 
+function getFaceOffSceneFocus(data) {
+  const focus = data.faceOff?.sceneArmFocus || {};
+  const width = Number(focus.width ?? 166);
+  const height = Number(focus.height ?? 118);
+  return {
+    x: Number(focus.x ?? SCREEN_WIDTH * 0.55),
+    y: Number(focus.y ?? SCREEN_HEIGHT * 0.64),
+    width,
+    height,
+  };
+}
+
+function drawFaceOffSceneBackdrop(ctx, data) {
+  const assetKey = data.faceOff?.sceneArtAssetKey || "faceOffKnockdownScene";
+  const src = assetKey ? data.art?.[assetKey]?.src : null;
+  const image = getImageAsset(src);
+
+  ctx.save();
+  const loaded = drawImageCover(ctx, image, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 1);
+  if (!loaded) {
+    const fallback = ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT);
+    fallback.addColorStop(0, "#101923");
+    fallback.addColorStop(0.52, "#18222a");
+    fallback.addColorStop(1, "#06080b");
+    ctx.fillStyle = fallback;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+
+  const leftShade = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.42, 0);
+  leftShade.addColorStop(0, "rgba(0,0,0,0.64)");
+  leftShade.addColorStop(0.68, "rgba(0,0,0,0.24)");
+  leftShade.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = leftShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const bottomShade = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.58, 0, SCREEN_HEIGHT);
+  bottomShade.addColorStop(0, "rgba(0,0,0,0)");
+  bottomShade.addColorStop(1, "rgba(0,0,0,0.62)");
+  ctx.fillStyle = bottomShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const vignette = ctx.createRadialGradient(
+    SCREEN_WIDTH * 0.58,
+    SCREEN_HEIGHT * 0.52,
+    SCREEN_WIDTH * 0.18,
+    SCREEN_WIDTH * 0.58,
+    SCREEN_HEIGHT * 0.52,
+    SCREEN_WIDTH * 0.82
+  );
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(0.64, "rgba(0,0,0,0.2)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.68)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "rgba(255,255,255,0.055)";
+  for (let y = 0; y < SCREEN_HEIGHT; y += 4) {
+    ctx.fillRect(0, y, SCREEN_WIDTH, 1);
+  }
+  ctx.restore();
+}
+
+function drawFaceOffSceneInfoPanel(ctx, theme) {
+  const x = 30;
+  const y = 64;
+  const width = 292;
+  const height = 170;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: "rgba(4, 8, 12, 0.54)",
+    stroke: "rgba(255,255,255,0.22)",
+    innerLines: false,
+  });
+
+  const rows = [
+    "대상: 순찰자 \"무명자\"",
+    "상태: 전투 불능",
+    "이름: 미확인",
+    "기억 잔류: 감지됨",
+  ];
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(245,248,251,0.9)";
+  ctx.font = "700 18px 'Segoe UI', sans-serif";
+  rows.forEach((row, index) => {
+    ctx.fillText(row, x + 24, y + 44 + index * 34);
+  });
+  ctx.restore();
+}
+
+function drawFaceOffScenePartPanel(ctx, theme, data, faceOff, enemy) {
+  const x = 30;
+  const y = 276;
+  const width = 292;
+  const height = 206;
+  const arm = enemy?.parts?.arm || null;
+  const partId = arm?.dropPartId || data.faceOff?.recoverablePartId || "watchman-right-arm";
+  const part = data.parts?.[partId] || null;
+  const maxHp = getHumanoidPartMaxHp("arm", arm);
+  const hp = clamp(Number(arm?.hp ?? maxHp), 0, maxHp);
+  const ratio = arm?.broken ? 0 : clamp(hp / maxHp, 0, 1);
+  const active = faceOff?.selectedPart === "rightArm" || faceOff?.hoverPart === "rightArm";
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: active ? "rgba(8, 18, 22, 0.68)" : "rgba(4, 8, 12, 0.54)",
+    stroke: active ? "rgba(147,234,255,0.52)" : "rgba(255,255,255,0.2)",
+    glow: active,
+    innerLines: false,
+  });
+
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.fillStyle = active ? "#f5f8fb" : "rgba(245,248,251,0.88)";
+  ctx.font = "800 21px 'Segoe UI', sans-serif";
+  ctx.fillText("오른팔 파츠", x + 24, y + 44);
+
+  ctx.fillStyle = "rgba(245,248,251,0.66)";
+  ctx.font = "700 15px 'Segoe UI', sans-serif";
+  ctx.fillText("기능: 조준 안정 / 반동 감소", x + 24, y + 86);
+  ctx.fillText(part ? `기억 잔류 ${part.memoryResidue ?? 0}` : "기억 잔류 감지", x + 24, y + 116);
+
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(x + 24, y + 136, width - 48, 8);
+  ctx.fillStyle = active ? theme.accentSecondary : "rgba(147,234,255,0.72)";
+  ctx.fillRect(x + 24, y + 136, (width - 48) * ratio, 8);
+
+  ctx.fillStyle = active ? theme.accentSecondary : "rgba(245,248,251,0.72)";
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText(arm?.broken ? "회수 가능 · A" : "LMB 사격 · R 재장전", x + 24, y + 176);
+  ctx.restore();
+}
+
+function drawFaceOffSceneWeaponPanel(ctx, theme, run, data) {
+  const hud = getSelectedArmHud(run, data);
+  const x = SCREEN_WIDTH - 342;
+  const y = 66;
+  const width = 296;
+  const height = 128;
+  const reloadTimer = hud.arm.reloadTimer ?? 0;
+  const reloadRatio = reloadTimer > 0
+    ? 1 - clamp(reloadTimer / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
+    : 1;
+  const reloading = reloadTimer > 0;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: "rgba(4, 8, 12, 0.5)",
+    stroke: reloading ? "rgba(231,244,126,0.42)" : "rgba(255,255,255,0.18)",
+    glow: reloading,
+    innerLines: false,
+  });
+
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(245,248,251,0.62)";
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText("ARM STATUS", x + 18, y + 22);
+
+  drawArmSlotChip(ctx, theme, "1 LEFT", hud.side === "left", x + 18, y + 34);
+  drawArmSlotChip(ctx, theme, "2 RIGHT", hud.side === "right", x + 90, y + 34);
+
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "800 15px 'Segoe UI', sans-serif";
+  ctx.fillText(hud.stats.label, x + 170, y + 54);
+
+  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.font = "900 28px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.magazine}/${hud.stats.magazineSize}`, x + 20, y + 94);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} ${hud.reserve}`, x + 108, y + 88);
+  ctx.fillText(reloading ? "재장전 중" : "R 재장전", x + 108, y + 106);
+
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(x + 170, y + 76, 104, 7);
+  ctx.fillStyle = reloading ? theme.accent : theme.accentSecondary;
+  ctx.fillRect(x + 170, y + 76, 104 * reloadRatio, 7);
+  ctx.restore();
+}
+
+function drawFaceOffSceneAim(ctx, theme, data, faceOff) {
+  const focus = getFaceOffSceneFocus(data);
+  const left = focus.x - focus.width / 2;
+  const top = focus.y - focus.height / 2;
+  const right = focus.x + focus.width / 2;
+  const bottom = focus.y + focus.height / 2;
+  const active = faceOff?.selectedPart === "rightArm" || faceOff?.hoverPart === "rightArm";
+  const pulse = 0.5 + Math.sin(performance.now() * 0.006) * 0.5;
+  const bracket = 28;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.strokeStyle = active ? `rgba(147,234,255,${0.78 + pulse * 0.18})` : "rgba(245,248,251,0.62)";
+  ctx.lineWidth = active ? 2.1 : 1.6;
+  ctx.shadowColor = "rgba(147,234,255,0.4)";
+  ctx.shadowBlur = active ? 14 : 7;
+  ctx.beginPath();
+  ctx.moveTo(left, top + bracket);
+  ctx.lineTo(left, top);
+  ctx.lineTo(left + bracket, top);
+  ctx.moveTo(right - bracket, top);
+  ctx.lineTo(right, top);
+  ctx.lineTo(right, top + bracket);
+  ctx.moveTo(left, bottom - bracket);
+  ctx.lineTo(left, bottom);
+  ctx.lineTo(left + bracket, bottom);
+  ctx.moveTo(right - bracket, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.lineTo(right, bottom - bracket);
+  ctx.stroke();
+
+  const x = clamp(faceOff?.aimX ?? focus.x, 8, SCREEN_WIDTH - 8);
+  const y = clamp(faceOff?.aimY ?? focus.y, 8, SCREEN_HEIGHT - 8);
+  ctx.shadowBlur = 8;
+  ctx.strokeStyle = "rgba(245,248,251,0.82)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(x, y, 15, 0, Math.PI * 2);
+  ctx.moveTo(x - 34, y);
+  ctx.lineTo(x - 10, y);
+  ctx.moveTo(x + 10, y);
+  ctx.lineTo(x + 34, y);
+  ctx.moveTo(x, y - 34);
+  ctx.lineTo(x, y - 10);
+  ctx.moveTo(x, y + 10);
+  ctx.lineTo(x, y + 34);
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = active ? theme.accentSecondary : "rgba(245,248,251,0.74)";
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("오른팔 파츠", focus.x, top - 14);
+  ctx.restore();
+}
+
+function drawFaceOffSceneSpeech(ctx, theme, faceOff) {
+  const text = faceOff.enemyLineVisible || faceOff.enemyLine || "";
+  if (!text) {
+    return;
+  }
+  const width = 690;
+  const height = 58;
+  const x = SCREEN_WIDTH / 2 - width / 2;
+  const y = 38;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: "rgba(4, 8, 12, 0.5)",
+    stroke: "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(245,248,251,0.86)";
+  ctx.font = "700 17px 'Segoe UI', sans-serif";
+  if (ctx.measureText(text).width > width - 60) {
+    ctx.font = "700 14px 'Segoe UI', sans-serif";
+  }
+  ctx.fillText(text, x + width / 2, y + 36);
+  if (faceOff.enemyLineIndex < (faceOff.enemyLine?.length ?? 0)) {
+    const blink = Math.sin(performance.now() * 0.012) > 0 ? 1 : 0.25;
+    ctx.fillStyle = `rgba(245,248,251,${blink})`;
+    ctx.fillRect(x + width / 2 + ctx.measureText(text).width / 2 + 7, y + 22, 7, 18);
+  }
+  ctx.restore();
+}
+
+function drawFaceOffSceneChoice(ctx, theme, option, slot, selected, dimmed = false) {
+  const { x, y, width, height } = slot;
+  const alpha = dimmed ? 0.48 : 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: selected ? "rgba(28, 38, 44, 0.78)" : "rgba(4, 8, 12, 0.54)",
+    stroke: selected ? "rgba(147,234,255,0.56)" : "rgba(255,255,255,0.18)",
+    glow: selected,
+    innerLines: false,
+  });
+
+  const keyLabel = option.key.replace("Key", "");
+  ctx.fillStyle = selected ? theme.accentSecondary : "rgba(245,248,251,0.76)";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(keyLabel, x + 30, y + 34);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.beginPath();
+  ctx.moveTo(x + 54, y + 13);
+  ctx.lineTo(x + 54, y + height - 13);
+  ctx.stroke();
+
+  ctx.fillStyle = selected ? "#f5f8fb" : "rgba(245,248,251,0.84)";
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(option.label, x + 70, y + 34);
+  ctx.restore();
+}
+
+function drawFaceOffSceneChoices(ctx, theme, data, faceOff) {
+  const options = data.faceOff?.dialogueOptions || [];
+  const centerX = SCREEN_WIDTH / 2;
+  const baseY = 580;
+  const cardW = 226;
+  const cardH = 56;
+  const reveal = clamp(faceOff.choiceRevealProgress ?? 0, 0, 1);
+  const dimmed = reveal < 1;
+  const layout = {
+    KeyW: { x: centerX - cardW / 2, y: baseY - 86, width: cardW, height: cardH },
+    KeyA: { x: centerX - cardW - 106, y: baseY, width: cardW, height: cardH },
+    KeyD: { x: centerX + 106, y: baseY, width: cardW, height: cardH },
+    KeyS: { x: centerX - cardW / 2, y: baseY + 76, width: cardW, height: cardH },
+  };
+
+  ctx.save();
+  ctx.globalAlpha = 0.35 + reveal * 0.65;
+  ctx.strokeStyle = "rgba(245,248,251,0.28)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(centerX, baseY - 24);
+  ctx.lineTo(centerX, baseY + 76);
+  ctx.moveTo(centerX - 106, baseY + cardH / 2);
+  ctx.lineTo(centerX + 106, baseY + cardH / 2);
+  ctx.stroke();
+  options.forEach((option) => {
+    const slot = layout[option.key];
+    if (!slot) {
+      return;
+    }
+    const selected = faceOff.selectedDialogueKey === option.key;
+    drawFaceOffSceneChoice(ctx, theme, option, slot, selected, dimmed);
+  });
+  ctx.restore();
+}
+
 function drawFaceOffOverlay(ctx, state, data, theme) {
   const run = state.run;
   const faceOff = run?.faceOff;
@@ -5116,27 +6023,21 @@ function drawFaceOffOverlay(ctx, state, data, theme) {
   if (shake.ratio > 0) {
     ctx.translate(shake.x, shake.y);
   }
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  ctx.fillStyle = "rgba(255,255,255,0.018)";
-  ctx.fillRect(0, 100, SCREEN_WIDTH, 430);
-
-  drawFaceOffTimeline(ctx, theme, faceOff, enemy);
-  drawFaceOffSilhouette(ctx, theme, data, faceOff);
-  drawFaceOffFingerGun(ctx, state, data);
-  drawFaceOffCrosshair(ctx, state);
-  drawFaceOffEnemySpeech(ctx, theme, faceOff);
-  drawFaceOffDialogue(ctx, theme, data, enemy, faceOff);
-  drawFaceOffWeaponPanel(ctx, theme, run, data);
+  drawFaceOffSceneBackdrop(ctx, data);
+  drawFaceOffSceneInfoPanel(ctx, theme);
+  drawFaceOffScenePartPanel(ctx, theme, data, faceOff, enemy);
+  drawFaceOffSceneWeaponPanel(ctx, theme, run, data);
+  drawFaceOffSceneAim(ctx, theme, data, faceOff);
+  drawFaceOffSceneSpeech(ctx, theme, faceOff);
+  drawFaceOffSceneChoices(ctx, theme, data, faceOff);
 
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(245,248,251,0.82)";
   ctx.font = "700 15px 'Segoe UI', sans-serif";
-  ctx.fillText(enemy?.label || "Human target", SCREEN_WIDTH / 2, 116);
   if (faceOff.message) {
     ctx.fillStyle = faceOff.result ? "rgba(255,255,255,0.92)" : "rgba(245,248,251,0.58)";
     ctx.font = "700 13px 'Segoe UI', sans-serif";
-    ctx.fillText(faceOff.message, SCREEN_WIDTH / 2, 138);
+    ctx.fillText(faceOff.message, SCREEN_WIDTH / 2, 124);
   }
   ctx.restore();
 
@@ -5299,6 +6200,7 @@ function renderExpedition(ctx, state, data) {
   drawAfterimages(ctx, run, data);
   drawRecoilFocusAfterimages(ctx, run, data);
   drawPlayer(ctx, run, data);
+  drawPartDrops(ctx, run);
   drawRecoilAimWorld(ctx, run);
   drawAttackFx(ctx, run);
   drawRecoilFx(ctx, run);
@@ -5322,7 +6224,9 @@ function renderExpedition(ctx, state, data) {
   ctx.restore();
 
   drawHudV5(ctx, state, data);
+  drawRunInventoryHint(ctx, state, run, theme);
   drawLootOverlayV2(ctx, state, data, theme);
+  drawRunInventoryOverlay(ctx, state, data, theme);
   drawAimCursorHud(ctx, state, data);
   drawFaceOffAcquireGauge(ctx, state);
   drawFaceOffOverlay(ctx, state, data, theme);
@@ -5429,6 +6333,61 @@ function drawShelterSceneV2(ctx, state, data) {
   ctx.fillStyle = theme.accent;
   ctx.font = "700 16px 'Segoe UI', sans-serif";
   ctx.fillText("C: 출격", 84, 320);
+
+  const partInventory = Array.isArray(state.meta?.partInventory) ? state.meta.partInventory : [];
+  const attachedParts = Array.isArray(state.meta?.attachedParts) ? state.meta.attachedParts : [];
+  const attachedRightArm = attachedParts.find((part) => part.slot === "rightArm") || null;
+  const drift = attachedParts.reduce((total, part) => total + Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0)), 0);
+  const stability = Math.max(0, 100 - drift);
+  const panelX = 58;
+  const panelY = 342;
+  const panelW = 366;
+  const panelH = 236;
+
+  drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
+    cut: 16,
+    fill: "rgba(7, 12, 18, 0.58)",
+    stroke: "rgba(255,255,255,0.17)",
+    innerLines: false,
+  });
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText("파츠 접합", panelX + 24, panelY + 34);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "700 11px 'Segoe UI', sans-serif";
+  ctx.fillText("파츠 목록", panelX + 24, panelY + 62);
+
+  ctx.font = "13px 'Segoe UI', sans-serif";
+  if (partInventory.length) {
+    partInventory.slice(0, 3).forEach((part, index) => {
+      const rowY = panelY + 88 + index * 28;
+      ctx.fillStyle = index === 0 ? theme.textMain : theme.textDim;
+      ctx.fillText(part.name || "이름 미확인", panelX + 24, rowY);
+      ctx.fillStyle = theme.textMute;
+      ctx.fillText(`기억 잔류 ${Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0))}`, panelX + 228, rowY);
+    });
+  } else {
+    wrapText(ctx, "탐험에서 팔 파츠를 회수하세요", panelX + 24, panelY + 86, panelW - 48, 19, theme.textDim, "13px 'Segoe UI', sans-serif");
+  }
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "700 11px 'Segoe UI', sans-serif";
+  ctx.fillText("오른팔 슬롯", panelX + 24, panelY + 164);
+
+  ctx.fillStyle = attachedRightArm ? theme.textMain : theme.textDim;
+  ctx.font = "700 14px 'Segoe UI', sans-serif";
+  ctx.fillText(attachedRightArm ? attachedRightArm.name || "이름 미확인" : "기본 프레임", panelX + 24, panelY + 190);
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "13px 'Segoe UI', sans-serif";
+  ctx.fillText(`기억 잔류 ${drift} · 자아 안정도 ${stability}`, panelX + 24, panelY + 214);
+
+  ctx.fillStyle = theme.accent;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText("Q: 선택 파츠 장착   R: 휴식/잔몽 보기", panelX + 24, panelY + 232);
 
   drawArtPanel(ctx, theme, data, "shelterPanel", 458, 88, 732, 520, {
     cut: 24,
@@ -5744,63 +6703,283 @@ function drawTitleSceneV3(ctx, state, data) {
   ctx.fillText("움직임과 HUD 배치를 점검한다.", 82, 640);
 }
 
-function drawShelterSceneV3(ctx, state, data) {
-  const theme = getUiTheme(data);
-  drawScenicBackdrop(ctx, theme, state.pulse * 0.9, 40);
+function drawShelterDreamEventV3(ctx, theme, state) {
+  const dream = state.shelterDreamEvent;
+  if (!dream) {
+    return;
+  }
 
-  drawBeveledPanel(ctx, theme, 58, 70, 366, 228, {
-    fill: "rgba(7, 12, 18, 0.6)",
-    stroke: "rgba(255,255,255,0.18)",
-    glow: true,
+  const x = 430;
+  const y = 500;
+  const width = 520;
+  const height = 164;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 16,
+    fill: "rgba(7, 12, 18, 0.68)",
+    stroke: "rgba(231, 244, 126, 0.24)",
+    innerLines: false,
   });
 
+  ctx.textAlign = "left";
   ctx.fillStyle = theme.accentSecondary;
-  ctx.font = "700 13px 'Segoe UI', sans-serif";
-  ctx.fillText("쉘터", 84, 102);
+  ctx.font = "800 11px 'Segoe UI', sans-serif";
+  ctx.fillText("잔몽", x + 22, y + 28);
 
   ctx.fillStyle = theme.textMain;
-  ctx.font = "700 48px 'Trebuchet MS', sans-serif";
-  ctx.fillText("Type-07A", 82, 160);
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText(dream.title || "잔몽", x + 22, y + 54);
+
+  const lines = Array.isArray(dream.lines) ? dream.lines : [];
+  let cursorY = y + 78;
+  lines.slice(0, 3).forEach((line) => {
+    wrapText(
+      ctx,
+      line,
+      x + 22,
+      cursorY,
+      width - 44,
+      18,
+      theme.textDim,
+      "13px 'Segoe UI', sans-serif",
+    );
+    cursorY += 20;
+  });
+
+  if (dream.clue) {
+    ctx.fillStyle = theme.accent;
+    ctx.font = "700 12px 'Segoe UI', sans-serif";
+    wrapText(ctx, `단서: ${dream.clue}`, x + 22, y + height - 28, width - 44, 16, theme.accent, "12px 'Segoe UI', sans-serif");
+  }
+}
+
+function drawShelterHubBackdrop(ctx, theme, state, data) {
+  const image = getImageAsset(data.art?.shelterHubConcept?.src);
+  if (image && image.complete && image.naturalWidth) {
+    drawImageCover(ctx, image, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 1);
+  } else {
+    drawScenicBackdrop(ctx, theme, state.pulse * 0.9, 40);
+  }
+
+  const shade = ctx.createLinearGradient(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  shade.addColorStop(0, "rgba(4, 9, 14, 0.22)");
+  shade.addColorStop(0.34, "rgba(8, 14, 18, 0.04)");
+  shade.addColorStop(1, "rgba(4, 8, 12, 0.42)");
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const floor = ctx.createLinearGradient(0, 470, 0, SCREEN_HEIGHT);
+  floor.addColorStop(0, "rgba(225, 244, 226, 0)");
+  floor.addColorStop(0.52, "rgba(8, 20, 19, 0.18)");
+  floor.addColorStop(1, "rgba(3, 8, 11, 0.62)");
+  ctx.fillStyle = floor;
+  ctx.fillRect(0, 470, SCREEN_WIDTH, 250);
+
+  ctx.strokeStyle = "rgba(231, 244, 126, 0.14)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(315, 526);
+  ctx.lineTo(778, 494);
+  ctx.lineTo(1072, 540);
+  ctx.stroke();
+}
+
+function drawShelterMenuIcon(ctx, type, x, y, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (type === "parts") {
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y + 6);
+    ctx.lineTo(x + 6, y - 6);
+    ctx.moveTo(x - 7, y - 4);
+    ctx.lineTo(x - 3, y - 8);
+    ctx.lineTo(x + 8, y + 3);
+    ctx.lineTo(x + 4, y + 7);
+    ctx.stroke();
+  } else if (type === "drone") {
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.moveTo(x - 12, y);
+    ctx.lineTo(x - 5, y);
+    ctx.moveTo(x + 5, y);
+    ctx.lineTo(x + 12, y);
+    ctx.moveTo(x, y - 12);
+    ctx.lineTo(x, y - 5);
+    ctx.moveTo(x, y + 5);
+    ctx.lineTo(x, y + 12);
+    ctx.stroke();
+  } else if (type === "log") {
+    ctx.strokeRect(x - 7, y - 9, 14, 18);
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y - 3);
+    ctx.lineTo(x + 4, y - 3);
+    ctx.moveTo(x - 3, y + 3);
+    ctx.lineTo(x + 4, y + 3);
+    ctx.stroke();
+  } else if (type === "rest") {
+    ctx.beginPath();
+    ctx.moveTo(x - 9, y + 6);
+    ctx.lineTo(x + 9, y + 6);
+    ctx.moveTo(x - 8, y + 2);
+    ctx.quadraticCurveTo(x - 2, y - 8, x + 6, y - 3);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(x - 8, y - 7);
+    ctx.lineTo(x + 4, y - 7);
+    ctx.lineTo(x + 4, y + 7);
+    ctx.lineTo(x - 8, y + 7);
+    ctx.moveTo(x + 2, y);
+    ctx.lineTo(x + 12, y);
+    ctx.moveTo(x + 8, y - 4);
+    ctx.lineTo(x + 12, y);
+    ctx.lineTo(x + 8, y + 4);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawShelterMenuV3(ctx, theme) {
+  const x = 30;
+  const y = 40;
+  const width = 238;
+  const height = 318;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: "rgba(9, 18, 24, 0.58)",
+    stroke: "rgba(222, 240, 239, 0.2)",
+    innerLines: false,
+    glow: true,
+  });
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(245,248,251,0.92)";
+  ctx.font = "800 18px 'Segoe UI', sans-serif";
+  ctx.fillText("피난처", x + 20, y + 32);
+
+  const items = [
+    { label: "파츠 접합", icon: "parts", active: true },
+    { label: "드론 관리", icon: "drone" },
+    { label: "기록 확인", icon: "log" },
+    { label: "휴식", icon: "rest" },
+    { label: "밖으로 나가기", icon: "exit" },
+  ];
+  items.forEach((item, index) => {
+    const rowY = y + 56 + index * 47;
+    drawBeveledPanel(ctx, theme, x + 14, rowY, width - 28, 38, {
+      cut: 4,
+      fill: item.active ? "rgba(29, 52, 60, 0.76)" : "rgba(10, 20, 26, 0.44)",
+      stroke: item.active ? "rgba(147, 234, 255, 0.38)" : "rgba(255,255,255,0.12)",
+      innerLines: false,
+      glow: false,
+    });
+    const color = item.active ? theme.accentSecondary : "rgba(228, 239, 235, 0.7)";
+    drawShelterMenuIcon(ctx, item.icon, x + 36, rowY + 19, color);
+    ctx.fillStyle = item.active ? theme.textMain : theme.textDim;
+    ctx.font = "700 14px 'Segoe UI', sans-serif";
+    ctx.fillText(item.label, x + 58, rowY + 24);
+  });
+}
+
+function drawShelterSmallGauge(ctx, theme, label, value, x, y, width) {
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(x, y + 18, width, 7);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.fillRect(x, y + 18, width * clamp(value, 0, 1), 7);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "700 11px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x, y + 10);
+}
+
+function drawShelterPartPanelV3(ctx, theme, state) {
+  const partInventory = Array.isArray(state.meta?.partInventory) ? state.meta.partInventory : [];
+  const attachedParts = Array.isArray(state.meta?.attachedParts) ? state.meta.attachedParts : [];
+  const attachedRightArm = attachedParts.find((part) => part.slot === "rightArm") || null;
+  const drift = attachedParts.reduce((total, part) => total + Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0)), 0);
+  const stability = Math.max(0, 100 - drift);
+  const x = 30;
+  const y = 378;
+  const width = 382;
+  const height = 244;
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: "rgba(7, 13, 18, 0.66)",
+    stroke: "rgba(255,255,255,0.18)",
+    innerLines: false,
+    glow: true,
+  });
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 11px 'Segoe UI', sans-serif";
+  ctx.fillText("REPAIR BAY", x + 22, y + 28);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 20px 'Segoe UI', sans-serif";
+  ctx.fillText("파츠 접합", x + 22, y + 56);
 
   ctx.fillStyle = theme.textDim;
-  ctx.font = "17px 'Segoe UI', sans-serif";
-  ctx.fillText("오퍼레이터 · 동기화 관측", 86, 192);
-  ctx.fillText("필요한 정보만 남긴다.", 86, 224);
-
-  const chipY = 246;
-  const chips = [
-    { x: 82, label: "신뢰", value: String(state.meta.trust) },
-    { x: 176, label: "자재", value: String(state.meta.bankedMaterials) },
-    { x: 270, label: "해금", value: String(state.meta.unlockedAbilities.length) },
-  ];
-
-  chips.forEach((chip) => {
-    drawBeveledPanel(ctx, theme, chip.x, chipY, 74, 42, {
-      cut: 12,
-      fill: "rgba(8, 12, 18, 0.34)",
-      stroke: "rgba(255,255,255,0.12)",
-      innerLines: false,
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText("회수 파츠", x + 22, y + 88);
+  if (partInventory.length) {
+    partInventory.slice(0, 3).forEach((part, index) => {
+      const rowY = y + 114 + index * 28;
+      ctx.fillStyle = index === 0 ? theme.textMain : theme.textDim;
+      ctx.font = "700 13px 'Segoe UI', sans-serif";
+      ctx.fillText(part.name || "이름 미확인", x + 22, rowY);
+      ctx.fillStyle = theme.textMute;
+      ctx.font = "12px 'Segoe UI', sans-serif";
+      ctx.fillText(`기억 잔류 ${Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0))}`, x + 244, rowY);
     });
-    ctx.fillStyle = theme.textMute;
-    ctx.font = "11px 'Segoe UI', sans-serif";
-    ctx.fillText(chip.label, chip.x + 14, chipY + 18);
-    ctx.fillStyle = theme.textMain;
-    ctx.font = "700 15px 'Segoe UI', sans-serif";
-    ctx.fillText(chip.value, chip.x + 14, chipY + 35);
-  });
+  } else {
+    wrapText(ctx, "탐험에서 팔 파츠를 회수하세요", x + 22, y + 112, width - 44, 18, theme.textDim, "13px 'Segoe UI', sans-serif");
+  }
+
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText("오른팔 슬롯", x + 22, y + 180);
+  ctx.fillStyle = attachedRightArm ? theme.textMain : theme.textDim;
+  ctx.font = "800 14px 'Segoe UI', sans-serif";
+  ctx.fillText(attachedRightArm ? attachedRightArm.name || "이름 미확인" : "기본 프레임", x + 114, y + 180);
+
+  drawShelterSmallGauge(ctx, theme, `자아 안정도 ${stability}`, stability / 100, x + 22, y + 198, 154);
+  drawShelterSmallGauge(ctx, theme, `기억 잔류 ${drift}`, drift / 40, x + 204, y + 198, 136);
 
   ctx.fillStyle = theme.accent;
-  ctx.font = "700 16px 'Segoe UI', sans-serif";
-  ctx.fillText("C: 출격", 84, 320);
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText("Q: 장착   R: 휴식/잔몽   C: 출격", x + 22, y + 232);
+}
 
-  drawArtPanel(ctx, theme, data, "shelterPanel", 458, 88, 732, 520, {
-    cut: 24,
-    fill: "rgba(7, 12, 18, 0.24)",
-    stroke: "rgba(255,255,255,0.16)",
-    glow: true,
-    alpha: 0.96,
-    overlay: "rgba(6, 10, 16, 0.08)",
+function drawShelterWorkbenchHudV3(ctx, theme) {
+  drawBeveledPanel(ctx, theme, 430, 390, 334, 82, {
+    cut: 10,
+    fill: "rgba(7, 14, 18, 0.42)",
+    stroke: "rgba(147, 234, 255, 0.18)",
+    innerLines: false,
+    glow: false,
   });
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText("SUNLIT FIELD SHELTER", 452, 418);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "800 15px 'Segoe UI', sans-serif";
+  ctx.fillText("무너진 고층 중간층 수리대", 452, 442);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText("하얀 안개와 식생이 들어오는 임시 거점", 452, 462);
+}
+
+function drawShelterSceneV3(ctx, state, data) {
+  const theme = getUiTheme(data);
+  drawShelterHubBackdrop(ctx, theme, state, data);
+  drawShelterMenuV3(ctx, theme);
+  drawShelterWorkbenchHudV3(ctx, theme);
+  drawShelterPartPanelV3(ctx, theme, state);
+  drawShelterDreamEventV3(ctx, theme, state);
 }
 
 function drawMiniMapV3(ctx, state, data, theme, layout) {

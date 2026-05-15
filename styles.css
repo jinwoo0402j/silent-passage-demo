@@ -295,7 +295,14 @@ body.is-map-overlay-active .debug-button,
 body.is-map-overlay-active .test-debug-button,
 body.is-map-overlay-active .test-debug-panel,
 body.is-map-overlay-active .movement-tuning-button,
-body.is-map-overlay-active .touch-controls {
+body.is-map-overlay-active .touch-controls,
+body.is-inventory-overlay-active .app-links,
+body.is-inventory-overlay-active .live-edit-button,
+body.is-inventory-overlay-active .debug-button,
+body.is-inventory-overlay-active .test-debug-button,
+body.is-inventory-overlay-active .test-debug-panel,
+body.is-inventory-overlay-active .movement-tuning-button,
+body.is-inventory-overlay-active .touch-controls {
   opacity: 0;
   pointer-events: none;
 }

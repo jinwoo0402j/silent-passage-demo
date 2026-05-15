@@ -33,6 +33,9 @@ const DEFAULT_META = {
   bankedMaterials: 0,
   unlockedAbilities: [],
   storyFlags: [],
+  partInventory: [],
+  attachedParts: [],
+  seenDreamIds: [],
   lastOutcome: null,
   completedRuns: 0,
 };
@@ -43,6 +46,21 @@ function clampValue(value, min, max) {
 
 function getCameraConfig(data) {
   return data.world.camera || {};
+}
+
+function getCameraBounds(data, viewportWidth, viewportHeight, config = getCameraConfig(data)) {
+  const verticalSlackRatio = clampValue(config.boundarySlackY ?? 0.5, 0, 1);
+  const horizontalSlackRatio = clampValue(config.boundarySlackX ?? 0, 0, 1);
+  const slackX = viewportWidth * horizontalSlackRatio;
+  const slackY = viewportHeight * verticalSlackRatio;
+  const worldWidth = Math.max(1, data.world?.width ?? viewportWidth);
+  const worldHeight = Math.max(1, data.world?.height ?? viewportHeight);
+  return {
+    minX: -slackX,
+    maxX: Math.max(-slackX, worldWidth - viewportWidth + slackX),
+    minY: -slackY,
+    maxY: Math.max(-slackY, worldHeight - viewportHeight + slackY),
+  };
 }
 
 function createGuardState(definition) {
@@ -136,9 +154,28 @@ function createHostileDroneState(definition) {
 }
 
 function createHumanoidEnemyState(definition) {
+  const defaultParts = {
+    arm: { hp: 40, broken: false, dropPartId: null },
+    leg: { hp: 45, broken: false, dropPartId: null },
+    core: { hp: 80, broken: false, dropPartId: null },
+  };
+  const parts = Object.fromEntries(
+    Object.entries(defaultParts).map(([slot, fallback]) => {
+      const source = definition.parts?.[slot] || {};
+      const hp = Math.max(0, Number(source.hp ?? fallback.hp));
+      return [slot, {
+        hp,
+        maxHp: Math.max(1, Number(source.maxHp ?? source.hp ?? fallback.hp)),
+        broken: Boolean(source.broken ?? fallback.broken),
+        dropPartId: source.dropPartId ?? fallback.dropPartId,
+        dropped: Boolean(source.dropped),
+      }];
+    }),
+  );
   return {
     ...deepClone(definition),
     hp: definition.maxHp ?? 100,
+    parts,
     disableMeter: 0,
     state: definition.disabled ? "disabled" : "patrol",
     active: false,
@@ -331,6 +368,9 @@ export function loadMetaState() {
       bankedMaterials: Number.isFinite(parsed.bankedMaterials) ? parsed.bankedMaterials : DEFAULT_META.bankedMaterials,
       unlockedAbilities: Array.isArray(parsed.unlockedAbilities) ? parsed.unlockedAbilities.map(String) : [],
       storyFlags: Array.isArray(parsed.storyFlags) ? parsed.storyFlags.map(String) : [],
+      partInventory: Array.isArray(parsed.partInventory) ? parsed.partInventory.map((part) => ({ ...part })) : [],
+      attachedParts: Array.isArray(parsed.attachedParts) ? parsed.attachedParts.map((part) => ({ ...part })) : [],
+      seenDreamIds: Array.isArray(parsed.seenDreamIds) ? parsed.seenDreamIds.map(String) : [],
       lastOutcome: parsed.lastOutcome || null,
       completedRuns: Number.isFinite(parsed.completedRuns) ? parsed.completedRuns : 0,
     };
@@ -371,9 +411,86 @@ export function getWeaponModule(data, moduleId) {
   return data.weaponModules?.[moduleId] || null;
 }
 
+export function getPartDefinition(data, partId) {
+  return data.parts?.[partId] || null;
+}
+
+export function getDreamDefinition(data, dreamId) {
+  return data.dreams?.[dreamId] || null;
+}
+
+export function normalizePartInstance(data, partLike) {
+  const definition = typeof partLike === "string" ? getPartDefinition(data, partLike) : getPartDefinition(data, partLike?.id);
+  if (!definition) {
+    return null;
+  }
+  return {
+    ...deepClone(definition),
+    ...(typeof partLike === "object" ? deepClone(partLike) : {}),
+    id: definition.id,
+    name: definition.name,
+    slot: definition.slot,
+    statModifiers: { ...(definition.statModifiers || {}), ...(partLike?.statModifiers || {}) },
+    memoryResidue: Number(partLike?.memoryResidue ?? definition.memoryResidue ?? definition.corruption ?? 0),
+    corruption: Number(partLike?.corruption ?? definition.corruption ?? definition.memoryResidue ?? 0),
+    purified: Boolean(partLike?.purified ?? definition.purified),
+  };
+}
+
+export function ensurePartInventory(meta, data) {
+  meta.partInventory = Array.isArray(meta.partInventory)
+    ? meta.partInventory.map((part) => normalizePartInstance(data, part)).filter(Boolean)
+    : [];
+  meta.attachedParts = Array.isArray(meta.attachedParts)
+    ? meta.attachedParts.map((part) => normalizePartInstance(data, part)).filter(Boolean)
+    : [];
+  meta.seenDreamIds = Array.isArray(meta.seenDreamIds) ? meta.seenDreamIds.map(String) : [];
+  return meta.partInventory;
+}
+
+export function getAttachedPartForSlot(meta, data, slot) {
+  ensurePartInventory(meta, data);
+  return meta.attachedParts.find((part) => part.slot === slot) || null;
+}
+
+export function getAttachedParts(meta, data) {
+  ensurePartInventory(meta, data);
+  return meta.attachedParts;
+}
+
+export function attachPartToSlot(meta, data, partId) {
+  const part = normalizePartInstance(data, partId);
+  if (!part) {
+    return null;
+  }
+  ensurePartInventory(meta, data);
+  if (!meta.partInventory.some((entry) => entry.id === part.id)) {
+    meta.partInventory.push(part);
+  }
+  meta.attachedParts = meta.attachedParts.filter((entry) => entry.slot !== part.slot);
+  meta.attachedParts.push(part);
+  return part;
+}
+
+export function computeMemoryDrift(meta, data) {
+  return getAttachedParts(meta, data).reduce((total, part) => total + Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0)), 0);
+}
+
+export function createIdentityState(meta, data) {
+  const memoryDrift = computeMemoryDrift(meta, data);
+  return {
+    stability: Math.max(0, 100 - memoryDrift),
+    memoryDrift,
+    attachedParts: getAttachedParts(meta, data).map((part) => part.id),
+    seenDreamIds: Array.isArray(meta.seenDreamIds) ? [...meta.seenDreamIds] : [],
+  };
+}
+
 export function computeArmWeaponStats(data, armState = {}) {
   const weapon = getArmWeapon(data, armState.armId) || {};
   const modules = Array.isArray(armState.modules) ? armState.modules.slice(0, 3) : [];
+  const attachedPart = getPartDefinition(data, armState.attachedPartId);
+  const attachedEffects = attachedPart?.statModifiers || {};
   let spreadMultiplier = 1;
   let recoilMultiplier = 1;
   let knockdownMultiplier = 1;
@@ -400,6 +517,17 @@ export function computeArmWeaponStats(data, armState = {}) {
     barrierStrength += Number.isFinite(effects.barrierStrength) ? effects.barrierStrength : 0;
     humanoidDamageBonus += Number.isFinite(effects.humanoidDamageBonus) ? effects.humanoidDamageBonus : 0;
   });
+  if (Number.isFinite(attachedEffects.spreadMultiplier)) {
+    spreadMultiplier *= attachedEffects.spreadMultiplier;
+  }
+  if (Number.isFinite(attachedEffects.recoilMultiplier)) {
+    recoilMultiplier *= attachedEffects.recoilMultiplier;
+  }
+  if (Number.isFinite(attachedEffects.knockdownMultiplier)) {
+    knockdownMultiplier *= attachedEffects.knockdownMultiplier;
+  }
+  magazineBonus += Number.isFinite(attachedEffects.magazineBonus) ? attachedEffects.magazineBonus : 0;
+  humanoidDamageBonus += Number.isFinite(attachedEffects.humanoidDamageBonus) ? attachedEffects.humanoidDamageBonus : 0;
 
   const magazineSize = Math.max(1, Math.floor((weapon.magazineSize ?? 1) + magazineBonus));
   const damage = Math.max(0, Number(weapon.damage ?? 1));
@@ -442,6 +570,10 @@ export function createWeaponLoadoutState(data) {
 
   ARM_SIDES.forEach((side) => {
     const armState = getDefaultArmState(data, side);
+    const attachedPart = getAttachedPartForSlot(data.__meta || {}, data, side === "right" ? "rightArm" : "leftArm");
+    if (attachedPart) {
+      armState.attachedPartId = attachedPart.id;
+    }
     const stats = computeArmWeaponStats(data, armState);
     armState.magazine = Number.isFinite(armState.magazine)
       ? clampValue(Math.floor(armState.magazine), 0, stats.magazineSize)
@@ -501,6 +633,7 @@ export function ensureWeaponLoadoutState(run, data) {
 }
 
 export function createRunState(data, meta) {
+  data.__meta = meta || {};
   const movement = data.player.movement;
   const maxDashCount = Math.max(1, Math.floor(movement.maxDashCount ?? 1));
   const startEntrance = (data.entrances || []).find((entry) => entry.id === "start")
@@ -626,12 +759,11 @@ export function createRunState(data, meta) {
   const cameraZoom = clampValue(cameraConfig.zoom ?? 1, 0.5, 2.5);
   const viewportWidth = CAMERA_SCREEN_WIDTH / cameraZoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / cameraZoom;
-  const maxCameraX = Math.max(0, data.world.width - viewportWidth);
-  const maxCameraY = Math.max(0, data.world.height - viewportHeight);
+  const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, cameraConfig);
   const focusX = cameraConfig.lookAheadEnabled ? (cameraConfig.neutralFocusX ?? 0.5) : CAMERA_FOCUS_X;
   const focusY = cameraConfig.lookAheadEnabled ? (cameraConfig.neutralFocusY ?? 0.5) : CAMERA_FOCUS_Y;
-  const initialCameraX = clampValue(player.x - viewportWidth * focusX, 0, maxCameraX);
-  const initialCameraY = clampValue(player.y - viewportHeight * focusY, 0, maxCameraY);
+  const initialCameraX = clampValue(player.x - viewportWidth * focusX, cameraBounds.minX, cameraBounds.maxX);
+  const initialCameraY = clampValue(player.y - viewportHeight * focusY, cameraBounds.minY, cameraBounds.maxY);
   const levelRuntime = createLevelRuntimeState(data);
   const currentLevelId = data.currentLevelId || data.defaultLevelId || "movement-lab-01";
 
@@ -671,6 +803,9 @@ export function createRunState(data, meta) {
       dragStartPanX: 0,
       dragStartPanY: 0,
     },
+    inventoryOverlay: {
+      active: false,
+    },
     weapons: createWeaponLoadoutState(data),
     player,
     interactables: data.interactables.map((item) => ({
@@ -692,6 +827,8 @@ export function createRunState(data, meta) {
       badge: false,
       items: [],
     },
+    partInventory: ensurePartInventory(meta || {}, data).map((part) => deepClone(part)),
+    identity: createIdentityState(meta || {}, data),
     encounters: {
       guard: createGuardState(data.encounters.find((entry) => entry.id === "guard")),
       ritualist: createRitualistState(data.encounters.find((entry) => entry.id === "ritualist")),
@@ -820,6 +957,7 @@ export function createInitialState(data) {
     debugLastNow: 0,
     debugLastDt: 0,
     statusText: "C: 입장",
+    shelterDreamEvent: null,
     resultSummary: null,
     currentControls: [],
     liveEdit: {

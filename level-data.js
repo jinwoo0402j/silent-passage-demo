@@ -28,6 +28,9 @@ export const GAME_DATA = {
     "faceOffTargetStylized": {
       "src": "./assets/ui/faceoff-target-stylized-v2.png?v=20260426-1"
     },
+    "faceOffKnockdownScene": {
+      "src": "./assets/ui/faceoff-knockdown-scene-v1.png?v=20260514-1"
+    },
     "faceOffFingerGun": {
       "src": "./assets/ui/faceoff-finger-gun.png?v=20260426-1"
     },
@@ -102,6 +105,9 @@ export const GAME_DATA = {
     },
     "shelterPanel": {
       "src": "./assets/ui/type07a-shelter-panel.png"
+    },
+    "shelterHubConcept": {
+      "src": "./assets/concepts/shelter-hub-background-v1.png?v=20260514-1"
     },
     "titlePanel": {
       "src": "./assets/ui/type07a-title-panel.png"
@@ -204,7 +210,10 @@ export const GAME_DATA = {
       "dashAffectsCamera": false,
       "braceAffectsCamera": false,
       "neutralFocusX": 0.5,
-      "neutralFocusY": 0.6,
+      "neutralFocusY": 0.55,
+      "boundarySlackY": 0.55,
+      "playerSafeTopY": 0.28,
+      "playerSafeBottomY": 0.68,
       "walkLookAhead": 0.15,
       "sprintLookAhead": 0.34,
       "sprintJumpLookAhead": 0.34,
@@ -280,7 +289,16 @@ export const GAME_DATA = {
     "targetAimTop": 128,
     "targetAimPivotY": 362,
     "targetAimPanMax": 330,
+    "targetAimAssistX": 704,
     "targetAimAssistY": 386,
+    "sceneArtAssetKey": "faceOffKnockdownScene",
+    "sceneArmFocus": {
+      "x": 704,
+      "y": 462,
+      "width": 166,
+      "height": 118
+    },
+    "recoverablePartId": "watchman-right-arm",
     "targetArtAimHeight": 1160,
     "targetArtAimY": 18,
     "targetArtPanMultiplier": 0.82,
@@ -314,6 +332,10 @@ export const GAME_DATA = {
       "ambushed": "뭐야... 어디서 나타난 거야?",
       "combat": "늦었어. 이미 조준하고 있었어.",
       "knockdown": "살려줘... 반격할 힘도 없어.",
+      "askName": "이름은 흐릿하다. 하지만 비 오는 검문소의 순찰자였다는 감각만 남아 있다.",
+      "recoverPartBlocked": "파츠 신호는 잡히지만, 아직 결속부가 움직이고 있다.",
+      "recoverPart": "손끝에 남아 있던 방향 감각이 조용히 옮겨 왔다.",
+      "dispose": "기억 잔류 신호가 빗물 속으로 낮게 가라앉았다.",
       "dialogue": "말로 끝내고 싶다면 빨리 말해.",
       "threatenSuccess": "알았어. 총 내려놓을게.",
       "threatenFail": "그 협박은 안 통해.",
@@ -339,29 +361,69 @@ export const GAME_DATA = {
     "dialogueOptions": [
       {
         "key": "KeyW",
-        "label": "무장해제해!",
-        "type": "threaten",
-        "baseChance": 0.52,
-        "successEffect": "surrender",
-        "failEffect": "trigger"
+        "label": "이름을 묻는다",
+        "type": "askName",
+        "baseChance": 1,
+        "successEffect": "revealOrigin",
+        "failEffect": null
       },
       {
         "key": "KeyA",
-        "label": "멈춰.",
-        "type": "deescalate",
-        "baseChance": 0.42,
-        "successEffect": "surrender",
-        "failEffect": "trigger"
+        "label": "오른팔을 회수한다",
+        "type": "recoverPart",
+        "baseChance": 1,
+        "successEffect": "recoverPart",
+        "failEffect": null
       },
       {
         "key": "KeyD",
-        "label": "안녕 친구?",
-        "type": "persuade",
-        "baseChance": 0.48,
-        "successEffect": "dealProgress",
-        "failEffect": "trigger"
+        "label": "처분한다",
+        "type": "dispose",
+        "baseChance": 1,
+        "successEffect": "dispose",
+        "failEffect": null
+      },
+      {
+        "key": "KeyS",
+        "label": "물러난다",
+        "type": "backOff",
+        "baseChance": 1,
+        "successEffect": "backOff",
+        "failEffect": null
       }
     ]
+  },
+  "parts": {
+    "watchman-right-arm": {
+      "id": "watchman-right-arm",
+      "name": "순찰자의 오른팔",
+      "slot": "rightArm",
+      "originOwnerId": "rifle-sentry-01",
+      "originLabel": "비 오는 검문소의 순찰자",
+      "dreamId": "dream-watchman-arm",
+      "memoryResidue": 12,
+      "corruption": 12,
+      "purified": false,
+      "statModifiers": {
+        "recoilMultiplier": 0.88,
+        "spreadMultiplier": 0.94,
+        "humanoidDamageBonus": 4
+      },
+      "description": "손끝에 아직 젖은 난간의 감각이 남아 있는 오른팔."
+    }
+  },
+  "dreams": {
+    "dream-watchman-arm": {
+      "id": "dream-watchman-arm",
+      "title": "잔몽: 비 오는 검문소",
+      "lines": [
+        "빗물이 손등을 따라 흘렀다.",
+        "무전기는 같은 문장을 반복하고 있었다.",
+        "누군가를 막아야 한다는 감각만 손끝에 남아 있다.",
+        "하지만 그 사람의 이름은 떠오르지 않는다."
+      ],
+      "clue": "검문소 근처에서 찢어진 명찰을 찾아야 한다."
+    }
   },
   "armWeapons": {
     "shotgun-arm-a": {
@@ -947,6 +1009,22 @@ export const GAME_DATA = {
       "triggerRate": 1,
       "timelineShotDamage": 12,
       "knockdownEnabled": true,
+      "parts": {
+        "arm": {
+          "hp": 40,
+          "broken": false,
+          "dropPartId": null
+        },
+        "leg": {
+          "hp": 45,
+          "broken": false,
+          "dropPartId": null
+        },
+        "core": {
+          "hp": 80,
+          "broken": false
+        }
+      },
       "staggerMax": 100,
       "staggerDecayDelay": 1,
       "staggerDecayRate": 35,
@@ -1002,6 +1080,23 @@ export const GAME_DATA = {
       "escapeDistance": 300,
       "exhaustionLimit": 2,
       "knockdownStaggerDuration": 0.58,
+      "parts": {
+        "arm": {
+          "hp": 36,
+          "broken": false,
+          "dropPartId": "watchman-right-arm"
+        },
+        "leg": {
+          "hp": 45,
+          "broken": false,
+          "dropPartId": null
+        },
+        "core": {
+          "hp": 80,
+          "broken": false,
+          "dropPartId": null
+        }
+      },
       "patrol": {
         "left": 1960,
         "right": 2180

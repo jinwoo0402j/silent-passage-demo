@@ -137,6 +137,9 @@ function clearTransientRunState(run) {
     rareSignalTimer: 0,
     lastRarity: null,
   };
+  run.inventoryOverlay = {
+    active: false,
+  };
   if (run.faceOff) {
     run.faceOff.active = false;
     run.faceOff.targetId = null;
@@ -173,6 +176,8 @@ function captureRunForSave(run) {
     map: clonePlain(run.map || {}, {}),
     mapOverlay: normalizeMapOverlayForSave(run.mapOverlay),
     weapons: clonePlain(run.weapons || {}, {}),
+    partInventory: clonePlain(run.partInventory || [], []),
+    identity: clonePlain(run.identity || {}, {}),
     lootInventory: clonePlain(run.lootInventory || [], []),
     inventory: clonePlain(run.inventory || {}, {}),
     clueLog: clonePlain(run.clueLog || [], []),
@@ -213,6 +218,8 @@ function applyRunSnapshot(run, snapshot) {
   run.map = clonePlain(snapshot.map || run.map || {}, run.map || {});
   run.mapOverlay = normalizeMapOverlayForSave(snapshot.mapOverlay || {});
   run.weapons = clonePlain(snapshot.weapons || run.weapons || {}, run.weapons || {});
+  run.partInventory = clonePlain(snapshot.partInventory || run.partInventory || [], []);
+  run.identity = clonePlain(snapshot.identity || run.identity || {}, run.identity || {});
   run.lootInventory = clonePlain(snapshot.lootInventory || [], []);
   run.inventory = clonePlain(snapshot.inventory || {}, {});
   run.clueLog = clonePlain(snapshot.clueLog || [], []);

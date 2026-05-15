@@ -1,13 +1,20 @@
 import {
   MOVEMENT_STATES,
   SCENES,
+  attachPartToSlot,
+  computeMemoryDrift,
   computeArmWeaponStats,
   createLevelRuntimeState,
   createRunState,
   ensureWeaponLoadoutState,
+  ensurePartInventory,
+  getAttachedParts,
+  getDreamDefinition,
+  getPartDefinition,
+  normalizePartInstance,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260507-slope-slide-physics-v1";
+} from "./state.js?v=20260514-camera-center-v3";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260507-slope-slide-physics-v1";
 import {
   clearSavedGame,
@@ -17,7 +24,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260505-level-source-v2";
+} from "./save-game.js?v=20260514-camera-center-v3";
 import {
   approach,
   clamp,
@@ -67,14 +74,15 @@ const ARM_SWITCH_KEYS = ["ShiftLeft", "ShiftRight"];
 const RELOAD_KEYS = ["KeyR"];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
+const INVENTORY_KEYS = ["Tab"];
+const INVENTORY_CLOSE_KEYS = ["Tab", "Escape"];
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
 const FACE_OFF_ENTRY_KEYS = ["KeyE"];
-const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD"];
+const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyS", "KeyD"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
-const FACE_OFF_RELEASE_KEY = "KeyQ";
 const HUMANOID_RESOLVED_STATES = new Set(["disabled", "surrendered", "dealt", "released", "escaped", "dead"]);
-const HUMANOID_RESOLVED_OUTCOMES = new Set(["kill", "disable", "surrender", "deal", "release", "escape"]);
+const HUMANOID_RESOLVED_OUTCOMES = new Set(["kill", "disable", "surrender", "deal", "release", "escape", "dispose"]);
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
   && (
     window.__SILENT_PASSAGE_PERF === "lite" ||
@@ -239,6 +247,20 @@ function clearTransientMapInput(state) {
   }
 }
 
+function ensureRunInventoryOverlay(run) {
+  run.inventoryOverlay = run.inventoryOverlay || {};
+  run.inventoryOverlay.active = Boolean(run.inventoryOverlay.active);
+  return run.inventoryOverlay;
+}
+
+function clearTransientOverlayInput(state) {
+  state.justPressed.clear();
+  if (state.mouse) {
+    state.mouse.primaryJustPressed = false;
+    state.mouse.secondaryJustPressed = false;
+  }
+}
+
 function isMapOverlayBlocked(state, run) {
   return state.scene !== SCENES.EXPEDITION
     || state.liveEdit?.active
@@ -283,6 +305,9 @@ function updateMapOverlayInput(state, data) {
 
   if (consumeEitherPress(state, MAP_KEYS)) {
     run.mapOverlay.active = true;
+    if (run.inventoryOverlay) {
+      run.inventoryOverlay.active = false;
+    }
     run.mapOverlay.dragging = false;
     run.mapOverlay.dragPointerId = null;
     clearTransientMapInput(state);
@@ -292,6 +317,62 @@ function updateMapOverlayInput(state, data) {
     }
     run.player.recoilFocusActive = false;
     setStatus(state, "Map");
+    return true;
+  }
+
+  return false;
+}
+
+function isInventoryOverlayBlocked(state, run) {
+  return state.scene !== SCENES.EXPEDITION
+    || state.liveEdit?.active
+    || run?.faceOff?.active
+    || run?.loot?.active;
+}
+
+function updateInventoryOverlayInput(state, data) {
+  const run = state.run;
+  if (!run) {
+    return false;
+  }
+  const overlay = ensureRunInventoryOverlay(run);
+
+  if (isInventoryOverlayBlocked(state, run)) {
+    overlay.active = false;
+    return false;
+  }
+
+  if (overlay.active) {
+    if (consumeEitherPress(state, INVENTORY_CLOSE_KEYS)) {
+      overlay.active = false;
+      clearTransientOverlayInput(state);
+      setStatus(state, "Inventory closed");
+      return true;
+    }
+    clearTransientOverlayInput(state);
+    if (run.recoilAim) {
+      run.recoilAim.active = false;
+      run.recoilAim.aiming = false;
+    }
+    run.player.recoilFocusActive = false;
+    setStatus(state, "Inventory");
+    return true;
+  }
+
+  if (consumeEitherPress(state, INVENTORY_KEYS)) {
+    overlay.active = true;
+    if (run.mapOverlay) {
+      run.mapOverlay.active = false;
+      run.mapOverlay.dragging = false;
+      run.mapOverlay.dragPointerId = null;
+    }
+    clearTransientOverlayInput(state);
+    if (run.recoilAim) {
+      run.recoilAim.active = false;
+      run.recoilAim.aiming = false;
+    }
+    run.player.recoilFocusActive = false;
+    setStatus(state, "Inventory");
     return true;
   }
 
@@ -535,6 +616,34 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
 
 function getCameraConfig(data) {
   return data.world.camera || {};
+}
+
+function getCameraBounds(data, viewportWidth, viewportHeight, config = getCameraConfig(data)) {
+  const verticalSlackRatio = clamp(config.boundarySlackY ?? 0.5, 0, 1);
+  const horizontalSlackRatio = clamp(config.boundarySlackX ?? 0, 0, 1);
+  const slackX = viewportWidth * horizontalSlackRatio;
+  const slackY = viewportHeight * verticalSlackRatio;
+  const worldWidth = Math.max(1, data.world?.width ?? viewportWidth);
+  const worldHeight = Math.max(1, data.world?.height ?? viewportHeight);
+  return {
+    minX: -slackX,
+    maxX: Math.max(-slackX, worldWidth - viewportWidth + slackX),
+    minY: -slackY,
+    maxY: Math.max(-slackY, worldHeight - viewportHeight + slackY),
+  };
+}
+
+function keepPlayerInsideCameraSafeBand(run, data, viewportHeight, cameraBounds) {
+  const config = getCameraConfig(data);
+  const playerCenterY = run.player.y + run.player.height * 0.5;
+  const safeTop = viewportHeight * clamp(config.playerSafeTopY ?? 0.28, 0.05, 0.9);
+  const safeBottom = viewportHeight * clamp(config.playerSafeBottomY ?? 0.68, 0.1, 0.95);
+  const relativeY = playerCenterY - run.cameraY;
+  if (relativeY > safeBottom) {
+    run.cameraY = clamp(playerCenterY - safeBottom, cameraBounds.minY, cameraBounds.maxY);
+  } else if (relativeY < safeTop) {
+    run.cameraY = clamp(playerCenterY - safeTop, cameraBounds.minY, cameraBounds.maxY);
+  }
 }
 
 function isBraceCameraState(player) {
@@ -877,8 +986,7 @@ function syncCamera(run, data, dt) {
     const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
     const targetX = run.player.x - viewportWidth * CAMERA_FOCUS_X;
     const targetY = run.player.y - viewportHeight * CAMERA_FOCUS_Y;
-    const maxX = Math.max(0, data.world.width - viewportWidth);
-    const maxY = Math.max(0, data.world.height - viewportHeight);
+    const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
     run.cameraZoom = zoom;
     run.cameraFocusX = CAMERA_FOCUS_X;
     run.cameraFocusY = CAMERA_FOCUS_Y;
@@ -887,8 +995,9 @@ function syncCamera(run, data, dt) {
     run.cameraTargetZoom = zoom;
     run.cameraLookAhead = 0;
     run.cameraSpeedRatio = 0;
-    run.cameraX = clamp(lerp(run.cameraX, targetX, Math.min(1, dt * 4.5)), 0, maxX);
-    run.cameraY = clamp(lerp(run.cameraY, targetY, Math.min(1, dt * 4.5)), 0, maxY);
+    run.cameraX = clamp(lerp(run.cameraX, targetX, Math.min(1, dt * 4.5)), cameraBounds.minX, cameraBounds.maxX);
+    run.cameraY = clamp(lerp(run.cameraY, targetY, Math.min(1, dt * 4.5)), cameraBounds.minY, cameraBounds.maxY);
+    keepPlayerInsideCameraSafeBand(run, data, viewportHeight, cameraBounds);
     return;
   }
 
@@ -960,15 +1069,15 @@ function syncCamera(run, data, dt) {
   const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
   const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
   const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
-  const maxX = Math.max(0, data.world.width - viewportWidth);
-  const maxY = Math.max(0, data.world.height - viewportHeight);
+  const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   run.cameraTargetZoom = targetZoom;
   run.cameraLookAhead = lookAhead;
   run.cameraSpeedRatio = speedZoom.ratio;
-  run.cameraX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
-  run.cameraY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
+  run.cameraX = clamp(lerp(run.cameraX, targetX, focusLerp), cameraBounds.minX, cameraBounds.maxX);
+  run.cameraY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), cameraBounds.minY, cameraBounds.maxY);
+  keepPlayerInsideCameraSafeBand(run, data, viewportHeight, cameraBounds);
 }
 
 function getFaceOffCameraTarget(run) {
@@ -989,29 +1098,29 @@ function lockCameraToFaceOffTarget(run, data, dt = 0, instant = true) {
     return;
   }
 
-  const zoom = clamp(run.cameraZoom ?? getCameraConfig(data).zoom ?? 1, 0.5, 2.5);
+  const config = getCameraConfig(data);
+  const zoom = clamp(run.cameraZoom ?? config.zoom ?? 1, 0.5, 2.5);
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
   const focusX = 0.5;
   const focusY = 0.48;
   const targetX = target.x + target.width * 0.5 - viewportWidth * focusX;
   const targetY = target.y + target.height * 0.42 - viewportHeight * focusY;
-  const maxX = Math.max(0, data.world.width - viewportWidth);
-  const maxY = Math.max(0, data.world.height - viewportHeight);
+  const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
 
   run.cameraFocusX = focusX;
   run.cameraFocusY = focusY;
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   if (instant) {
-    run.cameraX = clamp(targetX, 0, maxX);
-    run.cameraY = clamp(targetY, 0, maxY);
+    run.cameraX = clamp(targetX, cameraBounds.minX, cameraBounds.maxX);
+    run.cameraY = clamp(targetY, cameraBounds.minY, cameraBounds.maxY);
     return;
   }
 
   const cameraPull = Math.min(1, dt * (getFaceOffConfig(data).aimCameraPull ?? 5.5));
-  run.cameraX = clamp(lerp(run.cameraX, targetX, cameraPull), 0, maxX);
-  run.cameraY = clamp(lerp(run.cameraY, targetY, cameraPull), 0, maxY);
+  run.cameraX = clamp(lerp(run.cameraX, targetX, cameraPull), cameraBounds.minX, cameraBounds.maxX);
+  run.cameraY = clamp(lerp(run.cameraY, targetY, cameraPull), cameraBounds.minY, cameraBounds.maxY);
 }
 
 function getMovementConfig(data) {
@@ -2035,6 +2144,114 @@ function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback) {
   faceOff.choicesReady = false;
 }
 
+function mapFaceOffPartToHumanoidPart(partId) {
+  if (partId === "leftArm" || partId === "rightArm" || partId === "arm") {
+    return "arm";
+  }
+  if (partId === "leftLeg" || partId === "rightLeg" || partId === "leg") {
+    return "leg";
+  }
+  return "core";
+}
+
+function createPartDropInteractable(run, data, enemy, partId) {
+  const part = getPartDefinition(data, partId);
+  if (!part || (run.interactables || []).some((item) => item.kind === "partDrop" && item.partId === part.id)) {
+    return null;
+  }
+  const drop = {
+    id: `${enemy.id}-${part.id}-drop`,
+    kind: "partDrop",
+    partId: part.id,
+    x: enemy.x + enemy.width * 0.5 - 18,
+    y: enemy.y + enemy.height - 28,
+    width: 36,
+    height: 32,
+    prompt: "E: 파츠 회수",
+    label: "이름 미확인",
+    clue: `${part.name} 회수. 기억 잔류 감지.`,
+    used: false,
+  };
+  run.interactables.push(drop);
+  spawnParticles(run, drop.x + drop.width * 0.5, drop.y + 10, 16, "#dff7ee");
+  pushNotice(run, "파츠 회수 신호 감지. 기억 잔류가 남아 있다.");
+  return drop;
+}
+
+function createShelterReturnInteractable(run, item) {
+  if (!run || !item) {
+    return null;
+  }
+  const existing = (run.interactables || []).find((entry) => entry.kind === "shelterReturn" && !entry.used);
+  if (existing) {
+    return existing;
+  }
+  const signal = {
+    id: `${item.id}-shelter-return`,
+    kind: "shelterReturn",
+    x: item.x + 30,
+    y: Math.max(0, item.y - 8),
+    width: 44,
+    height: 44,
+    prompt: "E: 쉘터 복귀",
+    label: "쉘터 복귀 신호",
+    clue: "회수한 파츠를 들고 임시 거점으로 돌아갈 수 있다.",
+    used: false,
+  };
+  run.interactables.push(signal);
+  spawnParticles(run, signal.x + signal.width / 2, signal.y + signal.height / 2, 14, "#93eaff");
+  pushNotice(run, "쉘터 복귀 신호가 켜졌다.");
+  return signal;
+}
+
+function registerRecoveredPart(state, partId, anchorItem = null) {
+  const run = state.run;
+  const part = normalizePartInstance(state.data, partId);
+  if (!run || !part) {
+    return null;
+  }
+  ensurePartInventory(state.meta, state.data);
+  if (!state.meta.partInventory.some((entry) => entry.id === part.id)) {
+    state.meta.partInventory.push(part);
+  }
+  run.partInventory = Array.isArray(run.partInventory) ? run.partInventory : [];
+  if (!run.partInventory.some((entry) => entry.id === part.id)) {
+    run.partInventory.push(part);
+  }
+  saveMetaState(state.meta);
+  pushClue(run, `part-${part.id}`, `${part.originLabel || "이름 미확인"} · 기억 잔류 감지 · ${part.memoryResidue ?? 0}`);
+  const dream = part.dreamId ? getDreamDefinition(state.data, part.dreamId) : null;
+  if (dream?.title) {
+    pushNotice(run, `${dream.title}`);
+  }
+  if (anchorItem) {
+    spawnParticles(run, anchorItem.x + anchorItem.width / 2, anchorItem.y + anchorItem.height / 2, 18, "#dff7ee");
+    createShelterReturnInteractable(run, anchorItem);
+  }
+  pushNotice(run, `파츠 보유: ${part.name} · 기억 잔류 ${part.memoryResidue ?? 0} · E: 쉘터 복귀`, 5.2);
+  return part;
+}
+
+function applyHumanoidPartDamage(run, data, enemy, partKey, damage, options = {}) {
+  const parts = enemy?.parts || {};
+  const part = parts[partKey];
+  if (!part || part.broken) {
+    return false;
+  }
+  part.hp = Math.max(0, Number(part.hp ?? 0) - Math.max(0, damage));
+  if (part.hp > 0) {
+    return false;
+  }
+  part.broken = true;
+  enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.28);
+  spawnDamageNumber(run, enemy.x + enemy.width * 0.52, enemy.y + enemy.height * 0.32, 0, "#dff7ee", partKey === "arm" ? "ARM TRACE" : "BROKEN");
+  if (part.dropPartId && !part.dropped && !options.deferDrop) {
+    part.dropped = true;
+    createPartDropInteractable(run, data, enemy, part.dropPartId);
+  }
+  return true;
+}
+
 function playFaceOffBeep(faceOff) {
   if (typeof window === "undefined") {
     return;
@@ -2204,7 +2421,7 @@ function enterFaceOff(run, data, enemy, state) {
   faceOff.active = true;
   faceOff.targetId = enemy.id;
   faceOff.hoverPart = null;
-  faceOff.selectedPart = "torso";
+  faceOff.selectedPart = "rightArm";
   faceOff.selectedDialogueKey = "KeyW";
   faceOff.acquireTargetId = enemy.id;
   faceOff.acquireTimer = getFaceOffConfig(data).acquireDuration ?? 1;
@@ -2217,7 +2434,7 @@ function enterFaceOff(run, data, enemy, state) {
   faceOff.cursorAssistTimer = faceOff.cursorAssistDuration;
   faceOff.cursorAssistStartX = state.mouse?.screenX ?? CAMERA_SCREEN_WIDTH / 2;
   faceOff.cursorAssistStartY = state.mouse?.screenY ?? CAMERA_SCREEN_HEIGHT / 2;
-  faceOff.cursorAssistTargetX = CAMERA_SCREEN_WIDTH / 2;
+  faceOff.cursorAssistTargetX = getFaceOffConfig(data).targetAimAssistX ?? Math.round(CAMERA_SCREEN_WIDTH * 0.55);
   faceOff.cursorAssistTargetY = getFaceOffConfig(data).targetAimAssistY ?? 386;
   faceOff.timeline = 0;
   faceOff.triggerLimit = getFaceOffConfig(data).triggerLimit ?? 4.5;
@@ -2299,6 +2516,12 @@ function finishFaceOff(run, enemy, result, message) {
     enemy.state = "released";
     enemy.escapeTargetX = null;
     pushNotice(run, "Face-off: released.");
+  } else if (result === "dispose") {
+    enemy.disposed = true;
+    enemy.dead = true;
+    enemy.state = "dead";
+    enemy.active = false;
+    pushNotice(run, "처분 완료. 파츠는 회수하지 않았다.");
   }
 }
 
@@ -2311,6 +2534,16 @@ function getFaceOffAimPan(data, mouseY, screenHeight = CAMERA_SCREEN_HEIGHT) {
 
 function getFaceOffTargetZones(data, mouseY, screenWidth = CAMERA_SCREEN_WIDTH, screenHeight = CAMERA_SCREEN_HEIGHT) {
   const config = getFaceOffConfig(data);
+  if (config.sceneArmFocus) {
+    const focus = config.sceneArmFocus;
+    const armWidth = Number(focus.width ?? 166);
+    const armHeight = Number(focus.height ?? 118);
+    const armX = Number(focus.x ?? screenWidth * 0.55) - armWidth / 2;
+    const armY = Number(focus.y ?? screenHeight * 0.64) - armHeight / 2;
+    return [
+      { id: "rightArm", x: armX, y: armY, width: armWidth, height: armHeight },
+    ];
+  }
   const scale = config.targetAimScale ?? 1.62;
   const cx = screenWidth / 2;
   const top = (config.targetAimTop ?? 128) - getFaceOffAimPan(data, mouseY, screenHeight);
@@ -2346,7 +2579,127 @@ function getFaceOffPartAtMouse(state, data) {
   return hit && parts.some((part) => part.id === hit.id) ? hit.id : null;
 }
 
+function getFaceOffRecoverablePartId(data, enemy) {
+  return enemy?.parts?.arm?.dropPartId || getFaceOffConfig(data).recoverablePartId || "watchman-right-arm";
+}
+
+function createFaceOffRecoveryAnchor(enemy, partId) {
+  return {
+    id: `${enemy.id}-${partId}-faceoff-recovery`,
+    kind: "faceOffPartRecovery",
+    x: enemy.x + enemy.width * 0.5 - 22,
+    y: enemy.y + enemy.height * 0.58 - 22,
+    width: 44,
+    height: 44,
+    used: false,
+  };
+}
+
+function isFaceOffArmRecoverable(enemy) {
+  const arm = enemy?.parts?.arm;
+  return Boolean(arm?.broken || Number(arm?.hp ?? 1) <= 0);
+}
+
+function askFaceOffTargetName(run, data, enemy) {
+  if (!run?.faceOff) {
+    return;
+  }
+  run.faceOff.message = "이름 미확인 · 비 오는 검문소의 순찰자";
+  setFaceOffEnemyLine(
+    run,
+    data,
+    "dialogue",
+    "askName",
+    "이름은 흐릿하다. 하지만 비 오는 검문소의 순찰자였다는 감각만 남아 있다.",
+  );
+  pushClue(run, `${enemy.id}-origin`, "이름 미확인 · 비 오는 검문소의 순찰자 · 기억 잔류 감지");
+}
+
+function recoverFaceOffRightArmPart(state, data, enemy) {
+  const run = state.run;
+  const faceOff = run?.faceOff;
+  if (!faceOff || !enemy) {
+    return false;
+  }
+  const partId = getFaceOffRecoverablePartId(data, enemy);
+  const partDefinition = getPartDefinition(data, partId);
+  if (!partDefinition) {
+    faceOff.message = "회수 가능한 파츠가 없다.";
+    return false;
+  }
+  if (!isFaceOffArmRecoverable(enemy)) {
+    faceOff.selectedPart = "rightArm";
+    faceOff.message = "오른팔을 먼저 무력화해야 한다.";
+    setFaceOffEnemyLine(
+      run,
+      data,
+      "dialogue",
+      "recoverPartBlocked",
+      "파츠 신호는 잡히지만, 아직 결속부가 움직이고 있다.",
+    );
+    return false;
+  }
+
+  enemy.parts = enemy.parts || {};
+  enemy.parts.arm = enemy.parts.arm || { hp: 0, broken: false, dropPartId: partId };
+  enemy.parts.arm.hp = 0;
+  enemy.parts.arm.broken = true;
+  enemy.parts.arm.dropped = true;
+  enemy.parts.arm.dropPartId = partId;
+  enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.28);
+
+  const anchor = createFaceOffRecoveryAnchor(enemy, partId);
+  const part = registerRecoveredPart(state, partId, anchor);
+  if (!part) {
+    faceOff.message = "회수 가능한 파츠가 없다.";
+    return false;
+  }
+
+  setFaceOffEnemyLine(
+    run,
+    data,
+    "dialogue",
+    "recoverPart",
+    "손끝에 남아 있던 방향 감각이 조용히 옮겨 왔다.",
+  );
+  finishFaceOff(run, enemy, "disable", "파츠 회수 완료");
+  closeFaceOff(run, "파츠 회수 완료");
+  return true;
+}
+
+function disposeFaceOffTarget(run, data, enemy) {
+  if (!run?.faceOff || !enemy) {
+    return;
+  }
+  if (enemy.parts?.arm) {
+    enemy.parts.arm.dropped = true;
+  }
+  setFaceOffEnemyLine(
+    run,
+    data,
+    "dialogue",
+    "dispose",
+    "기억 잔류 신호가 빗물 속으로 낮게 가라앉았다.",
+  );
+  finishFaceOff(run, enemy, "dispose", "처분 완료 · 파츠 미회수");
+  closeFaceOff(run, "처분 완료 · 파츠 미회수");
+}
+
+function backOffFaceOff(run, enemy) {
+  if (!run?.faceOff || !enemy) {
+    return;
+  }
+  enemy.state = "knockedDown";
+  enemy.active = false;
+  enemy.trigger = 0;
+  closeFaceOff(run, "물러났다.");
+  pushNotice(run, "잠시 물러났다. E로 다시 조사할 수 있다.", 2.4);
+}
+
 function getDialogueChance(enemy, option) {
+  if (["askName", "recoverPart", "dispose", "backOff"].includes(option.type)) {
+    return 1;
+  }
   const social = enemy.social || {};
   const resolve = Number(social.resolve ?? 0.5);
   const fear = Number(social.fear ?? 0.5);
@@ -2390,6 +2743,13 @@ function applyFaceOffAttack(run, data, enemy) {
   if (!part) {
     return;
   }
+  const humanoidPartKey = mapFaceOffPartToHumanoidPart(part.id);
+  const targetHumanoidPart = enemy?.parts?.[humanoidPartKey];
+  if (humanoidPartKey === "arm" && targetHumanoidPart?.broken) {
+    faceOff.message = "오른팔 파츠 회수 가능 · A";
+    setFaceOffEnemyLine(run, data, "knockdown", "recoverPart", "손끝에 남아 있던 힘은 이미 풀려 있다.");
+    return;
+  }
 
   weaponContext.arm.magazine = Math.max(0, Math.floor(weaponContext.arm.magazine ?? 0) - 1);
   weaponContext.arm.fireCooldownTimer = weaponContext.stats.fireCooldown;
@@ -2397,6 +2757,9 @@ function applyFaceOffAttack(run, data, enemy) {
 
   const weaponDamageScale = weaponContext.stats.type === "shotgun" ? 1 : 0.58;
   const partDamage = Math.max(0, Number(part.damage ?? 0)) * weaponDamageScale;
+  const brokePart = humanoidPartKey === "arm"
+    ? applyHumanoidPartDamage(run, data, enemy, humanoidPartKey, Math.max(12, partDamage), { deferDrop: true })
+    : false;
   const lethalPart = part.id === "head" || (part.id === "torso" && weaponContext.stats.type === "shotgun") || partDamage >= 50;
   enemy.disableMeter = Math.max(0, (enemy.disableMeter ?? 0) + (part.disable ?? 0) * Math.max(0.25, weaponContext.stats.knockdownPower ?? 1));
   enemy.hitFlash = 0.18;
@@ -2405,6 +2768,12 @@ function applyFaceOffAttack(run, data, enemy) {
   setFaceOffEnemyLine(run, data, "knockdown", "hit", "윽...!");
   spawnParticles(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.45, 8, "#ffd6ba");
 
+  if (brokePart) {
+    setFaceOffEnemyLine(run, data, "knockdown", "hit", "손끝에 남아 있던 힘이 풀렸다.");
+    faceOff.selectedPart = "rightArm";
+    faceOff.message = "오른팔 파츠 회수 가능 · A";
+    return;
+  }
   if (lethalPart) {
     enemy.hp = 0;
     finishFaceOff(run, enemy, "kill", "kill");
@@ -2417,10 +2786,29 @@ function applyFaceOffAttack(run, data, enemy) {
   faceOff.message = `${part.label}: hit`;
 }
 
-function applyFaceOffDialogue(run, data, enemy, option) {
+function applyFaceOffDialogue(state, data, enemy, option) {
+  const run = state.run;
   const faceOff = run.faceOff;
-  const chance = getDialogueChance(enemy, option);
   faceOff.selectedDialogueKey = option.key;
+
+  if (option.type === "askName") {
+    askFaceOffTargetName(run, data, enemy);
+    return;
+  }
+  if (option.type === "recoverPart") {
+    recoverFaceOffRightArmPart(state, data, enemy);
+    return;
+  }
+  if (option.type === "dispose") {
+    disposeFaceOffTarget(run, data, enemy);
+    return;
+  }
+  if (option.type === "backOff") {
+    backOffFaceOff(run, enemy);
+    return;
+  }
+
+  const chance = getDialogueChance(enemy, option);
   setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "말로 끝내고 싶다면 빨리 말해.");
 
   if (Math.random() <= chance) {
@@ -2493,7 +2881,13 @@ function updateFaceOffArmSelection(run, data, state) {
 function updateFaceOffWeaponRuntime(run, data, state, dt) {
   updateFaceOffArmSelection(run, data, state);
   if (consumeEitherPress(state, RELOAD_KEYS)) {
-    startReloadSelectedArm(run, data);
+    const didStartReload = startReloadSelectedArm(run, data);
+    const context = getSelectedArmContext(run, data);
+    if (run.faceOff?.active) {
+      run.faceOff.message = didStartReload
+        ? `${context.stats.label} 재장전 중`
+        : run.message;
+    }
   }
   updateWeaponTimers(run, data, dt);
 }
@@ -2554,18 +2948,13 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
   faceOff.timeline = 0;
   enemy.trigger = 0;
 
-  if (consumePress(state, FACE_OFF_RELEASE_KEY)) {
-    finishFaceOff(run, enemy, "release", "release");
-    return true;
-  }
-
   if (!faceOff.choicesReady) {
     const pressedDialogueKey = FACE_OFF_DIALOGUE_KEYS.find((key) => consumePress(state, key));
     if (pressedDialogueKey) {
       revealFaceOffChoicesNow(faceOff);
       const option = getFaceOffDialogueOptions(data).find((entry) => entry.key === pressedDialogueKey);
       if (option) {
-        applyFaceOffDialogue(run, data, enemy, option);
+        applyFaceOffDialogue(state, data, enemy, option);
       }
     }
   } else {
@@ -2573,13 +2962,14 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
       if (consumePress(state, key)) {
         const option = getFaceOffDialogueOptions(data).find((entry) => entry.key === key);
         if (option) {
-          applyFaceOffDialogue(run, data, enemy, option);
+          applyFaceOffDialogue(state, data, enemy, option);
         }
       }
     }
   }
 
   if (state.mouse?.primaryJustPressed) {
+    faceOff.selectedPart = faceOff.hoverPart || "rightArm";
     applyFaceOffAttack(run, data, enemy);
   }
   if (state.mouse) {
@@ -2796,21 +3186,21 @@ function startReloadSelectedArm(run, data) {
   const reserve = getReserveAmmo(context);
   const currentMagazine = Math.max(0, Math.floor(context.arm.magazine ?? 0));
   if ((context.arm.reloadTimer ?? 0) > 0) {
-    pushNotice(run, `${context.stats.label} reloading`, 1.2);
+    pushNotice(run, `${context.stats.label} 재장전 중`, 1.2);
     return false;
   }
   if (currentMagazine >= context.stats.magazineSize) {
-    pushNotice(run, `${context.stats.label} magazine full`, 1.2);
+    pushNotice(run, `${context.stats.label} 탄창이 가득 찼다`, 1.2);
     return false;
   }
   if (reserve <= 0) {
-    pushNotice(run, `No ${context.stats.ammoType} reserve`, 1.2);
+    pushNotice(run, `${context.stats.ammoType.toUpperCase()} 예비탄 없음`, 1.2);
     return false;
   }
 
   context.arm.reloadTimer = context.stats.reloadDuration;
   context.arm.reloadDuration = context.stats.reloadDuration;
-  pushNotice(run, `Reloading ${context.stats.label}`, 1.2);
+  pushNotice(run, `${context.stats.label} 재장전 중`, 1.2);
   return true;
 }
 
@@ -3294,6 +3684,9 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
     enemy.active = true;
     enemy.state = enemy.state === "patrol" ? "combat" : enemy.state;
     enemy.hp = Math.max(0, (enemy.hp ?? enemy.maxHp ?? 100) - damage);
+    if (hit.part === "leftArm" || hit.part === "rightArm") {
+      applyHumanoidPartDamage(run, data, enemy, "arm", Math.max(8, damage * 0.65));
+    }
     enemy.hitFlash = critical ? 0.32 : 0.2;
     enemy.trigger = 0;
     spawnDamageNumber(
@@ -6448,6 +6841,44 @@ function collectLootItem(run, crate, item) {
   return true;
 }
 
+function collectPartDrop(state, item) {
+  const run = state.run;
+  if (!run || !item?.partId || item.used) {
+    return false;
+  }
+  const part = registerRecoveredPart(state, item.partId, item);
+  if (!part) {
+    return false;
+  }
+  item.used = true;
+  return true;
+}
+
+function returnToShelterFromExpedition(state, item) {
+  const run = state.run;
+  if (item) {
+    item.used = true;
+  }
+  if (run) {
+    run.prompt = "";
+    run.promptWorld = null;
+    if (run.faceOff) {
+      run.faceOff.active = false;
+      run.faceOff.targetId = null;
+    }
+  }
+  saveMetaState(state.meta);
+  clearSavedGame();
+  state.save = state.save || {};
+  state.save.hasRun = false;
+  state.save.lastSavedAt = null;
+  state.run = null;
+  state.resultSummary = null;
+  state.scene = SCENES.SHELTER;
+  state.sceneTimer = 0;
+  setStatus(state, "쉘터 복귀 · 회수한 파츠를 확인하세요.");
+}
+
 function updateLootLockedPlayer(run, dt) {
   const player = run.player;
   player.attackCooldown = Math.max(0, player.attackCooldown - dt);
@@ -6958,14 +7389,13 @@ function snapCameraToPlayer(run, data) {
   const focusY = config.lookAheadEnabled ? (config.neutralFocusY ?? 0.5) : CAMERA_FOCUS_Y;
   const targetX = run.player.x + run.player.width * 0.5 - viewportWidth * focusX;
   const targetY = run.player.y + run.player.height * 0.5 - viewportHeight * focusY;
-  const maxX = Math.max(0, data.world.width - viewportWidth);
-  const maxY = Math.max(0, data.world.height - viewportHeight);
+  const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
 
   run.cameraZoom = zoom;
   run.cameraFocusX = focusX;
   run.cameraFocusY = focusY;
-  run.cameraX = clamp(targetX, 0, maxX);
-  run.cameraY = clamp(targetY, 0, maxY);
+  run.cameraX = clamp(targetX, cameraBounds.minX, cameraBounds.maxX);
+  run.cameraY = clamp(targetY, cameraBounds.minY, cameraBounds.maxY);
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   run.cameraTargetZoom = zoom;
@@ -7292,6 +7722,16 @@ function updateInteractions(state, data, canInteract) {
     return;
   }
 
+  if (item.kind === "partDrop") {
+    collectPartDrop(state, item);
+    return;
+  }
+
+  if (item.kind === "shelterReturn") {
+    returnToShelterFromExpedition(state, item);
+    return;
+  }
+
   item.used = true;
   if (item.kind === "badge-locker") {
     run.inventory.badge = true;
@@ -7318,6 +7758,9 @@ function updateExpedition(state, data, dt) {
     if (run.mapOverlay) {
       run.mapOverlay.active = false;
     }
+    if (run.inventoryOverlay) {
+      run.inventoryOverlay.active = false;
+    }
     run.prompt = "";
     run.promptWorld = null;
     if (run.recoilAim) {
@@ -7337,6 +7780,10 @@ function updateExpedition(state, data, dt) {
   }
 
   updateMapExploration(run, data);
+
+  if (updateInventoryOverlayInput(state, data)) {
+    return;
+  }
 
   if (updateMapOverlayInput(state, data)) {
     return;
@@ -7475,17 +7922,99 @@ function updateExpedition(state, data, dt) {
       : run.timePhase === "dusk"
         ? "황혼 압박."
         : "야간 위협.";
+  if (run.identity?.memoryDrift >= 12 && run.noticeTimer <= 0 && !run.identity.lastDriftNoticeAt) {
+    run.identity.lastDriftNoticeAt = run.time ?? 0;
+    pushNotice(run, "낯선 비의 감각이 손끝에 남았다.");
+  }
   const notice = run.noticeTimer > 0 ? ` ${run.message}` : "";
   setStatus(state, `${phaseLabel}${notice}`);
   updateAutoSave(state, data, dt);
 }
 
-function updateShelter(state) {
-  setStatus(state, isMovementLab(state.data) ? "대기 중. C: 출격" : "쉘터 대기. C: 출격");
-  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
-    startNewSavedRun(state, state.data);
-    setStatus(state, "출격 중.");
+function syncEquippedPartsToMetaWeapons(state) {
+  state.data.__meta = state.meta;
+  saveMetaState(state.meta);
+}
+
+function equipFirstAvailableRightArmPart(state) {
+  ensurePartInventory(state.meta, state.data);
+  const part = state.meta.partInventory.find((entry) => entry.slot === "rightArm");
+  if (!part) {
+    state.shelterDreamEvent = null;
+    setStatus(state, "회수한 오른팔 파츠가 없습니다.");
+    return null;
   }
+  const attached = attachPartToSlot(state.meta, state.data, part.id);
+  syncEquippedPartsToMetaWeapons(state);
+  state.shelterDreamEvent = null;
+  setStatus(state, `${attached.name} 장착 · 기억 잔류 ${attached.memoryResidue ?? 0}`);
+  return attached;
+}
+
+function playNextPartDream(state) {
+  ensurePartInventory(state.meta, state.data);
+  const attachedParts = getAttachedParts(state.meta, state.data);
+  const nextPart = attachedParts.find((part) => part.dreamId && !state.meta.seenDreamIds.includes(part.dreamId));
+  if (!nextPart) {
+    const drift = computeMemoryDrift(state.meta, state.data);
+    const message = drift > 0 ? "낯선 감각은 조용히 남아 있습니다." : "아직 몸에 남은 잔몽이 없습니다.";
+    state.shelterDreamEvent = {
+      title: drift > 0 ? "잔몽 없음" : "고요한 휴식",
+      lines: [message],
+      clue: "",
+    };
+    setStatus(state, message);
+    return;
+  }
+  const dream = getDreamDefinition(state.data, nextPart.dreamId);
+  if (!dream) {
+    return;
+  }
+  state.meta.seenDreamIds.push(dream.id || nextPart.dreamId);
+  saveMetaState(state.meta);
+  state.shelterDreamEvent = {
+    title: dream.title || "잔몽",
+    lines: Array.isArray(dream.lines) ? [...dream.lines] : [],
+    clue: dream.clue || "",
+  };
+  const body = [dream.title, ...(dream.lines || []), dream.clue ? `단서: ${dream.clue}` : ""]
+    .filter(Boolean)
+    .join(" / ");
+  setStatus(state, body);
+}
+
+function updateShelter(state) {
+  ensurePartInventory(state.meta, state.data);
+  const attached = getAttachedParts(state.meta, state.data);
+  const drift = computeMemoryDrift(state.meta, state.data);
+  const partHint = state.meta.partInventory.length
+    ? `Q: 파츠 장착 / R: 휴식 · 잔몽 / 자아 안정도 ${Math.max(0, 100 - drift)}`
+    : "탐험에서 팔 파츠를 회수하세요";
+  setStatus(state, `${isMovementLab(state.data) ? "대기 중" : "피난처"} · C: 출격 · ${partHint}`);
+  if (consumeEitherPress(state, ["KeyQ"])) {
+    equipFirstAvailableRightArmPart(state);
+    return;
+  }
+  if (consumeEitherPress(state, ["KeyR"])) {
+    playNextPartDream(state);
+    return;
+  }
+  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    state.shelterDreamEvent = null;
+    state.data.__meta = state.meta;
+    startNewSavedRun(state, state.data);
+    if (state.run) {
+      state.run.identity = {
+        stability: Math.max(0, 100 - drift),
+        memoryDrift: drift,
+        attachedParts: attached.map((part) => part.id),
+        seenDreamIds: [...state.meta.seenDreamIds],
+      };
+    }
+    setStatus(state, "출격 중");
+    return;
+  }
+  return;
 }
 
 function updateTitle(state) {
@@ -7539,7 +8068,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Tab", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (!state.pressed.has(event.code)) {

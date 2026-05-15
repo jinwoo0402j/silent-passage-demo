@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260507-slope-slide-physics-v1";
+import { GAME_DATA } from "./level-data.js?v=20260514-camera-center-v3";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
@@ -13,8 +13,8 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260507-slope-slide-physics-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260505-level-source-v2";
+import { renderGame } from "./render.js?v=20260514-camera-center-v3";
+import { saveCurrentGame } from "./save-game.js?v=20260514-camera-center-v3";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -23,8 +23,10 @@ import {
   createLevelRuntimeState,
   createRunState,
   ensureWeaponLoadoutState,
-} from "./state.js?v=20260507-slope-slide-physics-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260507-slope-slide-physics-v1";
+  normalizePartInstance,
+  saveMetaState,
+} from "./state.js?v=20260514-camera-center-v3";
+import { bindInput, updateGame } from "./systems.js?v=20260514-faceoff-camera-fix-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -197,6 +199,18 @@ applySprintTuning(
 );
 
 const state = createInitialState(runtimeData);
+if (new URLSearchParams(window.location.search).get("partsLoop") === "1") {
+  const testPart = normalizePartInstance(runtimeData, "watchman-right-arm");
+  if (testPart) {
+    state.meta.partInventory = [testPart];
+    state.meta.attachedParts = [];
+    state.meta.seenDreamIds = [];
+    state.scene = SCENES.SHELTER;
+    state.sceneTimer = 0;
+    state.statusText = "피난처 · Q: 파츠 장착 / R: 휴식 · 잔몽";
+    saveMetaState(state.meta);
+  }
+}
 window.__faceOffState = state;
 window.__faceOffData = runtimeData;
 bindInput(state);
@@ -938,6 +952,7 @@ function isTestDebugToggleKey(event) {
 
 function syncBrowserControls(currentDom, currentState) {
   document.body.classList.toggle("is-map-overlay-active", Boolean(currentState.run?.mapOverlay?.active));
+  document.body.classList.toggle("is-inventory-overlay-active", Boolean(currentState.run?.inventoryOverlay?.active));
 
   if (currentDom.sceneActionButton) {
     const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION;
@@ -946,7 +961,7 @@ function syncBrowserControls(currentDom, currentState) {
   }
 
   if (currentDom.touchControls) {
-    const hidden = currentState.scene !== SCENES.EXPEDITION || currentState.liveEdit.active;
+    const hidden = currentState.scene !== SCENES.EXPEDITION || currentState.liveEdit.active || Boolean(currentState.run?.inventoryOverlay?.active);
     currentDom.touchControls.hidden = hidden;
     if (hidden) {
       currentDom.touchButtons.forEach((button) => {
