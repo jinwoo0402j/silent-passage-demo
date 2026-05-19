@@ -968,6 +968,7 @@ function createEditorState() {
       redoStack: [],
       limit: 80,
     },
+    clipboard: null,
     renderQueued: false,
   };
 }
@@ -1650,6 +1651,51 @@ function getSelectedEntity(editor) {
   }
 
   return null;
+}
+
+function getSelectionCollection(editor, kind) {
+  if (kind === "platform") {
+    return editor.data.platforms;
+  }
+  if (kind === "braceWall") {
+    return editor.data.braceWalls;
+  }
+  if (kind === "temporaryBlock") {
+    return editor.data.temporaryBlocks;
+  }
+  if (kind === "zipLine") {
+    return editor.data.zipLines;
+  }
+  if (kind === "zipLineNode") {
+    return editor.data.zipLineNodes;
+  }
+  if (kind === "prop") {
+    return editor.data.props;
+  }
+  if (kind === "enemy") {
+    return editor.data.humanoidEnemies;
+  }
+  if (kind === "drone") {
+    return editor.data.hostileDrones;
+  }
+  if (kind === "crate") {
+    return editor.data.lootCrates;
+  }
+  if (kind === "entrance") {
+    return editor.data.entrances;
+  }
+  if (kind === "routeExit") {
+    return editor.data.routeExits;
+  }
+  return null;
+}
+
+function getCopyableSelectionEntity(editor, item) {
+  const collection = getSelectionCollection(editor, item?.kind);
+  if (!collection || !Number.isInteger(item.index)) {
+    return null;
+  }
+  return collection[item.index] || null;
 }
 
 function isMultiSelection(selection) {
@@ -2549,6 +2595,169 @@ function getCanvasPoint(dom, event) {
     x: event.clientX - rect.left,
     y: event.clientY - rect.top,
   };
+}
+
+function createPastedId(sourceId, fallbackPrefix, token, index) {
+  const base = String(sourceId || fallbackPrefix || "copy").replace(/-copy-[a-z0-9-]+$/i, "");
+  return `${base}-copy-${token}-${index}`;
+}
+
+function offsetCopiedEntity(kind, entity, deltaX, deltaY) {
+  if (kind === "zipLine") {
+    entity.start = {
+      x: (entity.start?.x ?? 0) + deltaX,
+      y: (entity.start?.y ?? 0) + deltaY,
+    };
+    entity.end = {
+      x: (entity.end?.x ?? 0) + deltaX,
+      y: (entity.end?.y ?? 0) + deltaY,
+    };
+    return;
+  }
+
+  if (Number.isFinite(entity.x)) {
+    entity.x += deltaX;
+  }
+  if (Number.isFinite(entity.y)) {
+    entity.y += deltaY;
+  }
+
+  if (kind === "enemy" && entity.patrol) {
+    if (Number.isFinite(entity.patrol.left)) {
+      entity.patrol.left += deltaX;
+    }
+    if (Number.isFinite(entity.patrol.right)) {
+      entity.patrol.right += deltaX;
+    }
+  }
+
+  if (kind === "drone") {
+    if (Number.isFinite(entity.spawnX)) {
+      entity.spawnX += deltaX;
+    }
+    if (Number.isFinite(entity.spawnY)) {
+      entity.spawnY += deltaY;
+    }
+    if (entity.patrol) {
+      if (Number.isFinite(entity.patrol.left)) {
+        entity.patrol.left += deltaX;
+      }
+      if (Number.isFinite(entity.patrol.right)) {
+        entity.patrol.right += deltaX;
+      }
+    }
+  }
+}
+
+function copySelection(editor, dom) {
+  const items = getSelectionItems(editor.selected)
+    .map((item) => {
+      const entity = getCopyableSelectionEntity(editor, item);
+      return entity ? { kind: item.kind, entity: deepClone(entity) } : null;
+    })
+    .filter(Boolean);
+
+  if (items.length === 0) {
+    setStatus(editor, dom, "복사할 선택 항목 없음", "error", editor.dirty);
+    return;
+  }
+
+  const bounds = getSelectionRect(editor);
+  editor.clipboard = {
+    items,
+    bounds: bounds ? deepClone(bounds) : null,
+    pasteCount: 0,
+  };
+  setStatus(editor, dom, `${items.length}개 선택 항목 복사됨`, "", editor.dirty);
+}
+
+function pasteZipLine(editor, zipLine, deltaX, deltaY, token, itemIndex, selections) {
+  const startNodeId = createPastedId(zipLine.startNodeId, "zipline-node", token, `${itemIndex}-a`);
+  const endNodeId = createPastedId(zipLine.endNodeId, "zipline-node", token, `${itemIndex}-b`);
+  const start = {
+    x: (zipLine.start?.x ?? 0) + deltaX,
+    y: (zipLine.start?.y ?? 0) + deltaY,
+  };
+  const end = {
+    x: (zipLine.end?.x ?? 0) + deltaX,
+    y: (zipLine.end?.y ?? 0) + deltaY,
+  };
+  const connectRange = Math.max(ZIP_LINE_CONNECT_RANGE, Math.hypot(end.x - start.x, end.y - start.y));
+  const startNode = {
+    id: startNodeId,
+    x: start.x,
+    y: start.y,
+    connectRange,
+  };
+  const endNode = {
+    id: endNodeId,
+    x: end.x,
+    y: end.y,
+    connectRange,
+  };
+  editor.data.zipLineNodes.push(startNode, endNode);
+
+  const pasted = {
+    ...deepClone(zipLine),
+    id: createPastedId(zipLine.id, "zipline", token, itemIndex),
+    startNodeId,
+    endNodeId,
+    start,
+    end,
+  };
+  editor.data.zipLines.push(pasted);
+  selections.push({ kind: "zipLine", index: editor.data.zipLines.length - 1 });
+}
+
+function pasteSelection(editor, dom) {
+  if (!editor.clipboard?.items?.length) {
+    setStatus(editor, dom, "붙여넣을 복사 항목 없음", "error", editor.dirty);
+    return;
+  }
+
+  pushUndo(editor);
+  editor.clipboard.pasteCount = (editor.clipboard.pasteCount || 0) + 1;
+  const scale = getScaleConfig(editor.data);
+  const offset = Math.max(editor.snap, scale.tileSize) * editor.clipboard.pasteCount;
+  const token = `${Date.now().toString(36)}-${editor.clipboard.pasteCount}`;
+  const selections = [];
+
+  editor.clipboard.items.forEach((item, itemIndex) => {
+    if (item.kind === "zipLine") {
+      pasteZipLine(editor, item.entity, offset, offset, token, itemIndex, selections);
+      return;
+    }
+
+    const collection = getSelectionCollection(editor, item.kind);
+    if (!collection) {
+      return;
+    }
+
+    const pasted = deepClone(item.entity);
+    offsetCopiedEntity(item.kind, pasted, offset, offset);
+
+    if (Object.prototype.hasOwnProperty.call(pasted, "id")) {
+      pasted.id = createPastedId(pasted.id, item.kind, token, itemIndex);
+    }
+    if (item.kind === "crate" && Array.isArray(pasted.items)) {
+      pasted.items = pasted.items.map((crateItem, crateItemIndex) => ({
+        ...crateItem,
+        id: createPastedId(crateItem.id, `${pasted.id}-item`, token, `${itemIndex}-${crateItemIndex}`),
+      }));
+    }
+
+    collection.push(pasted);
+    selections.push({ kind: item.kind, index: collection.length - 1 });
+  });
+
+  if (selections.length === 0) {
+    setStatus(editor, dom, "붙여넣을 수 있는 항목 없음", "error", editor.dirty);
+    return;
+  }
+
+  pruneOutOfRangeZipLineConnections(editor.data);
+  setSelection(editor, dom, normalizeSelection({ kind: "multi", items: selections }));
+  setStatus(editor, dom, `${selections.length}개 선택 항목 붙여넣기 완료`, "", true);
 }
 
 function deleteSelection(editor, dom) {
@@ -4361,6 +4570,18 @@ function bindEvents(editor, dom) {
       return;
     }
 
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+      copySelection(editor, dom);
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+      event.preventDefault();
+      pasteSelection(editor, dom);
+      return;
+    }
+
     if (handleToolShortcut(editor, dom, event)) {
       return;
     }
@@ -4655,12 +4876,6 @@ function drawTemporaryBlocks(ctx, editor) {
       ctx.lineTo(x, block.y + block.height - 8 / editor.view.zoom);
       ctx.stroke();
     }
-
-    ctx.fillStyle = COLORS.temporaryBlock;
-    ctx.font = `${14 / editor.view.zoom}px Segoe UI`;
-    ctx.textAlign = "center";
-    ctx.fillText(`${block.hideDuration ?? 1.6}s`, block.x + block.width / 2, block.y - 8 / editor.view.zoom);
-    ctx.textAlign = "left";
   });
 }
 
@@ -5256,10 +5471,10 @@ function renderEditor(editor, dom) {
   drawGrid(ctx, editor);
   drawWorldBounds(ctx, editor);
   drawCameraGuide(ctx, editor);
-  drawBackgroundTiles(ctx, editor);
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawTemporaryBlocks(ctx, editor);
+  drawBackgroundTiles(ctx, editor);
   drawZipLines(ctx, editor);
   drawProps(ctx, editor);
   drawLootCrates(ctx, editor);

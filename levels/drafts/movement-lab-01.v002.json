@@ -115,6 +115,9 @@
       "hoverAirControlMultiplier": 0.9,
       "groundAccel": 3400,
       "groundDecel": 4200,
+      "stopInertiaInitialDecelMultiplier": 0.26,
+      "stopInertiaMaxDecelMultiplier": 1.28,
+      "stopInertiaRampSeconds": 0.52,
       "airControlMultiplier": 0.75,
       "jumpVelocity": -930,
       "coyoteTimeMs": 100,
@@ -124,6 +127,7 @@
       "apexGravityThreshold": 180,
       "jumpCornerCorrectionPx": 12,
       "dashDurationMs": 120,
+      "dashWindupMs": 55,
       "dashDistance": 162,
       "maxDashCount": 2,
       "dashCooldownMs": 450,
@@ -183,6 +187,10 @@
       "runHeightRatio": 1.025,
       "sprintWidthRatio": 1,
       "sprintHeightRatio": 1.013,
+      "zipLineAssetKey": "playerZipline",
+      "zipLineWidthRatio": 0.95,
+      "zipLineHeightRatio": 1.02,
+      "zipLineFootAnchorY": 0.55,
       "jumpWidthRatio": 1,
       "jumpHeightRatio": 1.15,
       "fallWidthRatio": 1,
@@ -206,6 +214,7 @@
       "idleAnchorX": 0.58,
       "runAnchorX": 0.651,
       "sprintAnchorX": 0.53,
+      "zipLineAnchorX": 0.42,
       "jumpAnchorX": 0.63,
       "fallAnchorX": 0.46,
       "dashAnchorX": 0.51,
@@ -314,7 +323,7 @@
       "width": 96,
       "height": 192,
       "prompt": "E: 다음 구역",
-      "toLevelId": "faceoff-checkpoint-01",
+      "toLevelId": "new-level",
       "toEntranceId": "start"
     }
   ],
@@ -619,10 +628,19 @@
       "width": 32,
       "height": 192,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "hideDuration": 9
     }
   ],
-  "props": [],
+  "props": [
+    {
+      "kind": "backgroundTile",
+      "x": 1664,
+      "y": 1872,
+      "width": 1040,
+      "height": 448,
+      "color": "#4f6f7d"
+    }
+  ],
   "braceWalls": [
     {
       "id": "brace-1777803126375",

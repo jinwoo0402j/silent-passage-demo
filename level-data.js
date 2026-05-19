@@ -600,6 +600,9 @@ export const GAME_DATA = {
       "hoverAirControlMultiplier": 0.9,
       "groundAccel": 3400,
       "groundDecel": 4200,
+      "stopInertiaInitialDecelMultiplier": 0.26,
+      "stopInertiaMaxDecelMultiplier": 1.28,
+      "stopInertiaRampSeconds": 0.52,
       "airControlMultiplier": 0.75,
       "jumpVelocity": -930,
       "coyoteTimeMs": 100,
@@ -608,7 +611,8 @@ export const GAME_DATA = {
       "apexGravityMultiplier": 0.58,
       "apexGravityThreshold": 180,
       "jumpCornerCorrectionPx": 12,
-      "dashDurationMs": 120,
+      "dashDurationMs": 80,
+      "dashWindupMs": 55,
       "dashDistance": 162,
       "maxDashCount": 2,
       "dashCooldownMs": 450,
@@ -774,7 +778,7 @@ export const GAME_DATA = {
     "y": 496,
     "width": 96,
     "height": 192,
-    "prompt": "E: 추출"
+    "prompt": "D: 추출"
   },
   "platforms": [
     {
@@ -1359,7 +1363,7 @@ GAME_DATA.levels = {
     },
     "extractionGate": {
       ...BASE_EXTRACTION_GATE,
-      "prompt": "E: 추출"
+      "prompt": "D: 추출"
     }
   }
 };

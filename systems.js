@@ -35,13 +35,13 @@ const CAMERA_SCREEN_WIDTH = 1280;
 const CAMERA_SCREEN_HEIGHT = 720;
 const CAMERA_FOCUS_X = 420 / CAMERA_SCREEN_WIDTH;
 const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
-const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
-const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
-const CROUCH_KEYS = ["ArrowDown", "KeyS"];
-const JUMP_KEYS = ["KeyW"];
-const ZIPLINE_MOUNT_KEYS = ["KeyW"];
-const DASH_KEYS = ["Space", "KeyX"];
-const SPRINT_KEYS = ["Space"];
+const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
+const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyE"];
+const CROUCH_KEYS = ["ArrowDown", "KeyW"];
+const JUMP_KEYS = ["Space"];
+const ZIPLINE_MOUNT_KEYS = ["Space"];
+const DASH_KEYS = ["CapsLock", "ShiftLeft", "ShiftRight", "KeyX"];
+const SPRINT_KEYS = ["CapsLock"];
 const BULLET_TIME_KEYS = [];
 const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
@@ -50,26 +50,26 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
-const INTERACT_KEYS = ["KeyZ", "KeyE"];
+const INTERACT_KEYS = ["KeyZ", "KeyD"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
 const NEW_RUN_KEYS = ["KeyN"];
-const LOOT_PREV_KEYS = ["ArrowUp", "KeyW"];
-const LOOT_NEXT_KEYS = ["ArrowDown", "KeyS"];
-const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyA"];
-const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyD"];
+const LOOT_PREV_KEYS = ["ArrowUp", "Space"];
+const LOOT_NEXT_KEYS = ["ArrowDown", "KeyW"];
+const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
+const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyE"];
 const LOOT_CLOSE_KEYS = ["Escape", "KeyQ"];
 const DEBUG_KEYS = ["F3", "Backquote"];
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
-const ARM_SWITCH_KEYS = ["ShiftLeft", "ShiftRight"];
+const ARM_SWITCH_KEYS = ["MouseMiddle"];
 const RELOAD_KEYS = ["KeyR"];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
-const FACE_OFF_ENTRY_KEYS = ["KeyE"];
+const FACE_OFF_ENTRY_KEYS = ["KeyD"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
 const FACE_OFF_RELEASE_KEY = "KeyQ";
@@ -456,6 +456,10 @@ function updateTemporaryBlocks(run, dt) {
   (run.temporaryBlocks || []).forEach((block) => {
     block.hitFlash = Math.max(0, (block.hitFlash ?? 0) - dt);
     block.respawnFlash = Math.max(0, (block.respawnFlash ?? 0) - dt);
+    if (block.destroyed) {
+      block.hiddenTimer = 0;
+      return;
+    }
     if ((block.hiddenTimer ?? 0) <= 0) {
       return;
     }
@@ -1073,7 +1077,7 @@ function getHostileAirborneSolidRect(entity) {
 }
 
 function isTemporaryBlockHidden(block) {
-  return (block?.hiddenTimer ?? 0) > 0;
+  return Boolean(block?.destroyed) || (block?.hiddenTimer ?? 0) > 0;
 }
 
 function getTemporaryBlockSolidRect(block) {
@@ -1118,7 +1122,7 @@ function getSlopeDownhillDirection(platform) {
   return platform.slopeDirection === "up-right" ? -1 : 1;
 }
 
-function isSlopePlatformSeamPassThrough(player, platform, data, side, config) {
+function isSlopePlatformSeamPassThrough(player, platform, data, side, config, slopePlatforms = null) {
   if (platform.dynamicEntityId) {
     return false;
   }
@@ -1136,7 +1140,7 @@ function isSlopePlatformSeamPassThrough(player, platform, data, side, config) {
     return false;
   }
 
-  for (const slope of getSlopePlatforms(data)) {
+  for (const slope of slopePlatforms || getSlopePlatforms(data)) {
     const slopeSideX = side === "left" ? slope.x + slope.width : slope.x;
     const slopeSideY = getSlopeSurfaceY(slope, slopeSideX);
     if (
@@ -1204,8 +1208,8 @@ function getCollisionPlatforms(data, run = null) {
   return [...solids, ...getDynamicCollisionSolids(run)];
 }
 
-function collidesWithPlatforms(rect, data, run = null) {
-  return getCollisionPlatforms(data, run).some((platform) => rectsOverlap(rect, platform));
+function collidesWithPlatforms(rect, data, run = null, collisionPlatforms = null) {
+  return (collisionPlatforms || getCollisionPlatforms(data, run)).some((platform) => rectsOverlap(rect, platform));
 }
 
 function getPlayerSlopeProbeXs(player) {
@@ -1217,13 +1221,13 @@ function getPlayerSlopeProbeXs(player) {
   return [leadingX, centerX, trailingX];
 }
 
-function canOccupyRect(rect, data, run = null) {
+function canOccupyRect(rect, data, run = null, collisionPlatforms = null) {
   return (
     rect.x >= 0 &&
     rect.y >= 0 &&
     rect.x + rect.width <= data.world.width &&
     rect.y + rect.height <= data.world.height &&
-    !collidesWithPlatforms(rect, data, run)
+    !collidesWithPlatforms(rect, data, run, collisionPlatforms)
   );
 }
 
@@ -1481,7 +1485,7 @@ function armSlideJumpCarry(player, run, config) {
   clearSlide(player);
 }
 
-function tryJumpCornerCorrection(player, data, config, run = null) {
+function tryJumpCornerCorrection(player, data, config, run = null, collisionPlatforms = null) {
   const baseDirection = Math.sign(player.vx) || player.facing || 1;
   const directions = [baseDirection, -baseDirection];
 
@@ -1494,7 +1498,7 @@ function tryJumpCornerCorrection(player, data, config, run = null) {
         height: player.height,
       };
 
-      if (canOccupyRect(candidate, data, run)) {
+      if (canOccupyRect(candidate, data, run, collisionPlatforms)) {
         player.x = candidate.x;
         return true;
       }
@@ -1504,7 +1508,7 @@ function tryJumpCornerCorrection(player, data, config, run = null) {
   return false;
 }
 
-function tryDashCornerCorrection(player, data, resolvedX, direction, config, run = null) {
+function tryDashCornerCorrection(player, data, resolvedX, direction, config, run = null, collisionPlatforms = null) {
   const maxLift = config.dashCornerCorrectionPx ?? 0;
   for (let offset = 1; offset <= maxLift; offset += 1) {
     const candidates = [
@@ -1523,7 +1527,7 @@ function tryDashCornerCorrection(player, data, resolvedX, direction, config, run
     ];
 
     for (const candidate of candidates) {
-      if (canOccupyRect(candidate, data, run)) {
+      if (canOccupyRect(candidate, data, run, collisionPlatforms)) {
         player.x = candidate.x;
         player.y = candidate.y;
         return true;
@@ -1549,25 +1553,27 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
     slopeDownhillDirection: 0,
   };
   player.groundSlopeDirection = 0;
+  const collisionPlatforms = getCollisionPlatforms(data, run);
+  const slopePlatforms = getSlopePlatforms(data);
 
   const previousX = player.x;
   player.x += player.vx * dt;
   let slopeSeamPlatform = null;
 
-  for (const platform of getCollisionPlatforms(data, run)) {
+  for (const platform of collisionPlatforms) {
     if (!rectsOverlap(player, platform)) {
       continue;
     }
 
     if (previousX + player.width <= platform.x + EPSILON) {
-      if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config)) {
+      if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config, slopePlatforms)) {
         slopeSeamPlatform = platform;
         continue;
       }
       const resolvedX = platform.x - player.width;
       if (
         player.dashTimer > 0 &&
-        tryDashCornerCorrection(player, data, resolvedX, 1, config, run)
+        tryDashCornerCorrection(player, data, resolvedX, 1, config, run, collisionPlatforms)
       ) {
         contacts.dashCornerCorrected = true;
         continue;
@@ -1577,14 +1583,14 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       contacts.wallRight = true;
       contacts.wallEntityId = platform.dynamicEntityId ?? null;
     } else if (previousX >= platform.x + platform.width - EPSILON) {
-      if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config)) {
+      if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config, slopePlatforms)) {
         slopeSeamPlatform = platform;
         continue;
       }
       const resolvedX = platform.x + platform.width;
       if (
         player.dashTimer > 0 &&
-        tryDashCornerCorrection(player, data, resolvedX, -1, config, run)
+        tryDashCornerCorrection(player, data, resolvedX, -1, config, run, collisionPlatforms)
       ) {
         contacts.dashCornerCorrected = true;
         continue;
@@ -1597,14 +1603,14 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       const pushLeft = player.x + player.width - platform.x;
       const pushRight = platform.x + platform.width - player.x;
       if (pushLeft < pushRight) {
-        if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config)) {
+        if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config, slopePlatforms)) {
           slopeSeamPlatform = platform;
           continue;
         }
         const resolvedX = player.x - pushLeft;
         if (
           player.dashTimer > 0 &&
-          tryDashCornerCorrection(player, data, resolvedX, 1, config, run)
+          tryDashCornerCorrection(player, data, resolvedX, 1, config, run, collisionPlatforms)
         ) {
           contacts.dashCornerCorrected = true;
           continue;
@@ -1614,14 +1620,14 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
         contacts.wallRight = true;
         contacts.wallEntityId = platform.dynamicEntityId ?? null;
       } else {
-        if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config)) {
+        if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config, slopePlatforms)) {
           slopeSeamPlatform = platform;
           continue;
         }
         const resolvedX = player.x + pushRight;
         if (
           player.dashTimer > 0 &&
-          tryDashCornerCorrection(player, data, resolvedX, -1, config, run)
+          tryDashCornerCorrection(player, data, resolvedX, -1, config, run, collisionPlatforms)
         ) {
           contacts.dashCornerCorrected = true;
           continue;
@@ -1653,7 +1659,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
   player.onGround = false;
   let groundPlatform = null;
 
-  for (const platform of getCollisionPlatforms(data, run)) {
+  for (const platform of collisionPlatforms) {
     const catchDynamicTop = shouldCatchDynamicTop(player, platform, previousY);
     if (!catchDynamicTop && !rectsOverlap(player, platform)) {
       continue;
@@ -1667,7 +1673,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       contacts.groundEntityId = platform.dynamicEntityId ?? null;
       groundPlatform = platform;
     } else if (previousY >= platform.y + platform.height - EPSILON) {
-      if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
+      if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run, collisionPlatforms)) {
         contacts.jumpCornerCorrected = true;
         continue;
       }
@@ -1685,7 +1691,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
         contacts.groundEntityId = platform.dynamicEntityId ?? null;
         groundPlatform = platform;
       } else {
-        if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
+        if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run, collisionPlatforms)) {
           contacts.jumpCornerCorrected = true;
           continue;
         }
@@ -1721,7 +1727,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
     let bestSlope = null;
     let bestSurfaceY = Number.POSITIVE_INFINITY;
 
-    for (const platform of getSlopePlatforms(data)) {
+    for (const platform of slopePlatforms) {
       if (player.x + player.width <= platform.x || player.x >= platform.x + platform.width) {
         continue;
       }
@@ -2594,6 +2600,8 @@ function setMovementState(player) {
     player.movementState = MOVEMENT_STATES.ZIPLINE;
   } else if (player.dashTimer > 0) {
     player.movementState = MOVEMENT_STATES.DASH;
+  } else if (player.dashWindupTimer > 0) {
+    player.movementState = MOVEMENT_STATES.DASH;
   } else if (player.wallJumpLockTimer > 0) {
     player.movementState = MOVEMENT_STATES.WALL_JUMP_LOCK;
   } else if (player.wallRunActive) {
@@ -2763,12 +2771,17 @@ function isSelectedWeaponAutomatic(run, data) {
 }
 
 function canAimWeapon(player) {
-  return Boolean(player.height === player.standHeight && player.dashTimer === 0);
+  return Boolean(
+    player.height === player.standHeight &&
+    player.dashTimer === 0 &&
+    player.dashWindupTimer === 0
+  );
 }
 
 function canFireWeaponPose(player) {
   return Boolean(
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     (
       player.height === player.standHeight ||
       (player.onGround && player.slideTimer > 0)
@@ -2880,6 +2893,7 @@ function canUseRecoilShot(player) {
   return (
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     player.recoilShotCharges > 0 &&
     player.recoilShotCooldownTimer === 0
   );
@@ -3252,7 +3266,8 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
 
   if (hit.type === "temporaryBlock") {
     const block = hit.target;
-    block.hiddenTimer = Math.max(0.1, block.hideDuration ?? 1.6);
+    block.destroyed = true;
+    block.hiddenTimer = 0;
     block.hitFlash = 0.18;
     spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "OPEN");
     spawnDirectedParticles(run, hitX, hitY, 16, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
@@ -3854,7 +3869,8 @@ function startDash(player, run, config, direction) {
   player.dashCharges = Math.max(0, player.dashCharges - 1);
   player.dashAvailable = false;
   player.dashDirection = direction;
-  player.dashTimer = config.dashDurationMs / 1000;
+  player.dashWindupTimer = (config.dashWindupMs ?? 0) / 1000;
+  player.dashTimer = player.dashWindupTimer > 0 ? 0 : config.dashDurationMs / 1000;
   player.dashCooldownTimer = config.dashCooldownMs / 1000;
   player.dashCarryTimer = 0;
   player.dashCarrySpeed = 0;
@@ -3869,6 +3885,21 @@ function startDash(player, run, config, direction) {
   player.dashTrailTimer = 0;
   pushAfterimage(run, player);
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#d1efff");
+}
+
+function startDashBurst(player, config) {
+  player.dashWindupTimer = 0;
+  player.dashTimer = config.dashDurationMs / 1000;
+  player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * player.dashDirection;
+  player.vy = 0;
+}
+
+function getStopInertiaDecel(player, config, baseDecel) {
+  const initialMultiplier = config.stopInertiaInitialDecelMultiplier ?? 0.26;
+  const maxMultiplier = config.stopInertiaMaxDecelMultiplier ?? 1.28;
+  const rampSeconds = Math.max(0.001, config.stopInertiaRampSeconds ?? 0.52);
+  const progress = clamp((player.noMoveInputTimer ?? 0) / rampSeconds, 0, 1);
+  return baseDecel * lerp(initialMultiplier, maxMultiplier, progress * progress);
 }
 
 function armDashCarry(player, config, speed) {
@@ -4198,6 +4229,9 @@ function updatePlayer(run, data, state, dt, input) {
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
   const wasWallSliding = player.wallSliding;
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
+  player.noMoveInputTimer = moveAxis === 0
+    ? (player.noMoveInputTimer ?? 0) + dt
+    : 0;
 
   player.dashInvulnerable = config.dashInvulnerable;
   player.slideInvulnerable = config.slideInvulnerable ?? true;
@@ -4322,9 +4356,16 @@ function updatePlayer(run, data, state, dt, input) {
     player.onGround &&
     player.height === player.standHeight &&
     moveAxis !== 0;
+  const sprintJumpCarryCompatible =
+    player.sprintJumpCarryTimer > 0 &&
+    player.sprintJumpCarrySpeed !== 0 &&
+    (
+      moveAxis === 0 ||
+      Math.sign(moveAxis) === Math.sign(player.sprintJumpCarrySpeed)
+    );
   const preserveAirSprint =
-    sprintHeld &&
-    player.sprintPrimed &&
+    (sprintHeld || sprintJumpCarryCompatible) &&
+    (player.sprintPrimed || sprintJumpCarryCompatible) &&
     !player.onGround &&
     player.height === player.standHeight &&
     player.sprintCharge > 0 &&
@@ -4413,6 +4454,7 @@ function updatePlayer(run, data, state, dt, input) {
     jumpHeld &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     player.wallJumpLockTimer === 0 &&
     !player.braceHolding;
 
@@ -4421,6 +4463,7 @@ function updatePlayer(run, data, state, dt, input) {
     !wantsWallRun &&
     player.dashAvailable &&
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     player.dashCooldownTimer === 0 &&
     player.wallJumpLockTimer === 0 &&
     player.height === player.standHeight
@@ -4433,6 +4476,24 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.lightActive && player.dashTimer > 0) {
     player.lightActive = false;
+  }
+
+  if (player.dashWindupTimer > 0) {
+    player.dashWindupTimer = Math.max(0, player.dashWindupTimer - dt);
+    player.vx = 0;
+    player.vy = 0;
+    player.canInteract = false;
+    player.facing = player.dashDirection || player.facing;
+    player.onGround = false;
+    player.wallSliding = false;
+    player.wallDirection = 0;
+    if (player.dashWindupTimer === 0) {
+      startDashBurst(player, config);
+    }
+    updateMovementVfx(run, data, dt);
+    player.jumpHeldLastFrame = jumpHeld;
+    setMovementState(player);
+    return;
   }
 
   if (player.dashTimer > 0) {
@@ -4657,7 +4718,10 @@ function updatePlayer(run, data, state, dt, input) {
       ? config.groundDecel
       : config.groundDecel * airControl;
 
-    player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : decel) * dt);
+    const stopDecel = moveAxis === 0 && player.onGround
+      ? getStopInertiaDecel(player, config, decel)
+      : decel;
+    player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : stopDecel) * dt);
 
     if (
       player.onGround &&
@@ -4694,11 +4758,14 @@ function updatePlayer(run, data, state, dt, input) {
     }
   }
 
-  if (player.sprintCharge > 0.12 && canBuildSprint) {
+  if (
+    player.sprintCharge > 0.12 &&
+    (canBuildSprint || (!player.onGround && sprintJumpCarryCompatible))
+  ) {
     player.sprintActive = true;
   }
 
-  player.lightActive = isPressed(state, "KeyQ") && run.battery > 0 && player.dashTimer === 0;
+  player.lightActive = isPressed(state, "KeyQ") && run.battery > 0 && player.dashTimer === 0 && player.dashWindupTimer === 0;
   if (player.lightActive) {
     run.battery = Math.max(0, run.battery - data.player.lightDrainPerSecond * dt);
     if (run.battery === 0) {
@@ -6556,7 +6623,7 @@ function getInteractionTargets(run, data) {
       id: faceOffEnemy.id,
       kind: "faceOff",
       enemy: faceOffEnemy,
-      text: "E: Face-off",
+      text: "D: Face-off",
       x: center.x,
       y: faceOffEnemy.y - 14,
     });
@@ -6569,7 +6636,7 @@ function getInteractionTargets(run, data) {
       targets.push({
         id: "extract",
         kind: "extract",
-        text: gate.prompt,
+        text: normalizeExtractionPrompt(gate.prompt),
         x: gate.x + gate.width / 2,
         y: gate.y - 12,
       });
@@ -6584,7 +6651,7 @@ function getInteractionTargets(run, data) {
         id: routeExit.id,
         kind: "routeExit",
         routeExit,
-        text: routeExit.prompt || "E: 다음 구역",
+        text: normalizeInteractionPrompt(routeExit.prompt || "D/Z: 다음 구역"),
         x: routeExit.x + routeExit.width / 2,
         y: routeExit.y - 12,
       });
@@ -6620,7 +6687,7 @@ function getInteractionTargets(run, data) {
       targets.push({
         id: item.id,
         kind: item.kind,
-        text: item.prompt,
+        text: normalizeInteractionPrompt(item.prompt),
         x: item.x + item.width / 2,
         y: item.y - 10,
       });
@@ -6636,7 +6703,7 @@ function getInteractionTargets(run, data) {
         id: crate.id,
         kind: "lootCrate",
         crate,
-        text: crate.opened ? "E: 상자 확인" : crate.prompt,
+        text: normalizeInteractionPrompt(crate.opened ? "D/Z: 상자 확인" : crate.prompt),
         x: crate.x + crate.width / 2,
         y: crate.y - 12,
       });
@@ -6651,7 +6718,7 @@ function getInteractionTargets(run, data) {
           id: pedestal.id,
           kind: "pedestal",
           pedestal,
-          text: `E: ${pedestal.label}`,
+          text: `D/Z: ${pedestal.label}`,
           x: pedestal.x + pedestal.width / 2,
           y: pedestal.y - 12,
         });
@@ -6670,7 +6737,15 @@ function getInteractionTargets(run, data) {
 
 function getZipLinePrompt(zipLine) {
   const prompt = zipLine?.prompt || "E: Zipline";
-  return prompt.replace(/^E\s*:/i, "W/E:");
+  return prompt.replace(/^E\s*:/i, "Space/D:");
+}
+
+function normalizeInteractionPrompt(prompt) {
+  return (prompt || "").replace(/^E\s*:/i, "D/Z:");
+}
+
+function normalizeExtractionPrompt(prompt) {
+  return (prompt || "D: 추출").replace(/^E\s*:/i, "D:");
 }
 
 function getNearestZipLineInteractionTarget(run, data) {
@@ -6892,6 +6967,7 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.attackHits = new Set();
   player.lightActive = false;
   player.dashTimer = 0;
+  player.dashWindupTimer = 0;
   player.dashCooldownTimer = 0;
   player.dashDirection = 0;
   player.slideTimer = 0;
@@ -7228,7 +7304,8 @@ function updateInteractions(state, data, canInteract) {
     braceWall &&
     !player.onGround &&
     player.height === player.standHeight &&
-    player.dashTimer === 0
+    player.dashTimer === 0 &&
+    player.dashWindupTimer === 0
   ) {
     run.prompt = "C: 벽 짚기";
     run.promptWorld = {
@@ -7539,7 +7616,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (!state.pressed.has(event.code)) {
@@ -7575,6 +7652,7 @@ export function updateGame(state, data, dt) {
       state.run.player.vy = 0;
       state.run.player.attackWindow = 0;
       state.run.player.dashTimer = 0;
+      state.run.player.dashWindupTimer = 0;
       state.run.player.lightActive = false;
     }
   }

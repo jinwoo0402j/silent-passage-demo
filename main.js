@@ -1208,6 +1208,14 @@ function bindUi(currentDom, currentState, data) {
     event.preventDefault();
     return true;
   };
+  const handleMiddleMouseSwitch = (event) => {
+    if (event.button !== 1 || currentState.scene !== SCENES.EXPEDITION || currentState.liveEdit.active) {
+      return false;
+    }
+    pressVirtualKey(currentState, "MouseMiddle");
+    event.preventDefault();
+    return true;
+  };
   const beginMapOverlayDrag = (event) => {
     if (!isMapOverlayActive() || event.button !== 0) {
       return false;
@@ -1433,6 +1441,9 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.canvas.addEventListener("mousedown", (event) => {
+    if (handleMiddleMouseSwitch(event)) {
+      return;
+    }
     if (isMapOverlayActive()) {
       event.preventDefault();
       return;
@@ -1443,6 +1454,12 @@ function bindUi(currentDom, currentState, data) {
   currentDom.canvas.addEventListener("wheel", (event) => {
     zoomMapOverlay(event);
   }, { passive: false });
+
+  currentDom.canvas.addEventListener("auxclick", (event) => {
+    if (event.button === 1) {
+      event.preventDefault();
+    }
+  });
 
   window.addEventListener("mousedown", (event) => {
     const buttons = typeof event.buttons === "number" ? event.buttons : 0;
@@ -1559,6 +1576,9 @@ function bindUi(currentDom, currentState, data) {
       currentState.mouse.secondaryDown = false;
       releaseAimPointerLock();
     }
+    if (event.button === 1) {
+      releaseVirtualKey(currentState, "MouseMiddle");
+    }
 
     if (!isLiveEditAvailable(currentState, data) || !currentState.liveEdit.active || !currentState.liveEdit.drag) {
       return;
@@ -1596,6 +1616,9 @@ function bindUi(currentDom, currentState, data) {
     if (event.button === 2) {
       currentState.mouse.secondaryDown = false;
       releaseAimPointerLock();
+    }
+    if (event.button === 1) {
+      releaseVirtualKey(currentState, "MouseMiddle");
     }
   });
 

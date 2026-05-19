@@ -969,6 +969,9 @@ function drawTerrain(ctx, data) {
 
 function drawTemporaryBlocks(ctx, run, theme) {
   (run.temporaryBlocks || []).forEach((block) => {
+    if (block.destroyed) {
+      return;
+    }
     const hiddenTimer = block.hiddenTimer ?? 0;
     if (hiddenTimer > 0) {
       return;
@@ -1151,15 +1154,45 @@ function drawProps(ctx, data, pulse, theme) {
   });
 }
 
-function drawBackgroundTiles(ctx, data) {
+function rectsIntersect(left, right) {
+  return (
+    left.x < right.x + right.width &&
+    left.x + left.width > right.x &&
+    left.y < right.y + right.height &&
+    left.y + left.height > right.y
+  );
+}
+
+function getBackgroundTileRect(prop) {
+  return {
+    x: prop.x,
+    y: prop.y,
+    width: Math.max(8, prop.width || 64),
+    height: Math.max(8, prop.height || 64),
+  };
+}
+
+function getBackgroundTileAlpha(prop, run) {
+  const rect = getBackgroundTileRect(prop);
+  const player = run?.player;
+  if (player && rectsIntersect(rect, player)) {
+    return prop.occupiedAlpha ?? 0.16;
+  }
+  return prop.alpha ?? 0.86;
+}
+
+function drawBackgroundTiles(ctx, data, run = null) {
   data.props.forEach((prop) => {
     if (prop.kind !== "backgroundTile") {
       return;
     }
+    const rect = getBackgroundTileRect(prop);
+    const alpha = getBackgroundTileAlpha(prop, run);
+    ctx.save();
     ctx.fillStyle = prop.color || "#4f6f7d";
-    ctx.globalAlpha = 0.72;
-    ctx.fillRect(prop.x, prop.y, Math.max(8, prop.width || 64), Math.max(8, prop.height || 64));
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = alpha;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.restore();
   });
 }
 
@@ -5256,13 +5289,13 @@ function renderExpedition(ctx, state, data) {
   ctx.scale(cameraZoom, cameraZoom);
   drawWorldMegastructures(ctx, run);
   drawGroundShine(ctx);
-  drawBackgroundTiles(ctx, data);
   drawTerrain(ctx, data);
   drawTemporaryBlocks(ctx, run, theme);
   drawZipLines(ctx, data, theme);
   drawGate(ctx, data, theme);
   drawRouteExits(ctx, data, theme);
   drawBraceWalls(ctx, data, theme);
+  drawBackgroundTiles(ctx, data, run);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
   drawEntity(ctx, run.encounters.guard, {
