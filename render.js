@@ -4837,7 +4837,7 @@ function drawActionNode(ctx, theme, x, y, type, label, keyLabel, prominent = fal
 
 function drawActionCluster(ctx, theme) {
   drawActionNode(ctx, theme, 118, 610, "move", "이동", "A D", true);
-  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "Space");
+  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "W / Space");
   drawActionNode(ctx, theme, 186, 570, "dash", "대시", "X");
   drawActionNode(ctx, theme, 56, 676, "crouch", "숙이기", "S");
   drawActionNode(ctx, theme, 184, 684, "use", "사용", "Z");
