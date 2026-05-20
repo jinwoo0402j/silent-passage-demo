@@ -361,7 +361,7 @@ function sanitizeExtractionGate(gate, fallback = null) {
     y: 0,
     width: 96,
     height: 192,
-    prompt: "E: 추출",
+    prompt: "D: 추출",
   };
   if (!gate && !fallback) {
     return null;
