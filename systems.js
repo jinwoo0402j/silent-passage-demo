@@ -1,20 +1,13 @@
 import {
   MOVEMENT_STATES,
   SCENES,
-  attachPartToSlot,
-  computeMemoryDrift,
   computeArmWeaponStats,
   createLevelRuntimeState,
   createRunState,
   ensureWeaponLoadoutState,
-  ensurePartInventory,
-  getAttachedParts,
-  getDreamDefinition,
-  getPartDefinition,
-  normalizePartInstance,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260514-camera-center-v3";
+} from "./state.js?v=20260507-slope-slide-physics-v1";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260507-slope-slide-physics-v1";
 import {
   clearSavedGame,
@@ -24,7 +17,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260514-camera-center-v3";
+} from "./save-game.js?v=20260505-level-source-v2";
 import {
   approach,
   clamp,
@@ -42,13 +35,13 @@ const CAMERA_SCREEN_WIDTH = 1280;
 const CAMERA_SCREEN_HEIGHT = 720;
 const CAMERA_FOCUS_X = 420 / CAMERA_SCREEN_WIDTH;
 const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
-const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
-const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
-const CROUCH_KEYS = ["ArrowDown", "KeyS"];
-const JUMP_KEYS = ["KeyW"];
-const ZIPLINE_MOUNT_KEYS = ["KeyW"];
-const DASH_KEYS = ["Space", "KeyX"];
-const SPRINT_KEYS = ["Space"];
+const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
+const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyE"];
+const CROUCH_KEYS = ["ArrowDown", "KeyW"];
+const JUMP_KEYS = ["Space"];
+const ZIPLINE_MOUNT_KEYS = ["Space"];
+const DASH_KEYS = ["CapsLock", "ShiftLeft", "ShiftRight", "KeyX"];
+const SPRINT_KEYS = ["CapsLock"];
 const BULLET_TIME_KEYS = [];
 const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
@@ -57,32 +50,31 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
-const INTERACT_KEYS = ["KeyZ", "KeyE"];
+const INTERACT_KEYS = ["KeyZ", "KeyD"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
 const NEW_RUN_KEYS = ["KeyN"];
-const LOOT_PREV_KEYS = ["ArrowUp", "KeyW"];
-const LOOT_NEXT_KEYS = ["ArrowDown", "KeyS"];
-const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyA"];
-const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyD"];
+const LOOT_PREV_KEYS = ["ArrowUp", "Space"];
+const LOOT_NEXT_KEYS = ["ArrowDown", "KeyW"];
+const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
+const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyE"];
 const LOOT_CLOSE_KEYS = ["Escape", "KeyQ"];
 const DEBUG_KEYS = ["F3", "Backquote"];
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
-const ARM_SWITCH_KEYS = ["ShiftLeft", "ShiftRight"];
+const ARM_SWITCH_KEYS = ["MouseMiddle"];
 const RELOAD_KEYS = ["KeyR"];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
-const INVENTORY_KEYS = ["Tab"];
-const INVENTORY_CLOSE_KEYS = ["Tab", "Escape"];
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
-const FACE_OFF_ENTRY_KEYS = ["KeyE"];
-const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyS", "KeyD"];
+const FACE_OFF_ENTRY_KEYS = ["KeyD"];
+const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
+const FACE_OFF_RELEASE_KEY = "KeyQ";
 const HUMANOID_RESOLVED_STATES = new Set(["disabled", "surrendered", "dealt", "released", "escaped", "dead"]);
-const HUMANOID_RESOLVED_OUTCOMES = new Set(["kill", "disable", "surrender", "deal", "release", "escape", "dispose"]);
+const HUMANOID_RESOLVED_OUTCOMES = new Set(["kill", "disable", "surrender", "deal", "release", "escape"]);
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
   && (
     window.__SILENT_PASSAGE_PERF === "lite" ||
@@ -247,20 +239,6 @@ function clearTransientMapInput(state) {
   }
 }
 
-function ensureRunInventoryOverlay(run) {
-  run.inventoryOverlay = run.inventoryOverlay || {};
-  run.inventoryOverlay.active = Boolean(run.inventoryOverlay.active);
-  return run.inventoryOverlay;
-}
-
-function clearTransientOverlayInput(state) {
-  state.justPressed.clear();
-  if (state.mouse) {
-    state.mouse.primaryJustPressed = false;
-    state.mouse.secondaryJustPressed = false;
-  }
-}
-
 function isMapOverlayBlocked(state, run) {
   return state.scene !== SCENES.EXPEDITION
     || state.liveEdit?.active
@@ -305,9 +283,6 @@ function updateMapOverlayInput(state, data) {
 
   if (consumeEitherPress(state, MAP_KEYS)) {
     run.mapOverlay.active = true;
-    if (run.inventoryOverlay) {
-      run.inventoryOverlay.active = false;
-    }
     run.mapOverlay.dragging = false;
     run.mapOverlay.dragPointerId = null;
     clearTransientMapInput(state);
@@ -317,62 +292,6 @@ function updateMapOverlayInput(state, data) {
     }
     run.player.recoilFocusActive = false;
     setStatus(state, "Map");
-    return true;
-  }
-
-  return false;
-}
-
-function isInventoryOverlayBlocked(state, run) {
-  return state.scene !== SCENES.EXPEDITION
-    || state.liveEdit?.active
-    || run?.faceOff?.active
-    || run?.loot?.active;
-}
-
-function updateInventoryOverlayInput(state, data) {
-  const run = state.run;
-  if (!run) {
-    return false;
-  }
-  const overlay = ensureRunInventoryOverlay(run);
-
-  if (isInventoryOverlayBlocked(state, run)) {
-    overlay.active = false;
-    return false;
-  }
-
-  if (overlay.active) {
-    if (consumeEitherPress(state, INVENTORY_CLOSE_KEYS)) {
-      overlay.active = false;
-      clearTransientOverlayInput(state);
-      setStatus(state, "Inventory closed");
-      return true;
-    }
-    clearTransientOverlayInput(state);
-    if (run.recoilAim) {
-      run.recoilAim.active = false;
-      run.recoilAim.aiming = false;
-    }
-    run.player.recoilFocusActive = false;
-    setStatus(state, "Inventory");
-    return true;
-  }
-
-  if (consumeEitherPress(state, INVENTORY_KEYS)) {
-    overlay.active = true;
-    if (run.mapOverlay) {
-      run.mapOverlay.active = false;
-      run.mapOverlay.dragging = false;
-      run.mapOverlay.dragPointerId = null;
-    }
-    clearTransientOverlayInput(state);
-    if (run.recoilAim) {
-      run.recoilAim.active = false;
-      run.recoilAim.aiming = false;
-    }
-    run.player.recoilFocusActive = false;
-    setStatus(state, "Inventory");
     return true;
   }
 
@@ -537,6 +456,10 @@ function updateTemporaryBlocks(run, dt) {
   (run.temporaryBlocks || []).forEach((block) => {
     block.hitFlash = Math.max(0, (block.hitFlash ?? 0) - dt);
     block.respawnFlash = Math.max(0, (block.respawnFlash ?? 0) - dt);
+    if (block.destroyed) {
+      block.hiddenTimer = 0;
+      return;
+    }
     if ((block.hiddenTimer ?? 0) <= 0) {
       return;
     }
@@ -616,34 +539,6 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
 
 function getCameraConfig(data) {
   return data.world.camera || {};
-}
-
-function getCameraBounds(data, viewportWidth, viewportHeight, config = getCameraConfig(data)) {
-  const verticalSlackRatio = clamp(config.boundarySlackY ?? 0.5, 0, 1);
-  const horizontalSlackRatio = clamp(config.boundarySlackX ?? 0, 0, 1);
-  const slackX = viewportWidth * horizontalSlackRatio;
-  const slackY = viewportHeight * verticalSlackRatio;
-  const worldWidth = Math.max(1, data.world?.width ?? viewportWidth);
-  const worldHeight = Math.max(1, data.world?.height ?? viewportHeight);
-  return {
-    minX: -slackX,
-    maxX: Math.max(-slackX, worldWidth - viewportWidth + slackX),
-    minY: -slackY,
-    maxY: Math.max(-slackY, worldHeight - viewportHeight + slackY),
-  };
-}
-
-function keepPlayerInsideCameraSafeBand(run, data, viewportHeight, cameraBounds) {
-  const config = getCameraConfig(data);
-  const playerCenterY = run.player.y + run.player.height * 0.5;
-  const safeTop = viewportHeight * clamp(config.playerSafeTopY ?? 0.28, 0.05, 0.9);
-  const safeBottom = viewportHeight * clamp(config.playerSafeBottomY ?? 0.68, 0.1, 0.95);
-  const relativeY = playerCenterY - run.cameraY;
-  if (relativeY > safeBottom) {
-    run.cameraY = clamp(playerCenterY - safeBottom, cameraBounds.minY, cameraBounds.maxY);
-  } else if (relativeY < safeTop) {
-    run.cameraY = clamp(playerCenterY - safeTop, cameraBounds.minY, cameraBounds.maxY);
-  }
 }
 
 function isBraceCameraState(player) {
@@ -986,7 +881,8 @@ function syncCamera(run, data, dt) {
     const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
     const targetX = run.player.x - viewportWidth * CAMERA_FOCUS_X;
     const targetY = run.player.y - viewportHeight * CAMERA_FOCUS_Y;
-    const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
+    const maxX = Math.max(0, data.world.width - viewportWidth);
+    const maxY = Math.max(0, data.world.height - viewportHeight);
     run.cameraZoom = zoom;
     run.cameraFocusX = CAMERA_FOCUS_X;
     run.cameraFocusY = CAMERA_FOCUS_Y;
@@ -995,9 +891,8 @@ function syncCamera(run, data, dt) {
     run.cameraTargetZoom = zoom;
     run.cameraLookAhead = 0;
     run.cameraSpeedRatio = 0;
-    run.cameraX = clamp(lerp(run.cameraX, targetX, Math.min(1, dt * 4.5)), cameraBounds.minX, cameraBounds.maxX);
-    run.cameraY = clamp(lerp(run.cameraY, targetY, Math.min(1, dt * 4.5)), cameraBounds.minY, cameraBounds.maxY);
-    keepPlayerInsideCameraSafeBand(run, data, viewportHeight, cameraBounds);
+    run.cameraX = clamp(lerp(run.cameraX, targetX, Math.min(1, dt * 4.5)), 0, maxX);
+    run.cameraY = clamp(lerp(run.cameraY, targetY, Math.min(1, dt * 4.5)), 0, maxY);
     return;
   }
 
@@ -1069,15 +964,15 @@ function syncCamera(run, data, dt) {
   const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
   const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
   const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
-  const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
+  const maxX = Math.max(0, data.world.width - viewportWidth);
+  const maxY = Math.max(0, data.world.height - viewportHeight);
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   run.cameraTargetZoom = targetZoom;
   run.cameraLookAhead = lookAhead;
   run.cameraSpeedRatio = speedZoom.ratio;
-  run.cameraX = clamp(lerp(run.cameraX, targetX, focusLerp), cameraBounds.minX, cameraBounds.maxX);
-  run.cameraY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), cameraBounds.minY, cameraBounds.maxY);
-  keepPlayerInsideCameraSafeBand(run, data, viewportHeight, cameraBounds);
+  run.cameraX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
+  run.cameraY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
 }
 
 function getFaceOffCameraTarget(run) {
@@ -1098,29 +993,29 @@ function lockCameraToFaceOffTarget(run, data, dt = 0, instant = true) {
     return;
   }
 
-  const config = getCameraConfig(data);
-  const zoom = clamp(run.cameraZoom ?? config.zoom ?? 1, 0.5, 2.5);
+  const zoom = clamp(run.cameraZoom ?? getCameraConfig(data).zoom ?? 1, 0.5, 2.5);
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
   const focusX = 0.5;
   const focusY = 0.48;
   const targetX = target.x + target.width * 0.5 - viewportWidth * focusX;
   const targetY = target.y + target.height * 0.42 - viewportHeight * focusY;
-  const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
+  const maxX = Math.max(0, data.world.width - viewportWidth);
+  const maxY = Math.max(0, data.world.height - viewportHeight);
 
   run.cameraFocusX = focusX;
   run.cameraFocusY = focusY;
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   if (instant) {
-    run.cameraX = clamp(targetX, cameraBounds.minX, cameraBounds.maxX);
-    run.cameraY = clamp(targetY, cameraBounds.minY, cameraBounds.maxY);
+    run.cameraX = clamp(targetX, 0, maxX);
+    run.cameraY = clamp(targetY, 0, maxY);
     return;
   }
 
   const cameraPull = Math.min(1, dt * (getFaceOffConfig(data).aimCameraPull ?? 5.5));
-  run.cameraX = clamp(lerp(run.cameraX, targetX, cameraPull), cameraBounds.minX, cameraBounds.maxX);
-  run.cameraY = clamp(lerp(run.cameraY, targetY, cameraPull), cameraBounds.minY, cameraBounds.maxY);
+  run.cameraX = clamp(lerp(run.cameraX, targetX, cameraPull), 0, maxX);
+  run.cameraY = clamp(lerp(run.cameraY, targetY, cameraPull), 0, maxY);
 }
 
 function getMovementConfig(data) {
@@ -1182,7 +1077,7 @@ function getHostileAirborneSolidRect(entity) {
 }
 
 function isTemporaryBlockHidden(block) {
-  return (block?.hiddenTimer ?? 0) > 0;
+  return Boolean(block?.destroyed) || (block?.hiddenTimer ?? 0) > 0;
 }
 
 function getTemporaryBlockSolidRect(block) {
@@ -1227,7 +1122,7 @@ function getSlopeDownhillDirection(platform) {
   return platform.slopeDirection === "up-right" ? -1 : 1;
 }
 
-function isSlopePlatformSeamPassThrough(player, platform, data, side, config) {
+function isSlopePlatformSeamPassThrough(player, platform, data, side, config, slopePlatforms = null) {
   if (platform.dynamicEntityId) {
     return false;
   }
@@ -1245,7 +1140,7 @@ function isSlopePlatformSeamPassThrough(player, platform, data, side, config) {
     return false;
   }
 
-  for (const slope of getSlopePlatforms(data)) {
+  for (const slope of slopePlatforms || getSlopePlatforms(data)) {
     const slopeSideX = side === "left" ? slope.x + slope.width : slope.x;
     const slopeSideY = getSlopeSurfaceY(slope, slopeSideX);
     if (
@@ -1313,8 +1208,8 @@ function getCollisionPlatforms(data, run = null) {
   return [...solids, ...getDynamicCollisionSolids(run)];
 }
 
-function collidesWithPlatforms(rect, data, run = null) {
-  return getCollisionPlatforms(data, run).some((platform) => rectsOverlap(rect, platform));
+function collidesWithPlatforms(rect, data, run = null, collisionPlatforms = null) {
+  return (collisionPlatforms || getCollisionPlatforms(data, run)).some((platform) => rectsOverlap(rect, platform));
 }
 
 function getPlayerSlopeProbeXs(player) {
@@ -1326,13 +1221,13 @@ function getPlayerSlopeProbeXs(player) {
   return [leadingX, centerX, trailingX];
 }
 
-function canOccupyRect(rect, data, run = null) {
+function canOccupyRect(rect, data, run = null, collisionPlatforms = null) {
   return (
     rect.x >= 0 &&
     rect.y >= 0 &&
     rect.x + rect.width <= data.world.width &&
     rect.y + rect.height <= data.world.height &&
-    !collidesWithPlatforms(rect, data, run)
+    !collidesWithPlatforms(rect, data, run, collisionPlatforms)
   );
 }
 
@@ -1590,7 +1485,7 @@ function armSlideJumpCarry(player, run, config) {
   clearSlide(player);
 }
 
-function tryJumpCornerCorrection(player, data, config, run = null) {
+function tryJumpCornerCorrection(player, data, config, run = null, collisionPlatforms = null) {
   const baseDirection = Math.sign(player.vx) || player.facing || 1;
   const directions = [baseDirection, -baseDirection];
 
@@ -1603,7 +1498,7 @@ function tryJumpCornerCorrection(player, data, config, run = null) {
         height: player.height,
       };
 
-      if (canOccupyRect(candidate, data, run)) {
+      if (canOccupyRect(candidate, data, run, collisionPlatforms)) {
         player.x = candidate.x;
         return true;
       }
@@ -1613,7 +1508,7 @@ function tryJumpCornerCorrection(player, data, config, run = null) {
   return false;
 }
 
-function tryDashCornerCorrection(player, data, resolvedX, direction, config, run = null) {
+function tryDashCornerCorrection(player, data, resolvedX, direction, config, run = null, collisionPlatforms = null) {
   const maxLift = config.dashCornerCorrectionPx ?? 0;
   for (let offset = 1; offset <= maxLift; offset += 1) {
     const candidates = [
@@ -1632,7 +1527,7 @@ function tryDashCornerCorrection(player, data, resolvedX, direction, config, run
     ];
 
     for (const candidate of candidates) {
-      if (canOccupyRect(candidate, data, run)) {
+      if (canOccupyRect(candidate, data, run, collisionPlatforms)) {
         player.x = candidate.x;
         player.y = candidate.y;
         return true;
@@ -1658,25 +1553,27 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
     slopeDownhillDirection: 0,
   };
   player.groundSlopeDirection = 0;
+  const collisionPlatforms = getCollisionPlatforms(data, run);
+  const slopePlatforms = getSlopePlatforms(data);
 
   const previousX = player.x;
   player.x += player.vx * dt;
   let slopeSeamPlatform = null;
 
-  for (const platform of getCollisionPlatforms(data, run)) {
+  for (const platform of collisionPlatforms) {
     if (!rectsOverlap(player, platform)) {
       continue;
     }
 
     if (previousX + player.width <= platform.x + EPSILON) {
-      if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config)) {
+      if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config, slopePlatforms)) {
         slopeSeamPlatform = platform;
         continue;
       }
       const resolvedX = platform.x - player.width;
       if (
         player.dashTimer > 0 &&
-        tryDashCornerCorrection(player, data, resolvedX, 1, config, run)
+        tryDashCornerCorrection(player, data, resolvedX, 1, config, run, collisionPlatforms)
       ) {
         contacts.dashCornerCorrected = true;
         continue;
@@ -1686,14 +1583,14 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       contacts.wallRight = true;
       contacts.wallEntityId = platform.dynamicEntityId ?? null;
     } else if (previousX >= platform.x + platform.width - EPSILON) {
-      if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config)) {
+      if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config, slopePlatforms)) {
         slopeSeamPlatform = platform;
         continue;
       }
       const resolvedX = platform.x + platform.width;
       if (
         player.dashTimer > 0 &&
-        tryDashCornerCorrection(player, data, resolvedX, -1, config, run)
+        tryDashCornerCorrection(player, data, resolvedX, -1, config, run, collisionPlatforms)
       ) {
         contacts.dashCornerCorrected = true;
         continue;
@@ -1706,14 +1603,14 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       const pushLeft = player.x + player.width - platform.x;
       const pushRight = platform.x + platform.width - player.x;
       if (pushLeft < pushRight) {
-        if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config)) {
+        if (isSlopePlatformSeamPassThrough(player, platform, data, "left", config, slopePlatforms)) {
           slopeSeamPlatform = platform;
           continue;
         }
         const resolvedX = player.x - pushLeft;
         if (
           player.dashTimer > 0 &&
-          tryDashCornerCorrection(player, data, resolvedX, 1, config, run)
+          tryDashCornerCorrection(player, data, resolvedX, 1, config, run, collisionPlatforms)
         ) {
           contacts.dashCornerCorrected = true;
           continue;
@@ -1723,14 +1620,14 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
         contacts.wallRight = true;
         contacts.wallEntityId = platform.dynamicEntityId ?? null;
       } else {
-        if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config)) {
+        if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config, slopePlatforms)) {
           slopeSeamPlatform = platform;
           continue;
         }
         const resolvedX = player.x + pushRight;
         if (
           player.dashTimer > 0 &&
-          tryDashCornerCorrection(player, data, resolvedX, -1, config, run)
+          tryDashCornerCorrection(player, data, resolvedX, -1, config, run, collisionPlatforms)
         ) {
           contacts.dashCornerCorrected = true;
           continue;
@@ -1762,7 +1659,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
   player.onGround = false;
   let groundPlatform = null;
 
-  for (const platform of getCollisionPlatforms(data, run)) {
+  for (const platform of collisionPlatforms) {
     const catchDynamicTop = shouldCatchDynamicTop(player, platform, previousY);
     if (!catchDynamicTop && !rectsOverlap(player, platform)) {
       continue;
@@ -1776,7 +1673,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       contacts.groundEntityId = platform.dynamicEntityId ?? null;
       groundPlatform = platform;
     } else if (previousY >= platform.y + platform.height - EPSILON) {
-      if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
+      if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run, collisionPlatforms)) {
         contacts.jumpCornerCorrected = true;
         continue;
       }
@@ -1794,7 +1691,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
         contacts.groundEntityId = platform.dynamicEntityId ?? null;
         groundPlatform = platform;
       } else {
-        if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run)) {
+        if (player.vy < 0 && tryJumpCornerCorrection(player, data, config, run, collisionPlatforms)) {
           contacts.jumpCornerCorrected = true;
           continue;
         }
@@ -1830,7 +1727,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
     let bestSlope = null;
     let bestSurfaceY = Number.POSITIVE_INFINITY;
 
-    for (const platform of getSlopePlatforms(data)) {
+    for (const platform of slopePlatforms) {
       if (player.x + player.width <= platform.x || player.x >= platform.x + platform.width) {
         continue;
       }
@@ -2144,114 +2041,6 @@ function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback) {
   faceOff.choicesReady = false;
 }
 
-function mapFaceOffPartToHumanoidPart(partId) {
-  if (partId === "leftArm" || partId === "rightArm" || partId === "arm") {
-    return "arm";
-  }
-  if (partId === "leftLeg" || partId === "rightLeg" || partId === "leg") {
-    return "leg";
-  }
-  return "core";
-}
-
-function createPartDropInteractable(run, data, enemy, partId) {
-  const part = getPartDefinition(data, partId);
-  if (!part || (run.interactables || []).some((item) => item.kind === "partDrop" && item.partId === part.id)) {
-    return null;
-  }
-  const drop = {
-    id: `${enemy.id}-${part.id}-drop`,
-    kind: "partDrop",
-    partId: part.id,
-    x: enemy.x + enemy.width * 0.5 - 18,
-    y: enemy.y + enemy.height - 28,
-    width: 36,
-    height: 32,
-    prompt: "E: 파츠 회수",
-    label: "이름 미확인",
-    clue: `${part.name} 회수. 기억 잔류 감지.`,
-    used: false,
-  };
-  run.interactables.push(drop);
-  spawnParticles(run, drop.x + drop.width * 0.5, drop.y + 10, 16, "#dff7ee");
-  pushNotice(run, "파츠 회수 신호 감지. 기억 잔류가 남아 있다.");
-  return drop;
-}
-
-function createShelterReturnInteractable(run, item) {
-  if (!run || !item) {
-    return null;
-  }
-  const existing = (run.interactables || []).find((entry) => entry.kind === "shelterReturn" && !entry.used);
-  if (existing) {
-    return existing;
-  }
-  const signal = {
-    id: `${item.id}-shelter-return`,
-    kind: "shelterReturn",
-    x: item.x + 30,
-    y: Math.max(0, item.y - 8),
-    width: 44,
-    height: 44,
-    prompt: "E: 쉘터 복귀",
-    label: "쉘터 복귀 신호",
-    clue: "회수한 파츠를 들고 임시 거점으로 돌아갈 수 있다.",
-    used: false,
-  };
-  run.interactables.push(signal);
-  spawnParticles(run, signal.x + signal.width / 2, signal.y + signal.height / 2, 14, "#93eaff");
-  pushNotice(run, "쉘터 복귀 신호가 켜졌다.");
-  return signal;
-}
-
-function registerRecoveredPart(state, partId, anchorItem = null) {
-  const run = state.run;
-  const part = normalizePartInstance(state.data, partId);
-  if (!run || !part) {
-    return null;
-  }
-  ensurePartInventory(state.meta, state.data);
-  if (!state.meta.partInventory.some((entry) => entry.id === part.id)) {
-    state.meta.partInventory.push(part);
-  }
-  run.partInventory = Array.isArray(run.partInventory) ? run.partInventory : [];
-  if (!run.partInventory.some((entry) => entry.id === part.id)) {
-    run.partInventory.push(part);
-  }
-  saveMetaState(state.meta);
-  pushClue(run, `part-${part.id}`, `${part.originLabel || "이름 미확인"} · 기억 잔류 감지 · ${part.memoryResidue ?? 0}`);
-  const dream = part.dreamId ? getDreamDefinition(state.data, part.dreamId) : null;
-  if (dream?.title) {
-    pushNotice(run, `${dream.title}`);
-  }
-  if (anchorItem) {
-    spawnParticles(run, anchorItem.x + anchorItem.width / 2, anchorItem.y + anchorItem.height / 2, 18, "#dff7ee");
-    createShelterReturnInteractable(run, anchorItem);
-  }
-  pushNotice(run, `파츠 보유: ${part.name} · 기억 잔류 ${part.memoryResidue ?? 0} · E: 쉘터 복귀`, 5.2);
-  return part;
-}
-
-function applyHumanoidPartDamage(run, data, enemy, partKey, damage, options = {}) {
-  const parts = enemy?.parts || {};
-  const part = parts[partKey];
-  if (!part || part.broken) {
-    return false;
-  }
-  part.hp = Math.max(0, Number(part.hp ?? 0) - Math.max(0, damage));
-  if (part.hp > 0) {
-    return false;
-  }
-  part.broken = true;
-  enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.28);
-  spawnDamageNumber(run, enemy.x + enemy.width * 0.52, enemy.y + enemy.height * 0.32, 0, "#dff7ee", partKey === "arm" ? "ARM TRACE" : "BROKEN");
-  if (part.dropPartId && !part.dropped && !options.deferDrop) {
-    part.dropped = true;
-    createPartDropInteractable(run, data, enemy, part.dropPartId);
-  }
-  return true;
-}
-
 function playFaceOffBeep(faceOff) {
   if (typeof window === "undefined") {
     return;
@@ -2421,7 +2210,7 @@ function enterFaceOff(run, data, enemy, state) {
   faceOff.active = true;
   faceOff.targetId = enemy.id;
   faceOff.hoverPart = null;
-  faceOff.selectedPart = "rightArm";
+  faceOff.selectedPart = "torso";
   faceOff.selectedDialogueKey = "KeyW";
   faceOff.acquireTargetId = enemy.id;
   faceOff.acquireTimer = getFaceOffConfig(data).acquireDuration ?? 1;
@@ -2434,7 +2223,7 @@ function enterFaceOff(run, data, enemy, state) {
   faceOff.cursorAssistTimer = faceOff.cursorAssistDuration;
   faceOff.cursorAssistStartX = state.mouse?.screenX ?? CAMERA_SCREEN_WIDTH / 2;
   faceOff.cursorAssistStartY = state.mouse?.screenY ?? CAMERA_SCREEN_HEIGHT / 2;
-  faceOff.cursorAssistTargetX = getFaceOffConfig(data).targetAimAssistX ?? Math.round(CAMERA_SCREEN_WIDTH * 0.55);
+  faceOff.cursorAssistTargetX = CAMERA_SCREEN_WIDTH / 2;
   faceOff.cursorAssistTargetY = getFaceOffConfig(data).targetAimAssistY ?? 386;
   faceOff.timeline = 0;
   faceOff.triggerLimit = getFaceOffConfig(data).triggerLimit ?? 4.5;
@@ -2516,12 +2305,6 @@ function finishFaceOff(run, enemy, result, message) {
     enemy.state = "released";
     enemy.escapeTargetX = null;
     pushNotice(run, "Face-off: released.");
-  } else if (result === "dispose") {
-    enemy.disposed = true;
-    enemy.dead = true;
-    enemy.state = "dead";
-    enemy.active = false;
-    pushNotice(run, "처분 완료. 파츠는 회수하지 않았다.");
   }
 }
 
@@ -2534,16 +2317,6 @@ function getFaceOffAimPan(data, mouseY, screenHeight = CAMERA_SCREEN_HEIGHT) {
 
 function getFaceOffTargetZones(data, mouseY, screenWidth = CAMERA_SCREEN_WIDTH, screenHeight = CAMERA_SCREEN_HEIGHT) {
   const config = getFaceOffConfig(data);
-  if (config.sceneArmFocus) {
-    const focus = config.sceneArmFocus;
-    const armWidth = Number(focus.width ?? 166);
-    const armHeight = Number(focus.height ?? 118);
-    const armX = Number(focus.x ?? screenWidth * 0.55) - armWidth / 2;
-    const armY = Number(focus.y ?? screenHeight * 0.64) - armHeight / 2;
-    return [
-      { id: "rightArm", x: armX, y: armY, width: armWidth, height: armHeight },
-    ];
-  }
   const scale = config.targetAimScale ?? 1.62;
   const cx = screenWidth / 2;
   const top = (config.targetAimTop ?? 128) - getFaceOffAimPan(data, mouseY, screenHeight);
@@ -2579,127 +2352,7 @@ function getFaceOffPartAtMouse(state, data) {
   return hit && parts.some((part) => part.id === hit.id) ? hit.id : null;
 }
 
-function getFaceOffRecoverablePartId(data, enemy) {
-  return enemy?.parts?.arm?.dropPartId || getFaceOffConfig(data).recoverablePartId || "watchman-right-arm";
-}
-
-function createFaceOffRecoveryAnchor(enemy, partId) {
-  return {
-    id: `${enemy.id}-${partId}-faceoff-recovery`,
-    kind: "faceOffPartRecovery",
-    x: enemy.x + enemy.width * 0.5 - 22,
-    y: enemy.y + enemy.height * 0.58 - 22,
-    width: 44,
-    height: 44,
-    used: false,
-  };
-}
-
-function isFaceOffArmRecoverable(enemy) {
-  const arm = enemy?.parts?.arm;
-  return Boolean(arm?.broken || Number(arm?.hp ?? 1) <= 0);
-}
-
-function askFaceOffTargetName(run, data, enemy) {
-  if (!run?.faceOff) {
-    return;
-  }
-  run.faceOff.message = "이름 미확인 · 비 오는 검문소의 순찰자";
-  setFaceOffEnemyLine(
-    run,
-    data,
-    "dialogue",
-    "askName",
-    "이름은 흐릿하다. 하지만 비 오는 검문소의 순찰자였다는 감각만 남아 있다.",
-  );
-  pushClue(run, `${enemy.id}-origin`, "이름 미확인 · 비 오는 검문소의 순찰자 · 기억 잔류 감지");
-}
-
-function recoverFaceOffRightArmPart(state, data, enemy) {
-  const run = state.run;
-  const faceOff = run?.faceOff;
-  if (!faceOff || !enemy) {
-    return false;
-  }
-  const partId = getFaceOffRecoverablePartId(data, enemy);
-  const partDefinition = getPartDefinition(data, partId);
-  if (!partDefinition) {
-    faceOff.message = "회수 가능한 파츠가 없다.";
-    return false;
-  }
-  if (!isFaceOffArmRecoverable(enemy)) {
-    faceOff.selectedPart = "rightArm";
-    faceOff.message = "오른팔을 먼저 무력화해야 한다.";
-    setFaceOffEnemyLine(
-      run,
-      data,
-      "dialogue",
-      "recoverPartBlocked",
-      "파츠 신호는 잡히지만, 아직 결속부가 움직이고 있다.",
-    );
-    return false;
-  }
-
-  enemy.parts = enemy.parts || {};
-  enemy.parts.arm = enemy.parts.arm || { hp: 0, broken: false, dropPartId: partId };
-  enemy.parts.arm.hp = 0;
-  enemy.parts.arm.broken = true;
-  enemy.parts.arm.dropped = true;
-  enemy.parts.arm.dropPartId = partId;
-  enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.28);
-
-  const anchor = createFaceOffRecoveryAnchor(enemy, partId);
-  const part = registerRecoveredPart(state, partId, anchor);
-  if (!part) {
-    faceOff.message = "회수 가능한 파츠가 없다.";
-    return false;
-  }
-
-  setFaceOffEnemyLine(
-    run,
-    data,
-    "dialogue",
-    "recoverPart",
-    "손끝에 남아 있던 방향 감각이 조용히 옮겨 왔다.",
-  );
-  finishFaceOff(run, enemy, "disable", "파츠 회수 완료");
-  closeFaceOff(run, "파츠 회수 완료");
-  return true;
-}
-
-function disposeFaceOffTarget(run, data, enemy) {
-  if (!run?.faceOff || !enemy) {
-    return;
-  }
-  if (enemy.parts?.arm) {
-    enemy.parts.arm.dropped = true;
-  }
-  setFaceOffEnemyLine(
-    run,
-    data,
-    "dialogue",
-    "dispose",
-    "기억 잔류 신호가 빗물 속으로 낮게 가라앉았다.",
-  );
-  finishFaceOff(run, enemy, "dispose", "처분 완료 · 파츠 미회수");
-  closeFaceOff(run, "처분 완료 · 파츠 미회수");
-}
-
-function backOffFaceOff(run, enemy) {
-  if (!run?.faceOff || !enemy) {
-    return;
-  }
-  enemy.state = "knockedDown";
-  enemy.active = false;
-  enemy.trigger = 0;
-  closeFaceOff(run, "물러났다.");
-  pushNotice(run, "잠시 물러났다. E로 다시 조사할 수 있다.", 2.4);
-}
-
 function getDialogueChance(enemy, option) {
-  if (["askName", "recoverPart", "dispose", "backOff"].includes(option.type)) {
-    return 1;
-  }
   const social = enemy.social || {};
   const resolve = Number(social.resolve ?? 0.5);
   const fear = Number(social.fear ?? 0.5);
@@ -2743,13 +2396,6 @@ function applyFaceOffAttack(run, data, enemy) {
   if (!part) {
     return;
   }
-  const humanoidPartKey = mapFaceOffPartToHumanoidPart(part.id);
-  const targetHumanoidPart = enemy?.parts?.[humanoidPartKey];
-  if (humanoidPartKey === "arm" && targetHumanoidPart?.broken) {
-    faceOff.message = "오른팔 파츠 회수 가능 · A";
-    setFaceOffEnemyLine(run, data, "knockdown", "recoverPart", "손끝에 남아 있던 힘은 이미 풀려 있다.");
-    return;
-  }
 
   weaponContext.arm.magazine = Math.max(0, Math.floor(weaponContext.arm.magazine ?? 0) - 1);
   weaponContext.arm.fireCooldownTimer = weaponContext.stats.fireCooldown;
@@ -2757,9 +2403,6 @@ function applyFaceOffAttack(run, data, enemy) {
 
   const weaponDamageScale = weaponContext.stats.type === "shotgun" ? 1 : 0.58;
   const partDamage = Math.max(0, Number(part.damage ?? 0)) * weaponDamageScale;
-  const brokePart = humanoidPartKey === "arm"
-    ? applyHumanoidPartDamage(run, data, enemy, humanoidPartKey, Math.max(12, partDamage), { deferDrop: true })
-    : false;
   const lethalPart = part.id === "head" || (part.id === "torso" && weaponContext.stats.type === "shotgun") || partDamage >= 50;
   enemy.disableMeter = Math.max(0, (enemy.disableMeter ?? 0) + (part.disable ?? 0) * Math.max(0.25, weaponContext.stats.knockdownPower ?? 1));
   enemy.hitFlash = 0.18;
@@ -2768,12 +2411,6 @@ function applyFaceOffAttack(run, data, enemy) {
   setFaceOffEnemyLine(run, data, "knockdown", "hit", "윽...!");
   spawnParticles(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.45, 8, "#ffd6ba");
 
-  if (brokePart) {
-    setFaceOffEnemyLine(run, data, "knockdown", "hit", "손끝에 남아 있던 힘이 풀렸다.");
-    faceOff.selectedPart = "rightArm";
-    faceOff.message = "오른팔 파츠 회수 가능 · A";
-    return;
-  }
   if (lethalPart) {
     enemy.hp = 0;
     finishFaceOff(run, enemy, "kill", "kill");
@@ -2786,29 +2423,10 @@ function applyFaceOffAttack(run, data, enemy) {
   faceOff.message = `${part.label}: hit`;
 }
 
-function applyFaceOffDialogue(state, data, enemy, option) {
-  const run = state.run;
+function applyFaceOffDialogue(run, data, enemy, option) {
   const faceOff = run.faceOff;
-  faceOff.selectedDialogueKey = option.key;
-
-  if (option.type === "askName") {
-    askFaceOffTargetName(run, data, enemy);
-    return;
-  }
-  if (option.type === "recoverPart") {
-    recoverFaceOffRightArmPart(state, data, enemy);
-    return;
-  }
-  if (option.type === "dispose") {
-    disposeFaceOffTarget(run, data, enemy);
-    return;
-  }
-  if (option.type === "backOff") {
-    backOffFaceOff(run, enemy);
-    return;
-  }
-
   const chance = getDialogueChance(enemy, option);
+  faceOff.selectedDialogueKey = option.key;
   setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "말로 끝내고 싶다면 빨리 말해.");
 
   if (Math.random() <= chance) {
@@ -2881,13 +2499,7 @@ function updateFaceOffArmSelection(run, data, state) {
 function updateFaceOffWeaponRuntime(run, data, state, dt) {
   updateFaceOffArmSelection(run, data, state);
   if (consumeEitherPress(state, RELOAD_KEYS)) {
-    const didStartReload = startReloadSelectedArm(run, data);
-    const context = getSelectedArmContext(run, data);
-    if (run.faceOff?.active) {
-      run.faceOff.message = didStartReload
-        ? `${context.stats.label} 재장전 중`
-        : run.message;
-    }
+    startReloadSelectedArm(run, data);
   }
   updateWeaponTimers(run, data, dt);
 }
@@ -2948,13 +2560,18 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
   faceOff.timeline = 0;
   enemy.trigger = 0;
 
+  if (consumePress(state, FACE_OFF_RELEASE_KEY)) {
+    finishFaceOff(run, enemy, "release", "release");
+    return true;
+  }
+
   if (!faceOff.choicesReady) {
     const pressedDialogueKey = FACE_OFF_DIALOGUE_KEYS.find((key) => consumePress(state, key));
     if (pressedDialogueKey) {
       revealFaceOffChoicesNow(faceOff);
       const option = getFaceOffDialogueOptions(data).find((entry) => entry.key === pressedDialogueKey);
       if (option) {
-        applyFaceOffDialogue(state, data, enemy, option);
+        applyFaceOffDialogue(run, data, enemy, option);
       }
     }
   } else {
@@ -2962,14 +2579,13 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
       if (consumePress(state, key)) {
         const option = getFaceOffDialogueOptions(data).find((entry) => entry.key === key);
         if (option) {
-          applyFaceOffDialogue(state, data, enemy, option);
+          applyFaceOffDialogue(run, data, enemy, option);
         }
       }
     }
   }
 
   if (state.mouse?.primaryJustPressed) {
-    faceOff.selectedPart = faceOff.hoverPart || "rightArm";
     applyFaceOffAttack(run, data, enemy);
   }
   if (state.mouse) {
@@ -2983,6 +2599,8 @@ function setMovementState(player) {
   if (player.zipLineActive) {
     player.movementState = MOVEMENT_STATES.ZIPLINE;
   } else if (player.dashTimer > 0) {
+    player.movementState = MOVEMENT_STATES.DASH;
+  } else if (player.dashWindupTimer > 0) {
     player.movementState = MOVEMENT_STATES.DASH;
   } else if (player.wallJumpLockTimer > 0) {
     player.movementState = MOVEMENT_STATES.WALL_JUMP_LOCK;
@@ -3153,12 +2771,17 @@ function isSelectedWeaponAutomatic(run, data) {
 }
 
 function canAimWeapon(player) {
-  return Boolean(player.height === player.standHeight && player.dashTimer === 0);
+  return Boolean(
+    player.height === player.standHeight &&
+    player.dashTimer === 0 &&
+    player.dashWindupTimer === 0
+  );
 }
 
 function canFireWeaponPose(player) {
   return Boolean(
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     (
       player.height === player.standHeight ||
       (player.onGround && player.slideTimer > 0)
@@ -3186,21 +2809,21 @@ function startReloadSelectedArm(run, data) {
   const reserve = getReserveAmmo(context);
   const currentMagazine = Math.max(0, Math.floor(context.arm.magazine ?? 0));
   if ((context.arm.reloadTimer ?? 0) > 0) {
-    pushNotice(run, `${context.stats.label} 재장전 중`, 1.2);
+    pushNotice(run, `${context.stats.label} reloading`, 1.2);
     return false;
   }
   if (currentMagazine >= context.stats.magazineSize) {
-    pushNotice(run, `${context.stats.label} 탄창이 가득 찼다`, 1.2);
+    pushNotice(run, `${context.stats.label} magazine full`, 1.2);
     return false;
   }
   if (reserve <= 0) {
-    pushNotice(run, `${context.stats.ammoType.toUpperCase()} 예비탄 없음`, 1.2);
+    pushNotice(run, `No ${context.stats.ammoType} reserve`, 1.2);
     return false;
   }
 
   context.arm.reloadTimer = context.stats.reloadDuration;
   context.arm.reloadDuration = context.stats.reloadDuration;
-  pushNotice(run, `${context.stats.label} 재장전 중`, 1.2);
+  pushNotice(run, `Reloading ${context.stats.label}`, 1.2);
   return true;
 }
 
@@ -3270,6 +2893,7 @@ function canUseRecoilShot(player) {
   return (
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     player.recoilShotCharges > 0 &&
     player.recoilShotCooldownTimer === 0
   );
@@ -3642,7 +3266,8 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
 
   if (hit.type === "temporaryBlock") {
     const block = hit.target;
-    block.hiddenTimer = Math.max(0.1, block.hideDuration ?? 1.6);
+    block.destroyed = true;
+    block.hiddenTimer = 0;
     block.hitFlash = 0.18;
     spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "OPEN");
     spawnDirectedParticles(run, hitX, hitY, 16, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
@@ -3684,9 +3309,6 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
     enemy.active = true;
     enemy.state = enemy.state === "patrol" ? "combat" : enemy.state;
     enemy.hp = Math.max(0, (enemy.hp ?? enemy.maxHp ?? 100) - damage);
-    if (hit.part === "leftArm" || hit.part === "rightArm") {
-      applyHumanoidPartDamage(run, data, enemy, "arm", Math.max(8, damage * 0.65));
-    }
     enemy.hitFlash = critical ? 0.32 : 0.2;
     enemy.trigger = 0;
     spawnDamageNumber(
@@ -4247,7 +3869,8 @@ function startDash(player, run, config, direction) {
   player.dashCharges = Math.max(0, player.dashCharges - 1);
   player.dashAvailable = false;
   player.dashDirection = direction;
-  player.dashTimer = config.dashDurationMs / 1000;
+  player.dashWindupTimer = (config.dashWindupMs ?? 0) / 1000;
+  player.dashTimer = player.dashWindupTimer > 0 ? 0 : config.dashDurationMs / 1000;
   player.dashCooldownTimer = config.dashCooldownMs / 1000;
   player.dashCarryTimer = 0;
   player.dashCarrySpeed = 0;
@@ -4262,6 +3885,21 @@ function startDash(player, run, config, direction) {
   player.dashTrailTimer = 0;
   pushAfterimage(run, player);
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#d1efff");
+}
+
+function startDashBurst(player, config) {
+  player.dashWindupTimer = 0;
+  player.dashTimer = config.dashDurationMs / 1000;
+  player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * player.dashDirection;
+  player.vy = 0;
+}
+
+function getStopInertiaDecel(player, config, baseDecel) {
+  const initialMultiplier = config.stopInertiaInitialDecelMultiplier ?? 0.26;
+  const maxMultiplier = config.stopInertiaMaxDecelMultiplier ?? 1.28;
+  const rampSeconds = Math.max(0.001, config.stopInertiaRampSeconds ?? 0.52);
+  const progress = clamp((player.noMoveInputTimer ?? 0) / rampSeconds, 0, 1);
+  return baseDecel * lerp(initialMultiplier, maxMultiplier, progress * progress);
 }
 
 function armDashCarry(player, config, speed) {
@@ -4591,6 +4229,9 @@ function updatePlayer(run, data, state, dt, input) {
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
   const wasWallSliding = player.wallSliding;
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
+  player.noMoveInputTimer = moveAxis === 0
+    ? (player.noMoveInputTimer ?? 0) + dt
+    : 0;
 
   player.dashInvulnerable = config.dashInvulnerable;
   player.slideInvulnerable = config.slideInvulnerable ?? true;
@@ -4715,9 +4356,16 @@ function updatePlayer(run, data, state, dt, input) {
     player.onGround &&
     player.height === player.standHeight &&
     moveAxis !== 0;
+  const sprintJumpCarryCompatible =
+    player.sprintJumpCarryTimer > 0 &&
+    player.sprintJumpCarrySpeed !== 0 &&
+    (
+      moveAxis === 0 ||
+      Math.sign(moveAxis) === Math.sign(player.sprintJumpCarrySpeed)
+    );
   const preserveAirSprint =
-    sprintHeld &&
-    player.sprintPrimed &&
+    (sprintHeld || sprintJumpCarryCompatible) &&
+    (player.sprintPrimed || sprintJumpCarryCompatible) &&
     !player.onGround &&
     player.height === player.standHeight &&
     player.sprintCharge > 0 &&
@@ -4806,6 +4454,7 @@ function updatePlayer(run, data, state, dt, input) {
     jumpHeld &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     player.wallJumpLockTimer === 0 &&
     !player.braceHolding;
 
@@ -4814,6 +4463,7 @@ function updatePlayer(run, data, state, dt, input) {
     !wantsWallRun &&
     player.dashAvailable &&
     player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
     player.dashCooldownTimer === 0 &&
     player.wallJumpLockTimer === 0 &&
     player.height === player.standHeight
@@ -4826,6 +4476,24 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.lightActive && player.dashTimer > 0) {
     player.lightActive = false;
+  }
+
+  if (player.dashWindupTimer > 0) {
+    player.dashWindupTimer = Math.max(0, player.dashWindupTimer - dt);
+    player.vx = 0;
+    player.vy = 0;
+    player.canInteract = false;
+    player.facing = player.dashDirection || player.facing;
+    player.onGround = false;
+    player.wallSliding = false;
+    player.wallDirection = 0;
+    if (player.dashWindupTimer === 0) {
+      startDashBurst(player, config);
+    }
+    updateMovementVfx(run, data, dt);
+    player.jumpHeldLastFrame = jumpHeld;
+    setMovementState(player);
+    return;
   }
 
   if (player.dashTimer > 0) {
@@ -5050,7 +4718,10 @@ function updatePlayer(run, data, state, dt, input) {
       ? config.groundDecel
       : config.groundDecel * airControl;
 
-    player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : decel) * dt);
+    const stopDecel = moveAxis === 0 && player.onGround
+      ? getStopInertiaDecel(player, config, decel)
+      : decel;
+    player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : stopDecel) * dt);
 
     if (
       player.onGround &&
@@ -5087,11 +4758,14 @@ function updatePlayer(run, data, state, dt, input) {
     }
   }
 
-  if (player.sprintCharge > 0.12 && canBuildSprint) {
+  if (
+    player.sprintCharge > 0.12 &&
+    (canBuildSprint || (!player.onGround && sprintJumpCarryCompatible))
+  ) {
     player.sprintActive = true;
   }
 
-  player.lightActive = isPressed(state, "KeyQ") && run.battery > 0 && player.dashTimer === 0;
+  player.lightActive = isPressed(state, "KeyQ") && run.battery > 0 && player.dashTimer === 0 && player.dashWindupTimer === 0;
   if (player.lightActive) {
     run.battery = Math.max(0, run.battery - data.player.lightDrainPerSecond * dt);
     if (run.battery === 0) {
@@ -6841,44 +6515,6 @@ function collectLootItem(run, crate, item) {
   return true;
 }
 
-function collectPartDrop(state, item) {
-  const run = state.run;
-  if (!run || !item?.partId || item.used) {
-    return false;
-  }
-  const part = registerRecoveredPart(state, item.partId, item);
-  if (!part) {
-    return false;
-  }
-  item.used = true;
-  return true;
-}
-
-function returnToShelterFromExpedition(state, item) {
-  const run = state.run;
-  if (item) {
-    item.used = true;
-  }
-  if (run) {
-    run.prompt = "";
-    run.promptWorld = null;
-    if (run.faceOff) {
-      run.faceOff.active = false;
-      run.faceOff.targetId = null;
-    }
-  }
-  saveMetaState(state.meta);
-  clearSavedGame();
-  state.save = state.save || {};
-  state.save.hasRun = false;
-  state.save.lastSavedAt = null;
-  state.run = null;
-  state.resultSummary = null;
-  state.scene = SCENES.SHELTER;
-  state.sceneTimer = 0;
-  setStatus(state, "쉘터 복귀 · 회수한 파츠를 확인하세요.");
-}
-
 function updateLootLockedPlayer(run, dt) {
   const player = run.player;
   player.attackCooldown = Math.max(0, player.attackCooldown - dt);
@@ -6987,7 +6623,7 @@ function getInteractionTargets(run, data) {
       id: faceOffEnemy.id,
       kind: "faceOff",
       enemy: faceOffEnemy,
-      text: "E: Face-off",
+      text: "D: Face-off",
       x: center.x,
       y: faceOffEnemy.y - 14,
     });
@@ -7000,7 +6636,7 @@ function getInteractionTargets(run, data) {
       targets.push({
         id: "extract",
         kind: "extract",
-        text: gate.prompt,
+        text: normalizeExtractionPrompt(gate.prompt),
         x: gate.x + gate.width / 2,
         y: gate.y - 12,
       });
@@ -7015,7 +6651,7 @@ function getInteractionTargets(run, data) {
         id: routeExit.id,
         kind: "routeExit",
         routeExit,
-        text: routeExit.prompt || "E: 다음 구역",
+        text: normalizeInteractionPrompt(routeExit.prompt || "D/Z: 다음 구역"),
         x: routeExit.x + routeExit.width / 2,
         y: routeExit.y - 12,
       });
@@ -7051,7 +6687,7 @@ function getInteractionTargets(run, data) {
       targets.push({
         id: item.id,
         kind: item.kind,
-        text: item.prompt,
+        text: normalizeInteractionPrompt(item.prompt),
         x: item.x + item.width / 2,
         y: item.y - 10,
       });
@@ -7067,7 +6703,7 @@ function getInteractionTargets(run, data) {
         id: crate.id,
         kind: "lootCrate",
         crate,
-        text: crate.opened ? "E: 상자 확인" : crate.prompt,
+        text: normalizeInteractionPrompt(crate.opened ? "D/Z: 상자 확인" : crate.prompt),
         x: crate.x + crate.width / 2,
         y: crate.y - 12,
       });
@@ -7082,7 +6718,7 @@ function getInteractionTargets(run, data) {
           id: pedestal.id,
           kind: "pedestal",
           pedestal,
-          text: `E: ${pedestal.label}`,
+          text: `D/Z: ${pedestal.label}`,
           x: pedestal.x + pedestal.width / 2,
           y: pedestal.y - 12,
         });
@@ -7101,7 +6737,15 @@ function getInteractionTargets(run, data) {
 
 function getZipLinePrompt(zipLine) {
   const prompt = zipLine?.prompt || "E: Zipline";
-  return prompt.replace(/^E\s*:/i, "W/E:");
+  return prompt.replace(/^E\s*:/i, "Space/D:");
+}
+
+function normalizeInteractionPrompt(prompt) {
+  return (prompt || "").replace(/^E\s*:/i, "D/Z:");
+}
+
+function normalizeExtractionPrompt(prompt) {
+  return (prompt || "D: 추출").replace(/^E\s*:/i, "D:");
 }
 
 function getNearestZipLineInteractionTarget(run, data) {
@@ -7323,6 +6967,7 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.attackHits = new Set();
   player.lightActive = false;
   player.dashTimer = 0;
+  player.dashWindupTimer = 0;
   player.dashCooldownTimer = 0;
   player.dashDirection = 0;
   player.slideTimer = 0;
@@ -7389,13 +7034,14 @@ function snapCameraToPlayer(run, data) {
   const focusY = config.lookAheadEnabled ? (config.neutralFocusY ?? 0.5) : CAMERA_FOCUS_Y;
   const targetX = run.player.x + run.player.width * 0.5 - viewportWidth * focusX;
   const targetY = run.player.y + run.player.height * 0.5 - viewportHeight * focusY;
-  const cameraBounds = getCameraBounds(data, viewportWidth, viewportHeight, config);
+  const maxX = Math.max(0, data.world.width - viewportWidth);
+  const maxY = Math.max(0, data.world.height - viewportHeight);
 
   run.cameraZoom = zoom;
   run.cameraFocusX = focusX;
   run.cameraFocusY = focusY;
-  run.cameraX = clamp(targetX, cameraBounds.minX, cameraBounds.maxX);
-  run.cameraY = clamp(targetY, cameraBounds.minY, cameraBounds.maxY);
+  run.cameraX = clamp(targetX, 0, maxX);
+  run.cameraY = clamp(targetY, 0, maxY);
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   run.cameraTargetZoom = zoom;
@@ -7658,7 +7304,8 @@ function updateInteractions(state, data, canInteract) {
     braceWall &&
     !player.onGround &&
     player.height === player.standHeight &&
-    player.dashTimer === 0
+    player.dashTimer === 0 &&
+    player.dashWindupTimer === 0
   ) {
     run.prompt = "C: 벽 짚기";
     run.promptWorld = {
@@ -7722,16 +7369,6 @@ function updateInteractions(state, data, canInteract) {
     return;
   }
 
-  if (item.kind === "partDrop") {
-    collectPartDrop(state, item);
-    return;
-  }
-
-  if (item.kind === "shelterReturn") {
-    returnToShelterFromExpedition(state, item);
-    return;
-  }
-
   item.used = true;
   if (item.kind === "badge-locker") {
     run.inventory.badge = true;
@@ -7758,9 +7395,6 @@ function updateExpedition(state, data, dt) {
     if (run.mapOverlay) {
       run.mapOverlay.active = false;
     }
-    if (run.inventoryOverlay) {
-      run.inventoryOverlay.active = false;
-    }
     run.prompt = "";
     run.promptWorld = null;
     if (run.recoilAim) {
@@ -7780,10 +7414,6 @@ function updateExpedition(state, data, dt) {
   }
 
   updateMapExploration(run, data);
-
-  if (updateInventoryOverlayInput(state, data)) {
-    return;
-  }
 
   if (updateMapOverlayInput(state, data)) {
     return;
@@ -7922,99 +7552,17 @@ function updateExpedition(state, data, dt) {
       : run.timePhase === "dusk"
         ? "황혼 압박."
         : "야간 위협.";
-  if (run.identity?.memoryDrift >= 12 && run.noticeTimer <= 0 && !run.identity.lastDriftNoticeAt) {
-    run.identity.lastDriftNoticeAt = run.time ?? 0;
-    pushNotice(run, "낯선 비의 감각이 손끝에 남았다.");
-  }
   const notice = run.noticeTimer > 0 ? ` ${run.message}` : "";
   setStatus(state, `${phaseLabel}${notice}`);
   updateAutoSave(state, data, dt);
 }
 
-function syncEquippedPartsToMetaWeapons(state) {
-  state.data.__meta = state.meta;
-  saveMetaState(state.meta);
-}
-
-function equipFirstAvailableRightArmPart(state) {
-  ensurePartInventory(state.meta, state.data);
-  const part = state.meta.partInventory.find((entry) => entry.slot === "rightArm");
-  if (!part) {
-    state.shelterDreamEvent = null;
-    setStatus(state, "회수한 오른팔 파츠가 없습니다.");
-    return null;
-  }
-  const attached = attachPartToSlot(state.meta, state.data, part.id);
-  syncEquippedPartsToMetaWeapons(state);
-  state.shelterDreamEvent = null;
-  setStatus(state, `${attached.name} 장착 · 기억 잔류 ${attached.memoryResidue ?? 0}`);
-  return attached;
-}
-
-function playNextPartDream(state) {
-  ensurePartInventory(state.meta, state.data);
-  const attachedParts = getAttachedParts(state.meta, state.data);
-  const nextPart = attachedParts.find((part) => part.dreamId && !state.meta.seenDreamIds.includes(part.dreamId));
-  if (!nextPart) {
-    const drift = computeMemoryDrift(state.meta, state.data);
-    const message = drift > 0 ? "낯선 감각은 조용히 남아 있습니다." : "아직 몸에 남은 잔몽이 없습니다.";
-    state.shelterDreamEvent = {
-      title: drift > 0 ? "잔몽 없음" : "고요한 휴식",
-      lines: [message],
-      clue: "",
-    };
-    setStatus(state, message);
-    return;
-  }
-  const dream = getDreamDefinition(state.data, nextPart.dreamId);
-  if (!dream) {
-    return;
-  }
-  state.meta.seenDreamIds.push(dream.id || nextPart.dreamId);
-  saveMetaState(state.meta);
-  state.shelterDreamEvent = {
-    title: dream.title || "잔몽",
-    lines: Array.isArray(dream.lines) ? [...dream.lines] : [],
-    clue: dream.clue || "",
-  };
-  const body = [dream.title, ...(dream.lines || []), dream.clue ? `단서: ${dream.clue}` : ""]
-    .filter(Boolean)
-    .join(" / ");
-  setStatus(state, body);
-}
-
 function updateShelter(state) {
-  ensurePartInventory(state.meta, state.data);
-  const attached = getAttachedParts(state.meta, state.data);
-  const drift = computeMemoryDrift(state.meta, state.data);
-  const partHint = state.meta.partInventory.length
-    ? `Q: 파츠 장착 / R: 휴식 · 잔몽 / 자아 안정도 ${Math.max(0, 100 - drift)}`
-    : "탐험에서 팔 파츠를 회수하세요";
-  setStatus(state, `${isMovementLab(state.data) ? "대기 중" : "피난처"} · C: 출격 · ${partHint}`);
-  if (consumeEitherPress(state, ["KeyQ"])) {
-    equipFirstAvailableRightArmPart(state);
-    return;
-  }
-  if (consumeEitherPress(state, ["KeyR"])) {
-    playNextPartDream(state);
-    return;
-  }
+  setStatus(state, isMovementLab(state.data) ? "대기 중. C: 출격" : "쉘터 대기. C: 출격");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
-    state.shelterDreamEvent = null;
-    state.data.__meta = state.meta;
     startNewSavedRun(state, state.data);
-    if (state.run) {
-      state.run.identity = {
-        stability: Math.max(0, 100 - drift),
-        memoryDrift: drift,
-        attachedParts: attached.map((part) => part.id),
-        seenDreamIds: [...state.meta.seenDreamIds],
-      };
-    }
-    setStatus(state, "출격 중");
-    return;
+    setStatus(state, "출격 중.");
   }
-  return;
 }
 
 function updateTitle(state) {
@@ -8068,7 +7616,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Tab", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (!state.pressed.has(event.code)) {
@@ -8104,6 +7652,7 @@ export function updateGame(state, data, dt) {
       state.run.player.vy = 0;
       state.run.player.attackWindow = 0;
       state.run.player.dashTimer = 0;
+      state.run.player.dashWindupTimer = 0;
       state.run.player.lightActive = false;
     }
   }
