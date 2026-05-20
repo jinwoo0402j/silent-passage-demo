@@ -36,9 +36,67 @@ const DEFAULT_META = {
   partInventory: [],
   attachedParts: [],
   seenDreamIds: [],
+  cgArchive: {
+    photos: [],
+    unlockedBackgroundIds: ["shelter-hub"],
+  },
   lastOutcome: null,
   completedRuns: 0,
 };
+
+const MAX_CG_PHOTOS = 12;
+
+function normalizeCgArchive(archive = {}) {
+  const source = archive && typeof archive === "object" ? archive : {};
+  const photos = Array.isArray(source.photos)
+    ? source.photos
+      .map((photo) => {
+        if (!photo || typeof photo !== "object") {
+          return null;
+        }
+        return {
+          id: String(photo.id || `photo-${Date.now()}`),
+          day: Number.isFinite(photo.day) ? Math.max(1, Math.floor(photo.day)) : 1,
+          createdAt: Number.isFinite(photo.createdAt) ? photo.createdAt : Date.now(),
+          backgroundId: String(photo.backgroundId || "shelter-hub"),
+          image: typeof photo.image === "string" ? photo.image : "",
+        };
+      })
+      .filter((photo) => photo && photo.image)
+      .slice(-MAX_CG_PHOTOS)
+    : [];
+  const unlockedBackgroundIds = Array.isArray(source.unlockedBackgroundIds)
+    ? source.unlockedBackgroundIds.map(String).filter(Boolean)
+    : [];
+  if (!unlockedBackgroundIds.includes("shelter-hub")) {
+    unlockedBackgroundIds.unshift("shelter-hub");
+  }
+  return {
+    photos,
+    unlockedBackgroundIds: [...new Set(unlockedBackgroundIds)],
+  };
+}
+
+function createShelterRestState() {
+  return {
+    active: false,
+    phase: "inactive",
+    timer: 0,
+    menuIndex: 0,
+    returnLevelId: null,
+    returnEntranceId: "start",
+    dayAdvanced: false,
+    photo: {
+      frameX: 0,
+      frameY: 0,
+      zoom: 1,
+      capturedImage: null,
+      flashTimer: 0,
+    },
+    recordsIndex: 0,
+    backgroundIndex: 0,
+  };
+}
 
 function clampValue(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -371,6 +429,7 @@ export function loadMetaState() {
       partInventory: Array.isArray(parsed.partInventory) ? parsed.partInventory.map((part) => ({ ...part })) : [],
       attachedParts: Array.isArray(parsed.attachedParts) ? parsed.attachedParts.map((part) => ({ ...part })) : [],
       seenDreamIds: Array.isArray(parsed.seenDreamIds) ? parsed.seenDreamIds.map(String) : [],
+      cgArchive: normalizeCgArchive(parsed.cgArchive),
       lastOutcome: parsed.lastOutcome || null,
       completedRuns: Number.isFinite(parsed.completedRuns) ? parsed.completedRuns : 0,
     };
@@ -780,9 +839,11 @@ export function createRunState(data, meta) {
     focusMax: 100,
     focusDepleted: false,
     focusActive: false,
+    day: 1,
     time: 0,
     timePhase: "day",
     nightActive: false,
+    shelterExitCooldown: 0,
     currentLevelId,
     levelStates: {},
     map: {
@@ -808,6 +869,7 @@ export function createRunState(data, meta) {
     inventoryOverlay: {
       active: false,
     },
+    shelterRest: createShelterRestState(),
     weapons: createWeaponLoadoutState(data),
     player,
     interactables: data.interactables.map((item) => ({
@@ -953,6 +1015,11 @@ export function createInitialState(data) {
     save: {
       hasRun: false,
       lastSavedAt: null,
+    },
+    titleMenu: {
+      menuIndex: 0,
+      confirmingNewRun: false,
+      lastHasRun: null,
     },
     sceneTimer: 0,
     debugFrame: 0,

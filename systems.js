@@ -7,8 +7,8 @@ import {
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260507-slope-slide-physics-v1";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260507-slope-slide-physics-v1";
+} from "./state.js?v=20260520-night-shelter-v1";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-shelter-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -17,7 +17,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260505-level-source-v2";
+} from "./save-game.js?v=20260520-night-shelter-v1";
 import {
   approach,
   clamp,
@@ -54,12 +54,17 @@ const INTERACT_KEYS = ["KeyZ", "KeyD"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
 const NEW_RUN_KEYS = ["KeyN"];
+const TITLE_MENU_ITEMS = ["new", "continue"];
+const TITLE_MENU_UP_KEYS = ["ArrowUp"];
+const TITLE_MENU_DOWN_KEYS = ["ArrowDown", "KeyW"];
+const TITLE_MENU_CANCEL_KEYS = ["Escape"];
 const LOOT_PREV_KEYS = ["ArrowUp", "Space"];
 const LOOT_NEXT_KEYS = ["ArrowDown", "KeyW"];
 const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
 const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyE"];
 const LOOT_CLOSE_KEYS = ["Escape", "KeyQ"];
 const DEBUG_KEYS = ["F3", "Backquote"];
+const DEBUG_SET_NIGHT_KEYS = ["Digit8"];
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
@@ -69,6 +74,18 @@ const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
+const SHELTER_MENU_ITEMS = ["photo", "records", "background"];
+const SHELTER_ARRIVAL_SECONDS = 2.4;
+const SHELTER_EXIT_COOLDOWN_SECONDS = 1.2;
+const SHELTER_NIGHT_LOCK_MESSAGE = "밤에만 쉘터 가능";
+const SHELTER_COOLDOWN_MESSAGE = "쉘터 문이 닫히는 중";
+const SHELTER_MENU_UP_KEYS = ["ArrowUp", "Space"];
+const SHELTER_MENU_DOWN_KEYS = ["ArrowDown", "KeyW"];
+const SHELTER_VIEW_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
+const SHELTER_VIEW_RIGHT_KEYS = ["ArrowRight", "KeyE"];
+const SHELTER_EXIT_KEYS = ["KeyC"];
+const SHELTER_BACK_KEYS = ["Escape"];
+const CG_PHOTO_LIMIT = 12;
 const FACE_OFF_ENTRY_KEYS = ["KeyD"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
@@ -6647,11 +6664,14 @@ function getInteractionTargets(run, data) {
     const exitRect = createRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
     if (distanceBetween(playerCenter, getCenter(exitRect)) < 118) {
       discoverRouteExit(run, data, routeExit);
+      const shelterBlockReason = isShelterRouteExit(routeExit, data)
+        ? getShelterRouteBlockReason(run)
+        : "";
       targets.push({
         id: routeExit.id,
-        kind: "routeExit",
+        kind: shelterBlockReason ? "shelterLocked" : "routeExit",
         routeExit,
-        text: normalizeInteractionPrompt(routeExit.prompt || "D/Z: 다음 구역"),
+        text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "D/Z: 다음 구역"),
         x: routeExit.x + routeExit.width / 2,
         y: routeExit.y - 12,
       });
@@ -7053,37 +7073,355 @@ function snapCameraToPlayer(run, data) {
   run.cameraFallTargetYOffset = 0;
 }
 
+function getShelterConfig(data) {
+  return {
+    levelId: data.shelter?.levelId || "shelter-hub-01",
+    backgroundId: data.shelter?.backgroundId || "shelter-hub",
+    arrivalCutsceneSeconds: Number.isFinite(data.shelter?.arrivalCutsceneSeconds)
+      ? data.shelter.arrivalCutsceneSeconds
+      : SHELTER_ARRIVAL_SECONDS,
+  };
+}
+
+function isShelterRouteExit(routeExit, data) {
+  const shelterLevelId = getShelterConfig(data).levelId;
+  return routeExit?.kind === "shelter"
+    || routeExit?.type === "shelter"
+    || routeExit?.toLevelId === shelterLevelId;
+}
+
+function getShelterRouteBlockReason(run) {
+  if (!run) {
+    return SHELTER_NIGHT_LOCK_MESSAGE;
+  }
+  if (Number.isFinite(run.shelterExitCooldown) && run.shelterExitCooldown > 0) {
+    return SHELTER_COOLDOWN_MESSAGE;
+  }
+  return run.timePhase === "night" ? "" : SHELTER_NIGHT_LOCK_MESSAGE;
+}
+
+function setRunNotice(run, message, duration = 1.8) {
+  if (!run || !message) {
+    return;
+  }
+  pushNotice(run, message);
+  run.message = message;
+  run.noticeTimer = duration;
+}
+
+function getRunTimePhaseLabel(run) {
+  if (run?.timePhase === "night") {
+    return "밤";
+  }
+  if (run?.timePhase === "dusk") {
+    return "황혼";
+  }
+  return "낮";
+}
+
+function setDebugNightPhase(state, data) {
+  const run = state.run;
+  if (state.scene !== SCENES.EXPEDITION || !run) {
+    return false;
+  }
+  const nightAt = Number.isFinite(data.world?.nightAt) ? data.world.nightAt : 150;
+  run.time = Math.max(Number(run.time) || 0, nightAt);
+  run.timePhase = "night";
+  run.nightActive = true;
+  setRunNotice(run, "테스트: 밤으로 전환", 2);
+  setStatus(state, run.message);
+  saveCurrentGame(state, data);
+  return true;
+}
+
+function createActiveShelterRestState(returnLevelId, returnEntranceId) {
+  return {
+    active: true,
+    phase: "arrival",
+    timer: 0,
+    menuIndex: 0,
+    returnLevelId: returnLevelId || null,
+    returnEntranceId: returnEntranceId || "start",
+    dayAdvanced: false,
+    photo: {
+      frameX: 0,
+      frameY: 0,
+      zoom: 1,
+      capturedImage: null,
+      flashTimer: 0,
+    },
+    recordsIndex: 0,
+    backgroundIndex: 0,
+  };
+}
+
+function resetShelterPhoto(rest) {
+  rest.photo = {
+    frameX: 0,
+    frameY: 0,
+    zoom: 1,
+    capturedImage: null,
+    flashTimer: 0,
+  };
+}
+
+function ensureCgArchive(meta) {
+  meta.cgArchive = meta.cgArchive && typeof meta.cgArchive === "object"
+    ? meta.cgArchive
+    : {};
+  meta.cgArchive.photos = Array.isArray(meta.cgArchive.photos)
+    ? meta.cgArchive.photos
+    : [];
+  meta.cgArchive.unlockedBackgroundIds = Array.isArray(meta.cgArchive.unlockedBackgroundIds)
+    ? meta.cgArchive.unlockedBackgroundIds.map(String).filter(Boolean)
+    : [];
+  if (!meta.cgArchive.unlockedBackgroundIds.includes("shelter-hub")) {
+    meta.cgArchive.unlockedBackgroundIds.unshift("shelter-hub");
+  }
+  return meta.cgArchive;
+}
+
+function refillWeaponsForShelter(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const defaultReserve = data.defaultLoadout?.reserveAmmo || {};
+  Object.keys(defaultReserve).forEach((ammoType) => {
+    weapons.reserveAmmo[ammoType] = defaultReserve[ammoType];
+  });
+  Object.values(weapons.arms || {}).forEach((arm) => {
+    const stats = computeArmWeaponStats(data, arm);
+    arm.magazine = stats.magazineSize;
+    arm.reloadTimer = 0;
+    arm.reloadDuration = 0;
+    arm.fireCooldownTimer = 0;
+    if (!Number.isFinite(weapons.reserveAmmo[stats.ammoType])) {
+      weapons.reserveAmmo[stats.ammoType] = defaultReserve[stats.ammoType] ?? stats.magazineSize;
+    }
+  });
+}
+
+function applyShelterRestRecovery(run, data) {
+  run.hp = data.player.maxHp;
+  run.sanity = data.player.maxSanity;
+  run.battery = data.player.maxBattery;
+  run.focusMax = Number.isFinite(run.focusMax) ? run.focusMax : 100;
+  run.focus = run.focusMax;
+  run.focusActive = false;
+  run.focusDepleted = false;
+  run.time = 0;
+  run.timePhase = "day";
+  run.nightActive = false;
+  refillWeaponsForShelter(run, data);
+}
+
+function beginShelterRest(state, data, returnLevelId, returnEntranceId) {
+  const run = state.run;
+  if (!run) {
+    return;
+  }
+  run.shelterRest = createActiveShelterRestState(returnLevelId, returnEntranceId);
+  if (!run.shelterRest.dayAdvanced) {
+    run.day = Math.max(1, Math.floor(run.day || 1)) + 1;
+    run.shelterRest.dayAdvanced = true;
+    applyShelterRestRecovery(run, data);
+  }
+  ensureCgArchive(state.meta || {});
+  run.message = `DAY ${run.day} · 쉘터 도착`;
+  run.noticeTimer = 2.6;
+  setStatus(state, "쉘터 폐쇄 중.");
+  saveCurrentGame(state, data);
+}
+
+function createShelterPhotoImage(run, data, rest) {
+  if (typeof document === "undefined") {
+    return "";
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = 480;
+  canvas.height = 270;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return "";
+  }
+  const photo = rest.photo || {};
+  const offsetX = clamp(Number(photo.frameX ?? 0), -1, 1);
+  const offsetY = clamp(Number(photo.frameY ?? 0), -1, 1);
+  const zoom = clamp(Number(photo.zoom ?? 1), 0.8, 1.35);
+  const background = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  background.addColorStop(0, "#dce8d2");
+  background.addColorStop(0.46, "#6d9da0");
+  background.addColorStop(1, "#111a20");
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.translate(canvas.width * 0.5 + offsetX * 42, canvas.height * 0.54 + offsetY * 26);
+  ctx.scale(zoom, zoom);
+  ctx.fillStyle = "rgba(246, 255, 235, 0.58)";
+  ctx.fillRect(-230, 36, 460, 58);
+  ctx.fillStyle = "rgba(9, 24, 28, 0.64)";
+  ctx.fillRect(-210, 62, 420, 38);
+  ctx.fillStyle = "rgba(18, 32, 38, 0.72)";
+  ctx.fillRect(-42, -16, 84, 112);
+  ctx.fillStyle = "rgba(230, 244, 219, 0.92)";
+  ctx.beginPath();
+  ctx.arc(0, -34, 30, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(41, 63, 72, 0.96)";
+  ctx.fillRect(-24, -2, 48, 88);
+  ctx.fillStyle = "rgba(149, 234, 255, 0.76)";
+  ctx.fillRect(-34, 18, 68, 8);
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(3, 8, 12, 0.36)";
+  ctx.fillRect(0, 0, canvas.width, 48);
+  ctx.fillStyle = "rgba(245,248,251,0.95)";
+  ctx.font = "700 18px Segoe UI, sans-serif";
+  ctx.fillText(`DAY ${Math.max(1, Math.floor(run.day || 1))}`, 24, 31);
+  ctx.fillStyle = "rgba(231,244,126,0.9)";
+  ctx.font = "700 12px Segoe UI, sans-serif";
+  ctx.fillText(data.levelLabel || "Shelter", 112, 31);
+
+  try {
+    return canvas.toDataURL("image/jpeg", 0.78);
+  } catch {
+    return "";
+  }
+}
+
+function saveShelterPhoto(state, data) {
+  const run = state.run;
+  const rest = run?.shelterRest;
+  if (!run || !rest) {
+    return false;
+  }
+  const image = rest.photo?.capturedImage || createShelterPhotoImage(run, data, rest);
+  if (!image) {
+    run.message = "사진 저장 실패.";
+    run.noticeTimer = 1.8;
+    return false;
+  }
+  const archive = ensureCgArchive(state.meta || {});
+  const backgroundId = getShelterConfig(data).backgroundId;
+  if (!archive.unlockedBackgroundIds.includes(backgroundId)) {
+    archive.unlockedBackgroundIds.push(backgroundId);
+  }
+  archive.photos.push({
+    id: `shelter-photo-${Date.now()}`,
+    day: Math.max(1, Math.floor(run.day || 1)),
+    createdAt: Date.now(),
+    backgroundId,
+    image,
+  });
+  archive.photos = archive.photos.slice(-CG_PHOTO_LIMIT);
+  saveMetaState(state.meta);
+  rest.recordsIndex = Math.max(0, archive.photos.length - 1);
+  run.message = "쉘터 사진 저장.";
+  run.noticeTimer = 2.2;
+  return true;
+}
+
+function transitionToLevel(state, data, targetLevelId, entranceId = "start", options = {}) {
+  const run = state.run;
+  if (!run || !targetLevelId) {
+    return null;
+  }
+
+  if (!getLevelIds(data.__baseData || data).includes(targetLevelId)) {
+    run.message = `Route target not found: ${targetLevelId}`;
+    run.noticeTimer = 2.6;
+    setStatus(state, run.message);
+    return null;
+  }
+
+  const fromLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId || "movement-lab-01";
+  run.levelStates = run.levelStates || {};
+  run.levelStates[fromLevelId] = captureLevelRuntimeState(run);
+
+  loadRuntimeLevelData(data, targetLevelId);
+  const resolvedTargetLevelId = data.currentLevelId || targetLevelId;
+  const savedState = run.levelStates[resolvedTargetLevelId] || null;
+  run.currentLevelId = resolvedTargetLevelId;
+  visitLevel(run, data, resolvedTargetLevelId);
+
+  installLevelRuntimeState(run, data, savedState);
+  resetPlayerForLevelTransition(run, data, entranceId || "start");
+  clearLevelTransitionEffects(run);
+  snapCameraToPlayer(run, data);
+  updateMapExploration(run, data);
+
+  run.message = options.message || `${data.levelLabel || resolvedTargetLevelId} 진입.`;
+  run.noticeTimer = 2.6;
+  setStatus(state, run.message);
+  if (options.persist !== false) {
+    saveCurrentGame(state, data);
+  }
+  return {
+    fromLevelId,
+    targetLevelId: resolvedTargetLevelId,
+  };
+}
+
 function transitionToRouteExit(state, data, routeExit) {
   const run = state.run;
   if (!run || !routeExit?.toLevelId) {
     return;
   }
 
-  if (!getLevelIds(data.__baseData || data).includes(routeExit.toLevelId)) {
-    run.message = `Route target not found: ${routeExit.toLevelId}`;
-    run.noticeTimer = 2.6;
-    setStatus(state, run.message);
-    return;
-  }
-
   discoverRouteExit(run, data, routeExit);
   const fromLevelId = run.currentLevelId || data.currentLevelId || data.defaultLevelId || "movement-lab-01";
-  run.levelStates = run.levelStates || {};
-  run.levelStates[fromLevelId] = captureLevelRuntimeState(run);
+  const shelterRoute = isShelterRouteExit(routeExit, data);
+  if (shelterRoute) {
+    const blockReason = getShelterRouteBlockReason(run);
+    if (blockReason) {
+      setRunNotice(run, blockReason, 2);
+      setStatus(state, blockReason);
+      return;
+    }
+  }
+  const result = transitionToLevel(state, data, routeExit.toLevelId, routeExit.toEntranceId || "start", {
+    persist: !shelterRoute,
+    message: shelterRoute ? "쉘터 진입." : undefined,
+  });
+  if (shelterRoute && result) {
+    beginShelterRest(state, data, fromLevelId, routeExit.returnEntranceId || "start");
+  }
+}
 
-  loadRuntimeLevelData(data, routeExit.toLevelId);
-  const targetLevelId = data.currentLevelId || routeExit.toLevelId;
-  const savedState = run.levelStates[targetLevelId] || null;
-  run.currentLevelId = targetLevelId;
-  visitLevel(run, data, targetLevelId);
-
-  installLevelRuntimeState(run, data, savedState);
-  resetPlayerForLevelTransition(run, data, routeExit.toEntranceId || "start");
-  clearLevelTransitionEffects(run);
-  snapCameraToPlayer(run, data);
-  updateMapExploration(run, data);
-
-  run.message = `${data.levelLabel || targetLevelId} 진입.`;
+function leaveShelterRest(state, data) {
+  const run = state.run;
+  const rest = run?.shelterRest;
+  if (!run || !rest?.active) {
+    return;
+  }
+  const targetLevelId = rest.returnLevelId || data.defaultLevelId || "movement-lab-01";
+  const entranceId = rest.returnEntranceId || "start";
+  const result = transitionToLevel(state, data, targetLevelId, entranceId, {
+    persist: false,
+    message: "쉘터 출발.",
+  });
+  if (!result) {
+    return;
+  }
+  run.shelterRest = {
+    active: false,
+    phase: "inactive",
+    timer: 0,
+    menuIndex: 0,
+    returnLevelId: null,
+    returnEntranceId: "start",
+    dayAdvanced: true,
+    photo: {
+      frameX: 0,
+      frameY: 0,
+      zoom: 1,
+      capturedImage: null,
+      flashTimer: 0,
+    },
+    recordsIndex: 0,
+    backgroundIndex: 0,
+  };
+  run.shelterExitCooldown = SHELTER_EXIT_COOLDOWN_SECONDS;
+  run.message = `${data.levelLabel || targetLevelId} 복귀.`;
   run.noticeTimer = 2.6;
   setStatus(state, run.message);
   saveCurrentGame(state, data);
@@ -7344,6 +7682,12 @@ function updateInteractions(state, data, canInteract) {
     return;
   }
 
+  if (nearest.kind === "shelterLocked") {
+    setRunNotice(run, nearest.text, 2);
+    setStatus(state, nearest.text);
+    return;
+  }
+
   if (nearest.kind === "routeExit") {
     transitionToRouteExit(state, data, nearest.routeExit);
     return;
@@ -7386,8 +7730,185 @@ function updateInteractions(state, data, canInteract) {
   }
 }
 
+function updateShelterRestMode(state, data, dt) {
+  const run = state.run;
+  const rest = run?.shelterRest;
+  if (!run || !rest?.active) {
+    return false;
+  }
+
+  if (state.liveEdit?.active) {
+    state.liveEdit.active = false;
+  }
+  run.prompt = "";
+  run.promptWorld = null;
+  if (run.mapOverlay) {
+    run.mapOverlay.active = false;
+    run.mapOverlay.dragging = false;
+    run.mapOverlay.dragPointerId = null;
+  }
+  if (run.recoilAim) {
+    run.recoilAim.active = false;
+    run.recoilAim.aiming = false;
+  }
+  run.focusActive = false;
+  run.player.recoilFocusActive = false;
+  rest.timer = Number.isFinite(rest.timer) ? rest.timer + dt : dt;
+  if (rest.photo) {
+    rest.photo.flashTimer = Math.max(0, Number(rest.photo.flashTimer || 0) - dt);
+  }
+
+  if (rest.phase === "arrival") {
+    const arrivalSeconds = getShelterConfig(data).arrivalCutsceneSeconds;
+    if (rest.timer >= arrivalSeconds || consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+      rest.phase = "menu";
+      rest.timer = 0;
+      rest.menuIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1);
+      setStatus(state, "쉘터 휴게.");
+      saveCurrentGame(state, data);
+    } else {
+      setStatus(state, "쉘터 폐쇄 중.");
+    }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  if (rest.phase === "menu") {
+    if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+      rest.menuIndex = (Math.max(0, Math.floor(rest.menuIndex || 0)) + SHELTER_MENU_ITEMS.length - 1) % SHELTER_MENU_ITEMS.length;
+    }
+    if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+      rest.menuIndex = (Math.max(0, Math.floor(rest.menuIndex || 0)) + 1) % SHELTER_MENU_ITEMS.length;
+    }
+    if (consumeEitherPress(state, SHELTER_EXIT_KEYS)) {
+      leaveShelterRest(state, data);
+      return true;
+    }
+    if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, CONFIRM_KEYS)) {
+      const item = SHELTER_MENU_ITEMS[clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1)];
+      if (item === "photo") {
+        rest.phase = "photo";
+        rest.timer = 0;
+        resetShelterPhoto(rest);
+        setStatus(state, "사진 모드.");
+      } else if (item === "records") {
+        rest.phase = "records";
+        rest.timer = 0;
+        rest.recordsIndex = clamp(Math.floor(rest.recordsIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).photos.length - 1));
+        setStatus(state, "기록 보기.");
+      } else {
+        rest.phase = "background";
+        rest.timer = 0;
+        rest.backgroundIndex = clamp(Math.floor(rest.backgroundIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).unlockedBackgroundIds.length - 1));
+        setStatus(state, "배경 보기.");
+      }
+    } else {
+      setStatus(state, "쉘터 휴게 · D/Z 선택 · C 밖으로");
+    }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  if (rest.phase === "photo") {
+    rest.photo = rest.photo || {};
+    const moveX = (isEitherPressed(state, SHELTER_VIEW_RIGHT_KEYS) ? 1 : 0)
+      - (isEitherPressed(state, SHELTER_VIEW_LEFT_KEYS) ? 1 : 0);
+    const moveY = (isEitherPressed(state, SHELTER_MENU_DOWN_KEYS) ? 1 : 0)
+      - (isEitherPressed(state, SHELTER_MENU_UP_KEYS) ? 1 : 0);
+    rest.photo.frameX = clamp(Number(rest.photo.frameX || 0) + moveX * dt * 1.18, -1, 1);
+    rest.photo.frameY = clamp(Number(rest.photo.frameY || 0) + moveY * dt * 1.18, -1, 1);
+    if (consumeEitherPress(state, RESTART_KEYS) || consumeEitherPress(state, RELOAD_KEYS)) {
+      resetShelterPhoto(rest);
+    }
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      rest.phase = "menu";
+      rest.timer = 0;
+      resetShelterPhoto(rest);
+    } else if (consumeEitherPress(state, INTERACT_KEYS)) {
+      rest.photo.capturedImage = createShelterPhotoImage(run, data, rest);
+      rest.photo.flashTimer = 0.22;
+      rest.phase = "photoPreview";
+      rest.timer = 0;
+      setStatus(state, "사진 확인 · C 저장 / R 재촬영");
+    } else {
+      setStatus(state, "사진 모드 · 방향키/Q/E 프레임 · D/Z 촬영");
+    }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  if (rest.phase === "photoPreview") {
+    if (consumeEitherPress(state, RELOAD_KEYS)) {
+      rest.phase = "photo";
+      rest.timer = 0;
+      rest.photo.capturedImage = null;
+    } else if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      rest.phase = "menu";
+      rest.timer = 0;
+      resetShelterPhoto(rest);
+    } else if (consumeEitherPress(state, CONFIRM_KEYS)) {
+      if (saveShelterPhoto(state, data)) {
+        rest.phase = "records";
+        rest.timer = 0;
+        saveCurrentGame(state, data);
+      }
+    } else {
+      setStatus(state, "사진 확인 · C 저장 / R 재촬영 / Esc 취소");
+    }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  if (rest.phase === "records") {
+    const photos = ensureCgArchive(state.meta || {}).photos;
+    if (consumeEitherPress(state, SHELTER_VIEW_LEFT_KEYS)) {
+      rest.recordsIndex = photos.length ? (Math.max(0, Math.floor(rest.recordsIndex || 0)) + photos.length - 1) % photos.length : 0;
+    }
+    if (consumeEitherPress(state, SHELTER_VIEW_RIGHT_KEYS)) {
+      rest.recordsIndex = photos.length ? (Math.max(0, Math.floor(rest.recordsIndex || 0)) + 1) % photos.length : 0;
+    }
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS) || consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+      rest.phase = "menu";
+      rest.timer = 0;
+    } else {
+      setStatus(state, "기록 보기 · Q/E 넘기기 · Esc 뒤로");
+    }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  if (rest.phase === "background") {
+    const backgrounds = ensureCgArchive(state.meta || {}).unlockedBackgroundIds;
+    if (consumeEitherPress(state, SHELTER_VIEW_LEFT_KEYS)) {
+      rest.backgroundIndex = backgrounds.length ? (Math.max(0, Math.floor(rest.backgroundIndex || 0)) + backgrounds.length - 1) % backgrounds.length : 0;
+    }
+    if (consumeEitherPress(state, SHELTER_VIEW_RIGHT_KEYS)) {
+      rest.backgroundIndex = backgrounds.length ? (Math.max(0, Math.floor(rest.backgroundIndex || 0)) + 1) % backgrounds.length : 0;
+    }
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS) || consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+      rest.phase = "menu";
+      rest.timer = 0;
+    } else {
+      setStatus(state, "배경 보기 · Q/E 넘기기 · Esc 뒤로");
+    }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  rest.phase = "menu";
+  rest.timer = 0;
+  updateAutoSave(state, data, dt);
+  return true;
+}
+
 function updateExpedition(state, data, dt) {
   const run = state.run;
+  if (updateShelterRestMode(state, data, dt)) {
+    return;
+  }
+  if (Number.isFinite(run.shelterExitCooldown) && run.shelterExitCooldown > 0) {
+    run.shelterExitCooldown = Math.max(0, run.shelterExitCooldown - dt);
+  }
   if (run.faceOff?.active && state.liveEdit?.active) {
     state.liveEdit.active = false;
   }
@@ -7545,8 +8066,9 @@ function updateExpedition(state, data, dt) {
     return;
   }
 
+  const timePhaseLabel = getRunTimePhaseLabel(run);
   const phaseLabel = isMovementLab(data)
-    ? "실험 중."
+    ? `실험 중 · ${timePhaseLabel}.`
     : run.timePhase === "day"
       ? "낮 유지."
       : run.timePhase === "dusk"
@@ -7565,6 +8087,51 @@ function updateShelter(state) {
   }
 }
 
+function ensureTitleMenuState(state, hasRun) {
+  const titleMenu = state.titleMenu && typeof state.titleMenu === "object"
+    ? state.titleMenu
+    : {};
+  if (titleMenu.lastHasRun !== hasRun) {
+    titleMenu.menuIndex = hasRun ? 1 : 0;
+    titleMenu.confirmingNewRun = false;
+  } else {
+    titleMenu.menuIndex = clamp(Math.floor(titleMenu.menuIndex || 0), 0, TITLE_MENU_ITEMS.length - 1);
+    if (!hasRun) {
+      titleMenu.menuIndex = 0;
+      titleMenu.confirmingNewRun = false;
+    }
+  }
+  titleMenu.lastHasRun = hasRun;
+  state.titleMenu = titleMenu;
+  return titleMenu;
+}
+
+function moveTitleMenu(titleMenu, hasRun, direction) {
+  titleMenu.confirmingNewRun = false;
+  if (!hasRun) {
+    titleMenu.menuIndex = 0;
+    return;
+  }
+  const count = TITLE_MENU_ITEMS.length;
+  titleMenu.menuIndex = (Math.floor(titleMenu.menuIndex || 0) + direction + count) % count;
+}
+
+function enterTitleNewRun(state, hasRun) {
+  if (hasRun) {
+    clearSavedGame();
+    state.save.hasRun = false;
+    state.save.lastSavedAt = null;
+  }
+  state.titleMenu = {
+    menuIndex: 0,
+    confirmingNewRun: false,
+    lastHasRun: false,
+  };
+  state.scene = SCENES.SHELTER;
+  state.sceneTimer = 0;
+  setStatus(state, "새 런 준비");
+}
+
 function updateTitle(state) {
   if (shouldStartFromUrlLevel()) {
     startNewSavedRun(state, state.data, { clearSaved: false, persist: false });
@@ -7573,29 +8140,73 @@ function updateTitle(state) {
   }
 
   state.save = state.save || {};
-  state.save.hasRun = hasSavedGame();
-  if (state.save.hasRun && consumeEitherPress(state, NEW_RUN_KEYS)) {
-    clearSavedGame();
-    state.save.hasRun = false;
-    state.scene = SCENES.SHELTER;
-    state.sceneTimer = 0;
-    setStatus(state, "새 런 준비");
+  const hasRun = hasSavedGame();
+  state.save.hasRun = hasRun;
+  const titleMenu = ensureTitleMenuState(state, hasRun);
+
+  if (titleMenu.confirmingNewRun) {
+    if (consumeEitherPress(state, TITLE_MENU_CANCEL_KEYS)) {
+      titleMenu.confirmingNewRun = false;
+      setStatus(state, "새 런 취소");
+      return;
+    }
+    if (consumeEitherPress(state, TITLE_MENU_UP_KEYS) || consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
+      titleMenu.confirmingNewRun = false;
+      setStatus(state, "메인 메뉴");
+      return;
+    }
+    if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+      enterTitleNewRun(state, hasRun);
+      return;
+    }
+    setStatus(state, "기존 저장 삭제 확인: C/D");
     return;
   }
-  if (state.save.hasRun && (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS))) {
-    restoreSavedGame(state, state.data);
+
+  if (consumeEitherPress(state, TITLE_MENU_UP_KEYS)) {
+    moveTitleMenu(titleMenu, hasRun, -1);
+    setStatus(state, "메인 메뉴");
     return;
   }
-  if (state.save.hasRun) {
-    setStatus(state, "C: 이어하기 / N: 새 런");
+  if (consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
+    moveTitleMenu(titleMenu, hasRun, 1);
+    setStatus(state, "메인 메뉴");
     return;
   }
-  setStatus(state, isMovementLab(state.data) ? "C: 입장" : "C: 쉘터");
+
+  if (consumeEitherPress(state, NEW_RUN_KEYS)) {
+    titleMenu.menuIndex = 0;
+    if (hasRun) {
+      titleMenu.confirmingNewRun = true;
+      setStatus(state, "기존 저장 삭제 확인");
+    } else {
+      enterTitleNewRun(state, false);
+    }
+    return;
+  }
+
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
-    state.scene = SCENES.SHELTER;
-    state.sceneTimer = 0;
-    setStatus(state, "연결 완료.");
+    const selected = TITLE_MENU_ITEMS[clamp(Math.floor(titleMenu.menuIndex || 0), 0, TITLE_MENU_ITEMS.length - 1)];
+    if (selected === "continue") {
+      if (hasRun && restoreSavedGame(state, state.data)) {
+        return;
+      }
+      state.save.hasRun = false;
+      titleMenu.menuIndex = 0;
+      titleMenu.lastHasRun = false;
+      setStatus(state, "저장된 런 없음");
+      return;
+    }
+    if (hasRun) {
+      titleMenu.confirmingNewRun = true;
+      setStatus(state, "기존 저장 삭제 확인");
+      return;
+    }
+    enterTitleNewRun(state, false);
+    return;
   }
+
+  setStatus(state, hasRun ? "위/아래 선택 · C/D 실행" : "처음부터 · C/D 실행");
 }
 
 function updateResults(state) {
@@ -7636,6 +8247,14 @@ export function updateGame(state, data, dt) {
 
   if (consumeEitherPress(state, DEBUG_KEYS)) {
     state.debug.active = !state.debug.active;
+  }
+
+  if (
+    (state.debug?.active || state.testDebug?.active)
+    && consumeEitherPress(state, DEBUG_SET_NIGHT_KEYS)
+    && setDebugNightPhase(state, data)
+  ) {
+    return;
   }
 
   if (

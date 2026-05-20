@@ -8,8 +8,8 @@
     "height": 4270,
     "gravity": 2350,
     "groundY": 3900,
-    "duskAt": 9999,
-    "nightAt": 19999,
+    "duskAt": 90,
+    "nightAt": 150,
     "sanityDrain": {
       "day": 0,
       "dusk": 0,

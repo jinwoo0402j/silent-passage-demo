@@ -2224,6 +2224,10 @@ function renderSelectionFields(editor, dom) {
     addNumber("Facing", "facing", entity.facing ?? 1, { min: -1, max: 1 });
   } else if (editor.selected.kind === "routeExit") {
     addText("ID", "id", entity.id || "");
+    addSelect("Kind", "kind", entity.kind || entity.type || "route", [
+      { value: "route", label: "Route" },
+      { value: "shelter", label: "Shelter" },
+    ]);
     addText("Label", "label", entity.label || "");
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2241,6 +2245,7 @@ function renderSelectionFields(editor, dom) {
     }));
     addSelect("To Level", "toLevelId", targetLevelId, levelOptions);
     addSelect("To Entrance", "toEntranceId", entity.toEntranceId || entranceOptions[0]?.value || "start", entranceOptions);
+    addText("Return Entrance", "returnEntranceId", entity.returnEntranceId || "start");
   } else if (editor.selected.kind === "gate") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2923,12 +2928,13 @@ function applySelectionField(editor, dom, field, value) {
     || field === "attackPattern"
     || field === "toLevelId"
     || field === "toEntranceId"
+    || field === "returnEntranceId"
   ) {
     if (entity[field] === value) {
       return;
     }
     pushUndo(editor);
-    if (field === "kind") {
+    if (field === "kind" && editor.selected?.kind === "platform") {
       if (value === "slope") {
         entity.kind = "slope";
         entity.slopeDirection = getPlatformSlopeDirection(entity);

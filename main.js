@@ -1,10 +1,10 @@
-import { GAME_DATA } from "./level-data.js?v=20260514-camera-center-v3";
+import { GAME_DATA } from "./level-data.js?v=20260520-night-shelter-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260507-slope-slide-physics-v1";
+} from "./level-store.js?v=20260520-night-shelter-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,8 +13,8 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260514-camera-center-v3";
-import { saveCurrentGame } from "./save-game.js?v=20260514-camera-center-v3";
+import { renderGame } from "./render.js?v=20260520-night-shelter-v1";
+import { saveCurrentGame } from "./save-game.js?v=20260520-night-shelter-v1";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -25,8 +25,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260514-camera-center-v3";
-import { bindInput, updateGame } from "./systems.js?v=20260514-faceoff-camera-fix-v1";
+} from "./state.js?v=20260520-night-shelter-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260520-night-shelter-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -47,7 +47,7 @@ testDebugButton.id = "testDebugButton";
 testDebugButton.className = "test-debug-button";
 testDebugButton.type = "button";
 testDebugButton.textContent = "TEST *";
-testDebugButton.title = "* 키로 테스트 디버그 패널 토글";
+testDebugButton.title = "* 키로 테스트 디버그 패널 토글, 8 키로 밤 전환";
 const testDebugPanel = document.createElement("section");
 testDebugPanel.id = "testDebugPanel";
 testDebugPanel.className = "test-debug-panel";
@@ -65,6 +65,7 @@ testDebugPanel.innerHTML = `
     <button type="button" data-test-action="restartRun">다시 시작하기</button>
     <button type="button" data-test-action="resetLevel">레벨 처음으로 돌아가기</button>
     <button type="button" data-test-action="respawnEnemies">맵의 적 전부 리스폰</button>
+    <button type="button" data-test-action="setNight">밤으로 전환</button>
     <button type="button" data-test-action="equipArSniper">AR / 스나이퍼 장착</button>
     <button type="button" data-test-action="equipShotgunMachinegun">샷건 / 머신건 장착</button>
   </div>
@@ -446,7 +447,14 @@ function consumeShortcutState(currentState, code) {
 
 function getSceneActionLabel(currentState) {
   if (currentState.scene === SCENES.TITLE) {
-    return currentState.save?.hasRun ? "이어하기" : "입장";
+    const hasRun = Boolean(currentState.save?.hasRun);
+    if (hasRun && currentState.titleMenu?.confirmingNewRun) {
+      return "삭제 후 시작";
+    }
+    const selectedIndex = hasRun
+      ? Math.max(0, Math.min(1, Math.floor(currentState.titleMenu?.menuIndex ?? 1)))
+      : 0;
+    return selectedIndex === 1 ? "이어하기" : "처음부터";
   }
   if (currentState.scene === SCENES.SHELTER) {
     return "출격";
@@ -880,6 +888,16 @@ function respawnDebugEnemies(currentState, data) {
   saveCurrentGame(currentState, data);
 }
 
+function setDebugNight(currentState, data) {
+  const run = ensureExpeditionRun(currentState, data);
+  const nightAt = Number.isFinite(data.world?.nightAt) ? data.world.nightAt : 150;
+  run.time = Math.max(Number(run.time) || 0, nightAt);
+  run.timePhase = "night";
+  run.nightActive = true;
+  setRunNotice(currentState, "테스트: 밤으로 전환");
+  saveCurrentGame(currentState, data);
+}
+
 function equipDebugWeaponPreset(currentState, data, preset) {
   const run = ensureExpeditionRun(currentState, data);
   const weapons = ensureWeaponLoadoutState(run, data);
@@ -939,6 +957,8 @@ function runTestDebugAction(currentDom, currentState, data, action) {
     resetDebugLevel(currentDom, currentState, data);
   } else if (action === "respawnEnemies") {
     respawnDebugEnemies(currentState, data);
+  } else if (action === "setNight") {
+    setDebugNight(currentState, data);
   } else if (action === "equipArSniper") {
     equipDebugWeaponPreset(currentState, data, "arSniper");
   } else if (action === "equipShotgunMachinegun") {

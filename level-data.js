@@ -256,8 +256,8 @@ export const GAME_DATA = {
       "aimPanLerp": 4.2,
       "aimPanReturnLerp": 3.4
     },
-    "duskAt": 9999,
-    "nightAt": 19999,
+    "duskAt": 90,
+    "nightAt": 150,
     "sanityDrain": {
       "day": 0,
       "dusk": 0,
@@ -1390,6 +1390,12 @@ const BASE_PLAYER_SPAWN = {
   ...GAME_DATA.player.spawn,
 };
 
+GAME_DATA.shelter = {
+  levelId: "shelter-hub-01",
+  backgroundId: "shelter-hub",
+  arrivalCutsceneSeconds: 2.4
+};
+
 GAME_DATA.defaultLevelId = "movement-lab-01";
 GAME_DATA.levels = {
   "movement-lab-01": {
@@ -1402,9 +1408,30 @@ GAME_DATA.levels = {
         "x": BASE_PLAYER_SPAWN.x,
         "y": BASE_PLAYER_SPAWN.y,
         "facing": 1
+      },
+      {
+        "id": "from-shelter",
+        "label": "Shelter Return",
+        "x": 744,
+        "y": BASE_PLAYER_SPAWN.y,
+        "facing": 1
       }
     ],
     "routeExits": [
+      {
+        "id": "to-shelter",
+        "kind": "shelter",
+        "type": "shelter",
+        "label": "Shelter",
+        "x": 652,
+        "y": 1792,
+        "width": 120,
+        "height": 192,
+        "prompt": "D/Z: 쉘터",
+        "toLevelId": "shelter-hub-01",
+        "toEntranceId": "start",
+        "returnEntranceId": "from-shelter"
+      },
       {
         "id": "to-faceoff-checkpoint",
         "label": "Face-off Checkpoint",
@@ -1430,6 +1457,89 @@ GAME_DATA.levels = {
       ]
     },
     "extractionGate": null
+  },
+  "shelter-hub-01": {
+    "id": "shelter-hub-01",
+    "label": "Shelter Hub 01",
+    "world": {
+      "mode": "shelter",
+      "width": 1280,
+      "height": 720,
+      "gravity": 2350,
+      "groundY": 640,
+      "duskAt": 90,
+      "nightAt": 150,
+      "sanityDrain": {
+        "day": 0,
+        "dusk": 0,
+        "night": 0
+      },
+      "startMessage": "쉘터 폐쇄.",
+      "startClueLog": [
+        "비상 쉘터 안에서는 시간이 하루 흐른다.",
+        "사진은 CG 기록에 보관된다."
+      ],
+      "labObjectives": [
+        "휴게",
+        "사진 기록",
+        "배경 감상"
+      ],
+      "camera": {
+        "zoom": 1,
+        "minZoom": 0.88,
+        "lookAheadEnabled": false,
+        "neutralFocusX": 0.5,
+        "neutralFocusY": 0.5,
+        "boundarySlackY": 0,
+        "boundarySlackX": 0
+      }
+    },
+    "player": {
+      "spawn": {
+        "x": 590,
+        "y": 552
+      }
+    },
+    "entrances": [
+      {
+        "id": "start",
+        "label": "Shelter Door",
+        "x": 590,
+        "y": 552,
+        "facing": 1
+      }
+    ],
+    "routeExits": [],
+    "map": {
+      "rooms": [
+        {
+          "id": "hub",
+          "label": "Shelter",
+          "x": 110,
+          "y": 132,
+          "width": 170,
+          "height": 92
+        }
+      ]
+    },
+    "extractionGate": null,
+    "platforms": [
+      {
+        "x": 0,
+        "y": 632,
+        "width": 1280,
+        "height": 88,
+        "color": "#40515a"
+      }
+    ],
+    "temporaryBlocks": [],
+    "zipLineNodes": [],
+    "zipLines": [],
+    "props": [],
+    "braceWalls": [],
+    "humanoidEnemies": [],
+    "hostileDrones": [],
+    "lootCrates": []
   },
   "faceoff-checkpoint-01": {
     "id": "faceoff-checkpoint-01",
@@ -1475,6 +1585,14 @@ GAME_DATA.worldMap = {
       height: 82,
     },
     {
+      id: "shelter-hub-01",
+      levelId: "shelter-hub-01",
+      x: 110,
+      y: 132,
+      width: 170,
+      height: 92,
+    },
+    {
       id: "faceoff-checkpoint-01",
       levelId: "faceoff-checkpoint-01",
       x: 260,
@@ -1484,6 +1602,12 @@ GAME_DATA.worldMap = {
     },
   ],
   edges: [
+    {
+      id: "movement-to-shelter",
+      fromLevelId: "movement-lab-01",
+      toLevelId: "shelter-hub-01",
+      routeId: "to-shelter",
+    },
     {
       id: "movement-to-faceoff",
       fromLevelId: "movement-lab-01",

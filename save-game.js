@@ -1,5 +1,5 @@
-import { SCENES, createRunState, saveMetaState } from "./state.js";
-import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260505-level-source-v2";
+import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260520-night-shelter-v1";
+import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-shelter-v1";
 
 const SAVE_SLOT_KEY = "rulebound-local-profile-v1";
 const SAVE_VERSION = 1;
@@ -26,9 +26,11 @@ const RUN_SCALAR_KEYS = [
   "focusMax",
   "focusDepleted",
   "focusActive",
+  "day",
   "time",
   "timePhase",
   "nightActive",
+  "shelterExitCooldown",
   "currentLevelId",
   "message",
   "noticeTimer",
@@ -115,6 +117,29 @@ function normalizeMapOverlayForSave(mapOverlay = {}) {
   };
 }
 
+function normalizeShelterRestForSave(shelterRest = {}) {
+  const source = shelterRest && typeof shelterRest === "object" ? shelterRest : {};
+  const photo = source.photo && typeof source.photo === "object" ? source.photo : {};
+  return {
+    active: Boolean(source.active),
+    phase: typeof source.phase === "string" ? source.phase : "inactive",
+    timer: Number.isFinite(source.timer) ? source.timer : 0,
+    menuIndex: Number.isFinite(source.menuIndex) ? Math.max(0, Math.floor(source.menuIndex)) : 0,
+    returnLevelId: typeof source.returnLevelId === "string" ? source.returnLevelId : null,
+    returnEntranceId: typeof source.returnEntranceId === "string" ? source.returnEntranceId : "start",
+    dayAdvanced: Boolean(source.dayAdvanced),
+    photo: {
+      frameX: Number.isFinite(photo.frameX) ? photo.frameX : 0,
+      frameY: Number.isFinite(photo.frameY) ? photo.frameY : 0,
+      zoom: Number.isFinite(photo.zoom) ? photo.zoom : 1,
+      capturedImage: typeof photo.capturedImage === "string" ? photo.capturedImage : null,
+      flashTimer: Number.isFinite(photo.flashTimer) ? photo.flashTimer : 0,
+    },
+    recordsIndex: Number.isFinite(source.recordsIndex) ? Math.max(0, Math.floor(source.recordsIndex)) : 0,
+    backgroundIndex: Number.isFinite(source.backgroundIndex) ? Math.max(0, Math.floor(source.backgroundIndex)) : 0,
+  };
+}
+
 function clearTransientRunState(run) {
   run.enemyShots = [];
   run.attackFx = [];
@@ -175,6 +200,7 @@ function captureRunForSave(run) {
     levelStates,
     map: clonePlain(run.map || {}, {}),
     mapOverlay: normalizeMapOverlayForSave(run.mapOverlay),
+    shelterRest: normalizeShelterRestForSave(run.shelterRest),
     weapons: clonePlain(run.weapons || {}, {}),
     partInventory: clonePlain(run.partInventory || [], []),
     identity: clonePlain(run.identity || {}, {}),
@@ -217,6 +243,7 @@ function applyRunSnapshot(run, snapshot) {
   run.levelStates = clonePlain(snapshot.levelStates || {}, {});
   run.map = clonePlain(snapshot.map || run.map || {}, run.map || {});
   run.mapOverlay = normalizeMapOverlayForSave(snapshot.mapOverlay || {});
+  run.shelterRest = normalizeShelterRestForSave(snapshot.shelterRest || run.shelterRest || {});
   run.weapons = clonePlain(snapshot.weapons || run.weapons || {}, run.weapons || {});
   run.partInventory = clonePlain(snapshot.partInventory || run.partInventory || [], []);
   run.identity = clonePlain(snapshot.identity || run.identity || {}, run.identity || {});
