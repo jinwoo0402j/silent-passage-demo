@@ -2239,13 +2239,6 @@
       "color": "#54697b"
     },
     {
-      "x": 5216,
-      "y": 2016,
-      "width": 64,
-      "height": 64,
-      "color": "#54697b"
-    },
-    {
       "x": 5408,
       "y": 1952,
       "width": 448,
@@ -2382,6 +2375,20 @@
       "x": 6176,
       "y": 2112,
       "width": 48,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5216,
+      "y": 2016,
+      "width": 64,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5280,
+      "y": 2080,
+      "width": 64,
       "height": 96,
       "color": "#54697b"
     }
@@ -2743,8 +2750,169 @@
     }
   ],
   "braceWalls": [],
-  "zipLineNodes": [],
-  "zipLines": [],
+  "zipLineNodes": [
+    {
+      "id": "zipline-node-1779234484341",
+      "x": 6176,
+      "y": 736,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779234489080",
+      "x": 6624,
+      "y": 1120,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779234491624",
+      "x": 7072,
+      "y": 1536,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779234493524",
+      "x": 7520,
+      "y": 1952,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779235692995",
+      "x": 2560,
+      "y": 1216,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779235700829",
+      "x": 2144,
+      "y": 1664,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779235703878",
+      "x": 1696,
+      "y": 2080,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779235707345",
+      "x": 1216,
+      "y": 2448,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1779235710053",
+      "x": 720,
+      "y": 2800,
+      "connectRange": 640
+    }
+  ],
+  "zipLines": [
+    {
+      "id": "zipline-1779234489080",
+      "startNodeId": "zipline-node-1779234484341",
+      "endNodeId": "zipline-node-1779234489080",
+      "start": {
+        "x": 6176,
+        "y": 736
+      },
+      "end": {
+        "x": 6624,
+        "y": 1120
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1779234491625",
+      "startNodeId": "zipline-node-1779234489080",
+      "endNodeId": "zipline-node-1779234491624",
+      "start": {
+        "x": 6624,
+        "y": 1120
+      },
+      "end": {
+        "x": 7072,
+        "y": 1536
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1779234493524",
+      "startNodeId": "zipline-node-1779234491624",
+      "endNodeId": "zipline-node-1779234493524",
+      "start": {
+        "x": 7072,
+        "y": 1536
+      },
+      "end": {
+        "x": 7520,
+        "y": 1952
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1779235700829",
+      "startNodeId": "zipline-node-1779235692995",
+      "endNodeId": "zipline-node-1779235700829",
+      "start": {
+        "x": 2560,
+        "y": 1216
+      },
+      "end": {
+        "x": 2144,
+        "y": 1664
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1779235703878",
+      "startNodeId": "zipline-node-1779235700829",
+      "endNodeId": "zipline-node-1779235703878",
+      "start": {
+        "x": 2144,
+        "y": 1664
+      },
+      "end": {
+        "x": 1696,
+        "y": 2080
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1779235707345",
+      "startNodeId": "zipline-node-1779235703878",
+      "endNodeId": "zipline-node-1779235707345",
+      "start": {
+        "x": 1696,
+        "y": 2080
+      },
+      "end": {
+        "x": 1216,
+        "y": 2448
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1779235710053",
+      "startNodeId": "zipline-node-1779235707345",
+      "endNodeId": "zipline-node-1779235710053",
+      "start": {
+        "x": 1216,
+        "y": 2448
+      },
+      "end": {
+        "x": 720,
+        "y": 2800
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    }
+  ],
   "humanoidEnemies": [],
   "hostileDrones": [],
   "lootTables": {
