@@ -347,7 +347,7 @@
       "width": 96,
       "height": 192,
       "prompt": "E: 다음 구역",
-      "toLevelId": "new-level",
+      "toLevelId": "city-level-01",
       "toEntranceId": "start"
     }
   ],

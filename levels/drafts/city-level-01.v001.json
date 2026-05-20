@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "levelId": "new-level",
+  "levelId": "city-level-01",
   "label": "City Level",
   "world": {
     "mode": "movementLab",
@@ -8,8 +8,8 @@
     "height": 4270,
     "gravity": 2350,
     "groundY": 3900,
-    "duskAt": 90,
-    "nightAt": 150,
+    "duskAt": 9999,
+    "nightAt": 19999,
     "sanityDrain": {
       "day": 0,
       "dusk": 0,
