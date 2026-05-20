@@ -109,6 +109,18 @@ export const GAME_DATA = {
     "shelterHubConcept": {
       "src": "./assets/concepts/shelter-hub-background-v1.png?v=20260514-1"
     },
+    "shelterPhotoDay01": {
+      "src": "./assets/cg/shelter-photo-day-01.png?v=20260520-1"
+    },
+    "shelterPhotoDay02": {
+      "src": "./assets/cg/shelter-photo-day-02.png?v=20260520-1"
+    },
+    "shelterPhotoDay03": {
+      "src": "./assets/cg/shelter-photo-day-03.png?v=20260520-1"
+    },
+    "shelterPhotoDay04": {
+      "src": "./assets/cg/shelter-photo-day-04.png?v=20260520-1"
+    },
     "titlePanel": {
       "src": "./assets/ui/type07a-title-panel.png"
     },
@@ -1393,7 +1405,13 @@ const BASE_PLAYER_SPAWN = {
 GAME_DATA.shelter = {
   levelId: "shelter-hub-01",
   backgroundId: "shelter-hub",
-  arrivalCutsceneSeconds: 2.4
+  arrivalCutsceneSeconds: 2.4,
+  photoScenes: [
+    { id: "shelter-photo-day-01", day: 1, label: "아침 정비", assetKey: "shelterPhotoDay01" },
+    { id: "shelter-photo-day-02", day: 2, label: "작업대", assetKey: "shelterPhotoDay02" },
+    { id: "shelter-photo-day-03", day: 3, label: "황혼 귀환", assetKey: "shelterPhotoDay03" },
+    { id: "shelter-photo-day-04", day: 4, label: "우천 대기", assetKey: "shelterPhotoDay04" }
+  ]
 };
 
 GAME_DATA.defaultLevelId = "movement-lab-01";
@@ -1411,7 +1429,7 @@ GAME_DATA.levels = {
       },
       {
         "id": "from-shelter",
-        "label": "Shelter Return",
+        "label": "피난처 복귀",
         "x": 744,
         "y": BASE_PLAYER_SPAWN.y,
         "facing": 1
@@ -1422,12 +1440,12 @@ GAME_DATA.levels = {
         "id": "to-shelter",
         "kind": "shelter",
         "type": "shelter",
-        "label": "Shelter",
+        "label": "피난처",
         "x": 652,
         "y": 1792,
         "width": 120,
         "height": 192,
-        "prompt": "D/Z: 쉘터",
+        "prompt": "D/Z: 피난처",
         "toLevelId": "shelter-hub-01",
         "toEntranceId": "start",
         "returnEntranceId": "from-shelter"
@@ -1460,7 +1478,7 @@ GAME_DATA.levels = {
   },
   "shelter-hub-01": {
     "id": "shelter-hub-01",
-    "label": "Shelter Hub 01",
+    "label": "피난처 허브 01",
     "world": {
       "mode": "shelter",
       "width": 1280,
@@ -1474,14 +1492,14 @@ GAME_DATA.levels = {
         "dusk": 0,
         "night": 0
       },
-      "startMessage": "쉘터 폐쇄.",
+      "startMessage": "피난처 폐쇄.",
       "startClueLog": [
-        "비상 쉘터 안에서는 시간이 하루 흐른다.",
-        "사진은 CG 기록에 보관된다."
+        "비상 피난처 안에서는 시간이 하루 흐른다.",
+        "촬영한 CG 일러스트는 기록에 보관된다."
       ],
       "labObjectives": [
         "휴게",
-        "사진 기록",
+        "CG 기록",
         "배경 감상"
       ],
       "camera": {
@@ -1503,7 +1521,7 @@ GAME_DATA.levels = {
     "entrances": [
       {
         "id": "start",
-        "label": "Shelter Door",
+        "label": "피난처 문",
         "x": 590,
         "y": 552,
         "facing": 1
@@ -1514,7 +1532,7 @@ GAME_DATA.levels = {
       "rooms": [
         {
           "id": "hub",
-          "label": "Shelter",
+          "label": "피난처",
           "x": 110,
           "y": 132,
           "width": 170,

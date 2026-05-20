@@ -318,7 +318,7 @@
     },
     {
       "id": "from-shelter",
-      "label": "Shelter Return",
+      "label": "피난처 복귀",
       "x": 1144,
       "y": 1888,
       "facing": 1
@@ -329,12 +329,12 @@
       "id": "to-shelter",
       "kind": "shelter",
       "type": "shelter",
-      "label": "Shelter",
+      "label": "피난처",
       "x": 1052,
       "y": 1792,
       "width": 120,
       "height": 192,
-      "prompt": "D/Z: 쉘터",
+      "prompt": "D/Z: 피난처",
       "toLevelId": "shelter-hub-01",
       "toEntranceId": "start",
       "returnEntranceId": "from-shelter"

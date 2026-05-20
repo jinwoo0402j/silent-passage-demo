@@ -7,8 +7,8 @@ import {
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260520-night-shelter-v1";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-shelter-v1";
+} from "./state.js?v=20260520-shelter-photo-v1";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -17,7 +17,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260520-night-shelter-v1";
+} from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   approach,
   clamp,
@@ -35,9 +35,9 @@ const CAMERA_SCREEN_WIDTH = 1280;
 const CAMERA_SCREEN_HEIGHT = 720;
 const CAMERA_FOCUS_X = 420 / CAMERA_SCREEN_WIDTH;
 const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
-const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
-const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyE"];
-const CROUCH_KEYS = ["ArrowDown", "KeyW"];
+const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
+const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
+const CROUCH_KEYS = ["ArrowDown", "KeyS"];
 const JUMP_KEYS = ["Space"];
 const ZIPLINE_MOUNT_KEYS = ["Space"];
 const DASH_KEYS = ["CapsLock", "ShiftLeft", "ShiftRight", "KeyX"];
@@ -50,21 +50,22 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
-const INTERACT_KEYS = ["KeyZ", "KeyD"];
+const INTERACT_KEYS = ["KeyZ"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
 const NEW_RUN_KEYS = ["KeyN"];
 const TITLE_MENU_ITEMS = ["new", "continue"];
-const TITLE_MENU_UP_KEYS = ["ArrowUp"];
-const TITLE_MENU_DOWN_KEYS = ["ArrowDown", "KeyW"];
+const TITLE_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
+const TITLE_MENU_DOWN_KEYS = ["ArrowDown", "KeyS"];
 const TITLE_MENU_CANCEL_KEYS = ["Escape"];
-const LOOT_PREV_KEYS = ["ArrowUp", "Space"];
-const LOOT_NEXT_KEYS = ["ArrowDown", "KeyW"];
-const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
-const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyE"];
+const LOOT_PREV_KEYS = ["ArrowUp", "KeyW"];
+const LOOT_NEXT_KEYS = ["ArrowDown", "KeyS"];
+const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyA"];
+const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const LOOT_CLOSE_KEYS = ["Escape", "KeyQ"];
 const DEBUG_KEYS = ["F3", "Backquote"];
 const DEBUG_SET_NIGHT_KEYS = ["Digit8"];
+const NIGHT_TRANSITION_SECONDS = 1.4;
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
@@ -74,20 +75,20 @@ const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
-const SHELTER_MENU_ITEMS = ["photo", "records", "background"];
+const SHELTER_MENU_ITEMS = ["photo", "records", "background", "rest", "exit"];
 const SHELTER_ARRIVAL_SECONDS = 2.4;
 const SHELTER_EXIT_COOLDOWN_SECONDS = 1.2;
-const SHELTER_NIGHT_LOCK_MESSAGE = "밤에만 쉘터 가능";
-const SHELTER_COOLDOWN_MESSAGE = "쉘터 문이 닫히는 중";
-const SHELTER_MENU_UP_KEYS = ["ArrowUp", "Space"];
-const SHELTER_MENU_DOWN_KEYS = ["ArrowDown", "KeyW"];
-const SHELTER_VIEW_LEFT_KEYS = ["ArrowLeft", "KeyQ"];
-const SHELTER_VIEW_RIGHT_KEYS = ["ArrowRight", "KeyE"];
+const SHELTER_NIGHT_LOCK_MESSAGE = "밤에만 피난처 가능";
+const SHELTER_COOLDOWN_MESSAGE = "피난처 문이 닫히는 중";
+const SHELTER_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
+const SHELTER_MENU_DOWN_KEYS = ["ArrowDown", "KeyS"];
+const SHELTER_VIEW_LEFT_KEYS = ["ArrowLeft", "KeyA"];
+const SHELTER_VIEW_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const SHELTER_EXIT_KEYS = ["KeyC"];
 const SHELTER_BACK_KEYS = ["Escape"];
 const CG_PHOTO_LIMIT = 12;
-const FACE_OFF_ENTRY_KEYS = ["KeyD"];
-const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD"];
+const FACE_OFF_ENTRY_KEYS = ["KeyZ"];
+const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD", "KeyS"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
 const FACE_OFF_RELEASE_KEY = "KeyQ";
 const HUMANOID_RESOLVED_STATES = new Set(["disabled", "surrendered", "dealt", "released", "escaped", "dead"]);
@@ -97,6 +98,7 @@ const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
     window.__SILENT_PASSAGE_PERF === "lite" ||
     new URLSearchParams(window.location.search).get("perf") === "lite"
   );
+const shelterCgImageCache = new Map();
 const RECOIL_FOCUS_AFTERIMAGE_INTERVAL = LOW_PERFORMANCE_MODE ? 0.14 : 0.08;
 const RECOIL_FOCUS_AFTERIMAGE_LIFE = 1;
 const RECOIL_FOCUS_AFTERIMAGE_MAX = LOW_PERFORMANCE_MODE ? 6 : 12;
@@ -5009,6 +5011,7 @@ function updateTimePhase(run, data, dt) {
       pushClue(run, "phase-dusk", "빛이 약해진다. Q는 시야만 보조한다.");
     } else if (run.timePhase === "night") {
       run.nightActive = true;
+      run.nightTransitionTimer = NIGHT_TRANSITION_SECONDS;
       pushNotice(run, "야간 위협 활성.");
       pushClue(run, "phase-night", "밤엔 귀환 비용이 커진다.");
     }
@@ -6640,7 +6643,7 @@ function getInteractionTargets(run, data) {
       id: faceOffEnemy.id,
       kind: "faceOff",
       enemy: faceOffEnemy,
-      text: "D: Face-off",
+      text: "Z: Face-off",
       x: center.x,
       y: faceOffEnemy.y - 14,
     });
@@ -6671,7 +6674,7 @@ function getInteractionTargets(run, data) {
         id: routeExit.id,
         kind: shelterBlockReason ? "shelterLocked" : "routeExit",
         routeExit,
-        text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "D/Z: 다음 구역"),
+        text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "Z: 다음 구역"),
         x: routeExit.x + routeExit.width / 2,
         y: routeExit.y - 12,
       });
@@ -6723,7 +6726,7 @@ function getInteractionTargets(run, data) {
         id: crate.id,
         kind: "lootCrate",
         crate,
-        text: normalizeInteractionPrompt(crate.opened ? "D/Z: 상자 확인" : crate.prompt),
+        text: normalizeInteractionPrompt(crate.opened ? "Z: 상자 확인" : crate.prompt),
         x: crate.x + crate.width / 2,
         y: crate.y - 12,
       });
@@ -6738,7 +6741,7 @@ function getInteractionTargets(run, data) {
           id: pedestal.id,
           kind: "pedestal",
           pedestal,
-          text: `D/Z: ${pedestal.label}`,
+          text: `Z: ${pedestal.label}`,
           x: pedestal.x + pedestal.width / 2,
           y: pedestal.y - 12,
         });
@@ -6757,15 +6760,15 @@ function getInteractionTargets(run, data) {
 
 function getZipLinePrompt(zipLine) {
   const prompt = zipLine?.prompt || "E: Zipline";
-  return prompt.replace(/^E\s*:/i, "Space/D:");
+  return prompt.replace(/^(?:Space\/D|D\/Z|D|E)\s*:/i, "Space/Z:");
 }
 
 function normalizeInteractionPrompt(prompt) {
-  return (prompt || "").replace(/^E\s*:/i, "D/Z:");
+  return (prompt || "").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
 }
 
 function normalizeExtractionPrompt(prompt) {
-  return (prompt || "D: 추출").replace(/^E\s*:/i, "D:");
+  return (prompt || "Z: 추출").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
 }
 
 function getNearestZipLineInteractionTarget(run, data) {
@@ -6844,7 +6847,7 @@ function applyExtraction(state, data) {
     state.run = null;
     state.scene = SCENES.RESULTS;
     state.sceneTimer = 0;
-    setStatus(state, "실험 종료. C");
+    setStatus(state, "실험 종료. C/Z");
     return;
   }
 
@@ -6892,7 +6895,7 @@ function applyExtraction(state, data) {
   state.run = null;
   state.scene = SCENES.RESULTS;
   state.sceneTimer = 0;
-  setStatus(state, "귀환 완료. C");
+  setStatus(state, "귀환 완료. C/Z");
 }
 
 function applyFailure(state, data, reason) {
@@ -6907,7 +6910,7 @@ function applyFailure(state, data, reason) {
     state.run = null;
     state.scene = SCENES.GAME_OVER;
     state.sceneTimer = 0;
-    setStatus(state, "실험 리셋. C");
+    setStatus(state, "실험 리셋. C/Z");
     return;
   }
 
@@ -6920,7 +6923,7 @@ function applyFailure(state, data, reason) {
   state.run = null;
   state.scene = SCENES.GAME_OVER;
   state.sceneTimer = 0;
-  setStatus(state, "런 실패. C");
+  setStatus(state, "런 실패. C/Z");
 }
 
 function restartCurrentRun(state, data) {
@@ -7128,6 +7131,7 @@ function setDebugNightPhase(state, data) {
   run.time = Math.max(Number(run.time) || 0, nightAt);
   run.timePhase = "night";
   run.nightActive = true;
+  run.nightTransitionTimer = NIGHT_TRANSITION_SECONDS;
   setRunNotice(run, "테스트: 밤으로 전환", 2);
   setStatus(state, run.message);
   saveCurrentGame(state, data);
@@ -7163,6 +7167,112 @@ function resetShelterPhoto(rest) {
     capturedImage: null,
     flashTimer: 0,
   };
+}
+
+function getShelterPhotoScenes(data) {
+  return Array.isArray(data.shelter?.photoScenes)
+    ? data.shelter.photoScenes.filter((scene) => scene && typeof scene === "object")
+    : [];
+}
+
+function normalizeShelterPhotoDay(day) {
+  return Math.max(1, Math.floor(Number(day) || 1));
+}
+
+function getShelterPhotoSceneForDay(data, day) {
+  const scenes = getShelterPhotoScenes(data);
+  if (!scenes.length) {
+    return null;
+  }
+  const normalizedDay = normalizeShelterPhotoDay(day);
+  const exact = scenes.find((scene) => normalizeShelterPhotoDay(scene.day) === normalizedDay);
+  return exact || scenes[(normalizedDay - 1) % scenes.length] || null;
+}
+
+function getShelterPhotoSceneSrc(data, scene) {
+  if (!scene) {
+    return "";
+  }
+  const assetSrc = scene.assetKey ? data.art?.[scene.assetKey]?.src : "";
+  return assetSrc || scene.src || "";
+}
+
+function getShelterCgIllustrationSrc(data, backgroundId = getShelterConfig(data).backgroundId, day = null) {
+  const sceneSrc = day == null
+    ? ""
+    : getShelterPhotoSceneSrc(data, getShelterPhotoSceneForDay(data, day));
+  if (sceneSrc) {
+    return sceneSrc;
+  }
+  if (backgroundId === "shelter-hub") {
+    return data.art?.shelterHubConcept?.src || "";
+  }
+  return data.art?.shelterHubConcept?.src || "";
+}
+
+function getShelterCgIllustrationImage(data, backgroundId = getShelterConfig(data).backgroundId, day = null) {
+  const src = getShelterCgIllustrationSrc(data, backgroundId, day);
+  if (!src || typeof Image === "undefined") {
+    return null;
+  }
+  if (!shelterCgImageCache.has(src)) {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = src;
+    shelterCgImageCache.set(src, image);
+  }
+  return shelterCgImageCache.get(src);
+}
+
+function isShelterCgIllustrationReady(data, backgroundId = getShelterConfig(data).backgroundId, day = null) {
+  const image = getShelterCgIllustrationImage(data, backgroundId, day);
+  return Boolean(image?.complete && image.naturalWidth && image.naturalHeight);
+}
+
+function preloadShelterCgIllustration(data, day = null) {
+  getShelterCgIllustrationImage(data, getShelterConfig(data).backgroundId, day);
+}
+
+function drawShelterCgFallback(ctx, width, height) {
+  const background = ctx.createLinearGradient(0, 0, width, height);
+  background.addColorStop(0, "#dce8d2");
+  background.addColorStop(0.46, "#6d9da0");
+  background.addColorStop(1, "#111a20");
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(246, 255, 235, 0.58)";
+  ctx.fillRect(10, height * 0.72, width - 20, height * 0.18);
+  ctx.fillStyle = "rgba(9, 24, 28, 0.64)";
+  ctx.fillRect(28, height * 0.82, width - 56, height * 0.12);
+}
+
+function drawImageCoverPan(ctx, image, x, y, width, height, panX = 0, panY = 0, zoom = 1) {
+  if (!image || !image.complete || !image.naturalWidth || !image.naturalHeight) {
+    return false;
+  }
+
+  const imageAspect = image.naturalWidth / image.naturalHeight;
+  const frameAspect = width / height;
+  let sw = image.naturalWidth;
+  let sh = image.naturalHeight;
+
+  if (imageAspect > frameAspect) {
+    sw = image.naturalHeight * frameAspect;
+  } else {
+    sh = image.naturalWidth / frameAspect;
+  }
+
+  const photoZoom = clamp(zoom, 1, 1.35);
+  sw = Math.max(1, Math.min(image.naturalWidth, sw / photoZoom));
+  sh = Math.max(1, Math.min(image.naturalHeight, sh / photoZoom));
+
+  const maxShiftX = Math.max(0, (image.naturalWidth - sw) * 0.5);
+  const maxShiftY = Math.max(0, (image.naturalHeight - sh) * 0.5);
+  const sx = clamp((image.naturalWidth - sw) * 0.5 + clamp(panX, -1, 1) * maxShiftX * 0.7, 0, image.naturalWidth - sw);
+  const sy = clamp((image.naturalHeight - sh) * 0.5 + clamp(panY, -1, 1) * maxShiftY * 0.7, 0, image.naturalHeight - sh);
+
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
+  return true;
 }
 
 function ensureCgArchive(meta) {
@@ -7210,6 +7320,7 @@ function applyShelterRestRecovery(run, data) {
   run.time = 0;
   run.timePhase = "day";
   run.nightActive = false;
+  run.nightTransitionTimer = 0;
   refillWeaponsForShelter(run, data);
 }
 
@@ -7225,9 +7336,10 @@ function beginShelterRest(state, data, returnLevelId, returnEntranceId) {
     applyShelterRestRecovery(run, data);
   }
   ensureCgArchive(state.meta || {});
-  run.message = `DAY ${run.day} · 쉘터 도착`;
+  preloadShelterCgIllustration(data, run.day);
+  run.message = `DAY ${run.day} · 피난처 도착`;
   run.noticeTimer = 2.6;
-  setStatus(state, "쉘터 폐쇄 중.");
+  setStatus(state, "피난처 폐쇄 중.");
   saveCurrentGame(state, data);
 }
 
@@ -7246,40 +7358,18 @@ function createShelterPhotoImage(run, data, rest) {
   const offsetX = clamp(Number(photo.frameX ?? 0), -1, 1);
   const offsetY = clamp(Number(photo.frameY ?? 0), -1, 1);
   const zoom = clamp(Number(photo.zoom ?? 1), 0.8, 1.35);
-  const background = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  background.addColorStop(0, "#dce8d2");
-  background.addColorStop(0.46, "#6d9da0");
-  background.addColorStop(1, "#111a20");
-  ctx.fillStyle = background;
+  const backgroundId = getShelterConfig(data).backgroundId;
+  const cgImage = getShelterCgIllustrationImage(data, backgroundId, run.day);
+  if (!drawImageCoverPan(ctx, cgImage, 0, 0, canvas.width, canvas.height, offsetX, offsetY, zoom)) {
+    drawShelterCgFallback(ctx, canvas.width, canvas.height);
+  }
+
+  const shade = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  shade.addColorStop(0, "rgba(2, 7, 10, 0.05)");
+  shade.addColorStop(0.58, "rgba(4, 12, 16, 0.02)");
+  shade.addColorStop(1, "rgba(2, 6, 10, 0.18)");
+  ctx.fillStyle = shade;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.save();
-  ctx.translate(canvas.width * 0.5 + offsetX * 42, canvas.height * 0.54 + offsetY * 26);
-  ctx.scale(zoom, zoom);
-  ctx.fillStyle = "rgba(246, 255, 235, 0.58)";
-  ctx.fillRect(-230, 36, 460, 58);
-  ctx.fillStyle = "rgba(9, 24, 28, 0.64)";
-  ctx.fillRect(-210, 62, 420, 38);
-  ctx.fillStyle = "rgba(18, 32, 38, 0.72)";
-  ctx.fillRect(-42, -16, 84, 112);
-  ctx.fillStyle = "rgba(230, 244, 219, 0.92)";
-  ctx.beginPath();
-  ctx.arc(0, -34, 30, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "rgba(41, 63, 72, 0.96)";
-  ctx.fillRect(-24, -2, 48, 88);
-  ctx.fillStyle = "rgba(149, 234, 255, 0.76)";
-  ctx.fillRect(-34, 18, 68, 8);
-  ctx.restore();
-
-  ctx.fillStyle = "rgba(3, 8, 12, 0.36)";
-  ctx.fillRect(0, 0, canvas.width, 48);
-  ctx.fillStyle = "rgba(245,248,251,0.95)";
-  ctx.font = "700 18px Segoe UI, sans-serif";
-  ctx.fillText(`DAY ${Math.max(1, Math.floor(run.day || 1))}`, 24, 31);
-  ctx.fillStyle = "rgba(231,244,126,0.9)";
-  ctx.font = "700 12px Segoe UI, sans-serif";
-  ctx.fillText(data.levelLabel || "Shelter", 112, 31);
 
   try {
     return canvas.toDataURL("image/jpeg", 0.78);
@@ -7296,12 +7386,13 @@ function saveShelterPhoto(state, data) {
   }
   const image = rest.photo?.capturedImage || createShelterPhotoImage(run, data, rest);
   if (!image) {
-    run.message = "사진 저장 실패.";
+    run.message = "CG 저장 실패.";
     run.noticeTimer = 1.8;
     return false;
   }
   const archive = ensureCgArchive(state.meta || {});
   const backgroundId = getShelterConfig(data).backgroundId;
+  const photoScene = getShelterPhotoSceneForDay(data, run.day);
   if (!archive.unlockedBackgroundIds.includes(backgroundId)) {
     archive.unlockedBackgroundIds.push(backgroundId);
   }
@@ -7310,12 +7401,14 @@ function saveShelterPhoto(state, data) {
     day: Math.max(1, Math.floor(run.day || 1)),
     createdAt: Date.now(),
     backgroundId,
+    sceneId: photoScene?.id || "",
+    sceneLabel: photoScene?.label || "",
     image,
   });
   archive.photos = archive.photos.slice(-CG_PHOTO_LIMIT);
   saveMetaState(state.meta);
   rest.recordsIndex = Math.max(0, archive.photos.length - 1);
-  run.message = "쉘터 사진 저장.";
+  run.message = "CG 일러스트 저장.";
   run.noticeTimer = 2.2;
   return true;
 }
@@ -7380,7 +7473,7 @@ function transitionToRouteExit(state, data, routeExit) {
   }
   const result = transitionToLevel(state, data, routeExit.toLevelId, routeExit.toEntranceId || "start", {
     persist: !shelterRoute,
-    message: shelterRoute ? "쉘터 진입." : undefined,
+    message: shelterRoute ? "피난처 진입." : undefined,
   });
   if (shelterRoute && result) {
     beginShelterRest(state, data, fromLevelId, routeExit.returnEntranceId || "start");
@@ -7397,7 +7490,7 @@ function leaveShelterRest(state, data) {
   const entranceId = rest.returnEntranceId || "start";
   const result = transitionToLevel(state, data, targetLevelId, entranceId, {
     persist: false,
-    message: "쉘터 출발.",
+    message: "피난처 출발.",
   });
   if (!result) {
     return;
@@ -7764,10 +7857,10 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
       rest.menuIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1);
-      setStatus(state, "쉘터 휴게.");
+      setStatus(state, "피난처 대기.");
       saveCurrentGame(state, data);
     } else {
-      setStatus(state, "쉘터 폐쇄 중.");
+      setStatus(state, "피난처 폐쇄 중.");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -7790,20 +7883,28 @@ function updateShelterRestMode(state, data, dt) {
         rest.phase = "photo";
         rest.timer = 0;
         resetShelterPhoto(rest);
-        setStatus(state, "사진 모드.");
+        preloadShelterCgIllustration(data, run.day);
+        setStatus(state, "CG 촬영 모드.");
       } else if (item === "records") {
         rest.phase = "records";
         rest.timer = 0;
         rest.recordsIndex = clamp(Math.floor(rest.recordsIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).photos.length - 1));
         setStatus(state, "기록 보기.");
-      } else {
+      } else if (item === "background") {
         rest.phase = "background";
         rest.timer = 0;
         rest.backgroundIndex = clamp(Math.floor(rest.backgroundIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).unlockedBackgroundIds.length - 1));
         setStatus(state, "배경 보기.");
+      } else if (item === "exit") {
+        leaveShelterRest(state, data);
+        return true;
+      } else {
+        run.message = "피난처 휴식 완료.";
+        run.noticeTimer = 1.8;
+        setStatus(state, run.message);
       }
     } else {
-      setStatus(state, "쉘터 휴게 · D/Z 선택 · C 밖으로");
+      setStatus(state, "피난처 · Z 선택 · C 밖으로");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -7825,13 +7926,19 @@ function updateShelterRestMode(state, data, dt) {
       rest.timer = 0;
       resetShelterPhoto(rest);
     } else if (consumeEitherPress(state, INTERACT_KEYS)) {
+      if (!isShelterCgIllustrationReady(data, getShelterConfig(data).backgroundId, run.day)) {
+        preloadShelterCgIllustration(data, run.day);
+        setStatus(state, "CG 로딩 중.");
+        updateAutoSave(state, data, dt);
+        return true;
+      }
       rest.photo.capturedImage = createShelterPhotoImage(run, data, rest);
       rest.photo.flashTimer = 0.22;
       rest.phase = "photoPreview";
       rest.timer = 0;
-      setStatus(state, "사진 확인 · C 저장 / R 재촬영");
+      setStatus(state, "CG 확인 · C 저장 / R 재촬영");
     } else {
-      setStatus(state, "사진 모드 · 방향키/Q/E 프레임 · D/Z 촬영");
+      setStatus(state, "CG 촬영 · 방향키/WASD 프레임 · Z 촬영");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -7853,7 +7960,7 @@ function updateShelterRestMode(state, data, dt) {
         saveCurrentGame(state, data);
       }
     } else {
-      setStatus(state, "사진 확인 · C 저장 / R 재촬영 / Esc 취소");
+      setStatus(state, "CG 확인 · C 저장 / R 재촬영 / Esc 취소");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -7871,7 +7978,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
     } else {
-      setStatus(state, "기록 보기 · Q/E 넘기기 · Esc 뒤로");
+      setStatus(state, "기록 보기 · A/D 넘기기 · Esc 뒤로");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -7889,7 +7996,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
     } else {
-      setStatus(state, "배경 보기 · Q/E 넘기기 · Esc 뒤로");
+      setStatus(state, "배경 보기 · A/D 넘기기 · Esc 뒤로");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -7908,6 +8015,9 @@ function updateExpedition(state, data, dt) {
   }
   if (Number.isFinite(run.shelterExitCooldown) && run.shelterExitCooldown > 0) {
     run.shelterExitCooldown = Math.max(0, run.shelterExitCooldown - dt);
+  }
+  if (Number.isFinite(run.nightTransitionTimer) && run.nightTransitionTimer > 0) {
+    run.nightTransitionTimer = Math.max(0, run.nightTransitionTimer - dt);
   }
   if (run.faceOff?.active && state.liveEdit?.active) {
     state.liveEdit.active = false;
@@ -8080,7 +8190,7 @@ function updateExpedition(state, data, dt) {
 }
 
 function updateShelter(state) {
-  setStatus(state, isMovementLab(state.data) ? "대기 중. C: 출격" : "쉘터 대기. C: 출격");
+  setStatus(state, isMovementLab(state.data) ? "피난처 대기. C: 출격" : "피난처 대기. C: 출격");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     startNewSavedRun(state, state.data);
     setStatus(state, "출격 중.");
@@ -8159,7 +8269,7 @@ function updateTitle(state) {
       enterTitleNewRun(state, hasRun);
       return;
     }
-    setStatus(state, "기존 저장 삭제 확인: C/D");
+    setStatus(state, "기존 저장 삭제 확인: C/Z");
     return;
   }
 
@@ -8206,11 +8316,11 @@ function updateTitle(state) {
     return;
   }
 
-  setStatus(state, hasRun ? "위/아래 선택 · C/D 실행" : "처음부터 · C/D 실행");
+  setStatus(state, hasRun ? "W/S 선택 · C/Z 실행" : "처음부터 · C/Z 실행");
 }
 
 function updateResults(state) {
-  setStatus(state, isMovementLab(state.data) ? "결과 화면. C" : "귀환 결과. C");
+  setStatus(state, isMovementLab(state.data) ? "결과 화면. C/Z" : "귀환 결과. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
@@ -8218,7 +8328,7 @@ function updateResults(state) {
 }
 
 function updateGameOver(state) {
-  setStatus(state, isMovementLab(state.data) ? "실패 화면. C" : "런 실패. C");
+  setStatus(state, isMovementLab(state.data) ? "실패 화면. C/Z" : "런 실패. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
@@ -8227,7 +8337,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyD", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (!state.pressed.has(event.code)) {

@@ -1,5 +1,5 @@
-import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260520-night-shelter-v1";
-import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-shelter-v1";
+import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260520-shelter-photo-v1";
+import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
 
 const SAVE_SLOT_KEY = "rulebound-local-profile-v1";
 const SAVE_VERSION = 1;
@@ -30,6 +30,7 @@ const RUN_SCALAR_KEYS = [
   "time",
   "timePhase",
   "nightActive",
+  "nightTransitionTimer",
   "shelterExitCooldown",
   "currentLevelId",
   "message",

@@ -1,10 +1,10 @@
-import { GAME_DATA } from "./level-data.js?v=20260520-night-shelter-v1";
+import { GAME_DATA } from "./level-data.js?v=20260520-shelter-photo-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260520-night-shelter-v1";
+} from "./level-store.js?v=20260520-night-pp-mask-v2";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,8 +13,8 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260520-night-shelter-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260520-night-shelter-v1";
+import { renderGame } from "./render.js?v=20260520-shelter-photo-v1";
+import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -25,8 +25,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260520-night-shelter-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260520-night-shelter-v1";
+} from "./state.js?v=20260520-shelter-photo-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260520-shelter-photo-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -894,6 +894,7 @@ function setDebugNight(currentState, data) {
   run.time = Math.max(Number(run.time) || 0, nightAt);
   run.timePhase = "night";
   run.nightActive = true;
+  run.nightTransitionTimer = 1.4;
   setRunNotice(currentState, "테스트: 밤으로 전환");
   saveCurrentGame(currentState, data);
 }

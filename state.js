@@ -59,6 +59,8 @@ function normalizeCgArchive(archive = {}) {
           day: Number.isFinite(photo.day) ? Math.max(1, Math.floor(photo.day)) : 1,
           createdAt: Number.isFinite(photo.createdAt) ? photo.createdAt : Date.now(),
           backgroundId: String(photo.backgroundId || "shelter-hub"),
+          sceneId: typeof photo.sceneId === "string" ? photo.sceneId : "",
+          sceneLabel: typeof photo.sceneLabel === "string" ? photo.sceneLabel : "",
           image: typeof photo.image === "string" ? photo.image : "",
         };
       })
@@ -843,6 +845,7 @@ export function createRunState(data, meta) {
     time: 0,
     timePhase: "day",
     nightActive: false,
+    nightTransitionTimer: 0,
     shelterExitCooldown: 0,
     currentLevelId,
     levelStates: {},

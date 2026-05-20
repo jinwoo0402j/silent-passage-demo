@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260507-slope-slide-physics-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260520-shelter-photo-v1";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -2226,7 +2226,7 @@ function renderSelectionFields(editor, dom) {
     addText("ID", "id", entity.id || "");
     addSelect("Kind", "kind", entity.kind || entity.type || "route", [
       { value: "route", label: "Route" },
-      { value: "shelter", label: "Shelter" },
+      { value: "shelter", label: "피난처" },
     ]);
     addText("Label", "label", entity.label || "");
     addNumber("X", "x", entity.x);
