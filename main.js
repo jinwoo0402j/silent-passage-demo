@@ -1,10 +1,10 @@
-import { GAME_DATA } from "./level-data.js?v=20260520-shelter-photo-v1";
+import { GAME_DATA } from "./level-data.js?v=20260522-faceoff-scene-main-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260520-night-pp-mask-v2";
+} from "./level-store.js?v=20260522-faceoff-scene-main-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,7 +13,7 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260520-shelter-photo-v1";
+import { renderGame } from "./render.js?v=20260522-faceoff-scene-main-v1";
 import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -25,8 +25,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260520-shelter-photo-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260520-shelter-photo-v1";
+} from "./state.js?v=20260522-faceoff-scene-main-v1";
+import { bindInput, updateGame } from "./systems.js?v=20260522-faceoff-scene-main-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

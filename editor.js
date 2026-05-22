@@ -15,7 +15,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260507-slope-slide-physics-v1";
+} from "./level-store.js?v=20260521-faceoff-event-store-v1";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -921,6 +921,7 @@ function prepareEditorData(data) {
   data.routeExits = data.routeExits || [];
   data.lootCrates = data.lootCrates || [];
   data.humanoidEnemies = data.humanoidEnemies || [];
+  data.faceOffEvents = Array.isArray(data.faceOffEvents) ? data.faceOffEvents : [];
   data.hostileDrones = data.hostileDrones || [];
   ensureEditorZipLineNodes(data);
   ensureEditorMapRooms(data);
@@ -2047,6 +2048,144 @@ function canDeleteSelection(selection) {
   ));
 }
 
+function ensureFaceOffEvents(data) {
+  data.faceOffEvents = Array.isArray(data.faceOffEvents) ? data.faceOffEvents : [];
+  return data.faceOffEvents;
+}
+
+function getFaceOffEventForEnemy(data, enemy) {
+  if (!enemy?.id) {
+    return null;
+  }
+  return ensureFaceOffEvents(data).find((event) => (
+    event?.trigger?.type === "enemy" && event.trigger.enemyId === enemy.id
+  )) || null;
+}
+
+function createDefaultFaceOffEvent(enemy) {
+  const enemyId = enemy?.id || `enemy-${Date.now()}`;
+  return {
+    id: `faceoff-${enemyId}`,
+    trigger: {
+      type: "enemy",
+      enemyId,
+    },
+    lines: [
+      `${enemy?.label || "적"}: 멈춰.`,
+      "Type-07A: 비켜.",
+    ],
+    choices: [
+      {
+        id: "subdue",
+        label: "무력화한다",
+        result: { type: "knockdown" },
+      },
+      {
+        id: "recover-part",
+        label: "부위를 회수한다",
+        result: { type: "recoverPart" },
+      },
+    ],
+    cinematic: {
+      shot: "closeup",
+      camera: "enemy",
+      shake: "light",
+    },
+    once: true,
+  };
+}
+
+function addFaceOffEventFields(fields, event, addTextarea) {
+  const choice0 = event.choices?.[0] || {};
+  const choice1 = event.choices?.[1] || {};
+  const cinematic = event.cinematic || {};
+  fields.push(`
+    <label class="field full">
+      <span>Event ID</span>
+      <input type="text" data-faceoff-event-field="id" value="${escapeHtml(event.id || "")}">
+    </label>
+    <label class="field full">
+      <span>Once</span>
+      <select data-faceoff-event-field="once">
+        <option value="true"${event.once !== false ? " selected" : ""}>Once</option>
+        <option value="false"${event.once === false ? " selected" : ""}>Repeat</option>
+      </select>
+    </label>
+  `);
+  addTextarea("Enemy / Player Lines", "lines", (event.lines || []).join("\n"), 5);
+  fields.push(`
+    <label class="field full">
+      <span>Choice 1</span>
+      <input type="text" data-faceoff-event-field="choices.0.label" value="${escapeHtml(choice0.label || "")}">
+    </label>
+    <label class="field full">
+      <span>Choice 1 Result</span>
+      <select data-faceoff-event-field="choices.0.result.type">
+        ${renderFaceOffResultOptions(choice0.result?.type || "knockdown")}
+      </select>
+    </label>
+    <label class="field full">
+      <span>Choice 2</span>
+      <input type="text" data-faceoff-event-field="choices.1.label" value="${escapeHtml(choice1.label || "")}">
+    </label>
+    <label class="field full">
+      <span>Choice 2 Result</span>
+      <select data-faceoff-event-field="choices.1.result.type">
+        ${renderFaceOffResultOptions(choice1.result?.type || "recoverPart")}
+      </select>
+    </label>
+    <label class="field full">
+      <span>Shot</span>
+      <select data-faceoff-event-field="cinematic.shot">
+        ${renderOptionList(cinematic.shot || "closeup", [
+          ["closeup", "Close-up"],
+          ["wide", "Wide"],
+          ["part", "Part focus"],
+        ])}
+      </select>
+    </label>
+    <label class="field full">
+      <span>Camera</span>
+      <select data-faceoff-event-field="cinematic.camera">
+        ${renderOptionList(cinematic.camera || "enemy", [
+          ["enemy", "Enemy"],
+          ["player", "Player"],
+          ["center", "Center"],
+        ])}
+      </select>
+    </label>
+    <label class="field full">
+      <span>Shake</span>
+      <select data-faceoff-event-field="cinematic.shake">
+        ${renderOptionList(cinematic.shake || "light", [
+          ["none", "None"],
+          ["light", "Light"],
+          ["heavy", "Heavy"],
+        ])}
+      </select>
+    </label>
+    <div class="field full">
+      <button type="button" class="ghost-button" data-faceoff-event-action="delete">Remove Face-off Event</button>
+    </div>
+  `);
+}
+
+function renderFaceOffResultOptions(value) {
+  return renderOptionList(value, [
+    ["knockdown", "Knockdown"],
+    ["recoverPart", "Recover part"],
+    ["spare", "Spare"],
+    ["resumeCombat", "Resume combat"],
+    ["setFlag", "Set flag"],
+  ]);
+}
+
+function renderOptionList(value, options) {
+  return options.map(([optionValue, label]) => (
+    `<option value="${escapeHtml(optionValue)}"${optionValue === value ? " selected" : ""}>${escapeHtml(label)}</option>`
+  )).join("");
+}
+
 function renderSelectionFields(editor, dom) {
   dom.selectionLabel.textContent = describeSelection(editor);
   dom.deleteSelectionButton.disabled = !editor.selected || !canDeleteSelection(editor.selected);
@@ -2091,6 +2230,10 @@ function renderSelectionFields(editor, dom) {
 
   const addText = (label, field, value) => {
     fields.push(`<label class="field full"><span>${label}</span><input type="text" data-field="${field}" value="${escapeHtml(value)}"></label>`);
+  };
+
+  const addTextarea = (label, field, value, rows = 3) => {
+    fields.push(`<label class="field full"><span>${label}</span><textarea data-faceoff-event-field="${field}" rows="${rows}">${escapeHtml(value)}</textarea></label>`);
   };
 
   const addSelect = (label, field, value, options) => {
@@ -2181,6 +2324,18 @@ function renderSelectionFields(editor, dom) {
     }
     addNumber("Patrol L", "patrol.left", entity.patrol?.left ?? entity.x);
     addNumber("Patrol R", "patrol.right", entity.patrol?.right ?? entity.x + 220);
+    const faceOffEvent = getFaceOffEventForEnemy(editor.data, entity);
+    fields.push(`<div class="field-heading">Face-off Event</div>`);
+    if (!faceOffEvent) {
+      fields.push(`
+        <div class="field full">
+          <button type="button" class="ghost-button" data-faceoff-event-action="create">Create Face-off Event</button>
+          <small>이 적에 대사/선택지/연출 데이터를 연결한다.</small>
+        </div>
+      `);
+    } else {
+      addFaceOffEventFields(fields, faceOffEvent, addTextarea);
+    }
   } else if (editor.selected.kind === "drone") {
     addText("ID", "id", entity.id || "");
     addSelect("Visual", "visualKind", entity.visualKind || "crow", [
@@ -2835,7 +2990,15 @@ function deleteSelection(editor, dom) {
   ));
   editor.data.zipLineNodes = editor.data.zipLineNodes.filter((_, index) => !zipLineNodeIndexes.has(index));
   editor.data.props = editor.data.props.filter((_, index) => !propIndexes.has(index));
+  const removedEnemyIds = new Set(
+    editor.data.humanoidEnemies.filter((_, index) => enemyIndexes.has(index)).map((enemy) => enemy.id).filter(Boolean),
+  );
   editor.data.humanoidEnemies = editor.data.humanoidEnemies.filter((_, index) => !enemyIndexes.has(index));
+  if (removedEnemyIds.size > 0) {
+    editor.data.faceOffEvents = ensureFaceOffEvents(editor.data).filter((event) => (
+      !removedEnemyIds.has(event?.trigger?.enemyId)
+    ));
+  }
   editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !droneIndexes.has(index));
   editor.data.lootCrates = editor.data.lootCrates.filter((_, index) => !crateIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
@@ -2955,6 +3118,16 @@ function applySelectionField(editor, dom, field, value) {
     } else {
       const previousId = entity.id;
       entity[field] = value;
+      if (editor.selected?.kind === "enemy" && field === "id" && previousId && previousId !== value) {
+        ensureFaceOffEvents(editor.data).forEach((event) => {
+          if (event?.trigger?.type === "enemy" && event.trigger.enemyId === previousId) {
+            event.trigger.enemyId = value;
+            if (event.id === `faceoff-${previousId}`) {
+              event.id = `faceoff-${value}`;
+            }
+          }
+        });
+      }
       if (editor.selected?.kind === "zipLineNode" && field === "id" && previousId && previousId !== value) {
         (editor.data.zipLines || []).forEach((zipLine) => {
           if (zipLine.startNodeId === previousId) {
@@ -3050,6 +3223,96 @@ function applySelectionField(editor, dom, field, value) {
   if (editor.selected?.kind === "spawn" && (field === "x" || field === "y")) {
     syncStartEntranceToSpawn(editor);
   }
+  renderSelectionFields(editor, dom);
+  markDirty(editor, dom);
+  queueRender(editor, dom);
+}
+
+function createFaceOffEventForSelectedEnemy(editor, dom) {
+  if (editor.selected?.kind !== "enemy") {
+    return;
+  }
+  const enemy = getSelectedEntity(editor);
+  if (!enemy || getFaceOffEventForEnemy(editor.data, enemy)) {
+    renderSelectionFields(editor, dom);
+    return;
+  }
+  pushUndo(editor);
+  ensureFaceOffEvents(editor.data).push(createDefaultFaceOffEvent(enemy));
+  renderSelectionFields(editor, dom);
+  markDirty(editor, dom);
+  queueRender(editor, dom);
+}
+
+function deleteFaceOffEventForSelectedEnemy(editor, dom) {
+  if (editor.selected?.kind !== "enemy") {
+    return;
+  }
+  const enemy = getSelectedEntity(editor);
+  const event = getFaceOffEventForEnemy(editor.data, enemy);
+  if (!event) {
+    renderSelectionFields(editor, dom);
+    return;
+  }
+  pushUndo(editor);
+  editor.data.faceOffEvents = ensureFaceOffEvents(editor.data).filter((entry) => entry !== event);
+  renderSelectionFields(editor, dom);
+  markDirty(editor, dom);
+  queueRender(editor, dom);
+}
+
+function applyFaceOffEventField(editor, dom, field, value) {
+  if (editor.selected?.kind !== "enemy") {
+    return;
+  }
+  const enemy = getSelectedEntity(editor);
+  const event = getFaceOffEventForEnemy(editor.data, enemy);
+  if (!event) {
+    renderSelectionFields(editor, dom);
+    return;
+  }
+  const nextEvent = deepClone(event);
+  if (field === "id") {
+    nextEvent.id = value.trim() || event.id;
+  } else if (field === "once") {
+    nextEvent.once = value !== "false";
+  } else if (field === "lines") {
+    nextEvent.lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  } else if (field === "choices.0.label" || field === "choices.1.label") {
+    const index = field.includes(".0.") ? 0 : 1;
+    nextEvent.choices = Array.isArray(nextEvent.choices) ? nextEvent.choices : [];
+    nextEvent.choices[index] = {
+      id: nextEvent.choices[index]?.id || `choice-${index + 1}`,
+      label: value,
+      result: nextEvent.choices[index]?.result || { type: index === 0 ? "knockdown" : "recoverPart" },
+    };
+  } else if (field === "choices.0.result.type" || field === "choices.1.result.type") {
+    const index = field.includes(".0.") ? 0 : 1;
+    nextEvent.choices = Array.isArray(nextEvent.choices) ? nextEvent.choices : [];
+    nextEvent.choices[index] = {
+      id: nextEvent.choices[index]?.id || `choice-${index + 1}`,
+      label: nextEvent.choices[index]?.label || `Choice ${index + 1}`,
+      result: {
+        ...(nextEvent.choices[index]?.result || {}),
+        type: value,
+      },
+    };
+  } else if (field.startsWith("cinematic.")) {
+    const key = field.slice("cinematic.".length);
+    nextEvent.cinematic = {
+      ...(nextEvent.cinematic || {}),
+      [key]: value,
+    };
+  } else {
+    return;
+  }
+
+  if (JSON.stringify(nextEvent) === JSON.stringify(event)) {
+    return;
+  }
+  pushUndo(editor);
+  Object.keys(event).forEach((key) => delete event[key]);
+  Object.assign(event, nextEvent);
   renderSelectionFields(editor, dom);
   markDirty(editor, dom);
   queueRender(editor, dom);
@@ -4500,6 +4763,11 @@ function bindEvents(editor, dom) {
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
       return;
     }
+    const faceOffEventField = target.dataset.faceoffEventField;
+    if (faceOffEventField) {
+      applyFaceOffEventField(editor, dom, faceOffEventField, target.value);
+      return;
+    }
     const field = target.dataset.field;
     if (!field) {
       return;
@@ -4509,6 +4777,18 @@ function bindEvents(editor, dom) {
 
   dom.selectionFields.addEventListener("input", handleSelectionFieldChange);
   dom.selectionFields.addEventListener("change", handleSelectionFieldChange);
+  dom.selectionFields.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const action = target.dataset.faceoffEventAction;
+    if (action === "create") {
+      createFaceOffEventForSelectedEnemy(editor, dom);
+    } else if (action === "delete") {
+      deleteFaceOffEventForSelectedEnemy(editor, dom);
+    }
+  });
 
   dom.playerRenderFields.addEventListener("input", (event) => {
     const target = event.target;

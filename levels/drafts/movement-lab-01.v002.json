@@ -284,6 +284,24 @@
     }
   },
   "faceOff": {
+    "sceneArtAssetKey": "faceOffScenePlead",
+    "sceneArtStates": {
+      "idle": "faceOffScenePlead",
+      "plead": "faceOffScenePlead",
+      "shot": "faceOffSceneShot",
+      "release": "faceOffSceneRelease",
+      "deal": "faceOffSceneDeal",
+      "disable": "faceOffSceneShot",
+      "kill": "faceOffSceneShot",
+      "hit-head": "faceOffSceneHitHead",
+      "hit-torso": "faceOffSceneHitTorso",
+      "hit-arm": "faceOffSceneHitArm",
+      "hit-leg": "faceOffSceneHitLeg",
+      "break-head": "faceOffSceneBreakHead",
+      "break-torso": "faceOffSceneBreakTorso",
+      "break-arm": "faceOffSceneBreakArm",
+      "break-leg": "faceOffSceneBreakLeg"
+    },
     "enemyLineCharDelay": 0.045,
     "enemyLineHoldDuration": 0.85,
     "choiceSlideDuration": 0.32,
@@ -296,6 +314,47 @@
     "targetArtAimY": 18,
     "targetArtPanMultiplier": 0.82
   },
+  "faceOffEvents": [
+    {
+      "id": "faceoff-enemy-1778318871749-mercy",
+      "trigger": {
+        "type": "enemy",
+        "enemyId": "enemy-1778318871749"
+      },
+      "lines": [
+        "잠깐, 잠깐만... 쏘지 마.",
+        "난 그냥 여기 배치된 것뿐이야. 진짜야.",
+        "길을 비켜.",
+        "비킬게. 다 말할게. 제발..."
+      ],
+      "choices": [
+        {
+          "id": "spare",
+          "label": "살려보낸다",
+          "result": {
+            "type": "spare",
+            "line": "적은 무기를 버리고, 뒤도 돌아보지 않고 도망친다."
+          }
+        },
+        {
+          "id": "confession",
+          "label": "정보만 받아낸다",
+          "result": {
+            "type": "setFlag",
+            "flag": "spared_sentry_confession",
+            "value": true,
+            "line": "그는 떨리는 목소리로 근처 순찰 루트를 털어놓는다."
+          }
+        }
+      ],
+      "cinematic": {
+        "shot": "close",
+        "camera": "enemy",
+        "shake": "light"
+      },
+      "once": true
+    }
+  ],
   "map": {
     "rooms": [
       {

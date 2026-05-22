@@ -839,6 +839,54 @@ function sanitizeUiLayout(layout, baseLayout) {
   );
 }
 
+function extractFaceOffEvent(event = {}) {
+  return safeRecord(event);
+}
+
+function sanitizeFaceOffEvent(event, index, baseEvent = null) {
+  const source = event && typeof event === "object" ? event : {};
+  const fallback = baseEvent && typeof baseEvent === "object" ? baseEvent : {};
+  const id = safeString(source.id, fallback.id || `faceoff-event-${index + 1}`);
+  const trigger = safeRecord(source.trigger, fallback.trigger || {});
+  const choices = Array.isArray(source.choices)
+    ? source.choices.map((choice, choiceIndex) => ({
+      id: safeString(choice?.id, `choice-${choiceIndex + 1}`),
+      label: safeString(choice?.label, `Choice ${choiceIndex + 1}`),
+      result: safeRecord(choice?.result, {}),
+    }))
+    : safeArray(fallback.choices);
+
+  return {
+    id,
+    trigger: {
+      type: safeString(trigger.type, "enemy"),
+      enemyId: safeString(trigger.enemyId, ""),
+    },
+    lines: safeArray(source.lines, fallback.lines),
+    choices,
+    cinematic: safeRecord(source.cinematic, fallback.cinematic || {}),
+    once: safeBoolean(source.once, fallback.once ?? true),
+  };
+}
+
+function mergeFaceOffEvents(sourceEvents, fallbackEvents = []) {
+  const merged = new Map();
+  (fallbackEvents || []).forEach((event, index) => {
+    const sanitized = sanitizeFaceOffEvent(event, index);
+    if (sanitized.id) {
+      merged.set(sanitized.id, sanitized);
+    }
+  });
+  (sourceEvents || []).forEach((event, index) => {
+    const fallback = event?.id ? merged.get(event.id) : fallbackEvents?.[index];
+    const sanitized = sanitizeFaceOffEvent(event, index, fallback);
+    if (sanitized.id) {
+      merged.set(sanitized.id, sanitized);
+    }
+  });
+  return [...merged.values()];
+}
+
 export function extractEditableLevelData(data) {
   return {
     version: LEVEL_DATA_VERSION,
@@ -871,6 +919,8 @@ export function extractEditableLevelData(data) {
       layout: extractUiLayout(data.ui?.layout),
     },
     faceOff: {
+      sceneArtAssetKey: data.faceOff?.sceneArtAssetKey,
+      sceneArtStates: safeRecord(data.faceOff?.sceneArtStates),
       enemyLineCharDelay: data.faceOff?.enemyLineCharDelay,
       enemyLineHoldDuration: data.faceOff?.enemyLineHoldDuration,
       choiceSlideDuration: data.faceOff?.choiceSlideDuration,
@@ -935,6 +985,7 @@ export function extractEditableLevelData(data) {
     zipLineNodes: (data.zipLineNodes || []).map((node) => extractZipLineNode(node)),
     zipLines: (data.zipLines || []).map((zipLine) => extractZipLine(zipLine)),
     humanoidEnemies: (data.humanoidEnemies || []).map((enemy) => safeRecord(enemy)),
+    faceOffEvents: (data.faceOffEvents || []).map((event) => extractFaceOffEvent(event)),
     hostileDrones: (data.hostileDrones || []).map((drone) => extractHostileDrone(drone)),
     lootTables: safeRecord(data.lootTables),
     lootCrates: (data.lootCrates || []).map((crate) => extractLootCrate(crate)),
@@ -982,6 +1033,8 @@ export function normalizeEditableLevelData(raw, baseData) {
       layout: sanitizeUiLayout(source.ui?.layout, fallback.ui.layout),
     },
     faceOff: {
+      sceneArtAssetKey: safeString(source.faceOff?.sceneArtAssetKey, fallback.faceOff.sceneArtAssetKey ?? ""),
+      sceneArtStates: safeRecord(source.faceOff?.sceneArtStates, fallback.faceOff.sceneArtStates || {}),
       enemyLineCharDelay: safeNumber(source.faceOff?.enemyLineCharDelay, fallback.faceOff.enemyLineCharDelay, 0.035),
       enemyLineHoldDuration: safeNumber(source.faceOff?.enemyLineHoldDuration, fallback.faceOff.enemyLineHoldDuration, 0.35),
       choiceSlideDuration: safeNumber(source.faceOff?.choiceSlideDuration, fallback.faceOff.choiceSlideDuration, 0.26),
@@ -1028,6 +1081,9 @@ export function normalizeEditableLevelData(raw, baseData) {
     humanoidEnemies: Array.isArray(source.humanoidEnemies)
       ? source.humanoidEnemies.map((enemy, index) => safeRecord(enemy, fallback.humanoidEnemies?.[index] || {}))
       : (fallback.humanoidEnemies || []).map((enemy) => safeRecord(enemy)),
+    faceOffEvents: Array.isArray(source.faceOffEvents)
+      ? mergeFaceOffEvents(source.faceOffEvents, fallback.faceOffEvents || [])
+      : mergeFaceOffEvents([], fallback.faceOffEvents || []),
     hostileDrones: Array.isArray(source.hostileDrones)
       ? source.hostileDrones.map((drone, index) => sanitizeHostileDrone(drone, index, fallback.hostileDrones?.[index]))
       : (fallback.hostileDrones || []).map((drone, index) => sanitizeHostileDrone(drone, index)),
@@ -1098,6 +1154,7 @@ export function mergeLevelData(baseData, override) {
   next.zipLineNodes = normalized.zipLineNodes;
   next.zipLines = normalized.zipLines;
   next.humanoidEnemies = normalized.humanoidEnemies;
+  next.faceOffEvents = normalized.faceOffEvents;
   next.hostileDrones = normalized.hostileDrones;
   next.lootTables = normalized.lootTables;
   next.lootCrates = normalized.lootCrates;

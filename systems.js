@@ -5,10 +5,11 @@ import {
   createLevelRuntimeState,
   createRunState,
   ensureWeaponLoadoutState,
+  ensurePartInventory,
   hasUnlocked,
   saveMetaState,
 } from "./state.js?v=20260520-shelter-photo-v1";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260521-faceoff-event-store-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -89,7 +90,16 @@ const SHELTER_BACK_KEYS = ["Escape"];
 const CG_PHOTO_LIMIT = 12;
 const FACE_OFF_ENTRY_KEYS = ["KeyZ"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD", "KeyS"];
+const FACE_OFF_MENU_UP_KEYS = ["KeyW", "ArrowUp"];
+const FACE_OFF_MENU_DOWN_KEYS = ["KeyS", "ArrowDown"];
+const FACE_OFF_MENU_CONFIRM_KEYS = ["Space", "Enter"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
+const FACE_OFF_RESULT_EXIT_BUTTON = {
+  x: CAMERA_SCREEN_WIDTH / 2 - 180,
+  y: 586,
+  width: 360,
+  height: 58,
+};
 const FACE_OFF_RELEASE_KEY = "KeyQ";
 const HUMANOID_RESOLVED_STATES = new Set(["disabled", "surrendered", "dealt", "released", "escaped", "dead"]);
 const HUMANOID_RESOLVED_OUTCOMES = new Set(["kill", "disable", "surrender", "deal", "release", "escape"]);
@@ -1969,6 +1979,43 @@ function getFaceOffDialogueOptions(data) {
   return getFaceOffConfig(data).dialogueOptions || [];
 }
 
+function getActiveFaceOffDialogueOptions(data, faceOff = null) {
+  return Array.isArray(faceOff?.dialogueOptions) && faceOff.dialogueOptions.length
+    ? faceOff.dialogueOptions
+    : getFaceOffDialogueOptions(data);
+}
+
+function getFaceOffEventForEnemy(data, enemy) {
+  if (!enemy?.id || !Array.isArray(data.faceOffEvents)) {
+    return null;
+  }
+  return data.faceOffEvents.find((event) => (
+    event?.trigger?.type === "enemy" && event.trigger.enemyId === enemy.id
+  )) || null;
+}
+
+function getFaceOffEventLines(event) {
+  return Array.isArray(event?.lines)
+    ? event.lines.map((line) => String(line ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+function normalizeFaceOffEventChoices(event) {
+  const sourceChoices = Array.isArray(event?.choices) ? event.choices : [];
+  return sourceChoices.slice(0, FACE_OFF_DIALOGUE_KEYS.length).map((choice, index) => {
+    const result = choice?.result && typeof choice.result === "object" ? choice.result : {};
+    return {
+      key: FACE_OFF_DIALOGUE_KEYS[index],
+      label: choice?.label || `Choice ${index + 1}`,
+      type: result.type || choice?.type || "knockdown",
+      baseChance: 1,
+      successEffect: result.type || choice?.type || "knockdown",
+      eventChoiceId: choice?.id || `choice-${index + 1}`,
+      eventResult: result,
+    };
+  });
+}
+
 function getHumanoidCenter(enemy) {
   return {
     x: enemy.x + enemy.width * 0.5,
@@ -2048,6 +2095,8 @@ function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback) {
     return;
   }
   faceOff.encounterState = encounterState;
+  faceOff.enemyLineQueue = null;
+  faceOff.enemyLineQueueIndex = 0;
   faceOff.enemyLine = getFaceOffEnemyLine(data, lineKey, fallback);
   faceOff.enemyLineVisible = "";
   faceOff.enemyLineIndex = 0;
@@ -2058,6 +2107,101 @@ function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback) {
   faceOff.choiceRevealDuration = getFaceOffConfig(data).choiceSlideDuration ?? 0.26;
   faceOff.choiceRevealProgress = 0;
   faceOff.choicesReady = false;
+}
+
+function getFaceOffSelectedOption(faceOff, data) {
+  const options = getActiveFaceOffDialogueOptions(data, faceOff);
+  if (!options.length) {
+    return null;
+  }
+  const current = options.find((option) => option.key === faceOff.selectedDialogueKey);
+  return current || options[0];
+}
+
+function moveFaceOffSelectedOption(faceOff, data, direction) {
+  const options = getActiveFaceOffDialogueOptions(data, faceOff);
+  if (!options.length) {
+    return;
+  }
+  const currentIndex = Math.max(0, options.findIndex((option) => option.key === faceOff.selectedDialogueKey));
+  const nextIndex = (currentIndex + direction + options.length) % options.length;
+  faceOff.selectedDialogueKey = options[nextIndex].key;
+}
+
+function isFaceOffResultExitButtonPressed(mouse) {
+  if (!mouse?.primaryJustPressed) {
+    return false;
+  }
+  const mx = mouse.screenX ?? 0;
+  const my = mouse.screenY ?? 0;
+  return (
+    mx >= FACE_OFF_RESULT_EXIT_BUTTON.x &&
+    mx <= FACE_OFF_RESULT_EXIT_BUTTON.x + FACE_OFF_RESULT_EXIT_BUTTON.width &&
+    my >= FACE_OFF_RESULT_EXIT_BUTTON.y &&
+    my <= FACE_OFF_RESULT_EXIT_BUTTON.y + FACE_OFF_RESULT_EXIT_BUTTON.height
+  );
+}
+
+function setFaceOffLineText(faceOff, data, line) {
+  faceOff.enemyLine = line || "";
+  faceOff.enemyLineVisible = "";
+  faceOff.enemyLineIndex = 0;
+  faceOff.enemyLineTimer = 0;
+  faceOff.enemyLineCharDelay = getFaceOffConfig(data).enemyLineCharDelay ?? 0.035;
+  faceOff.choiceRevealTimer = 0;
+  faceOff.choiceRevealHold = getFaceOffConfig(data).enemyLineHoldDuration ?? 0.35;
+  faceOff.choiceRevealDuration = getFaceOffConfig(data).choiceSlideDuration ?? 0.26;
+  faceOff.choiceRevealProgress = 0;
+  faceOff.choicesReady = false;
+}
+
+function setFaceOffCustomLine(run, data, encounterState, line) {
+  const faceOff = run.faceOff;
+  if (!faceOff) {
+    return;
+  }
+  faceOff.encounterState = encounterState;
+  faceOff.enemyLineQueue = null;
+  faceOff.enemyLineQueueIndex = 0;
+  setFaceOffLineText(faceOff, data, line);
+}
+
+function setFaceOffCustomLines(run, data, encounterState, lines) {
+  const faceOff = run.faceOff;
+  if (!faceOff) {
+    return;
+  }
+  const queue = (Array.isArray(lines) ? lines : [lines])
+    .map((line) => String(line ?? "").trim())
+    .filter(Boolean);
+  faceOff.encounterState = encounterState;
+  faceOff.enemyLineQueue = queue;
+  faceOff.enemyLineQueueIndex = 0;
+  setFaceOffLineText(faceOff, data, queue[0] || "");
+}
+
+function getFaceOffShotReactionLine(part, damageResult, lethalPart = false) {
+  const partId = part?.id || "";
+  const brokeNow = Boolean(damageResult?.brokeNow);
+  if (lethalPart && partId === "head") {
+    return "아... 안 돼. 제발, 거긴 쏘지 마...";
+  }
+  if (lethalPart) {
+    return "숨이... 안 쉬어져. 그만... 제발...";
+  }
+  if (partId === "head") {
+    return brokeNow ? "머리가 울려... 아무것도 안 보여..." : "머리는 안 돼... 제발 거긴 쏘지 마...";
+  }
+  if (partId === "torso") {
+    return brokeNow ? "몸이 안 움직여... 숨이 막혀..." : "윽... 더는 못 버티겠어...";
+  }
+  if (partId === "leftArm" || partId === "rightArm") {
+    return brokeNow ? "팔이... 팔이 말을 안 들어..." : "내 팔... 제발, 팔은 쏘지 마...";
+  }
+  if (partId === "leftLeg" || partId === "rightLeg") {
+    return brokeNow ? "다리가 풀렸어... 도망도 못 가..." : "다리만은... 제발 그만...";
+  }
+  return brokeNow ? "망가졌어... 이제 못 움직여..." : "아파... 그만해...";
 }
 
 function playFaceOffBeep(faceOff) {
@@ -2160,6 +2304,8 @@ function triggerFaceOffShotFeedback(run, data) {
   faceOff.shotShakeTimer = faceOff.shotShakeDuration;
   faceOff.shotFlashDuration = getFaceOffConfig(data).shotFlashDuration ?? 0.16;
   faceOff.shotFlashTimer = faceOff.shotFlashDuration;
+  faceOff.visualState = "shot";
+  faceOff.visualStateTimer = 0.75;
   playFaceOffShotSound();
 }
 
@@ -2200,6 +2346,20 @@ function updateFaceOffChoiceReveal(faceOff, data, dt) {
   const duration = Math.max(0.001, config.choiceSlideDuration ?? faceOff.choiceRevealDuration ?? 0.26);
   faceOff.choiceRevealHold = hold;
   faceOff.choiceRevealDuration = duration;
+
+  const queue = Array.isArray(faceOff.enemyLineQueue) ? faceOff.enemyLineQueue : [];
+  const nextQueueIndex = (faceOff.enemyLineQueueIndex ?? 0) + 1;
+  if (nextQueueIndex < queue.length) {
+    faceOff.choiceRevealTimer = Math.min(hold, (faceOff.choiceRevealTimer ?? 0) + dt);
+    faceOff.choiceRevealProgress = 0;
+    faceOff.choicesReady = false;
+    if (faceOff.choiceRevealTimer >= hold) {
+      faceOff.enemyLineQueueIndex = nextQueueIndex;
+      setFaceOffLineText(faceOff, data, queue[nextQueueIndex]);
+    }
+    return;
+  }
+
   faceOff.choiceRevealTimer = Math.min(hold + duration, (faceOff.choiceRevealTimer ?? 0) + dt);
   faceOff.choiceRevealProgress = clamp((faceOff.choiceRevealTimer - hold) / duration, 0, 1);
   faceOff.choicesReady = faceOff.choiceRevealProgress >= 1;
@@ -2212,6 +2372,13 @@ function revealFaceOffChoicesNow(faceOff) {
   if (faceOff.enemyLine) {
     faceOff.enemyLineIndex = faceOff.enemyLine.length;
     faceOff.enemyLineVisible = faceOff.enemyLine;
+  }
+  if (Array.isArray(faceOff.enemyLineQueue) && faceOff.enemyLineQueue.length) {
+    const lastIndex = faceOff.enemyLineQueue.length - 1;
+    faceOff.enemyLineQueueIndex = lastIndex;
+    faceOff.enemyLine = faceOff.enemyLineQueue[lastIndex] || faceOff.enemyLine;
+    faceOff.enemyLineVisible = faceOff.enemyLine;
+    faceOff.enemyLineIndex = faceOff.enemyLine.length;
   }
   faceOff.choiceRevealTimer = (faceOff.choiceRevealHold ?? 0) + (faceOff.choiceRevealDuration ?? 0.26);
   faceOff.choiceRevealProgress = 1;
@@ -2249,13 +2416,31 @@ function enterFaceOff(run, data, enemy, state) {
   faceOff.result = null;
   faceOff.resultTimer = 0;
   faceOff.message = "";
-  setFaceOffEnemyLine(
-    run,
-    data,
-    "knockdown",
-    "knockdown",
-    "살려줘... 반격할 힘도 없어.",
-  );
+  faceOff.visualState = "plead";
+  faceOff.visualStateTimer = 0;
+  const event = getFaceOffEventForEnemy(data, enemy);
+  if (event) {
+    faceOff.eventId = event.id || "";
+    faceOff.eventChoiceResults = {};
+    faceOff.dialogueOptions = normalizeFaceOffEventChoices(event);
+    faceOff.dialogueOptions.forEach((option) => {
+      faceOff.eventChoiceResults[option.key] = option.eventResult || {};
+    });
+    faceOff.cinematic = event.cinematic || {};
+    setFaceOffCustomLines(run, data, "event", getFaceOffEventLines(event));
+  } else {
+    faceOff.eventId = "";
+    faceOff.eventChoiceResults = null;
+    faceOff.dialogueOptions = null;
+    faceOff.cinematic = null;
+    setFaceOffEnemyLine(
+      run,
+      data,
+      "knockdown",
+      "knockdown",
+      "살려줘... 반격할 힘도 없어.",
+    );
+  }
   run.player.vx = 0;
   run.player.vy = Math.min(run.player.vy, 0);
   if (run.loot?.active) {
@@ -2280,11 +2465,19 @@ function closeFaceOff(run, message = "") {
   run.faceOff.enemyLineVisible = "";
   run.faceOff.enemyLineIndex = 0;
   run.faceOff.enemyLineTimer = 0;
+  run.faceOff.enemyLineQueue = null;
+  run.faceOff.enemyLineQueueIndex = 0;
+  run.faceOff.eventId = "";
+  run.faceOff.eventChoiceResults = null;
+  run.faceOff.dialogueOptions = null;
+  run.faceOff.cinematic = null;
   run.faceOff.choiceRevealTimer = 0;
   run.faceOff.choiceRevealProgress = 0;
   run.faceOff.choicesReady = false;
   run.faceOff.shotShakeTimer = 0;
   run.faceOff.shotFlashTimer = 0;
+  run.faceOff.visualState = "idle";
+  run.faceOff.visualStateTimer = 0;
   run.faceOff.result = null;
   run.faceOff.resultTimer = 0;
   run.faceOff.message = message;
@@ -2301,6 +2494,8 @@ function finishFaceOff(run, enemy, result, message) {
   run.faceOff.result = result;
   run.faceOff.resultTimer = 0.55;
   run.faceOff.message = message;
+  run.faceOff.visualState = result || "result";
+  run.faceOff.visualStateTimer = 1.2;
 
   if (result === "kill") {
     killHumanoidEnemy(run, enemy, "");
@@ -2371,6 +2566,75 @@ function getFaceOffPartAtMouse(state, data) {
   return hit && parts.some((part) => part.id === hit.id) ? hit.id : null;
 }
 
+function mapFaceOffPartToHumanoidPart(partId) {
+  if (partId === "head" || partId === "torso" || partId === "core") {
+    return "core";
+  }
+  if (partId === "leftArm" || partId === "rightArm" || partId === "arm") {
+    return "arm";
+  }
+  if (partId === "leftLeg" || partId === "rightLeg" || partId === "leg") {
+    return "leg";
+  }
+  return "core";
+}
+
+function getFaceOffPartBreakVisualState(partId) {
+  if (partId === "head") {
+    return "break-head";
+  }
+  if (partId === "torso" || partId === "core") {
+    return "break-torso";
+  }
+  if (partId === "leftArm" || partId === "rightArm" || partId === "arm") {
+    return "break-arm";
+  }
+  if (partId === "leftLeg" || partId === "rightLeg" || partId === "leg") {
+    return "break-leg";
+  }
+  return "shot";
+}
+
+function getFaceOffPartHitVisualState(partId) {
+  if (partId === "head") {
+    return "hit-head";
+  }
+  if (partId === "torso" || partId === "core") {
+    return "hit-torso";
+  }
+  if (partId === "leftArm" || partId === "rightArm" || partId === "arm") {
+    return "hit-arm";
+  }
+  if (partId === "leftLeg" || partId === "rightLeg" || partId === "leg") {
+    return "hit-leg";
+  }
+  return "shot";
+}
+
+function applyFaceOffPartDamage(enemy, partId, amount) {
+  const partKey = mapFaceOffPartToHumanoidPart(partId);
+  const partState = enemy?.parts?.[partKey];
+  if (!partState) {
+    return { partKey, hp: 0, maxHp: 1, broken: false, brokeNow: false };
+  }
+  const maxHp = Math.max(1, Number(partState.maxHp ?? partState.hp ?? 1));
+  const beforeBroken = Boolean(partState.broken);
+  const beforeHp = beforeBroken ? 0 : Math.max(0, Number(partState.hp ?? maxHp));
+  const nextHp = Math.max(0, beforeHp - Math.max(0, amount));
+  partState.maxHp = maxHp;
+  partState.hp = nextHp;
+  if (nextHp <= 0) {
+    partState.broken = true;
+  }
+  return {
+    partKey,
+    hp: nextHp,
+    maxHp,
+    broken: Boolean(partState.broken),
+    brokeNow: !beforeBroken && Boolean(partState.broken),
+  };
+}
+
 function getDialogueChance(enemy, option) {
   const social = enemy.social || {};
   const resolve = Number(social.resolve ?? 0.5);
@@ -2422,12 +2686,18 @@ function applyFaceOffAttack(run, data, enemy) {
 
   const weaponDamageScale = weaponContext.stats.type === "shotgun" ? 1 : 0.58;
   const partDamage = Math.max(0, Number(part.damage ?? 0)) * weaponDamageScale;
+  const partDamageResult = applyFaceOffPartDamage(enemy, part.id, partDamage);
   const lethalPart = part.id === "head" || (part.id === "torso" && weaponContext.stats.type === "shotgun") || partDamage >= 50;
-  enemy.disableMeter = Math.max(0, (enemy.disableMeter ?? 0) + (part.disable ?? 0) * Math.max(0.25, weaponContext.stats.knockdownPower ?? 1));
+  const breakBonus = partDamageResult.brokeNow ? 26 : 0;
+  enemy.disableMeter = Math.max(0, (enemy.disableMeter ?? 0) + ((part.disable ?? 0) + breakBonus) * Math.max(0.25, weaponContext.stats.knockdownPower ?? 1));
   enemy.hitFlash = 0.18;
   enemy.staggerTimer = enemy.knockdownStaggerDuration ?? 0.45;
   triggerFaceOffShotFeedback(run, data);
-  setFaceOffEnemyLine(run, data, "knockdown", "hit", "윽...!");
+  faceOff.visualState = partDamageResult.brokeNow
+    ? getFaceOffPartBreakVisualState(part.id)
+    : getFaceOffPartHitVisualState(part.id);
+  faceOff.visualStateTimer = partDamageResult.brokeNow ? 1.15 : 0.75;
+  setFaceOffCustomLine(run, data, "shot", getFaceOffShotReactionLine(part, partDamageResult, lethalPart));
   spawnParticles(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.45, 8, "#ffd6ba");
 
   if (lethalPart) {
@@ -2439,10 +2709,82 @@ function applyFaceOffAttack(run, data, enemy) {
     finishFaceOff(run, enemy, "disable", "disable");
     return;
   }
-  faceOff.message = `${part.label}: hit`;
+  faceOff.message = partDamageResult.brokeNow
+    ? `${part.label}: broken`
+    : `${part.label}: hit ${Math.ceil(partDamageResult.hp)}/${partDamageResult.maxHp}`;
 }
 
-function applyFaceOffDialogue(run, data, enemy, option) {
+function getRecoverablePartIdFromFaceOff(run, data, enemy, result = {}) {
+  if (result.partId) {
+    return result.partId;
+  }
+  const selectedPart = run.faceOff?.selectedPart;
+  const mappedPart = selectedPart === "rightArm" ? "arm" : selectedPart === "rightLeg" || selectedPart === "leftLeg" ? "leg" : selectedPart;
+  const enemyPart = enemy?.parts?.[mappedPart];
+  return enemyPart?.dropPartId || getFaceOffConfig(data).recoverablePartId || "";
+}
+
+function applyFaceOffEventResult(state, run, data, enemy, option) {
+  const result = option.eventResult || {};
+  const type = result.type || option.type;
+  const resultMessage = result.message || option.label || "";
+  run.faceOff.selectedDialogueKey = option.key;
+
+  if (type === "recoverPart") {
+    const partId = getRecoverablePartIdFromFaceOff(run, data, enemy, result);
+    if (partId) {
+      ensurePartInventory(state.meta, data);
+      if (!state.meta.partInventory.some((part) => (part.id || part) === partId)) {
+        state.meta.partInventory.push(partId);
+      }
+      ensurePartInventory(state.meta, data);
+      saveMetaState(state.meta);
+      pushNotice(run, "Face-off: parts recovered.");
+    }
+    setFaceOffCustomLine(run, data, "event", result.line || "회수 신호가 손끝으로 옮겨 왔다.");
+    finishFaceOff(run, enemy, "disable", resultMessage || "parts recovered");
+    return true;
+  }
+
+  if (type === "knockdown") {
+    setFaceOffCustomLine(run, data, "event", result.line || "상대가 완전히 무력화됐다.");
+    finishFaceOff(run, enemy, "disable", resultMessage || "disabled");
+    return true;
+  }
+
+  if (type === "spare") {
+    setFaceOffCustomLine(run, data, "event", result.line || "길을 비켜준다.");
+    finishFaceOff(run, enemy, "release", resultMessage || "released");
+    return true;
+  }
+
+  if (type === "resumeCombat") {
+    enemy.state = "patrol";
+    enemy.active = true;
+    enemy.disabled = false;
+    enemy.staggerTimer = 0;
+    enemy.hp = Math.max(1, enemy.hp || Math.floor((enemy.maxHp || 100) * 0.35));
+    closeFaceOff(run, "resumeCombat");
+    pushNotice(run, "Face-off: combat resumed.");
+    return true;
+  }
+
+  if (type === "setFlag") {
+    run.eventFlags = run.eventFlags || {};
+    const flag = result.flag || `${run.faceOff?.eventId || enemy.id}:${option.eventChoiceId || option.key}`;
+    run.eventFlags[flag] = result.value ?? true;
+    setFaceOffCustomLine(run, data, "event", result.line || "상태가 기록됐다.");
+    finishFaceOff(run, enemy, "deal", resultMessage || "recorded");
+    return true;
+  }
+
+  return false;
+}
+
+function applyFaceOffDialogue(state, run, data, enemy, option) {
+  if (option?.eventResult) {
+    return applyFaceOffEventResult(state, run, data, enemy, option);
+  }
   const faceOff = run.faceOff;
   const chance = getDialogueChance(enemy, option);
   faceOff.selectedDialogueKey = option.key;
@@ -2538,9 +2880,25 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
   faceOff.entryTransitionTimer = Math.max(0, entryTransitionTimer - dt);
   faceOff.shotShakeTimer = Math.max(0, (faceOff.shotShakeTimer ?? 0) - dt);
   faceOff.shotFlashTimer = Math.max(0, (faceOff.shotFlashTimer ?? 0) - dt);
+  faceOff.visualStateTimer = Math.max(0, (faceOff.visualStateTimer ?? 0) - dt);
   updateFaceOffCursorAssist(state, faceOff, dt);
   faceOff.aimX = state.mouse?.screenX ?? CAMERA_SCREEN_WIDTH / 2;
   faceOff.aimY = state.mouse?.screenY ?? CAMERA_SCREEN_HEIGHT / 2;
+
+  if (faceOff.result) {
+    faceOff.resultTimer = Math.max(0, (faceOff.resultTimer ?? 0) - dt);
+    const exitPressed = consumeEitherPress(state, [...FACE_OFF_CANCEL_KEYS, ...INTERACT_KEYS, "Enter"]);
+    const exitByMouse = Boolean(state.mouse?.secondaryJustPressed || isFaceOffResultExitButtonPressed(state.mouse));
+    if (state.mouse) {
+      state.mouse.secondaryJustPressed = false;
+      state.mouse.primaryJustPressed = false;
+    }
+    if (exitPressed || exitByMouse) {
+      closeFaceOff(run, faceOff.result);
+      return false;
+    }
+    return true;
+  }
 
   const cancelByMouse = Boolean(state.mouse?.secondaryJustPressed);
   const cancelPressed = consumeEitherPress(state, FACE_OFF_CANCEL_KEYS) || cancelByMouse;
@@ -2559,14 +2917,6 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
   updateFaceOffEnemyLine(faceOff, dt);
   updateFaceOffChoiceReveal(faceOff, data, dt);
 
-  if (faceOff.result) {
-    faceOff.resultTimer = Math.max(0, faceOff.resultTimer - dt);
-    if (faceOff.resultTimer === 0) {
-      closeFaceOff(run, faceOff.result);
-    }
-    return true;
-  }
-
   if (!isHumanoidFaceOffCandidate(enemy)) {
     closeFaceOff(run);
     return false;
@@ -2584,23 +2934,19 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
     return true;
   }
 
-  if (!faceOff.choicesReady) {
-    const pressedDialogueKey = FACE_OFF_DIALOGUE_KEYS.find((key) => consumePress(state, key));
-    if (pressedDialogueKey) {
+  if (consumeEitherPress(state, FACE_OFF_MENU_UP_KEYS)) {
+    moveFaceOffSelectedOption(faceOff, data, -1);
+  }
+  if (consumeEitherPress(state, FACE_OFF_MENU_DOWN_KEYS)) {
+    moveFaceOffSelectedOption(faceOff, data, 1);
+  }
+  if (consumeEitherPress(state, FACE_OFF_MENU_CONFIRM_KEYS)) {
+    if (!faceOff.choicesReady) {
       revealFaceOffChoicesNow(faceOff);
-      const option = getFaceOffDialogueOptions(data).find((entry) => entry.key === pressedDialogueKey);
-      if (option) {
-        applyFaceOffDialogue(run, data, enemy, option);
-      }
     }
-  } else {
-    for (const key of FACE_OFF_DIALOGUE_KEYS) {
-      if (consumePress(state, key)) {
-        const option = getFaceOffDialogueOptions(data).find((entry) => entry.key === key);
-        if (option) {
-          applyFaceOffDialogue(run, data, enemy, option);
-        }
-      }
+    const option = getFaceOffSelectedOption(faceOff, data);
+    if (option) {
+      applyFaceOffDialogue(state, run, data, enemy, option);
     }
   }
 

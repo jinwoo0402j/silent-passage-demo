@@ -2843,7 +2843,8 @@ function getPlayerPoseConfig(data, pose) {
   const config = poseMap[pose] || poseMap.idle;
   return {
     ...config,
-    footAnchorY: config.footAnchorY ?? renderConfig.footAnchorY ?? 0.978,
+    footAnchorY: config.footAnchorY ?? renderConfig[`${pose}FootAnchorY`] ?? renderConfig.footAnchorY ?? 0.978,
+    sourceFacing: config.sourceFacing ?? renderConfig[`${pose}SourceFacing`] ?? renderConfig.sourceFacing ?? -1,
   };
 }
 
@@ -2949,7 +2950,8 @@ function getPlayerSpriteFrame(player, data, pose, time = 0) {
   }
 
   const imageAspect = sourceWidth / sourceHeight;
-  const drawHeight = Math.max(1, player.height * poseConfig.heightRatio);
+  const spriteScale = Math.max(0.1, Number(data.player?.render?.spriteScale ?? 1));
+  const drawHeight = Math.max(1, player.height * poseConfig.heightRatio * spriteScale);
   const drawWidth = Math.max(1, drawHeight * imageAspect * poseConfig.widthRatio);
 
   const footX = player.x + player.width * 0.5;
@@ -5039,16 +5041,6 @@ function getFaceOffAimPan(data, mouseY, screenHeight = SCREEN_HEIGHT) {
 
 function getFaceOffTargetZones(data, mouseY, screenWidth = SCREEN_WIDTH, screenHeight = SCREEN_HEIGHT) {
   const config = data.faceOff || {};
-  if (config.sceneArmFocus) {
-    const focus = config.sceneArmFocus;
-    const armWidth = Number(focus.width ?? 166);
-    const armHeight = Number(focus.height ?? 118);
-    const armX = Number(focus.x ?? screenWidth * 0.55) - armWidth / 2;
-    const armY = Number(focus.y ?? screenHeight * 0.64) - armHeight / 2;
-    return [
-      { id: "rightArm", label: "R ARM", x: armX, y: armY, width: armWidth, height: armHeight, shape: "rect" },
-    ];
-  }
   const scale = config.targetAimScale ?? 1.62;
   const cx = screenWidth / 2;
   const top = (config.targetAimTop ?? 128) - getFaceOffAimPan(data, mouseY, screenHeight);
@@ -5686,7 +5678,9 @@ function drawFaceOffDialogue(ctx, theme, data, enemy, faceOff) {
   if (reveal <= 0) {
     return;
   }
-  const options = data.faceOff?.dialogueOptions || [];
+  const options = Array.isArray(faceOff?.dialogueOptions) && faceOff.dialogueOptions.length
+    ? faceOff.dialogueOptions
+    : data.faceOff?.dialogueOptions || [];
   const cardW = 286;
   const cardH = 58;
   const lowerGap = 30;
@@ -5971,13 +5965,90 @@ function getFaceOffSceneFocus(data) {
   };
 }
 
-function drawFaceOffSceneBackdrop(ctx, data) {
-  const assetKey = data.faceOff?.sceneArtAssetKey || "faceOffKnockdownScene";
-  const src = assetKey ? data.art?.[assetKey]?.src : null;
-  const image = getImageAsset(src);
+function getFaceOffSceneVisualState(faceOff) {
+  if (!faceOff) {
+    return "idle";
+  }
+  if (faceOff.result) {
+    return faceOff.result;
+  }
+  if ((faceOff.visualStateTimer ?? 0) > 0 && faceOff.visualState) {
+    return faceOff.visualState;
+  }
+  return faceOff.visualState || "plead";
+}
+
+function getFaceOffSceneAssetKey(data, faceOff) {
+  const states = data.faceOff?.sceneArtStates || {};
+  const visualState = getFaceOffSceneVisualState(faceOff);
+  return states[visualState] || data.faceOff?.sceneArtAssetKey || "faceOffKnockdownScene";
+}
+
+function applyFaceOffSceneVisualGrade(ctx, faceOff) {
+  const visualState = getFaceOffSceneVisualState(faceOff);
+  const pulse = clamp((faceOff?.visualStateTimer ?? 0) / 1.2, 0, 1);
+  const shotPulse = visualState === "shot" ? clamp((faceOff?.visualStateTimer ?? 0) / 0.75, 0, 1) : 0;
 
   ctx.save();
-  const loaded = drawImageCover(ctx, image, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 1);
+  ctx.globalCompositeOperation = "source-atop";
+  if (visualState === "shot" || visualState.startsWith("hit-")) {
+    ctx.fillStyle = `rgba(255, 72, 86, ${0.18 + shotPulse * 0.18})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    ctx.fillStyle = `rgba(255, 255, 255, ${shotPulse * 0.16})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (visualState === "break-arm") {
+    ctx.fillStyle = `rgba(147, 234, 255, ${0.18 + pulse * 0.12})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (visualState === "break-leg") {
+    ctx.fillStyle = `rgba(231, 244, 126, ${0.16 + pulse * 0.12})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (visualState === "break-head" || visualState === "break-torso") {
+    ctx.fillStyle = `rgba(255, 72, 86, ${0.2 + pulse * 0.16})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (visualState === "kill") {
+    ctx.fillStyle = `rgba(120, 8, 20, ${0.22 + pulse * 0.16})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (visualState === "disable") {
+    ctx.fillStyle = `rgba(126, 221, 255, ${0.14 + pulse * 0.1})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (visualState === "release") {
+    ctx.fillStyle = `rgba(231, 244, 126, ${0.12 + pulse * 0.1})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (visualState === "deal") {
+    ctx.fillStyle = `rgba(147, 234, 255, ${0.13 + pulse * 0.12})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else {
+    ctx.fillStyle = "rgba(28, 44, 54, 0.1)";
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+  ctx.restore();
+}
+
+function drawFaceOffSceneBackdrop(ctx, data, faceOff) {
+  const assetKey = getFaceOffSceneAssetKey(data, faceOff);
+  const src = assetKey ? data.art?.[assetKey]?.src : null;
+  const image = getImageAsset(src);
+  const visualState = getFaceOffSceneVisualState(faceOff);
+  const pulse = clamp((faceOff?.visualStateTimer ?? 0) / 1.2, 0, 1);
+  const shotPulse = (visualState === "shot" || visualState.startsWith("hit-"))
+    ? clamp((faceOff?.visualStateTimer ?? 0) / 0.75, 0, 1)
+    : 0;
+  const zoom = 1
+    + ((visualState === "shot" || visualState.startsWith("hit-")) ? shotPulse * 0.055 : 0)
+    + (visualState.startsWith("break-") ? pulse * 0.035 : 0)
+    + (faceOff?.result ? pulse * 0.025 : 0);
+  const panX = visualState === "release" ? -0.08
+    : visualState === "deal" ? 0.06
+      : visualState.endsWith("arm") ? 0.05
+        : 0;
+  const panY = visualState === "kill" ? 0.05
+    : visualState === "disable" ? -0.03
+      : visualState.endsWith("head") ? -0.05
+        : visualState.endsWith("leg") ? 0.05
+          : 0;
+
+  ctx.save();
+  const loaded = drawImageCoverPan(ctx, image, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, panX, panY, zoom, 1);
   if (!loaded) {
     const fallback = ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT);
     fallback.addColorStop(0, "#101923");
@@ -5986,6 +6057,7 @@ function drawFaceOffSceneBackdrop(ctx, data) {
     ctx.fillStyle = fallback;
     ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
   }
+  applyFaceOffSceneVisualGrade(ctx, faceOff);
 
   const leftShade = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.42, 0);
   leftShade.addColorStop(0, "rgba(0,0,0,0.64)");
@@ -6055,6 +6127,45 @@ function drawFaceOffScenePartPanel(ctx, theme, data, faceOff, enemy) {
   const y = 276;
   const width = 292;
   const height = 206;
+  const selectedPart = faceOff?.selectedPart || "torso";
+  const partKey = mapFaceOffPartToHumanoidPart(selectedPart);
+  const enemyPart = enemy?.parts?.[partKey] || null;
+  const bodyPart = (data.faceOff?.bodyParts || []).find((entry) => entry.id === selectedPart) || null;
+  const selectedMaxHp = getHumanoidPartMaxHp(partKey, enemyPart);
+  const selectedHp = clamp(Number(enemyPart?.hp ?? selectedMaxHp), 0, selectedMaxHp);
+  const selectedRatio = enemyPart?.broken ? 0 : clamp(selectedHp / selectedMaxHp, 0, 1);
+  const partActive = Boolean(faceOff?.hoverPart);
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: partActive ? "rgba(8, 18, 22, 0.68)" : "rgba(4, 8, 12, 0.54)",
+    stroke: partActive ? "rgba(147,234,255,0.52)" : "rgba(255,255,255,0.2)",
+    glow: partActive,
+    innerLines: false,
+  });
+
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.fillStyle = partActive ? "#f5f8fb" : "rgba(245,248,251,0.88)";
+  ctx.font = "800 21px 'Segoe UI', sans-serif";
+  ctx.fillText(bodyPart?.label || getFaceOffPartLabel(selectedPart), x + 24, y + 44);
+
+  ctx.fillStyle = "rgba(245,248,251,0.66)";
+  ctx.font = "700 14px 'Segoe UI', sans-serif";
+  ctx.fillText(`피해 ${Math.round(bodyPart?.damage ?? 0)} / 제압 ${Math.round(bodyPart?.disable ?? 0)}`, x + 24, y + 86);
+  ctx.fillText(`내구 ${Math.ceil(selectedHp)} / ${selectedMaxHp}`, x + 24, y + 116);
+
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(x + 24, y + 136, width - 48, 8);
+  ctx.fillStyle = enemyPart?.broken ? theme.accentSecondary : partActive ? theme.accentSecondary : "rgba(147,234,255,0.72)";
+  ctx.fillRect(x + 24, y + 136, (width - 48) * selectedRatio, 8);
+
+  ctx.fillStyle = enemyPart?.broken ? theme.accentSecondary : "rgba(245,248,251,0.72)";
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText(enemyPart?.broken ? "파괴됨" : "LMB 사격 / 마우스로 부위 선택", x + 24, y + 176);
+  ctx.restore();
+  return;
+
   const arm = enemy?.parts?.arm || null;
   const partId = arm?.dropPartId || data.faceOff?.recoverablePartId || "watchman-right-arm";
   const part = data.parts?.[partId] || null;
@@ -6143,6 +6254,62 @@ function drawFaceOffSceneWeaponPanel(ctx, theme, run, data) {
 }
 
 function drawFaceOffSceneAim(ctx, theme, data, faceOff) {
+  const aimY = faceOff?.aimY ?? SCREEN_HEIGHT * 0.5;
+  const zones = getFaceOffTargetZones(data, aimY);
+  const pulse = 0.5 + Math.sin(performance.now() * 0.006) * 0.5;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  zones.forEach((zone) => {
+    const active = zone.id === faceOff?.selectedPart || zone.id === faceOff?.hoverPart;
+    ctx.fillStyle = active ? "rgba(147,234,255,0.13)" : "rgba(245,248,251,0.025)";
+    ctx.strokeStyle = active ? `rgba(147,234,255,${0.7 + pulse * 0.22})` : "rgba(245,248,251,0.28)";
+    ctx.lineWidth = active ? 2.1 : 1.1;
+    ctx.shadowColor = "rgba(147,234,255,0.42)";
+    ctx.shadowBlur = active ? 14 : 4;
+    ctx.beginPath();
+    if (zone.shape === "ellipse") {
+      ctx.ellipse(zone.x + zone.width / 2, zone.y + zone.height / 2, zone.width / 2, zone.height / 2, 0, 0, Math.PI * 2);
+    } else if (ctx.roundRect) {
+      ctx.roundRect(zone.x, zone.y, zone.width, zone.height, 10);
+    } else {
+      ctx.rect(zone.x, zone.y, zone.width, zone.height);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = active ? theme.accentSecondary : "rgba(245,248,251,0.54)";
+    ctx.font = "800 10px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(zone.label, zone.x + zone.width / 2, zone.y - 6);
+  });
+
+  const x = clamp(faceOff?.aimX ?? SCREEN_WIDTH / 2, 8, SCREEN_WIDTH - 8);
+  const y = clamp(faceOff?.aimY ?? SCREEN_HEIGHT / 2, 8, SCREEN_HEIGHT - 8);
+  ctx.shadowBlur = 8;
+  ctx.strokeStyle = "rgba(245,248,251,0.82)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(x, y, 15, 0, Math.PI * 2);
+  ctx.moveTo(x - 34, y);
+  ctx.lineTo(x - 10, y);
+  ctx.moveTo(x + 10, y);
+  ctx.lineTo(x + 34, y);
+  ctx.moveTo(x, y - 34);
+  ctx.lineTo(x, y - 10);
+  ctx.moveTo(x, y + 10);
+  ctx.lineTo(x, y + 34);
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "rgba(245,248,251,0.74)";
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("부위 조준", SCREEN_WIDTH / 2, 108);
+  ctx.restore();
+  return;
+  /*
   const focus = getFaceOffSceneFocus(data);
   const left = focus.x - focus.width / 2;
   const top = focus.y - focus.height / 2;
@@ -6196,6 +6363,7 @@ function drawFaceOffSceneAim(ctx, theme, data, faceOff) {
   ctx.textAlign = "center";
   ctx.fillText("오른팔 파츠", focus.x, top - 14);
   ctx.restore();
+  */
 }
 
 function drawFaceOffSceneSpeech(ctx, theme, faceOff) {
@@ -6242,7 +6410,7 @@ function drawFaceOffSceneChoice(ctx, theme, option, slot, selected, dimmed = fal
     innerLines: false,
   });
 
-  const keyLabel = option.key.replace("Key", "");
+  const keyLabel = selected ? ">" : "";
   ctx.fillStyle = selected ? theme.accentSecondary : "rgba(245,248,251,0.76)";
   ctx.font = "900 18px 'Segoe UI', sans-serif";
   ctx.textAlign = "center";
@@ -6262,30 +6430,36 @@ function drawFaceOffSceneChoice(ctx, theme, option, slot, selected, dimmed = fal
 }
 
 function drawFaceOffSceneChoices(ctx, theme, data, faceOff) {
-  const options = data.faceOff?.dialogueOptions || [];
+  if (faceOff?.result) {
+    return;
+  }
+  const options = Array.isArray(faceOff?.dialogueOptions) && faceOff.dialogueOptions.length
+    ? faceOff.dialogueOptions
+    : data.faceOff?.dialogueOptions || [];
   const centerX = SCREEN_WIDTH / 2;
-  const baseY = 580;
-  const cardW = 226;
+  const cardW = 360;
   const cardH = 56;
+  const gap = 12;
+  const totalH = options.length * cardH + Math.max(0, options.length - 1) * gap;
+  const startY = 566 - totalH / 2;
   const reveal = clamp(faceOff.choiceRevealProgress ?? 0, 0, 1);
   const dimmed = reveal < 1;
-  const layout = {
-    KeyW: { x: centerX - cardW / 2, y: baseY - 86, width: cardW, height: cardH },
-    KeyA: { x: centerX - cardW - 106, y: baseY, width: cardW, height: cardH },
-    KeyD: { x: centerX + 106, y: baseY, width: cardW, height: cardH },
-    KeyS: { x: centerX - cardW / 2, y: baseY + 76, width: cardW, height: cardH },
-  };
-
+  const baseY = startY + 108;
+  const layout = Object.fromEntries(options.map((option, index) => [
+    option.key,
+    {
+      x: centerX - cardW / 2,
+      y: startY + index * (cardH + gap),
+      width: cardW,
+      height: cardH,
+    },
+  ]));
   ctx.save();
   ctx.globalAlpha = 0.35 + reveal * 0.65;
-  ctx.strokeStyle = "rgba(245,248,251,0.28)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(centerX, baseY - 24);
-  ctx.lineTo(centerX, baseY + 76);
-  ctx.moveTo(centerX - 106, baseY + cardH / 2);
-  ctx.lineTo(centerX + 106, baseY + cardH / 2);
-  ctx.stroke();
+  ctx.fillStyle = "rgba(245,248,251,0.62)";
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("W/S: 선택  Space: 확정", centerX, baseY - 126);
   options.forEach((option) => {
     const slot = layout[option.key];
     if (!slot) {
@@ -6294,6 +6468,39 @@ function drawFaceOffSceneChoices(ctx, theme, data, faceOff) {
     const selected = faceOff.selectedDialogueKey === option.key;
     drawFaceOffSceneChoice(ctx, theme, option, slot, selected, dimmed);
   });
+  ctx.restore();
+}
+
+function drawFaceOffResultExitButton(ctx, theme, faceOff) {
+  if (!faceOff?.result) {
+    return;
+  }
+  const x = SCREEN_WIDTH / 2 - 180;
+  const y = 586;
+  const width = 360;
+  const height = 58;
+  const hover = (
+    (faceOff.aimX ?? 0) >= x &&
+    (faceOff.aimX ?? 0) <= x + width &&
+    (faceOff.aimY ?? 0) >= y &&
+    (faceOff.aimY ?? 0) <= y + height
+  );
+
+  ctx.save();
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: hover ? "rgba(28, 42, 48, 0.86)" : "rgba(4, 8, 12, 0.66)",
+    stroke: hover ? "rgba(147,234,255,0.72)" : "rgba(255,255,255,0.22)",
+    glow: hover,
+    innerLines: false,
+  });
+  ctx.fillStyle = hover ? theme.accentSecondary : "rgba(245,248,251,0.9)";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("나가기", x + width / 2, y + 31);
+  ctx.fillStyle = "rgba(245,248,251,0.56)";
+  ctx.font = "800 11px 'Segoe UI', sans-serif";
+  ctx.fillText("Z / Enter / Esc", x + width / 2, y + 47);
   ctx.restore();
 }
 
@@ -6313,13 +6520,14 @@ function drawFaceOffOverlay(ctx, state, data, theme) {
   if (shake.ratio > 0) {
     ctx.translate(shake.x, shake.y);
   }
-  drawFaceOffSceneBackdrop(ctx, data);
+  drawFaceOffSceneBackdrop(ctx, data, faceOff);
   drawFaceOffSceneInfoPanel(ctx, theme);
   drawFaceOffScenePartPanel(ctx, theme, data, faceOff, enemy);
   drawFaceOffSceneWeaponPanel(ctx, theme, run, data);
   drawFaceOffSceneAim(ctx, theme, data, faceOff);
   drawFaceOffSceneSpeech(ctx, theme, faceOff);
   drawFaceOffSceneChoices(ctx, theme, data, faceOff);
+  drawFaceOffResultExitButton(ctx, theme, faceOff);
 
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(245,248,251,0.82)";

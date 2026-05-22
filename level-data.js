@@ -31,6 +31,42 @@ export const GAME_DATA = {
     "faceOffKnockdownScene": {
       "src": "./assets/ui/faceoff-knockdown-scene-v1.png?v=20260514-1"
     },
+    "faceOffScenePlead": {
+      "src": "./assets/ui/faceoff-scene-plead-v3.png?v=20260521-3"
+    },
+    "faceOffSceneShot": {
+      "src": "./assets/ui/faceoff-scene-shot-v3.png?v=20260521-3"
+    },
+    "faceOffSceneRelease": {
+      "src": "./assets/ui/faceoff-scene-release-v3.png?v=20260521-3"
+    },
+    "faceOffSceneDeal": {
+      "src": "./assets/ui/faceoff-scene-deal-v3.png?v=20260521-3"
+    },
+    "faceOffSceneHitHead": {
+      "src": "./assets/ui/faceoff-scene-hit-head-v1.png?v=20260521-1"
+    },
+    "faceOffSceneHitTorso": {
+      "src": "./assets/ui/faceoff-scene-hit-torso-v1.png?v=20260521-1"
+    },
+    "faceOffSceneHitArm": {
+      "src": "./assets/ui/faceoff-scene-hit-arm-v1.png?v=20260521-1"
+    },
+    "faceOffSceneHitLeg": {
+      "src": "./assets/ui/faceoff-scene-hit-leg-v1.png?v=20260521-1"
+    },
+    "faceOffSceneBreakHead": {
+      "src": "./assets/ui/faceoff-scene-break-head-v1.png?v=20260521-1"
+    },
+    "faceOffSceneBreakTorso": {
+      "src": "./assets/ui/faceoff-scene-break-torso-v1.png?v=20260521-1"
+    },
+    "faceOffSceneBreakArm": {
+      "src": "./assets/ui/faceoff-scene-break-arm-v1.png?v=20260521-1"
+    },
+    "faceOffSceneBreakLeg": {
+      "src": "./assets/ui/faceoff-scene-break-leg-v1.png?v=20260521-1"
+    },
     "faceOffFingerGun": {
       "src": "./assets/ui/faceoff-finger-gun.png?v=20260426-1"
     },
@@ -303,7 +339,24 @@ export const GAME_DATA = {
     "targetAimPanMax": 330,
     "targetAimAssistX": 704,
     "targetAimAssistY": 386,
-    "sceneArtAssetKey": "faceOffKnockdownScene",
+    "sceneArtAssetKey": "faceOffScenePlead",
+    "sceneArtStates": {
+      "idle": "faceOffScenePlead",
+      "plead": "faceOffScenePlead",
+      "shot": "faceOffSceneShot",
+      "release": "faceOffSceneRelease",
+      "deal": "faceOffSceneDeal",
+      "disable": "faceOffSceneShot",
+      "kill": "faceOffSceneShot",
+      "hit-head": "faceOffSceneHitHead",
+      "hit-torso": "faceOffSceneHitTorso",
+      "hit-arm": "faceOffSceneHitArm",
+      "hit-leg": "faceOffSceneHitLeg",
+      "break-head": "faceOffSceneBreakHead",
+      "break-torso": "faceOffSceneBreakTorso",
+      "break-arm": "faceOffSceneBreakArm",
+      "break-leg": "faceOffSceneBreakLeg"
+    },
     "sceneArmFocus": {
       "x": 704,
       "y": 462,
