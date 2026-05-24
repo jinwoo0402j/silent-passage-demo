@@ -8,8 +8,8 @@
     "height": 1900,
     "gravity": 2350,
     "groundY": 1680,
-    "duskAt": 9999,
-    "nightAt": 19999,
+    "duskAt": 90,
+    "nightAt": 150,
     "sanityDrain": 0,
     "startMessage": "Slope slide test lab.",
     "startClueLog": [

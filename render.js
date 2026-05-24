@@ -4,15 +4,36 @@ import {
   computeArmWeaponStats,
   ensureWeaponLoadoutState,
   hasUnlocked,
-} from "./state.js";
+} from "./state.js?v=20260520-shelter-photo-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
 let spriteTintCanvas = null;
 let spriteTintContext = null;
+let nightOverlayCanvas = null;
+let nightOverlayContext = null;
 const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
 const MAP_EXPLORE_CELL_SIZE = 320;
+const NIGHT_TRANSITION_SECONDS = 1.4;
+const TITLE_MENU_OPTIONS = [
+  { id: "new", label: "처음부터", detail: "새 런 준비" },
+  { id: "continue", label: "이어하기", detail: "저장된 런 복귀" },
+];
+const SHELTER_HUB_MENU = [
+  { id: "parts", label: "파츠 접합", icon: "parts" },
+  { id: "drone", label: "드론 관리", icon: "drone" },
+  { id: "records", label: "기록 확인", icon: "log" },
+  { id: "rest", label: "휴식", icon: "rest" },
+  { id: "exit", label: "출격", icon: "exit" },
+];
+const SHELTER_REST_MENU = [
+  { id: "photo", label: "CG 촬영", icon: "photo", detail: "피난처 배경과 Type-07A를 CG 일러스트로 저장한다." },
+  { id: "records", label: "CG 기록", icon: "log", detail: "저장한 CG와 잔몽 기록을 확인한다." },
+  { id: "background", label: "배경 감상", icon: "background", detail: "해금된 피난처 배경을 크게 본다." },
+  { id: "rest", label: "휴식 완료", icon: "rest", detail: "체력, 정신력, 배터리와 탄약이 회복됐다." },
+  { id: "exit", label: "밖으로 나가기", icon: "exit", detail: "피난처 밖으로 돌아가 탐사를 이어간다." },
+];
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
   && (
     window.__SILENT_PASSAGE_PERF === "lite" ||
@@ -28,6 +49,62 @@ const LOOT_RARITY_META = {
 
 function isMovementLab(data) {
   return data.world.mode === "movementLab";
+}
+
+function isShelterRouteExit(routeExit, data) {
+  const shelterLevelId = data.shelter?.levelId || "shelter-hub-01";
+  return routeExit?.kind === "shelter"
+    || routeExit?.type === "shelter"
+    || routeExit?.toLevelId === shelterLevelId;
+}
+
+function getRunTimePhaseLabel(run) {
+  if (run?.timePhase === "night") {
+    return "밤";
+  }
+  if (run?.timePhase === "dusk") {
+    return "황혼";
+  }
+  return "낮";
+}
+
+function isShelterPortalOpen(run) {
+  if (!run) {
+    return true;
+  }
+  return run.timePhase === "night"
+    && !(Number.isFinite(run.shelterExitCooldown) && run.shelterExitCooldown > 0);
+}
+
+function getNightPostProcessStrength(run) {
+  if (run?.timePhase === "night") {
+    return 1;
+  }
+  if (run?.timePhase === "dusk") {
+    return 0.35;
+  }
+  return 0;
+}
+
+function ensureNightOverlayCanvas() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  if (!nightOverlayCanvas) {
+    nightOverlayCanvas = document.createElement("canvas");
+    nightOverlayContext = nightOverlayCanvas.getContext("2d");
+  }
+  if (!nightOverlayContext) {
+    return null;
+  }
+  if (nightOverlayCanvas.width !== SCREEN_WIDTH || nightOverlayCanvas.height !== SCREEN_HEIGHT) {
+    nightOverlayCanvas.width = SCREEN_WIDTH;
+    nightOverlayCanvas.height = SCREEN_HEIGHT;
+  }
+  return {
+    canvas: nightOverlayCanvas,
+    ctx: nightOverlayContext,
+  };
 }
 
 function isEntityDisabled(entity) {
@@ -273,6 +350,38 @@ function drawImageCover(ctx, image, x, y, width, height, alpha = 1) {
   return true;
 }
 
+function drawImageCoverPan(ctx, image, x, y, width, height, panX = 0, panY = 0, zoom = 1, alpha = 1) {
+  if (!image || !image.complete || !image.naturalWidth || !image.naturalHeight) {
+    return false;
+  }
+
+  const imageAspect = image.naturalWidth / image.naturalHeight;
+  const frameAspect = width / height;
+  let sw = image.naturalWidth;
+  let sh = image.naturalHeight;
+
+  if (imageAspect > frameAspect) {
+    sw = image.naturalHeight * frameAspect;
+  } else {
+    sh = image.naturalWidth / frameAspect;
+  }
+
+  const photoZoom = clamp(zoom, 1, 1.35);
+  sw = Math.max(1, Math.min(image.naturalWidth, sw / photoZoom));
+  sh = Math.max(1, Math.min(image.naturalHeight, sh / photoZoom));
+
+  const maxShiftX = Math.max(0, (image.naturalWidth - sw) * 0.5);
+  const maxShiftY = Math.max(0, (image.naturalHeight - sh) * 0.5);
+  const sx = clamp((image.naturalWidth - sw) * 0.5 + clamp(panX, -1, 1) * maxShiftX * 0.7, 0, image.naturalWidth - sw);
+  const sy = clamp((image.naturalHeight - sh) * 0.5 + clamp(panY, -1, 1) * maxShiftY * 0.7, 0, image.naturalHeight - sh);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
+  ctx.restore();
+  return true;
+}
+
 function drawArtPanel(ctx, theme, data, key, x, y, width, height, options = {}) {
   const {
     cut = 18,
@@ -433,7 +542,7 @@ function sceneLabel(scene) {
     return "타이틀";
   }
   if (scene === SCENES.SHELTER) {
-    return "쉘터";
+    return "피난처";
   }
   if (scene === SCENES.EXPEDITION) {
     return "탐사";
@@ -453,7 +562,7 @@ function objectiveLines(state) {
       ];
     }
     return [
-      "쉘터 연결",
+      "피난처 연결",
       "규칙 확인",
     ];
   }
@@ -501,13 +610,13 @@ function objectiveLines(state) {
       ]
       : [
         "결과 확인",
-        "쉘터 복귀",
+        "피난처 복귀",
       ];
   }
 
   return [
     "런 무효",
-    "쉘터 복귀",
+    "피난처 복귀",
   ];
 }
 
@@ -665,7 +774,7 @@ function drawTitleScene(ctx, state, data) {
 
   ctx.fillStyle = theme.accent;
   ctx.font = "600 16px 'Segoe UI', sans-serif";
-  ctx.fillText(isMovementLab(data) ? "C: 입장" : "C: 쉘터", 88, 314);
+  ctx.fillText(isMovementLab(data) ? "C: 입장" : "C: 피난처", 88, 314);
 
   drawCharacterBackdrop(ctx, theme, 722, 54, 454, 636);
   drawStandingArt(ctx, data, "operatorStanding", 742, 54, 420, 636, 0.98);
@@ -697,7 +806,7 @@ function drawShelterScene(ctx, state, data) {
 
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "700 14px 'Segoe UI', sans-serif";
-  ctx.fillText("쉘터", 92, 92);
+  ctx.fillText("피난처", 92, 92);
 
   ctx.fillStyle = theme.textMain;
   ctx.font = "700 54px 'Trebuchet MS', sans-serif";
@@ -1068,8 +1177,60 @@ function drawGate(ctx, data, theme) {
   ctx.fillRect(gate.x + gate.width - 16, gate.y, 6, gate.height);
 }
 
-function drawRouteExits(ctx, data, theme) {
+function drawShelterPortal(ctx, routeExit, theme, pulse = 0, open = true) {
+  const centerX = routeExit.x + routeExit.width * 0.5;
+  const centerY = routeExit.y + routeExit.height * 0.5;
+  const radiusX = Math.max(42, routeExit.width * 0.48);
+  const radiusY = Math.max(72, routeExit.height * 0.48);
+  const shimmer = 0.5 + Math.sin(pulse * 2.2 + centerX * 0.01) * 0.5;
+  const accent = open ? "231,244,126" : "132,145,151";
+  const cyan = open ? "147,234,255" : "82,104,112";
+  const panelFill = open ? "rgba(6, 16, 20, 0.28)" : "rgba(5, 10, 13, 0.34)";
+  const panelStroke = open ? "rgba(147, 234, 255, 0.36)" : "rgba(132, 145, 151, 0.24)";
+
+  ctx.save();
+  drawBeveledPanel(ctx, theme, routeExit.x - 20, routeExit.y - 24, routeExit.width + 40, routeExit.height + 38, {
+    cut: 22,
+    fill: panelFill,
+    stroke: panelStroke,
+    glow: open,
+  });
+  const glow = ctx.createRadialGradient(centerX, centerY, 12, centerX, centerY, radiusY * 1.1);
+  glow.addColorStop(0, `rgba(${accent},${open ? 0.28 + shimmer * 0.12 : 0.08})`);
+  glow.addColorStop(0.44, `rgba(${cyan},${open ? 0.18 : 0.08})`);
+  glow.addColorStop(1, "rgba(7,12,18,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY, radiusX * 1.18, radiusY * 1.18, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = `rgba(${accent}, ${open ? 0.72 : 0.34})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = `rgba(${cyan}, ${open ? 0.42 : 0.22})`;
+  ctx.lineWidth = 1.5;
+  for (let index = 0; index < 4; index += 1) {
+    const inset = index * 9 + (open ? shimmer * 4 : 0);
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY, Math.max(8, radiusX - inset), Math.max(14, radiusY - inset * 1.3), 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = open ? "rgba(255,255,255,0.86)" : "rgba(193,204,209,0.72)";
+  ctx.font = "800 13px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(routeExit.label || "피난처", centerX, routeExit.y - 30);
+  ctx.restore();
+}
+
+function drawRouteExits(ctx, data, theme, pulse = 0, run = null) {
   (data.routeExits || []).forEach((routeExit) => {
+    if (isShelterRouteExit(routeExit, data)) {
+      drawShelterPortal(ctx, routeExit, theme, pulse, isShelterPortalOpen(run));
+      return;
+    }
     drawBeveledPanel(ctx, theme, routeExit.x - 14, routeExit.y - 18, routeExit.width + 28, routeExit.height + 24, {
       cut: 16,
       fill: "rgba(10, 20, 26, 0.2)",
@@ -3509,7 +3670,7 @@ function drawInventoryDetailCard(ctx, theme, data, part, equipped, x, y, width, 
   ctx.textAlign = "right";
   ctx.fillStyle = "rgba(20, 30, 28, 0.78)";
   ctx.font = "900 11px 'Segoe UI', sans-serif";
-  ctx.fillText("쉘터에서 접합 가능", x + width - 18, y + 30);
+  ctx.fillText("피난처에서 접합 가능", x + width - 18, y + 30);
   ctx.textAlign = "left";
 }
 
@@ -3682,14 +3843,14 @@ function drawRunInventoryOverlay(ctx, state, data, theme) {
   });
   ctx.fillStyle = theme.textMute;
   ctx.font = "800 10px 'Segoe UI', sans-serif";
-  ctx.fillText("SHELTER ACTION", rightX + 16, topY + 478);
+  ctx.fillText("피난처 조작", rightX + 16, topY + 478);
   ctx.fillStyle = theme.textDim;
   ctx.font = "12px 'Segoe UI', sans-serif";
-  ctx.fillText("장착과 잔몽은 쉘터에서 확인", rightX + 16, topY + 502);
+  ctx.fillText("장착과 잔몽은 피난처에서 확인", rightX + 16, topY + 502);
 
   ctx.fillStyle = theme.textMute;
   ctx.font = "12px 'Segoe UI', sans-serif";
-  ctx.fillText("장착과 잔몽은 쉘터에서 확인", panelX + 34, panelY + panelH - 26);
+  ctx.fillText("장착과 잔몽은 피난처에서 확인", panelX + 34, panelY + panelH - 26);
   ctx.textAlign = "right";
   ctx.fillText("TAB 닫기", panelX + panelW - 34, panelY + panelH - 26);
   ctx.textAlign = "left";
@@ -4107,30 +4268,126 @@ function drawRecoilFocusOverlay(ctx, run, data) {
   ctx.restore();
 }
 
-function drawDarknessOverlay(ctx, run, data) {
-  if (isMovementLab(data)) {
+function drawNightPostProcess(ctx, run, data, pulse = 0) {
+  const strength = getNightPostProcessStrength(run);
+  if (strength <= 0) {
+    return;
+  }
+  const overlay = ensureNightOverlayCanvas();
+  if (!overlay) {
     return;
   }
 
   const cameraZoom = getRunCameraZoom(run, data);
-  const base = run.timePhase === "day" ? 0.04 : run.timePhase === "dusk" ? 0.18 : 0.42;
-  const sanityPenalty = run.sanity < 40 ? 0.18 : run.sanity < 70 ? 0.08 : 0;
-  ctx.save();
-  ctx.fillStyle = `rgba(3, 5, 8, ${base + sanityPenalty})`;
-  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-
   const playerX = (run.player.x - run.cameraX + run.player.width / 2) * cameraZoom;
   const playerY = (run.player.y - run.cameraY + run.player.height / 2) * cameraZoom;
-  const radius = (run.player.lightActive ? 250 : run.timePhase === "night" ? 134 : run.timePhase === "dusk" ? 210 : 340) * cameraZoom;
-  const light = ctx.createRadialGradient(playerX, playerY, 18, playerX, playerY, radius);
-  light.addColorStop(0, "rgba(0,0,0,0.96)");
-  light.addColorStop(0.5, "rgba(0,0,0,0.4)");
-  light.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.fillStyle = light;
-  ctx.beginPath();
-  ctx.arc(playerX, playerY, radius, 0, Math.PI * 2);
-  ctx.fill();
+  const lightBoost = run.player.lightActive ? 1 : 0;
+  const sightRadius = lightBoost
+    ? SCREEN_HEIGHT * 0.48
+    : run.timePhase === "night"
+      ? SCREEN_HEIGHT * 0.35
+      : SCREEN_HEIGHT * 0.46;
+  const clearCoreRadius = lightBoost
+    ? Math.min(150, sightRadius * 0.42)
+    : Math.min(116, sightRadius * 0.42);
+  const transition = clamp(Number(run.nightTransitionTimer || 0) / NIGHT_TRANSITION_SECONDS, 0, 1);
+  const transitionPulse = Math.sin((1 - transition) * Math.PI) * transition;
+  const sanityPenalty = run.sanity < 40 ? 0.12 : run.sanity < 70 ? 0.05 : 0;
+  const overlayCtx = overlay.ctx;
+
+  overlayCtx.save();
+  overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
+  overlayCtx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  overlayCtx.globalCompositeOperation = "source-over";
+
+  overlayCtx.fillStyle = `rgba(1, 4, 9, ${Math.min(0.92, 0.58 + 0.3 * strength + sanityPenalty)})`;
+  overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const colorWash = overlayCtx.createLinearGradient(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  colorWash.addColorStop(0, `rgba(18, 64, 92, ${0.08 * strength})`);
+  colorWash.addColorStop(0.44, `rgba(7, 28, 48, ${0.08 * strength})`);
+  colorWash.addColorStop(1, `rgba(0, 3, 12, ${0.22 * strength})`);
+  overlayCtx.fillStyle = colorWash;
+  overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const edgeShade = overlayCtx.createRadialGradient(
+    SCREEN_WIDTH * 0.5,
+    SCREEN_HEIGHT * 0.5,
+    SCREEN_HEIGHT * 0.22,
+    SCREEN_WIDTH * 0.5,
+    SCREEN_HEIGHT * 0.5,
+    SCREEN_WIDTH * 0.68,
+  );
+  edgeShade.addColorStop(0, "rgba(0,0,0,0)");
+  edgeShade.addColorStop(0.5, `rgba(0,10,20,${0.18 * strength})`);
+  edgeShade.addColorStop(1, `rgba(0,0,0,${0.62 * strength})`);
+  overlayCtx.fillStyle = edgeShade;
+  overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const verticalShade = overlayCtx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT);
+  verticalShade.addColorStop(0, `rgba(0, 4, 12, ${0.34 * strength})`);
+  verticalShade.addColorStop(0.26, "rgba(0, 4, 12, 0)");
+  verticalShade.addColorStop(0.74, "rgba(0, 4, 12, 0)");
+  verticalShade.addColorStop(1, `rgba(0, 4, 12, ${0.42 * strength})`);
+  overlayCtx.fillStyle = verticalShade;
+  overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  overlayCtx.globalCompositeOperation = "destination-out";
+  overlayCtx.fillStyle = "rgba(0,0,0,1)";
+  overlayCtx.beginPath();
+  overlayCtx.arc(playerX, playerY, clearCoreRadius, 0, Math.PI * 2);
+  overlayCtx.fill();
+
+  const sight = overlayCtx.createRadialGradient(playerX, playerY, clearCoreRadius * 0.55, playerX, playerY, sightRadius);
+  sight.addColorStop(0, `rgba(0,0,0,${0.88 + lightBoost * 0.1})`);
+  sight.addColorStop(0.42, `rgba(0,0,0,${0.5 + lightBoost * 0.22})`);
+  sight.addColorStop(0.78, `rgba(0,0,0,${0.16 + lightBoost * 0.08})`);
+  sight.addColorStop(1, "rgba(0,0,0,0)");
+  overlayCtx.fillStyle = sight;
+  overlayCtx.beginPath();
+  overlayCtx.arc(playerX, playerY, sightRadius, 0, Math.PI * 2);
+  overlayCtx.fill();
+
+  overlayCtx.globalCompositeOperation = "screen";
+  const halo = overlayCtx.createRadialGradient(playerX, playerY, 10, playerX, playerY, sightRadius * 0.72);
+  halo.addColorStop(0, `rgba(154, 231, 255, ${0.16 * strength + lightBoost * 0.12})`);
+  halo.addColorStop(0.62, `rgba(42, 148, 188, ${0.06 * strength})`);
+  halo.addColorStop(1, "rgba(0,0,0,0)");
+  overlayCtx.fillStyle = halo;
+  overlayCtx.beginPath();
+  overlayCtx.arc(playerX, playerY, sightRadius * 0.72, 0, Math.PI * 2);
+  overlayCtx.fill();
+
+  if (!LOW_PERFORMANCE_MODE) {
+    overlayCtx.globalCompositeOperation = "screen";
+    overlayCtx.strokeStyle = `rgba(92, 196, 232, ${0.03 * strength})`;
+    overlayCtx.lineWidth = 1;
+    const drift = (pulse * 18) % 44;
+    for (let y = -drift; y < SCREEN_HEIGHT + 44; y += 44) {
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(0, y);
+      overlayCtx.bezierCurveTo(SCREEN_WIDTH * 0.32, y - 16, SCREEN_WIDTH * 0.64, y + 18, SCREEN_WIDTH, y - 8);
+      overlayCtx.stroke();
+    }
+  }
+
+  if (transitionPulse > 0.001) {
+    overlayCtx.globalCompositeOperation = "screen";
+    overlayCtx.fillStyle = `rgba(134, 218, 255, ${0.1 * transitionPulse})`;
+    overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    overlayCtx.globalCompositeOperation = "source-over";
+    overlayCtx.strokeStyle = `rgba(188, 246, 255, ${0.34 * transitionPulse})`;
+    overlayCtx.lineWidth = 2 + transitionPulse * 5;
+    overlayCtx.beginPath();
+    overlayCtx.arc(playerX, playerY, 70 + transitionPulse * 320, 0, Math.PI * 2);
+    overlayCtx.stroke();
+  }
+
+  overlayCtx.restore();
+
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.drawImage(overlay.canvas, 0, 0);
   ctx.restore();
 }
 
@@ -4580,9 +4837,9 @@ function drawActionNode(ctx, theme, x, y, type, label, keyLabel, prominent = fal
 
 function drawActionCluster(ctx, theme) {
   drawActionNode(ctx, theme, 118, 610, "move", "이동", "A D", true);
-  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "W");
-  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "Space");
-  drawActionNode(ctx, theme, 56, 676, "crouch", "숙이기", "↓");
+  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "W / Space");
+  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "X");
+  drawActionNode(ctx, theme, 56, 676, "crouch", "숙이기", "S");
   drawActionNode(ctx, theme, 184, 684, "use", "사용", "Z");
 }
 
@@ -6194,7 +6451,7 @@ function renderExpedition(ctx, state, data) {
   drawTemporaryBlocks(ctx, run, theme);
   drawZipLines(ctx, data, theme);
   drawGate(ctx, data, theme);
-  drawRouteExits(ctx, data, theme);
+  drawRouteExits(ctx, data, theme, state.pulse, run);
   drawBraceWalls(ctx, data, theme);
   drawBackgroundTiles(ctx, data, run);
   drawProps(ctx, data, state.pulse, theme);
@@ -6243,18 +6500,22 @@ function renderExpedition(ctx, state, data) {
   drawDodgeFx(ctx, run);
   drawDebugWorldOverlay(ctx, state, data);
   drawLiveEditWorldOverlay(ctx, state, data);
-  drawWorldPrompt(ctx, run, theme);
   ctx.restore();
 
   drawRecoilFocusOverlay(ctx, run, data);
-  drawDarknessOverlay(ctx, run, data);
+  drawNightPostProcess(ctx, run, data, state.pulse);
   drawProjectileDodgeOverlay(ctx, run, data);
   drawFaceOffEntryTransition(ctx, run, data);
   ctx.save();
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
   ctx.scale(cameraZoom, cameraZoom);
   drawThreatSense(ctx, run, state);
+  drawWorldPrompt(ctx, run, theme);
   ctx.restore();
+
+  if (drawShelterRestOverlay(ctx, state, data, theme)) {
+    return;
+  }
 
   drawHudV5(ctx, state, data);
   drawRunInventoryHint(ctx, state, run, theme);
@@ -6330,7 +6591,7 @@ function drawShelterSceneV2(ctx, state, data) {
 
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "700 13px 'Segoe UI', sans-serif";
-  ctx.fillText("쉘터", 84, 102);
+  ctx.fillText("피난처", 84, 102);
 
   ctx.fillStyle = theme.textMain;
   ctx.font = "700 48px 'Trebuchet MS', sans-serif";
@@ -6684,6 +6945,49 @@ function getObjectiveLinesV3(state, data) {
   return lines.slice(0, 4);
 }
 
+function drawTitleMenuOption(ctx, theme, option, x, y, width, height, selected, enabled) {
+  const fill = selected
+    ? "rgba(29, 52, 60, 0.82)"
+    : "rgba(7, 15, 20, 0.44)";
+  const stroke = selected
+    ? "rgba(147,234,255,0.45)"
+    : "rgba(255,255,255,0.12)";
+
+  ctx.save();
+  ctx.globalAlpha = enabled ? 1 : 0.46;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill,
+    stroke,
+    innerLines: false,
+  });
+  ctx.fillStyle = selected && enabled ? theme.accent : "rgba(255,255,255,0.22)";
+  ctx.fillRect(x + 14, y + 14, 4, height - 28);
+  ctx.fillStyle = enabled ? (selected ? theme.textMain : theme.textDim) : "rgba(196,205,207,0.58)";
+  ctx.font = "900 21px 'Segoe UI', sans-serif";
+  ctx.fillText(option.label, x + 34, y + 29);
+  ctx.fillStyle = enabled ? theme.textMute : "rgba(196,205,207,0.42)";
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText(enabled ? option.detail : "저장 없음", x + 34, y + 48);
+  ctx.restore();
+}
+
+function drawTitleConfirmBox(ctx, theme, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: "rgba(38, 24, 18, 0.82)",
+    stroke: "rgba(231, 244, 126, 0.34)",
+    glow: true,
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 15px 'Segoe UI', sans-serif";
+  ctx.fillText("기존 저장을 지우고 처음부터 시작?", x + 22, y + 32);
+  ctx.fillStyle = theme.accent;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText("C/Z 확인    Esc 취소    W/S 메뉴 복귀", x + 22, y + 62);
+}
+
 function drawTitleSceneV3(ctx, state, data) {
   const theme = getUiTheme(data);
   drawScenicBackdrop(ctx, theme, state.pulse, 0);
@@ -6691,7 +6995,7 @@ function drawTitleSceneV3(ctx, state, data) {
   ctx.fillStyle = "rgba(5, 10, 16, 0.22)";
   ctx.fillRect(0, 0, 540, 720);
 
-  drawBeveledPanel(ctx, theme, 56, 62, 420, 214, {
+  drawBeveledPanel(ctx, theme, 56, 62, 420, 420, {
     fill: "rgba(7, 13, 20, 0.54)",
     stroke: "rgba(255,255,255,0.16)",
     glow: true,
@@ -6710,9 +7014,36 @@ function drawTitleSceneV3(ctx, state, data) {
   ctx.fillText("규칙 해석 익스트랙션", 86, 194);
   ctx.fillText("저텍스트 HUD · SD 플레이어", 86, 224);
 
-  ctx.fillStyle = theme.accent;
-  ctx.font = "700 16px 'Segoe UI', sans-serif";
-  ctx.fillText(state.save?.hasRun ? "C: 이어하기  ·  N: 새 런" : "C: 시작", 84, 254);
+  const hasRun = Boolean(state.save?.hasRun);
+  const selectedIndex = hasRun
+    ? clamp(Math.floor(state.titleMenu?.menuIndex ?? 1), 0, TITLE_MENU_OPTIONS.length - 1)
+    : 0;
+  const confirmingNewRun = Boolean(state.titleMenu?.confirmingNewRun && hasRun);
+
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText("MAIN MENU", 84, 260);
+  TITLE_MENU_OPTIONS.forEach((option, index) => {
+    drawTitleMenuOption(
+      ctx,
+      theme,
+      option,
+      82,
+      276 + index * 68,
+      344,
+      56,
+      index === selectedIndex && !confirmingNewRun,
+      option.id !== "continue" || hasRun,
+    );
+  });
+
+  if (confirmingNewRun) {
+    drawTitleConfirmBox(ctx, theme, 82, 404, 344, 64);
+  } else {
+    ctx.fillStyle = theme.accent;
+    ctx.font = "800 13px 'Segoe UI', sans-serif";
+    ctx.fillText(hasRun ? "W/S 선택    C/Z 실행" : "C/Z 처음부터", 84, 454);
+  }
 
   drawArtPanel(ctx, theme, data, "titlePanel", 540, 74, 664, 574, {
     cut: 24,
@@ -6844,6 +7175,15 @@ function drawShelterMenuIcon(ctx, type, x, y, color) {
     ctx.moveTo(x, y + 5);
     ctx.lineTo(x, y + 12);
     ctx.stroke();
+  } else if (type === "photo") {
+    ctx.strokeRect(x - 9, y - 6, 18, 13);
+    ctx.beginPath();
+    ctx.moveTo(x - 4, y - 8);
+    ctx.lineTo(x + 4, y - 8);
+    ctx.lineTo(x + 6, y - 6);
+    ctx.moveTo(x - 5, y);
+    ctx.arc(x, y, 4, Math.PI, Math.PI * 3);
+    ctx.stroke();
   } else if (type === "log") {
     ctx.strokeRect(x - 7, y - 9, 14, 18);
     ctx.beginPath();
@@ -6851,6 +7191,14 @@ function drawShelterMenuIcon(ctx, type, x, y, color) {
     ctx.lineTo(x + 4, y - 3);
     ctx.moveTo(x - 3, y + 3);
     ctx.lineTo(x + 4, y + 3);
+    ctx.stroke();
+  } else if (type === "background") {
+    ctx.strokeRect(x - 9, y - 8, 18, 16);
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y + 5);
+    ctx.lineTo(x - 2, y);
+    ctx.lineTo(x + 2, y + 3);
+    ctx.lineTo(x + 7, y - 3);
     ctx.stroke();
   } else if (type === "rest") {
     ctx.beginPath();
@@ -6875,11 +7223,15 @@ function drawShelterMenuIcon(ctx, type, x, y, color) {
   ctx.restore();
 }
 
-function drawShelterMenuV3(ctx, theme) {
+function drawShelterMenuV3(ctx, theme, options = {}) {
   const x = 30;
   const y = 40;
   const width = 238;
   const height = 318;
+  const items = Array.isArray(options.items) && options.items.length
+    ? options.items
+    : SHELTER_HUB_MENU;
+  const selectedIndex = clamp(Math.floor(options.selectedIndex ?? 0), 0, Math.max(0, items.length - 1));
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 10,
     fill: "rgba(9, 18, 24, 0.58)",
@@ -6891,27 +7243,21 @@ function drawShelterMenuV3(ctx, theme) {
   ctx.textAlign = "left";
   ctx.fillStyle = "rgba(245,248,251,0.92)";
   ctx.font = "800 18px 'Segoe UI', sans-serif";
-  ctx.fillText("피난처", x + 20, y + 32);
+  ctx.fillText(options.title || "피난처", x + 20, y + 32);
 
-  const items = [
-    { label: "파츠 접합", icon: "parts", active: true },
-    { label: "드론 관리", icon: "drone" },
-    { label: "기록 확인", icon: "log" },
-    { label: "휴식", icon: "rest" },
-    { label: "밖으로 나가기", icon: "exit" },
-  ];
   items.forEach((item, index) => {
     const rowY = y + 56 + index * 47;
+    const active = typeof item.active === "boolean" ? item.active : index === selectedIndex;
     drawBeveledPanel(ctx, theme, x + 14, rowY, width - 28, 38, {
       cut: 4,
-      fill: item.active ? "rgba(29, 52, 60, 0.76)" : "rgba(10, 20, 26, 0.44)",
-      stroke: item.active ? "rgba(147, 234, 255, 0.38)" : "rgba(255,255,255,0.12)",
+      fill: active ? "rgba(29, 52, 60, 0.76)" : "rgba(10, 20, 26, 0.44)",
+      stroke: active ? "rgba(147, 234, 255, 0.38)" : "rgba(255,255,255,0.12)",
       innerLines: false,
       glow: false,
     });
-    const color = item.active ? theme.accentSecondary : "rgba(228, 239, 235, 0.7)";
+    const color = active ? theme.accentSecondary : "rgba(228, 239, 235, 0.7)";
     drawShelterMenuIcon(ctx, item.icon, x + 36, rowY + 19, color);
-    ctx.fillStyle = item.active ? theme.textMain : theme.textDim;
+    ctx.fillStyle = active ? theme.textMain : theme.textDim;
     ctx.font = "700 14px 'Segoe UI', sans-serif";
     ctx.fillText(item.label, x + 58, rowY + 24);
   });
@@ -6927,7 +7273,7 @@ function drawShelterSmallGauge(ctx, theme, label, value, x, y, width) {
   ctx.fillText(label, x, y + 10);
 }
 
-function drawShelterPartPanelV3(ctx, theme, state) {
+function drawShelterPartPanelV3(ctx, theme, state, options = {}) {
   const partInventory = Array.isArray(state.meta?.partInventory) ? state.meta.partInventory : [];
   const attachedParts = Array.isArray(state.meta?.attachedParts) ? state.meta.attachedParts : [];
   const attachedRightArm = attachedParts.find((part) => part.slot === "rightArm") || null;
@@ -6945,6 +7291,37 @@ function drawShelterPartPanelV3(ctx, theme, state) {
     innerLines: false,
     glow: true,
   });
+
+  const rest = options.rest || null;
+  if (rest?.active) {
+    const selectedIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_REST_MENU.length - 1);
+    const selectedItem = SHELTER_REST_MENU[selectedIndex] || SHELTER_REST_MENU[0];
+    const run = state.run || {};
+    ctx.textAlign = "left";
+    ctx.fillStyle = theme.accentSecondary;
+    ctx.font = "800 11px 'Segoe UI', sans-serif";
+    ctx.fillText("REFUGE HUB", x + 22, y + 28);
+    ctx.fillStyle = theme.textMain;
+    ctx.font = "900 20px 'Segoe UI', sans-serif";
+    ctx.fillText("피난처 휴식", x + 22, y + 56);
+
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "700 12px 'Segoe UI', sans-serif";
+    ctx.fillText(`DAY ${Math.max(1, Math.floor(run.day || 1))}`, x + 22, y + 88);
+    ctx.fillText("회복 완료", x + 204, y + 88);
+    drawShelterSmallGauge(ctx, theme, "체력/정신력 회복", 1, x + 22, y + 106, 154);
+    drawShelterSmallGauge(ctx, theme, "배터리/탄약 보충", 1, x + 204, y + 106, 136);
+
+    ctx.fillStyle = theme.textMain;
+    ctx.font = "900 15px 'Segoe UI', sans-serif";
+    ctx.fillText(selectedItem.label, x + 22, y + 168);
+    wrapText(ctx, selectedItem.detail || "", x + 22, y + 194, width - 44, 18, theme.textDim, "13px 'Segoe UI', sans-serif");
+
+    ctx.fillStyle = theme.accent;
+    ctx.font = "800 12px 'Segoe UI', sans-serif";
+    ctx.fillText("W/S 메뉴   Z 선택   C: 밖으로", x + 22, y + 232);
+    return;
+  }
 
   ctx.textAlign = "left";
   ctx.fillStyle = theme.accentSecondary;
@@ -6983,10 +7360,10 @@ function drawShelterPartPanelV3(ctx, theme, state) {
 
   ctx.fillStyle = theme.accent;
   ctx.font = "800 12px 'Segoe UI', sans-serif";
-  ctx.fillText("Q: 장착   R: 휴식/잔몽   C: 출격", x + 22, y + 232);
+  ctx.fillText(options.actionText || "Q: 장착   R: 휴식/잔몽   C: 출격", x + 22, y + 232);
 }
 
-function drawShelterWorkbenchHudV3(ctx, theme) {
+function drawShelterWorkbenchHudV3(ctx, theme, options = {}) {
   drawBeveledPanel(ctx, theme, 430, 390, 334, 82, {
     cut: 10,
     fill: "rgba(7, 14, 18, 0.42)",
@@ -6997,22 +7374,337 @@ function drawShelterWorkbenchHudV3(ctx, theme) {
   ctx.textAlign = "left";
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "800 10px 'Segoe UI', sans-serif";
-  ctx.fillText("SUNLIT FIELD SHELTER", 452, 418);
+  ctx.fillText("피난처 허브", 452, 418);
   ctx.fillStyle = theme.textMain;
   ctx.font = "800 15px 'Segoe UI', sans-serif";
-  ctx.fillText("무너진 고층 중간층 수리대", 452, 442);
+  ctx.fillText(options.rest?.active ? "탐사 중간 휴식 지점" : "무너진 고층 중간층 수리대", 452, 442);
   ctx.fillStyle = theme.textDim;
   ctx.font = "12px 'Segoe UI', sans-serif";
   ctx.fillText("하얀 안개와 식생이 들어오는 임시 거점", 452, 462);
 }
 
-function drawShelterSceneV3(ctx, state, data) {
+function drawShelterSceneV3(ctx, state, data, options = {}) {
   const theme = getUiTheme(data);
+  const rest = options.rest || null;
+  const inRunRest = Boolean(rest?.active);
   drawShelterHubBackdrop(ctx, theme, state, data);
-  drawShelterMenuV3(ctx, theme);
-  drawShelterWorkbenchHudV3(ctx, theme);
-  drawShelterPartPanelV3(ctx, theme, state);
+  drawShelterMenuV3(ctx, theme, {
+    items: inRunRest ? SHELTER_REST_MENU : SHELTER_HUB_MENU,
+    selectedIndex: inRunRest ? rest.menuIndex : 0,
+  });
+  drawShelterWorkbenchHudV3(ctx, theme, { rest });
+  drawShelterPartPanelV3(ctx, theme, state, {
+    rest,
+    actionText: inRunRest ? "W/S 메뉴   Z 선택   C: 밖으로" : undefined,
+  });
   drawShelterDreamEventV3(ctx, theme, state);
+}
+
+function getShelterBackgroundSrc(data, backgroundId = "shelter-hub") {
+  if (backgroundId === "shelter-hub") {
+    return data.art?.shelterHubConcept?.src;
+  }
+  return data.art?.shelterHubConcept?.src;
+}
+
+function getShelterPhotoScenes(data) {
+  return Array.isArray(data.shelter?.photoScenes)
+    ? data.shelter.photoScenes.filter((scene) => scene && typeof scene === "object")
+    : [];
+}
+
+function normalizeShelterPhotoDay(day) {
+  return Math.max(1, Math.floor(Number(day) || 1));
+}
+
+function getShelterPhotoSceneForDay(data, day) {
+  const scenes = getShelterPhotoScenes(data);
+  if (!scenes.length) {
+    return null;
+  }
+  const normalizedDay = normalizeShelterPhotoDay(day);
+  const exact = scenes.find((scene) => normalizeShelterPhotoDay(scene.day) === normalizedDay);
+  return exact || scenes[(normalizedDay - 1) % scenes.length] || null;
+}
+
+function getShelterPhotoSceneSrc(data, scene) {
+  if (!scene) {
+    return "";
+  }
+  const assetSrc = scene.assetKey ? data.art?.[scene.assetKey]?.src : "";
+  return assetSrc || scene.src || "";
+}
+
+function getShelterPhotoCaptureSrc(data, day) {
+  return getShelterPhotoSceneSrc(data, getShelterPhotoSceneForDay(data, day))
+    || getShelterBackgroundSrc(data, data.shelter?.backgroundId || "shelter-hub");
+}
+
+function preloadShelterPhotoSceneAssets(data) {
+  getShelterPhotoScenes(data).forEach((scene) => {
+    const src = getShelterPhotoSceneSrc(data, scene);
+    if (src) {
+      getImageAsset(src);
+    }
+  });
+}
+
+function drawShelterRestBackground(ctx, state, data, theme, alpha = 1) {
+  const image = getImageAsset(getShelterBackgroundSrc(data));
+  if (image && image.complete && image.naturalWidth) {
+    drawImageCover(ctx, image, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, alpha);
+  } else {
+    drawScenicBackdrop(ctx, theme, state.pulse * 0.75, 80);
+  }
+  const shade = ctx.createLinearGradient(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  shade.addColorStop(0, "rgba(2, 7, 10, 0.16)");
+  shade.addColorStop(0.52, "rgba(4, 12, 16, 0.05)");
+  shade.addColorStop(1, "rgba(2, 6, 10, 0.56)");
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+}
+
+function drawShelterArrivalOverlay(ctx, state, data, theme, rest) {
+  drawShelterRestBackground(ctx, state, data, theme, 1);
+  const progress = clamp((rest.timer || 0) / Math.max(0.1, data.shelter?.arrivalCutsceneSeconds || 2.4), 0, 1);
+  const door = progress * SCREEN_WIDTH * 0.5;
+  ctx.fillStyle = "rgba(3, 8, 12, 0.88)";
+  ctx.fillRect(0, 0, door, SCREEN_HEIGHT);
+  ctx.fillRect(SCREEN_WIDTH - door, 0, door, SCREEN_HEIGHT);
+  ctx.strokeStyle = "rgba(231,244,126,0.4)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(door, 0);
+  ctx.lineTo(door, SCREEN_HEIGHT);
+  ctx.moveTo(SCREEN_WIDTH - door, 0);
+  ctx.lineTo(SCREEN_WIDTH - door, SCREEN_HEIGHT);
+  ctx.stroke();
+
+  const fade = progress < 0.18 ? 1 - progress / 0.18 : progress > 0.82 ? (progress - 0.82) / 0.18 : 0;
+  ctx.fillStyle = `rgba(245,248,251,${0.28 * clamp(fade, 0, 1)})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(245,248,251,0.96)";
+  ctx.font = "900 54px 'Segoe UI', sans-serif";
+  ctx.fillText(`DAY ${Math.max(1, Math.floor(state.run?.day || 1))}`, SCREEN_WIDTH * 0.5, 330);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 14px 'Segoe UI', sans-serif";
+  ctx.fillText("피난처 폐쇄", SCREEN_WIDTH * 0.5, 368);
+  ctx.textAlign = "left";
+}
+
+function drawShelterRestHeader(ctx, theme, state, title) {
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(3, 8, 12, 0.42)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, 82);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`DAY ${Math.max(1, Math.floor(state.run?.day || 1))}`, 42, 32);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 24px 'Segoe UI', sans-serif";
+  ctx.fillText(title, 42, 62);
+}
+
+function drawShelterRestMenuOverlay(ctx, state, data, theme, rest) {
+  drawShelterRestBackground(ctx, state, data, theme, 1);
+  drawShelterRestHeader(ctx, theme, state, "피난처 휴식");
+
+  const panelX = 58;
+  const panelY = 132;
+  const panelW = 332;
+  const panelH = 310;
+  drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
+    cut: 12,
+    fill: "rgba(5, 12, 16, 0.66)",
+    stroke: "rgba(255,255,255,0.18)",
+    glow: true,
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText("REST OPTIONS", panelX + 24, panelY + 34);
+  SHELTER_REST_MENU.forEach((item, index) => {
+    const y = panelY + 68 + index * 68;
+    const selected = index === Math.floor(rest.menuIndex || 0);
+    drawBeveledPanel(ctx, theme, panelX + 20, y, panelW - 40, 50, {
+      cut: 8,
+      fill: selected ? "rgba(29, 52, 60, 0.82)" : "rgba(7, 15, 20, 0.44)",
+      stroke: selected ? "rgba(147,234,255,0.45)" : "rgba(255,255,255,0.12)",
+      innerLines: false,
+    });
+    ctx.fillStyle = selected ? theme.textMain : theme.textDim;
+    ctx.font = "900 18px 'Segoe UI', sans-serif";
+    ctx.fillText(item.label, panelX + 44, y + 32);
+  });
+  ctx.fillStyle = theme.accent;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText("Z 선택    C 밖으로", panelX + 24, panelY + panelH - 26);
+}
+
+function drawShelterPhotoOverlay(ctx, state, data, theme, rest) {
+  drawShelterRestBackground(ctx, state, data, theme, 1);
+  drawShelterRestHeader(ctx, theme, state, rest.phase === "photoPreview" ? "CG 확인" : "CG 일러스트 촬영");
+  const photo = rest.photo || {};
+  const panX = clamp(Number(photo.frameX || 0), -1, 1);
+  const panY = clamp(Number(photo.frameY || 0), -1, 1);
+  const zoom = clamp(Number(photo.zoom || 1), 0.8, 1.35);
+
+  const frameX = 300;
+  const frameY = 126;
+  const frameW = 680;
+  const frameH = 430;
+  const day = Math.max(1, Math.floor(state.run?.day || 1));
+  const photoScene = getShelterPhotoSceneForDay(data, day);
+  const cgImage = getImageAsset(getShelterPhotoCaptureSrc(data, day));
+  if (!drawImageCoverPan(ctx, cgImage, frameX, frameY, frameW, frameH, panX, panY, zoom, 1)) {
+    ctx.fillStyle = "rgba(7, 14, 18, 0.92)";
+    ctx.fillRect(frameX, frameY, frameW, frameH);
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "900 15px 'Segoe UI', sans-serif";
+    ctx.fillText("CG 로딩 중", frameX + 28, frameY + 42);
+  }
+  ctx.strokeStyle = "rgba(245,248,251,0.86)";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(frameX, frameY, frameW, frameH);
+  ctx.strokeStyle = "rgba(231,244,126,0.72)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(frameX + frameW * 0.5, frameY);
+  ctx.lineTo(frameX + frameW * 0.5, frameY + frameH);
+  ctx.moveTo(frameX, frameY + frameH * 0.5);
+  ctx.lineTo(frameX + frameW, frameY + frameH * 0.5);
+  ctx.stroke();
+
+  const sceneIndex = Math.max(0, getShelterPhotoScenes(data).indexOf(photoScene));
+  const sceneCount = getShelterPhotoScenes(data).length;
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText(
+    `DAY ${day} · ${photoScene?.label || "피난처 CG"}${sceneCount ? ` · ${sceneIndex + 1}/${sceneCount}` : ""}`,
+    frameX,
+    frameY - 14
+  );
+
+  if (rest.phase === "photoPreview" && photo.capturedImage) {
+    const image = getImageAsset(photo.capturedImage);
+    drawBeveledPanel(ctx, theme, 976, 136, 236, 158, {
+      cut: 8,
+      fill: "rgba(4,10,14,0.72)",
+      stroke: "rgba(255,255,255,0.2)",
+      innerLines: false,
+    });
+    if (image && image.complete && image.naturalWidth) {
+      drawImageCover(ctx, image, 990, 150, 208, 117, 1);
+    }
+    ctx.fillStyle = theme.accent;
+    ctx.font = "900 12px 'Segoe UI', sans-serif";
+    ctx.fillText("C 저장   R 재촬영", 1000, 282);
+  } else {
+    ctx.fillStyle = theme.accent;
+    ctx.font = "900 13px 'Segoe UI', sans-serif";
+    ctx.fillText("방향키/WASD 프레임    Z CG 촬영    Esc 취소", 358, 588);
+  }
+
+  if ((photo.flashTimer || 0) > 0) {
+    ctx.fillStyle = `rgba(245,248,251,${clamp(photo.flashTimer / 0.22, 0, 1) * 0.48})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+}
+
+function drawShelterRecordsOverlay(ctx, state, data, theme, rest) {
+  drawShelterRestBackground(ctx, state, data, theme, 0.42);
+  drawShelterRestHeader(ctx, theme, state, "CG 기록");
+  const archive = state.meta?.cgArchive || {};
+  const photos = Array.isArray(archive.photos) ? archive.photos : [];
+  const index = photos.length ? clamp(Math.floor(rest.recordsIndex || 0), 0, photos.length - 1) : 0;
+  const photo = photos[index] || null;
+  drawBeveledPanel(ctx, theme, 104, 118, 784, 486, {
+    cut: 14,
+    fill: "rgba(4,10,14,0.68)",
+    stroke: "rgba(255,255,255,0.18)",
+    glow: true,
+    innerLines: false,
+  });
+  if (photo) {
+    const image = getImageAsset(photo.image);
+    if (image && image.complete && image.naturalWidth) {
+      drawImageCover(ctx, image, 132, 150, 728, 410, 1);
+    }
+    ctx.fillStyle = theme.textMain;
+    ctx.font = "900 17px 'Segoe UI', sans-serif";
+    const sceneLabel = photo.sceneLabel ? ` · ${photo.sceneLabel}` : "";
+    ctx.fillText(`DAY ${photo.day}${sceneLabel} · ${index + 1}/${photos.length}`, 132, 584);
+  } else {
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "900 22px 'Segoe UI', sans-serif";
+    ctx.fillText("저장된 CG 없음", 146, 310);
+  }
+
+  const dreams = Object.values(data.dreams || {});
+  drawBeveledPanel(ctx, theme, 928, 118, 250, 486, {
+    cut: 12,
+    fill: "rgba(4,10,14,0.58)",
+    stroke: "rgba(255,255,255,0.14)",
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText("DREAM LOG", 952, 150);
+  dreams.slice(0, 5).forEach((dream, dreamIndex) => {
+    ctx.fillStyle = dreamIndex === 0 ? theme.textMain : theme.textDim;
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    wrapText(ctx, dream.title || dream.id, 952, 184 + dreamIndex * 52, 204, 16, ctx.fillStyle, "700 13px 'Segoe UI', sans-serif");
+  });
+  ctx.fillStyle = theme.accent;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText("A/D 넘기기    Esc 뒤로", 104, 644);
+}
+
+function drawShelterBackgroundOverlay(ctx, state, data, theme, rest) {
+  const archive = state.meta?.cgArchive || {};
+  const backgrounds = Array.isArray(archive.unlockedBackgroundIds) && archive.unlockedBackgroundIds.length
+    ? archive.unlockedBackgroundIds
+    : ["shelter-hub"];
+  const index = clamp(Math.floor(rest.backgroundIndex || 0), 0, backgrounds.length - 1);
+  const backgroundId = backgrounds[index] || "shelter-hub";
+  const image = getImageAsset(getShelterBackgroundSrc(data, backgroundId));
+  if (image && image.complete && image.naturalWidth) {
+    drawImageCover(ctx, image, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 1);
+  } else {
+    drawShelterRestBackground(ctx, state, data, theme, 1);
+  }
+  ctx.fillStyle = "rgba(3,8,12,0.32)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, 92);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 26px 'Segoe UI', sans-serif";
+  ctx.fillText("배경보기", 42, 56);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText(`${backgroundId} · ${index + 1}/${backgrounds.length}`, 188, 56);
+  ctx.fillStyle = theme.accent;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText("A/D 넘기기    Esc 뒤로", 42, 668);
+}
+
+function drawShelterRestOverlay(ctx, state, data, theme) {
+  const rest = state.run?.shelterRest;
+  if (!rest?.active) {
+    return false;
+  }
+  preloadShelterPhotoSceneAssets(data);
+  if (rest.phase === "arrival") {
+    drawShelterArrivalOverlay(ctx, state, data, theme, rest);
+  } else if (rest.phase === "photo" || rest.phase === "photoPreview") {
+    drawShelterPhotoOverlay(ctx, state, data, theme, rest);
+  } else if (rest.phase === "records") {
+    drawShelterRecordsOverlay(ctx, state, data, theme, rest);
+  } else if (rest.phase === "background") {
+    drawShelterBackgroundOverlay(ctx, state, data, theme, rest);
+  } else {
+    drawShelterSceneV3(ctx, state, data, { rest });
+  }
+  return true;
 }
 
 function drawMiniMapV3(ctx, state, data, theme, layout) {
@@ -7998,6 +8690,9 @@ function drawCompassHudV5(ctx, state, data, theme) {
   ctx.fillText("E", x + width - 52, y + 10);
   ctx.fillStyle = theme.accentSecondary;
   ctx.fillText(String(summary.label || currentLevelId).toUpperCase().slice(0, 16), x + width * 0.5, y + 46);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.fillText(`DAY ${Math.max(1, Math.floor(run.day || 1))} · ${getRunTimePhaseLabel(run)}`, x + width * 0.5, y + 62);
   ctx.textAlign = "left";
   ctx.restore();
 }
@@ -9153,7 +9848,7 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
       "필요하면 에디터에서 HUD와 스프라이트 비율을 다시 맞춘다.",
     ]
     : isFailure
-      ? ["이번 런의 획득물은 모두 사라졌다.", "쉘터로 돌아가 다시 준비한다."]
+      ? ["이번 런의 획득물은 모두 사라졌다.", "피난처로 돌아가 다시 준비한다."]
       : [
         `경비형 ${formatOutcome(state.resultSummary?.outcomes?.guard)}`,
         `의식형 ${formatOutcome(state.resultSummary?.outcomes?.ritualist)}`,
@@ -9167,7 +9862,7 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
 
   ctx.fillStyle = theme.accent;
   ctx.font = "700 16px 'Segoe UI', sans-serif";
-  ctx.fillText("C: 계속", 192, 560);
+  ctx.fillText("C/Z: 계속", 192, 560);
 }
 
 export function renderGame(dom, state, data) {

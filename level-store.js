@@ -235,6 +235,8 @@ function sanitizeEntrance(entrance, index, fallback = null) {
 function extractRouteExit(exit = {}) {
   return {
     id: safeString(exit.id, "route-exit"),
+    kind: safeString(exit.kind, safeString(exit.type, "route")),
+    type: safeString(exit.type, safeString(exit.kind, "route")),
     label: safeString(exit.label, exit.id || "Route Exit"),
     x: safeNumber(exit.x, 0),
     y: safeNumber(exit.y, 0),
@@ -243,12 +245,15 @@ function extractRouteExit(exit = {}) {
     prompt: safeString(exit.prompt, "E: 다음 구역"),
     toLevelId: safeString(exit.toLevelId, ""),
     toEntranceId: safeString(exit.toEntranceId, "start"),
+    returnEntranceId: safeString(exit.returnEntranceId, "start"),
   };
 }
 
 function sanitizeRouteExit(exit, index, fallback = null) {
   const base = fallback || {
     id: `route-exit-${index + 1}`,
+    kind: "route",
+    type: "route",
     label: `Route Exit ${index + 1}`,
     x: 0,
     y: 0,
@@ -257,10 +262,14 @@ function sanitizeRouteExit(exit, index, fallback = null) {
     prompt: "E: 다음 구역",
     toLevelId: "",
     toEntranceId: "start",
+    returnEntranceId: "start",
   };
   const source = exit && typeof exit === "object" ? exit : {};
+  const kind = safeString(source.kind, safeString(source.type, base.kind || base.type || "route"));
   return {
     id: safeId(source.id, base.id),
+    kind,
+    type: safeString(source.type, kind),
     label: safeString(source.label, base.label),
     x: safeNumber(source.x, base.x),
     y: safeNumber(source.y, base.y),
@@ -269,6 +278,7 @@ function sanitizeRouteExit(exit, index, fallback = null) {
     prompt: safeString(source.prompt, base.prompt),
     toLevelId: safeString(source.toLevelId, base.toLevelId),
     toEntranceId: safeString(source.toEntranceId, base.toEntranceId || "start"),
+    returnEntranceId: safeString(source.returnEntranceId, base.returnEntranceId || "start"),
   };
 }
 
