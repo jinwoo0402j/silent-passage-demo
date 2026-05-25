@@ -1,10 +1,13 @@
 import {
   MOVEMENT_STATES,
   SCENES,
+  SHELTER_UPGRADES,
   computeArmWeaponStats,
   ensureWeaponLoadoutState,
+  getShelterUpgradeCost,
+  getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260520-shelter-photo-v1";
+} from "./state.js?v=20260523-body-status-v7";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
@@ -16,6 +19,7 @@ const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
 const MAP_EXPLORE_CELL_SIZE = 320;
 const NIGHT_TRANSITION_SECONDS = 1.4;
+const INVENTORY_BODY_PORTRAIT_SRC = "./assets/ui/body-status-operator-v1.png?v=20260523-body-status-v7";
 const TITLE_MENU_OPTIONS = [
   { id: "new", label: "처음부터", detail: "새 런 준비" },
   { id: "continue", label: "이어하기", detail: "저장된 런 복귀" },
@@ -33,6 +37,10 @@ const SHELTER_REST_MENU = [
   { id: "background", label: "배경 감상", icon: "background", detail: "해금된 피난처 배경을 크게 본다." },
   { id: "rest", label: "휴식 완료", icon: "rest", detail: "체력, 정신력, 배터리와 탄약이 회복됐다." },
   { id: "exit", label: "밖으로 나가기", icon: "exit", detail: "피난처 밖으로 돌아가 탐사를 이어간다." },
+];
+const SHELTER_HUB_UPGRADE_MENU = [
+  { id: "upgrade", label: "업그레이드", icon: "parts" },
+  { id: "exit", label: "출격", icon: "exit" },
 ];
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
   && (
@@ -76,14 +84,137 @@ function isShelterPortalOpen(run) {
     && !(Number.isFinite(run.shelterExitCooldown) && run.shelterExitCooldown > 0);
 }
 
-function getNightPostProcessStrength(run) {
-  if (run?.timePhase === "night") {
+function getDuskProgress(run, data) {
+  if (!run || run.timePhase === "day") {
+    return 0;
+  }
+  if (run.timePhase === "night") {
     return 1;
   }
-  if (run?.timePhase === "dusk") {
-    return 0.35;
+  const duskAt = Number.isFinite(data?.world?.duskAt) ? data.world.duskAt : 90;
+  const nightAt = Number.isFinite(data?.world?.nightAt) ? data.world.nightAt : 150;
+  return clamp(((run.time ?? duskAt) - duskAt) / Math.max(1, nightAt - duskAt), 0, 1);
+}
+
+function getBodyPartRatio(run, key) {
+  const part = run?.playerBody?.[key];
+  if (!part) {
+    return 1;
+  }
+  return clamp(Number(part.hp ?? part.maxHp ?? 100) / Math.max(1, Number(part.maxHp ?? 100)), 0, 1);
+}
+
+function getHeadVisionPenalty(run) {
+  const ratio = getBodyPartRatio(run, "head");
+  if (ratio <= 0) {
+    return 0.38;
+  }
+  if (ratio <= 0.4) {
+    return 0.24;
+  }
+  if (ratio <= 0.7) {
+    return 0.12;
   }
   return 0;
+}
+
+function getVisionPressure(run, data) {
+  const headPenalty = getHeadVisionPenalty(run);
+  const basePressure = (() => {
+    if (!run || run.timePhase === "day") {
+      return 0;
+    }
+    if (run.timePhase === "night") {
+      return 1;
+    }
+    return 0.35 + getDuskProgress(run, data) * 0.45;
+  })();
+  return clamp(basePressure + headPenalty, 0, 1.35);
+}
+
+function getTimeVisionPressure(run, data) {
+  if (!run || run.timePhase === "day") {
+    return 0;
+  }
+  if (run.timePhase === "night") {
+    return 1;
+  }
+  return 0.35 + getDuskProgress(run, data) * 0.45;
+}
+
+function getNightPostProcessStrength(run, data) {
+  return Math.max(getTimeVisionPressure(run, data), getHeadVisionPenalty(run));
+}
+
+function getWeaponKickCameraOffset(run) {
+  const kick = run?.weaponKick;
+  if (!kick || !Number.isFinite(kick.timer) || !Number.isFinite(kick.duration) || kick.duration <= 0) {
+    return { x: 0, y: 0 };
+  }
+  const progress = clamp(kick.timer / kick.duration, 0, 1);
+  if (progress <= 0) {
+    return { x: 0, y: 0 };
+  }
+  const falloff = progress * progress;
+  const seed = Number(kick.seed || 0);
+  const intensity = Number(kick.intensity || 0);
+  const wobblePhase = (1 - progress) * 17 + seed;
+  const wobbleX = Math.sin(wobblePhase * Math.PI * 2) * intensity * 0.28;
+  const wobbleY = Math.cos((wobblePhase + 0.37) * Math.PI * 2) * intensity * 0.22;
+  return {
+    x: ((kick.dirX || 0) * intensity + wobbleX) * falloff,
+    y: ((kick.dirY || 0) * intensity * 0.64 + wobbleY) * falloff,
+  };
+}
+
+function formatRunClock(seconds = 0) {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function getRunTimePressureInfo(run, data) {
+  const duskAt = Number.isFinite(data?.world?.duskAt) ? data.world.duskAt : 90;
+  const nightAt = Number.isFinite(data?.world?.nightAt) ? data.world.nightAt : 150;
+  const time = Math.max(0, Number(run?.time ?? 0));
+  if (run?.timePhase === "night") {
+    return {
+      label: "야간",
+      remaining: 0,
+      progress: 1,
+      urgent: true,
+    };
+  }
+  if (run?.timePhase === "dusk") {
+    return {
+      label: `밤까지 ${Math.max(0, Math.ceil(nightAt - time))}s`,
+      remaining: Math.max(0, nightAt - time),
+      progress: clamp((time - duskAt) / Math.max(1, nightAt - duskAt), 0, 1),
+      urgent: true,
+    };
+  }
+  return {
+    label: `황혼까지 ${Math.max(0, Math.ceil(duskAt - time))}s`,
+    remaining: Math.max(0, duskAt - time),
+    progress: clamp(time / Math.max(1, duskAt), 0, 1),
+    urgent: false,
+  };
+}
+
+function getFlashlightDirection(run) {
+  const aim = run?.recoilAim;
+  if (aim && (aim.aiming || aim.active) && (Math.abs(aim.shotDirX || 0) > 0.001 || Math.abs(aim.shotDirY || 0) > 0.001)) {
+    const length = Math.hypot(aim.shotDirX || 0, aim.shotDirY || 0) || 1;
+    return {
+      x: (aim.shotDirX || 0) / length,
+      y: (aim.shotDirY || 0) / length,
+    };
+  }
+  return {
+    x: Math.sign(run?.player?.facing || 1) || 1,
+    y: -0.04,
+  };
 }
 
 function ensureNightOverlayCanvas() {
@@ -1376,7 +1507,8 @@ function drawLootCrates(ctx, run, theme) {
     const height = crate.height;
     const rarePulse = clamp(crate.rareSignalTimer ?? 0, 0, 1);
     const active = run.loot?.crateId === crate.id;
-    const alpha = crate.searched ? 0.42 : 1;
+    const alpha = crate.searched || crate.spilled ? 0.42 : 1;
+    const hitFlash = clamp(crate.hitFlash ?? 0, 0, 1);
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -1388,13 +1520,13 @@ function drawLootCrates(ctx, run, theme) {
 
     drawBeveledPanel(ctx, theme, x, y, width, height, {
       cut: 8,
-      fill: crate.opened ? "rgba(18, 30, 39, 0.82)" : "rgba(10, 17, 24, 0.9)",
-      stroke: active ? "rgba(147, 234, 255, 0.86)" : "rgba(255, 255, 255, 0.2)",
+      fill: crate.broken ? "rgba(35, 19, 18, 0.78)" : crate.opened ? "rgba(18, 30, 39, 0.82)" : "rgba(10, 17, 24, 0.9)",
+      stroke: hitFlash > 0 ? "rgba(255, 214, 186, 0.9)" : active ? "rgba(147, 234, 255, 0.86)" : "rgba(255, 255, 255, 0.2)",
       innerLines: false,
     });
 
     ctx.shadowBlur = 0;
-    ctx.fillStyle = crate.opened ? "rgba(135, 225, 255, 0.18)" : "rgba(231, 244, 126, 0.16)";
+    ctx.fillStyle = crate.broken ? "rgba(255, 214, 186, 0.18)" : crate.opened ? "rgba(135, 225, 255, 0.18)" : "rgba(231, 244, 126, 0.16)";
     ctx.fillRect(x + 8, y + 8, width - 16, 5);
     ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
     ctx.fillRect(x + width * 0.5 - 2, y + 8, 4, height - 14);
@@ -1405,12 +1537,58 @@ function drawLootCrates(ctx, run, theme) {
     ctx.lineTo(x + width - 12, y + height * 0.56);
     ctx.stroke();
 
-    if (!crate.searched) {
+    if (!crate.searched && !crate.spilled) {
       const blink = 0.35 + Math.sin((run.time ?? 0) * 4 + x * 0.03) * 0.18;
       ctx.fillStyle = `rgba(147, 234, 255, ${blink})`;
       ctx.fillRect(x + width - 18, y + 12, 8, 8);
     }
 
+    if (!crate.spilled && Number.isFinite(crate.hp) && Number.isFinite(crate.maxHp)) {
+      const hpRatio = clamp(crate.hp / Math.max(1, crate.maxHp), 0, 1);
+      ctx.fillStyle = "rgba(255,255,255,0.16)";
+      ctx.fillRect(x + 8, y - 8, width - 16, 3);
+      ctx.fillStyle = hitFlash > 0 ? "#ffd6ba" : "#93eaff";
+      ctx.fillRect(x + 8, y - 8, (width - 16) * hpRatio, 3);
+    }
+
+    ctx.restore();
+  });
+}
+
+function getWorldLootColor(item) {
+  const rarity = String(item?.rarity || "common");
+  if (rarity === "epic" || rarity === "relic") {
+    return "#f6e98a";
+  }
+  if (rarity === "rare") {
+    return "#87e1ff";
+  }
+  if (rarity === "uncommon") {
+    return "#a8f7cf";
+  }
+  return "#dce7ec";
+}
+
+function drawSpilledLoot(ctx, run) {
+  (run.spilledLoot || []).forEach((drop) => {
+    const item = drop.item || {};
+    const color = getWorldLootColor(item);
+    const pulse = 0.5 + Math.sin((run.time ?? 0) * 5 + (drop.pulse ?? 0)) * 0.5;
+    const radius = drop.radius ?? 12;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10 + pulse * 8;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(drop.x, drop.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "rgba(4, 8, 12, 0.78)";
+    ctx.fillRect(drop.x - radius * 0.55, drop.y - 3, radius * 1.1, 6);
+    ctx.fillStyle = `rgba(255,255,255,${0.42 + pulse * 0.24})`;
+    ctx.fillRect(drop.x - radius * 0.28, drop.y - radius * 0.55, radius * 0.56, 3);
     ctx.restore();
   });
 }
@@ -3570,6 +3748,157 @@ function drawInventoryBodySilhouette(ctx, theme, x, y, width, height) {
   ctx.restore();
 }
 
+function getInventoryBodyParts(run) {
+  const defaults = {
+    head: { label: "HEAD", hp: 100, maxHp: 100 },
+    core: { label: "CORE", hp: 100, maxHp: 100 },
+    leftArm: { label: "LEFT ARM", hp: 100, maxHp: 100 },
+    rightArm: { label: "RIGHT ARM", hp: 100, maxHp: 100 },
+    legs: { label: "LEGS", hp: 100, maxHp: 100 },
+  };
+  return Object.entries(defaults).map(([key, fallback]) => {
+    const source = run?.playerBody?.[key] || {};
+    const maxHp = Math.max(1, Number(source.maxHp ?? fallback.maxHp));
+    const hp = clamp(Number(source.hp ?? fallback.hp), 0, maxHp);
+    return {
+      key,
+      label: source.label || fallback.label,
+      hp,
+      maxHp,
+      ratio: clamp(hp / maxHp, 0, 1),
+      recentHit: Math.max(0, Number(source.recentHit ?? 0)),
+    };
+  });
+}
+
+function getInventoryBodyStatusLabel(ratio) {
+  if (ratio <= 0.05) {
+    return "BROKEN";
+  }
+  if (ratio <= 0.5) {
+    return "DAMAGED";
+  }
+  if (ratio <= 0.78) {
+    return "WORN";
+  }
+  return "STABLE";
+}
+
+function drawInventoryCharacterPortrait(ctx, theme, data, run, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 14,
+    fill: "rgba(4, 9, 14, 0.74)",
+    stroke: "rgba(147,234,255,0.18)",
+    innerLines: false,
+  });
+
+  ctx.save();
+  beveledPath(ctx, x + 3, y + 3, width - 6, height - 6, 14);
+  ctx.clip();
+  const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+  gradient.addColorStop(0, "rgba(14, 23, 30, 0.96)");
+  gradient.addColorStop(0.55, "rgba(3, 8, 13, 0.94)");
+  gradient.addColorStop(1, "rgba(20, 37, 40, 0.92)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, width, height);
+
+  ctx.strokeStyle = "rgba(147,234,255,0.08)";
+  ctx.lineWidth = 1;
+  for (let line = 0; line < 9; line += 1) {
+    const lineY = y + 28 + line * 32;
+    ctx.beginPath();
+    ctx.moveTo(x + 12, lineY);
+    ctx.lineTo(x + width - 12, lineY);
+    ctx.stroke();
+  }
+
+  const src = data.art?.operatorStanding?.src || data.art?.[data.ui?.portraitAssetKey]?.src;
+  const image = getImageAsset(src);
+  if (image && image.complete && image.naturalWidth) {
+    const drawH = height * 1.06;
+    const drawW = drawH * (image.naturalWidth / image.naturalHeight);
+    ctx.globalAlpha = 0.94;
+    ctx.drawImage(image, x + width * 0.5 - drawW * 0.5, y + height - drawH + 12, drawW, drawH);
+  } else {
+    drawInventoryBodySilhouette(ctx, theme, x + width * 0.28, y + 26, width * 0.44, height - 50);
+  }
+
+  const pulse = 0.5 + Math.sin(performance.now() * 0.009) * 0.5;
+  const cracks = [
+    { x: 0.26, y: 0.5, w: 42, h: 32 },
+    { x: 0.37, y: 0.68, w: 52, h: 38 },
+    { x: 0.62, y: 0.58, w: 38, h: 30 },
+  ];
+  ctx.globalCompositeOperation = "screen";
+  cracks.forEach((crack, index) => {
+    const cx = x + width * crack.x;
+    const cy = y + height * crack.y;
+    ctx.strokeStyle = `rgba(255, 116, 154, ${0.3 + pulse * 0.18})`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + crack.w * 0.28, cy - crack.h * 0.26);
+    ctx.lineTo(cx + crack.w * 0.54, cy + crack.h * 0.06);
+    ctx.lineTo(cx + crack.w, cy - crack.h * 0.18 + index * 3);
+    ctx.stroke();
+  });
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(245,248,251,0.72)";
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.fillText("TYPE-07A", x + 16, y + 24);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(147,234,255,0.64)";
+  ctx.fillText("TAB", x + width - 16, y + 24);
+  ctx.textAlign = "left";
+}
+
+function drawInventoryBodyMeter(ctx, theme, part, x, y, width) {
+  const ratio = part.ratio;
+  const percent = Math.round(ratio * 100);
+  const critical = ratio <= 0.5;
+  const warn = ratio <= 0.78;
+  const hitPulse = clamp(part.recentHit / 1.2, 0, 1);
+  const color = critical ? "#ff749a" : warn ? "#ffbf7a" : theme.accentSecondary;
+
+  drawBeveledPanel(ctx, theme, x, y, width, 42, {
+    cut: 8,
+    fill: critical ? "rgba(38, 11, 18, 0.62)" : "rgba(8, 16, 21, 0.58)",
+    stroke: hitPulse > 0 ? "rgba(255, 191, 122, 0.82)" : critical ? "rgba(255,116,154,0.42)" : "rgba(147,234,255,0.18)",
+    innerLines: false,
+  });
+  ctx.fillStyle = critical ? "#ffd6df" : theme.textMain;
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.fillText(part.label, x + 12, y + 16);
+  ctx.textAlign = "right";
+  ctx.fillStyle = color;
+  ctx.fillText(`${percent}%`, x + width - 12, y + 16);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(x + 12, y + 25, width - 24, 6);
+  ctx.fillStyle = color;
+  ctx.fillRect(x + 12, y + 25, (width - 24) * ratio, 6);
+  ctx.fillStyle = critical ? "#ff9fb4" : "rgba(245,248,251,0.46)";
+  ctx.font = "800 8px 'Segoe UI', sans-serif";
+  ctx.fillText(getInventoryBodyStatusLabel(ratio), x + 12, y + 39);
+}
+
+function drawInventoryBodyStatusPanel(ctx, theme, data, run, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 15,
+    fill: "rgba(8, 16, 21, 0.54)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  drawInventoryCharacterPortrait(ctx, theme, data, run, x + 12, y + 16, width - 24, 222);
+  const parts = getInventoryBodyParts(run);
+  const meterW = width - 34;
+  const startY = y + 256;
+  parts.forEach((part, index) => {
+    drawInventoryBodyMeter(ctx, theme, part, x + 17, startY + index * 46, meterW);
+  });
+}
+
 function drawInventoryLoadoutSlot(ctx, theme, label, value, x, y, width, height, options = {}) {
   const active = Boolean(options.active);
   drawBeveledPanel(ctx, theme, x, y, width, height, {
@@ -3699,6 +4028,652 @@ function drawInventoryMemoryPocket(ctx, theme, data, part, drift, stability, x, 
   ctx.fillRect(x + 16, y + height - 28, (width - 32) * clamp(stability / 100, 0, 1), 7);
 }
 
+function drawInventoryConceptPips(ctx, x, y, width, ratio, color) {
+  const count = 10;
+  const gap = 4;
+  const pipW = (width - gap * (count - 1)) / count;
+  const active = Math.round(clamp(ratio, 0, 1) * count);
+  for (let index = 0; index < count; index += 1) {
+    ctx.fillStyle = index < active ? color : "rgba(255,255,255,0.12)";
+    ctx.fillRect(x + index * (pipW + gap), y, pipW, 8);
+  }
+}
+
+function getInventoryConceptPart(run, key) {
+  return getInventoryBodyParts(run).find((part) => part.key === key) || getInventoryBodyParts(run)[0];
+}
+
+function drawInventoryConceptCallout(ctx, theme, run, key, label, x, y, width, height, anchorX, anchorY, options = {}) {
+  const part = getInventoryConceptPart(run, key);
+  const ratio = part.ratio;
+  const percent = Math.round(ratio * 100);
+  const damaged = ratio <= 0.5;
+  const warn = ratio <= 0.78;
+  const color = damaged ? "#ff625d" : warn ? "#ffbf7a" : theme.accentSecondary;
+  const side = options.side || (x < anchorX ? "left" : "right");
+  const edgeX = side === "left" ? x + width : x;
+  const edgeY = y + height * (options.edgeRatioY ?? 0.5);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.strokeStyle = damaged ? "rgba(255,98,93,0.92)" : "rgba(118,235,228,0.86)";
+  ctx.lineWidth = damaged ? 2.4 : 2;
+  ctx.beginPath();
+  ctx.moveTo(edgeX, edgeY);
+  const elbowX = side === "left" ? Math.min(anchorX - 22, edgeX + 64) : Math.max(anchorX + 22, edgeX - 64);
+  ctx.lineTo(elbowX, edgeY);
+  ctx.lineTo(anchorX, anchorY);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(6,12,14,0.9)";
+  ctx.beginPath();
+  ctx.arc(anchorX, anchorY, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = damaged ? "#ff625d" : theme.accentSecondary;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(anchorX, anchorY, 6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: damaged ? "rgba(26, 8, 11, 0.88)" : "rgba(5, 18, 21, 0.84)",
+    stroke: damaged ? "rgba(255,98,93,0.82)" : "rgba(118,235,228,0.54)",
+    glow: damaged,
+    innerLines: false,
+  });
+  ctx.fillStyle = damaged ? "#ffd7d2" : "rgba(213,242,242,0.86)";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x + 18, y + 30);
+  ctx.fillStyle = color;
+  ctx.font = "900 42px 'Segoe UI', sans-serif";
+  ctx.fillText(`${percent}`, x + 18, y + 72);
+  ctx.font = "900 20px 'Segoe UI', sans-serif";
+  ctx.fillText("%", x + 18 + ctx.measureText(`${percent}`).width + 5, y + 68);
+  drawInventoryConceptPips(ctx, x + 20, y + height - 28, width - 42, ratio, color);
+  if (damaged) {
+    ctx.fillStyle = "#ff625d";
+    ctx.font = "900 14px 'Segoe UI', sans-serif";
+    ctx.fillText("DAMAGED", x + 48, y + height - 52);
+    ctx.beginPath();
+    ctx.moveTo(x + 23, y + height - 62);
+    ctx.lineTo(x + 34, y + height - 42);
+    ctx.lineTo(x + 12, y + height - 42);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawInventoryConceptBodyMap(ctx, theme, x, y) {
+  const icons = ["HEAD", "CORE", "ARM", "LEGS", "VITAL"];
+  ctx.save();
+  icons.forEach((label, index) => {
+    const cellY = y + index * 54;
+    drawBeveledPanel(ctx, theme, x, cellY, 44, 44, {
+      cut: 4,
+      fill: "rgba(4,14,17,0.72)",
+      stroke: "rgba(118,235,228,0.16)",
+      innerLines: false,
+    });
+    ctx.fillStyle = "rgba(118,235,228,0.28)";
+    ctx.font = "900 7px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(label, x + 22, cellY + 27);
+  });
+  ctx.textAlign = "left";
+  ctx.strokeStyle = "rgba(118,235,228,0.36)";
+  ctx.lineWidth = 1.4;
+  const sx = x + 92;
+  const sy = y + 20;
+  ctx.beginPath();
+  ctx.arc(sx + 28, sy + 26, 15, 0, Math.PI * 2);
+  ctx.moveTo(sx + 28, sy + 44);
+  ctx.lineTo(sx + 28, sy + 152);
+  ctx.moveTo(sx - 6, sy + 78);
+  ctx.lineTo(sx + 62, sy + 78);
+  ctx.moveTo(sx + 11, sy + 152);
+  ctx.lineTo(sx - 8, sy + 232);
+  ctx.moveTo(sx + 45, sy + 152);
+  ctx.lineTo(sx + 64, sy + 232);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(118,235,228,0.16)";
+  ctx.fillRect(sx + 20, sy + 58, 16, 78);
+  ctx.restore();
+}
+
+function drawInventoryConceptDamageMarks(ctx, theme, run, x, y, width, height) {
+  const marks = {
+    head: [
+      [[0.52, 0.12], [0.55, 0.15], [0.53, 0.18]],
+      [[0.57, 0.11], [0.6, 0.14], [0.59, 0.17]],
+    ],
+    core: [
+      [[0.52, 0.34], [0.56, 0.38], [0.54, 0.43]],
+      [[0.58, 0.35], [0.61, 0.4], [0.59, 0.46]],
+    ],
+    leftArm: [
+      [[0.34, 0.34], [0.31, 0.42], [0.35, 0.49]],
+      [[0.38, 0.39], [0.35, 0.48], [0.39, 0.57]],
+    ],
+    rightArm: [
+      [[0.67, 0.36], [0.7, 0.44], [0.67, 0.53]],
+      [[0.72, 0.42], [0.75, 0.51], [0.71, 0.6]],
+    ],
+    legs: [
+      [[0.49, 0.64], [0.52, 0.73], [0.49, 0.83]],
+      [[0.57, 0.63], [0.6, 0.73], [0.58, 0.84]],
+    ],
+  };
+  const parts = Object.fromEntries(getInventoryBodyParts(run).map((part) => [part.key, part]));
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  Object.entries(marks).forEach(([key, paths]) => {
+    const part = parts[key];
+    if (!part) {
+      return;
+    }
+    const stress = clamp((1 - part.ratio) + part.recentHit * 0.65, 0, 1);
+    if (stress <= 0.04) {
+      return;
+    }
+    ctx.globalAlpha = 0.22 + stress * 0.64;
+    ctx.strokeStyle = part.ratio <= 0.5 ? "#ff4e49" : theme.warning;
+    ctx.shadowColor = ctx.strokeStyle;
+    ctx.shadowBlur = 12 + stress * 12;
+    ctx.lineWidth = 1.6 + stress * 2.2;
+    paths.forEach((path) => {
+      ctx.beginPath();
+      path.forEach(([px, py], index) => {
+        const cx = x + width * px;
+        const cy = y + height * py;
+        if (index === 0) {
+          ctx.moveTo(cx, cy);
+        } else {
+          ctx.lineTo(cx, cy);
+        }
+      });
+      ctx.stroke();
+    });
+  });
+  ctx.restore();
+}
+
+function drawInventoryConceptPortrait(ctx, theme, data, run, x, y, width, height) {
+  ctx.save();
+  beveledPath(ctx, x, y, width, height, 12);
+  ctx.clip();
+  const bg = ctx.createLinearGradient(x, y, x + width, y + height);
+  bg.addColorStop(0, "rgba(2, 8, 10, 0.95)");
+  bg.addColorStop(0.5, "rgba(5, 13, 17, 0.9)");
+  bg.addColorStop(1, "rgba(2, 6, 9, 0.96)");
+  ctx.fillStyle = bg;
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeStyle = "rgba(118,235,228,0.06)";
+  ctx.lineWidth = 1;
+  for (let index = 0; index < 12; index += 1) {
+    const lineY = y + 24 + index * 42;
+    ctx.beginPath();
+    ctx.moveTo(x, lineY);
+    ctx.lineTo(x + width, lineY);
+    ctx.stroke();
+  }
+  const image = getImageAsset(INVENTORY_BODY_PORTRAIT_SRC);
+  if (image && image.complete && image.naturalWidth) {
+    const drawH = height + 520;
+    const drawW = drawH * (image.naturalWidth / image.naturalHeight);
+    ctx.globalAlpha = 0.96;
+    ctx.drawImage(image, x + width * 0.5 - drawW * 0.5, y - 70, drawW, drawH);
+  } else {
+    drawStandingArt(ctx, data, "operatorStanding", x + 280, y + 4, 360, height + 80, 0.9);
+  }
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fillRect(x, y, width, height);
+  const vignette = ctx.createRadialGradient(x + width * 0.54, y + height * 0.42, 160, x + width * 0.54, y + height * 0.42, 520);
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.58)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(x, y, width, height);
+  drawInventoryConceptDamageMarks(ctx, theme, run, x, y, width, height);
+  ctx.restore();
+}
+
+function getInventoryConceptItems(run, data, quickItems, materials) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const selectedArm = weapons.arms?.[weapons.selectedSide] || weapons.arms?.right || {};
+  const stats = computeArmWeaponStats(data, selectedArm);
+  const reserve = Math.max(0, Math.floor(weapons.reserveAmmo?.[stats.ammoType] ?? 0));
+  const base = [
+    { kind: "weapon", category: "weapon", label: stats.equipped ? stats.label : "M-9 PISTOL", count: 1, description: "9mm 구경의 반자동 권총." },
+    { kind: "ammo", category: "ammo", label: "9MM", count: reserve, description: "권총 탄약." },
+    { kind: "med", category: "healing", label: "MED", count: 3, description: "응급 회복 키트." },
+    { kind: "battery", category: "misc", label: "CELL", count: 2, description: "소형 에너지 셀." },
+    { kind: "material", category: "material", label: "PARTS", count: Math.max(1, materials || 12), description: "수리와 제작에 쓰는 자재." },
+    { kind: "vial", category: "healing", label: "VIAL", count: 2, description: "신경 안정 앰플." },
+    { kind: "injector", category: "healing", label: "INJ", count: 1, description: "전투용 주입기." },
+    { kind: "module", category: "material", label: "MOD", count: 1, description: "무기 모듈 부품." },
+    { kind: "tape", category: "misc", label: "TAPE", count: 4, description: "임시 보수용 테이프." },
+    { kind: "docs", category: "misc", label: "DOC", count: 9, description: "회수 문서." },
+    ...quickItems.map((item) => ({
+      kind: item.slot ? "part" : "loot",
+      category: item.slot ? "material" : "misc",
+      label: item.name || item.label || item.id || "ITEM",
+      count: item.quantity ?? item.count ?? 1,
+      description: item.description || item.detail || (item.slot ? "회수한 파츠." : "현장에서 회수한 물품."),
+    })),
+  ];
+  const category = run?.inventoryOverlay?.category || "all";
+  const unique = [];
+  const seen = new Set();
+  base.forEach((item) => {
+    if (category !== "all" && item.category !== category) {
+      return;
+    }
+    const key = `${item.category}:${item.kind}:${item.label}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(item);
+    }
+  });
+  return unique.slice(0, 20);
+}
+
+function drawInventoryConceptItemIcon(ctx, item, x, y, size, selected = false) {
+  ctx.save();
+  ctx.translate(x + size / 2, y + size / 2);
+  ctx.strokeStyle = selected ? "#76ebe4" : "rgba(210,220,218,0.62)";
+  ctx.fillStyle = selected ? "rgba(118,235,228,0.18)" : "rgba(255,255,255,0.06)";
+  ctx.lineWidth = selected ? 2.2 : 1.6;
+  const kind = item?.kind || "loot";
+  if (kind === "weapon") {
+    ctx.fillRect(-20, -8, 35, 13);
+    ctx.strokeRect(-20, -8, 35, 13);
+    ctx.fillRect(6, 3, 9, 22);
+    ctx.strokeRect(6, 3, 9, 22);
+    ctx.fillRect(16, -4, 12, 5);
+  } else if (kind === "ammo") {
+    ctx.rotate(-0.42);
+    ctx.fillRect(-7, -24, 14, 48);
+    ctx.strokeRect(-7, -24, 14, 48);
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(-4, -18, 8, 30);
+  } else if (kind === "med") {
+    ctx.fillStyle = "rgba(180,58,58,0.78)";
+    ctx.fillRect(-22, -18, 44, 36);
+    ctx.strokeRect(-22, -18, 44, 36);
+    ctx.fillStyle = "rgba(255,245,238,0.88)";
+    ctx.fillRect(-5, -13, 10, 26);
+    ctx.fillRect(-13, -5, 26, 10);
+  } else if (kind === "battery" || kind === "vial" || kind === "injector") {
+    ctx.fillRect(-10, -22, 20, 44);
+    ctx.strokeRect(-10, -22, 20, 44);
+    ctx.fillStyle = "rgba(118,235,228,0.35)";
+    ctx.fillRect(-7, -2, 14, 18);
+  } else if (kind === "module" || kind === "material" || kind === "part") {
+    ctx.rotate(0.12);
+    ctx.fillRect(-21, -18, 42, 36);
+    ctx.strokeRect(-21, -18, 42, 36);
+    ctx.strokeRect(-10, -8, 20, 16);
+    ctx.fillStyle = "rgba(118,235,228,0.45)";
+    ctx.fillRect(-4, -4, 8, 8);
+  } else {
+    ctx.fillRect(-19, -15, 38, 30);
+    ctx.strokeRect(-19, -15, 38, 30);
+    ctx.beginPath();
+    ctx.moveTo(-12, -4);
+    ctx.lineTo(12, -4);
+    ctx.moveTo(-12, 6);
+    ctx.lineTo(8, 6);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawInventoryConceptGrid(ctx, theme, items, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 8,
+    fill: "rgba(5, 9, 10, 0.76)",
+    stroke: "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+  const tabs = ["전체", "무기", "탄약", "회복", "재료", "기타"];
+  const tabW = (width - 34) / tabs.length;
+  tabs.forEach((tab, index) => {
+    const tabX = x + 17 + index * tabW;
+    ctx.fillStyle = index === 0 ? "#e8fbf8" : "rgba(245,248,251,0.48)";
+    ctx.font = "900 15px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(tab, tabX + tabW / 2, y + 32);
+    if (index === 0) {
+      ctx.fillStyle = theme.accentSecondary;
+      ctx.fillRect(tabX + 8, y + 43, tabW - 16, 2);
+    }
+  });
+  ctx.textAlign = "left";
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.beginPath();
+  ctx.moveTo(x + 18, y + 48);
+  ctx.lineTo(x + width - 18, y + 48);
+  ctx.stroke();
+
+  const columns = 5;
+  const rows = 4;
+  const gap = 4;
+  const cell = Math.floor((width - 34 - gap * (columns - 1)) / columns);
+  const gridX = x + 17;
+  const gridY = y + 68;
+  for (let index = 0; index < columns * rows; index += 1) {
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const cellX = gridX + col * (cell + gap);
+    const cellY = gridY + row * (cell + gap);
+    const item = items[index] || null;
+    const selected = index === 0;
+    drawBeveledPanel(ctx, theme, cellX, cellY, cell, cell, {
+      cut: 2,
+      fill: selected ? "rgba(118,235,228,0.12)" : item ? "rgba(255,255,255,0.055)" : "rgba(255,255,255,0.025)",
+      stroke: selected ? "rgba(118,235,228,0.72)" : "rgba(255,255,255,0.1)",
+      innerLines: false,
+    });
+    if (item) {
+      drawInventoryConceptItemIcon(ctx, item, cellX + 8, cellY + 8, cell - 16, selected);
+      if (Number(item.count) > 1) {
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#f5f8fb";
+        ctx.font = "900 16px 'Segoe UI', sans-serif";
+        ctx.fillText(String(item.count), cellX + cell - 8, cellY + cell - 8);
+        ctx.textAlign = "left";
+      }
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath();
+      ctx.moveTo(cellX + 14, cellY + cell - 14);
+      ctx.lineTo(cellX + cell - 14, cellY + 14);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawInventoryConceptGridInteractive(ctx, theme, items, overlay, x, y, width, height) {
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 8,
+    fill: "rgba(5, 9, 10, 0.76)",
+    stroke: "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+  const tabs = [
+    { key: "all", label: "전체" },
+    { key: "weapon", label: "무기" },
+    { key: "ammo", label: "탄약" },
+    { key: "healing", label: "회복" },
+    { key: "material", label: "재료" },
+    { key: "misc", label: "기타" },
+  ];
+  const activeCategory = overlay?.category || "all";
+  const tabW = (width - 34) / tabs.length;
+  tabs.forEach((tab, index) => {
+    const tabX = x + 17 + index * tabW;
+    const active = tab.key === activeCategory;
+    ctx.fillStyle = active ? "#e8fbf8" : "rgba(245,248,251,0.48)";
+    ctx.font = "900 15px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(tab.label, tabX + tabW / 2, y + 32);
+    ctx.fillStyle = active ? theme.accentSecondary : "rgba(255,255,255,0.08)";
+    ctx.fillRect(tabX + 8, y + 43, tabW - 16, active ? 2 : 1);
+  });
+  ctx.textAlign = "left";
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.beginPath();
+  ctx.moveTo(x + 18, y + 48);
+  ctx.lineTo(x + width - 18, y + 48);
+  ctx.stroke();
+
+  const columns = 5;
+  const rows = 4;
+  const gap = 4;
+  const cell = Math.floor((width - 34 - gap * (columns - 1)) / columns);
+  const gridX = x + 17;
+  const gridY = y + 68;
+  const selectedIndex = clamp(Math.floor(Number(overlay?.selectedIndex ?? 0)), 0, Math.max(0, items.length - 1));
+  for (let index = 0; index < columns * rows; index += 1) {
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const cellX = gridX + col * (cell + gap);
+    const cellY = gridY + row * (cell + gap);
+    const item = items[index] || null;
+    const selected = index === selectedIndex;
+    drawBeveledPanel(ctx, theme, cellX, cellY, cell, cell, {
+      cut: 2,
+      fill: selected ? "rgba(118,235,228,0.14)" : item ? "rgba(255,255,255,0.055)" : "rgba(255,255,255,0.025)",
+      stroke: selected ? "rgba(118,235,228,0.84)" : "rgba(255,255,255,0.1)",
+      glow: selected,
+      innerLines: false,
+    });
+    if (item) {
+      drawInventoryConceptItemIcon(ctx, item, cellX + 8, cellY + 8, cell - 16, selected);
+      if (Number(item.count) > 1) {
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#f5f8fb";
+        ctx.font = "900 16px 'Segoe UI', sans-serif";
+        ctx.fillText(String(item.count), cellX + cell - 8, cellY + cell - 8);
+        ctx.textAlign = "left";
+      }
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath();
+      ctx.moveTo(cellX + 14, cellY + cell - 14);
+      ctx.lineTo(cellX + cell - 14, cellY + 14);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawInventoryConceptWeaponPanel(ctx, theme, run, data, x, y, width, height) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const arm = weapons.arms?.[weapons.selectedSide] || weapons.arms?.right || {};
+  const stats = computeArmWeaponStats(data, arm);
+  const maxHp = Math.max(1, Number(data.player?.maxHp ?? 100));
+  const durability = clamp((run.hp ?? maxHp) / maxHp, 0, 1);
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 8,
+    fill: "rgba(4, 9, 10, 0.78)",
+    stroke: "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+  drawBeveledPanel(ctx, theme, x + 16, y + 20, 146, height - 40, {
+    cut: 4,
+    fill: "rgba(255,255,255,0.055)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  drawInventoryConceptItemIcon(ctx, { kind: "weapon" }, x + 42, y + 42, 92, true);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 20px 'Segoe UI', sans-serif";
+  ctx.fillText(stats.type === "pistol" ? "M-9 PISTOL" : (stats.label || "ARM WEAPON").toUpperCase(), x + 184, y + 38);
+  ctx.fillStyle = "rgba(245,248,251,0.58)";
+  ctx.font = "800 14px 'Segoe UI', sans-serif";
+  ctx.fillText("9mm 구경의 반자동 권총.", x + 184, y + 66);
+  ctx.fillText("표준형 모델.", x + 184, y + 90);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.fillText("내구도", x + 184, y + 118);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(`${Math.round(durability * 100)}%`, x + width - 28, y + 118);
+  ctx.textAlign = "left";
+  drawInventoryConceptPips(ctx, x + 184, y + 130, width - 220, durability, theme.accentSecondary);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 14px 'Segoe UI', sans-serif";
+  ctx.fillText("장탄수", x + 184, y + 164);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(`${arm.magazine ?? 0} / ${weapons.reserveAmmo?.[stats.ammoType] ?? 0}`, x + width - 28, y + 164);
+  ctx.textAlign = "left";
+}
+
+function drawInventoryConceptSelectedPanel(ctx, theme, run, data, selectedItem, x, y, width, height) {
+  const item = selectedItem || { kind: "loot", label: "EMPTY", count: 0, description: "선택된 아이템 없음." };
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const arm = weapons.arms?.[weapons.selectedSide] || weapons.arms?.right || {};
+  const stats = computeArmWeaponStats(data, arm);
+  const isWeapon = item.kind === "weapon";
+  const maxHp = Math.max(1, Number(data.player?.maxHp ?? 100));
+  const durability = isWeapon ? clamp((run.hp ?? maxHp) / maxHp, 0, 1) : clamp(Number(item.durability ?? item.quality ?? 0.92), 0, 1);
+
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 8,
+    fill: "rgba(4, 9, 10, 0.78)",
+    stroke: "rgba(255,255,255,0.18)",
+    innerLines: false,
+  });
+  drawBeveledPanel(ctx, theme, x + 16, y + 20, 146, height - 40, {
+    cut: 4,
+    fill: "rgba(255,255,255,0.055)",
+    stroke: "rgba(255,255,255,0.12)",
+    innerLines: false,
+  });
+  drawInventoryConceptItemIcon(ctx, item, x + 42, y + 42, 92, true);
+
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 20px 'Segoe UI', sans-serif";
+  ctx.fillText((item.label || "ITEM").toUpperCase().slice(0, 18), x + 184, y + 38);
+  ctx.fillStyle = "rgba(245,248,251,0.62)";
+  ctx.font = "800 14px 'Segoe UI', sans-serif";
+  ctx.fillText(item.description || "선택한 아이템.", x + 184, y + 66);
+  ctx.fillText(isWeapon ? "표준형 모델." : `보유 수량 ${Math.max(0, Number(item.count ?? 1))}`, x + 184, y + 90);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.fillText(isWeapon ? "내구도" : "상태", x + 184, y + 118);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(`${Math.round(durability * 100)}%`, x + width - 28, y + 118);
+  ctx.textAlign = "left";
+  drawInventoryConceptPips(ctx, x + 184, y + 130, width - 220, durability, theme.accentSecondary);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 14px 'Segoe UI', sans-serif";
+  ctx.fillText(isWeapon ? "장탄수" : "분류", x + 184, y + 164);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(
+    isWeapon ? `${arm.magazine ?? 0} / ${weapons.reserveAmmo?.[stats.ammoType] ?? 0}` : (item.category || "misc").toUpperCase(),
+    x + width - 28,
+    y + 164,
+  );
+  ctx.textAlign = "left";
+}
+
+function drawInventoryConceptFooter(ctx, theme, run, data, x, y, width) {
+  const hpMax = Math.max(1, Number(data.player?.maxHp ?? 100));
+  const hpRatio = clamp((run.hp ?? hpMax) / hpMax, 0, 1);
+  const focusRatio = clamp((run.focus ?? 100) / Math.max(1, run.focusMax ?? 100), 0, 1);
+  const meter = (label, value, current, max, meterX) => {
+    ctx.fillStyle = "rgba(245,248,251,0.62)";
+    ctx.font = "900 15px 'Segoe UI', sans-serif";
+    ctx.fillText(label, meterX, y + 22);
+    ctx.fillStyle = theme.accentSecondary;
+    ctx.font = "900 20px 'Segoe UI', sans-serif";
+    ctx.fillText(String(Math.round(current)), meterX + 76, y + 23);
+    ctx.fillStyle = "rgba(245,248,251,0.58)";
+    ctx.font = "800 15px 'Segoe UI', sans-serif";
+    ctx.fillText(`/ ${Math.round(max)}`, meterX + 118, y + 22);
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillRect(meterX, y + 36, 230, 5);
+    ctx.fillStyle = value <= 0.35 ? "#ff625d" : theme.accentSecondary;
+    ctx.fillRect(meterX, y + 36, 230 * value, 5);
+  };
+  meter("체력", hpRatio, run.hp ?? hpMax, hpMax, x);
+  meter("스태미나", focusRatio, run.focus ?? 100, run.focusMax ?? 100, x + 300);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(245,248,251,0.62)";
+  ctx.font = "900 15px 'Segoe UI', sans-serif";
+  ctx.fillText("소지금", x + width - 150, y + 22);
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "900 20px 'Segoe UI', sans-serif";
+  ctx.fillText(String(Math.max(0, Math.round(run.materials ?? 0))).padStart(4, "0"), x + width, y + 23);
+  ctx.textAlign = "left";
+}
+
+function drawRunInventoryOverlayConcept(ctx, state, data, theme, options) {
+  const run = state.run;
+  const { parts, selectedPart, quickItems, materials, drift, stability } = options;
+  const inventoryItems = getInventoryConceptItems(run, data, quickItems, materials);
+  const overlay = run.inventoryOverlay || {};
+  overlay.selectedIndex = clamp(Math.floor(Number(overlay.selectedIndex ?? 0)), 0, Math.max(0, inventoryItems.length - 1));
+  const selectedInventoryItem = inventoryItems[overlay.selectedIndex] || null;
+  const panelX = 18;
+  const panelY = 28;
+  const panelW = 1244;
+  const panelH = 640;
+  const leftX = panelX + 16;
+  const leftY = panelY + 58;
+  const leftW = 760;
+  const leftH = 542;
+  const rightX = panelX + 794;
+  const rightY = leftY;
+  const rightW = panelW - 810;
+  const gridH = 392;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.66)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  drawBeveledPanel(ctx, theme, panelX, panelY + 30, panelW, panelH - 28, {
+    cut: 10,
+    fill: "rgba(2, 7, 9, 0.88)",
+    stroke: "rgba(255,255,255,0.22)",
+    innerLines: false,
+  });
+
+  drawBeveledPanel(ctx, theme, SCREEN_WIDTH / 2 - 150, panelY - 4, 300, 48, {
+    cut: 12,
+    fill: "rgba(2, 10, 12, 0.92)",
+    stroke: "rgba(118,235,228,0.42)",
+    innerLines: false,
+  });
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "900 36px 'Segoe UI', sans-serif";
+  ctx.fillText("INVENTORY", SCREEN_WIDTH / 2, panelY + 32);
+  ctx.textAlign = "left";
+  drawBeveledPanel(ctx, theme, panelX + 4, panelY, 52, 34, {
+    cut: 4,
+    fill: "rgba(255,255,255,0.055)",
+    stroke: "rgba(255,255,255,0.32)",
+    innerLines: false,
+  });
+  ctx.fillStyle = "#f5f8fb";
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText("TAB", panelX + 17, panelY + 23);
+  ctx.fillStyle = "rgba(245,248,251,0.58)";
+  ctx.font = "800 16px 'Segoe UI', sans-serif";
+  ctx.fillText("인벤토리 닫기", panelX + 74, panelY + 23);
+
+  drawInventoryConceptPortrait(ctx, theme, data, run, leftX, leftY, leftW, leftH);
+  drawBeveledPanel(ctx, theme, leftX + 8, leftY + 28, 230, 54, {
+    cut: 8,
+    fill: "rgba(3,16,18,0.72)",
+    stroke: "rgba(118,235,228,0.32)",
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 22px 'Segoe UI', sans-serif";
+  ctx.fillText("BODY STATUS", leftX + 48, leftY + 63);
+  drawInventoryConceptBodyMap(ctx, theme, leftX + 20, leftY + 116);
+  drawInventoryConceptCallout(ctx, theme, run, "head", "HEAD", leftX + 150, leftY + 116, 132, 94, leftX + 358, leftY + 164, { side: "left" });
+  drawInventoryConceptCallout(ctx, theme, run, "leftArm", "LEFT ARM", leftX + 64, leftY + 318, 166, 130, leftX + 285, leftY + 372, { side: "left", edgeRatioY: 0.45 });
+  drawInventoryConceptCallout(ctx, theme, run, "core", "CORE", leftX + 550, leftY + 142, 148, 100, leftX + 472, leftY + 288, { side: "right" });
+  drawInventoryConceptCallout(ctx, theme, run, "rightArm", "RIGHT ARM", leftX + 598, leftY + 316, 150, 96, leftX + 602, leftY + 344, { side: "right" });
+  drawInventoryConceptCallout(ctx, theme, run, "legs", "LEGS", leftX + 604, leftY + 474, 136, 94, leftX + 560, leftY + 492, { side: "right" });
+
+  drawInventoryConceptGridInteractive(ctx, theme, inventoryItems, overlay, rightX, rightY, rightW, gridH);
+  drawInventoryConceptSelectedPanel(ctx, theme, run, data, selectedInventoryItem, rightX, rightY + gridH + 14, rightW, 170);
+  drawInventoryConceptFooter(ctx, theme, run, data, panelX + 10, panelY + panelH - 6, panelW - 20);
+  ctx.restore();
+}
+
 function drawRunInventoryOverlay(ctx, state, data, theme) {
   const run = state.run;
   if (!run?.inventoryOverlay?.active) {
@@ -3712,10 +4687,36 @@ function drawRunInventoryOverlay(ctx, state, data, theme) {
   const selectedPart = parts[0] || attachedRightArm || null;
   const lootItems = Array.isArray(run.lootInventory) ? run.lootInventory : [];
   const inventoryItems = Array.isArray(run.inventory?.items) ? run.inventory.items : [];
-  const quickItems = [...inventoryItems, ...lootItems].slice(0, 6);
+  const quickItems = [];
+  const quickItemKeys = new Set();
+  [...inventoryItems, ...lootItems].forEach((item) => {
+    if (!item) {
+      return;
+    }
+    const key = `${item.crateId || "field"}:${item.id || item.name || quickItems.length}`;
+    if (quickItemKeys.has(key)) {
+      return;
+    }
+    quickItemKeys.add(key);
+    quickItems.push(item);
+  });
+  quickItems.length = Math.min(quickItems.length, 6);
   const materials = Math.max(0, Math.round(run.materials ?? 0));
   const drift = attachedParts.reduce((total, part) => total + Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0)), 0);
   const stability = Math.max(0, 100 - drift);
+
+  drawRunInventoryOverlayConcept(ctx, state, data, theme, {
+    parts,
+    attachedParts,
+    attachedIds,
+    selectedPart,
+    lootItems,
+    quickItems,
+    materials,
+    drift,
+    stability,
+  });
+  return;
 
   ctx.save();
   ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
@@ -3755,9 +4756,9 @@ function drawRunInventoryOverlay(ctx, state, data, theme) {
 
   const topY = panelY + 108;
   const leftX = panelX + 34;
-  const leftW = 280;
+  const leftW = 340;
   const packX = leftX + leftW + 34;
-  const packW = 526;
+  const packW = 474;
   const rightX = packX + packW + 34;
   const rightW = panelX + panelW - rightX - 34;
 
@@ -3781,6 +4782,14 @@ function drawRunInventoryOverlay(ctx, state, data, theme) {
   ctx.fillRect(leftX + 116, topY + 366, 138, 7);
   ctx.fillStyle = stability < 50 ? "#ff9fb4" : "#e7f47e";
   ctx.fillRect(leftX + 116, topY + 366, 138 * clamp(stability / 100, 0, 1), 7);
+  drawBeveledPanel(ctx, theme, leftX - 4, topY - 22, leftW + 8, 24, {
+    cut: 6,
+    fill: "rgba(5, 10, 15, 0.94)",
+    stroke: "rgba(255,255,255,0)",
+    innerLines: false,
+  });
+  drawInventorySectionHeader(ctx, theme, "BODY STATUS", "파손 수치", leftX, topY, leftW);
+  drawInventoryBodyStatusPanel(ctx, theme, data, run, leftX, topY + 28, leftW, 500);
 
   drawInventorySectionHeader(ctx, theme, "RECOVERED PARTS / BACKPACK", `파츠 ${parts.length} · 보관 ${lootItems.length}`, packX, topY, packW);
   drawBeveledPanel(ctx, theme, packX, topY + 28, packW, 366, {
@@ -3823,13 +4832,14 @@ function drawRunInventoryOverlay(ctx, state, data, theme) {
   for (let index = 0; index < 6; index += 1) {
     const column = index % 2;
     const row = Math.floor(index / 2);
+    const quickSlotW = Math.max(76, Math.min(98, (rightW - 48) / 2));
     drawInventoryQuickSlot(
       ctx,
       theme,
       quickItems[index],
-      rightX + 18 + column * 112,
+      rightX + 18 + column * (quickSlotW + 12),
       topY + 56 + row * 54,
-      98,
+      quickSlotW,
       42,
       index
     );
@@ -4271,7 +5281,7 @@ function drawRecoilFocusOverlay(ctx, run, data) {
 }
 
 function drawNightPostProcess(ctx, run, data, pulse = 0) {
-  const strength = getNightPostProcessStrength(run);
+  const strength = getNightPostProcessStrength(run, data);
   if (strength <= 0) {
     return;
   }
@@ -4284,14 +5294,22 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   const playerX = (run.player.x - run.cameraX + run.player.width / 2) * cameraZoom;
   const playerY = (run.player.y - run.cameraY + run.player.height / 2) * cameraZoom;
   const lightBoost = run.player.lightActive ? 1 : 0;
+  const duskProgress = getDuskProgress(run, data);
+  const headPenalty = getHeadVisionPenalty(run);
+  const sightPenaltyScale = clamp(1 - headPenalty * 0.72, 0.58, 1);
+  const lightPenaltyScale = clamp(1 - headPenalty * 0.42, 0.7, 1);
+  const baseSightFactor = run.timePhase === "night"
+    ? 0.32
+    : lerp(0.58, 0.34, duskProgress);
+  const litSightFactor = run.timePhase === "night"
+    ? 0.54
+    : lerp(0.64, 0.52, duskProgress);
   const sightRadius = lightBoost
-    ? SCREEN_HEIGHT * 0.48
-    : run.timePhase === "night"
-      ? SCREEN_HEIGHT * 0.35
-      : SCREEN_HEIGHT * 0.46;
+    ? SCREEN_HEIGHT * litSightFactor * lightPenaltyScale
+    : SCREEN_HEIGHT * baseSightFactor * sightPenaltyScale;
   const clearCoreRadius = lightBoost
-    ? Math.min(150, sightRadius * 0.42)
-    : Math.min(116, sightRadius * 0.42);
+    ? Math.min(164, sightRadius * 0.38)
+    : Math.min(108, sightRadius * 0.34);
   const transition = clamp(Number(run.nightTransitionTimer || 0) / NIGHT_TRANSITION_SECONDS, 0, 1);
   const transitionPulse = Math.sin((1 - transition) * Math.PI) * transition;
   const sanityPenalty = run.sanity < 40 ? 0.12 : run.sanity < 70 ? 0.05 : 0;
@@ -4302,7 +5320,7 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   overlayCtx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
   overlayCtx.globalCompositeOperation = "source-over";
 
-  overlayCtx.fillStyle = `rgba(1, 4, 9, ${Math.min(0.92, 0.58 + 0.3 * strength + sanityPenalty)})`;
+  overlayCtx.fillStyle = `rgba(1, 4, 9, ${Math.min(0.94, 0.46 + 0.4 * strength + sanityPenalty)})`;
   overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   const colorWash = overlayCtx.createLinearGradient(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -4341,14 +5359,35 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   overlayCtx.fill();
 
   const sight = overlayCtx.createRadialGradient(playerX, playerY, clearCoreRadius * 0.55, playerX, playerY, sightRadius);
-  sight.addColorStop(0, `rgba(0,0,0,${0.88 + lightBoost * 0.1})`);
-  sight.addColorStop(0.42, `rgba(0,0,0,${0.5 + lightBoost * 0.22})`);
-  sight.addColorStop(0.78, `rgba(0,0,0,${0.16 + lightBoost * 0.08})`);
+  sight.addColorStop(0, `rgba(0,0,0,${0.9 + lightBoost * 0.08})`);
+  sight.addColorStop(0.36, `rgba(0,0,0,${0.58 + lightBoost * 0.18})`);
+  sight.addColorStop(0.72, `rgba(0,0,0,${0.18 + lightBoost * 0.08})`);
   sight.addColorStop(1, "rgba(0,0,0,0)");
   overlayCtx.fillStyle = sight;
   overlayCtx.beginPath();
   overlayCtx.arc(playerX, playerY, sightRadius, 0, Math.PI * 2);
   overlayCtx.fill();
+
+  if (run.player.lightActive) {
+    const direction = getFlashlightDirection(run);
+    const coneLength = SCREEN_HEIGHT * (run.timePhase === "night" ? 0.92 : 0.82) * lightPenaltyScale;
+    const coneAngle = Math.PI * 0.21;
+    const heading = Math.atan2(direction.y, direction.x);
+    const gradient = overlayCtx.createRadialGradient(playerX, playerY, 18, playerX, playerY, coneLength);
+    gradient.addColorStop(0, "rgba(0,0,0,0.98)");
+    gradient.addColorStop(0.36, "rgba(0,0,0,0.84)");
+    gradient.addColorStop(0.72, "rgba(0,0,0,0.36)");
+    gradient.addColorStop(1, "rgba(0,0,0,0)");
+    overlayCtx.save();
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(playerX, playerY);
+    overlayCtx.arc(playerX, playerY, coneLength, heading - coneAngle, heading + coneAngle);
+    overlayCtx.closePath();
+    overlayCtx.clip();
+    overlayCtx.fillStyle = gradient;
+    overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    overlayCtx.restore();
+  }
 
   overlayCtx.globalCompositeOperation = "screen";
   const halo = overlayCtx.createRadialGradient(playerX, playerY, 10, playerX, playerY, sightRadius * 0.72);
@@ -4359,6 +5398,26 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   overlayCtx.beginPath();
   overlayCtx.arc(playerX, playerY, sightRadius * 0.72, 0, Math.PI * 2);
   overlayCtx.fill();
+
+  if (run.player.lightActive) {
+    const direction = getFlashlightDirection(run);
+    const coneLength = SCREEN_HEIGHT * (run.timePhase === "night" ? 0.86 : 0.74) * lightPenaltyScale;
+    const coneAngle = Math.PI * 0.18;
+    const heading = Math.atan2(direction.y, direction.x);
+    const beam = overlayCtx.createRadialGradient(playerX, playerY, 12, playerX, playerY, coneLength);
+    beam.addColorStop(0, "rgba(231, 244, 126, 0.18)");
+    beam.addColorStop(0.4, "rgba(147, 234, 255, 0.08)");
+    beam.addColorStop(1, "rgba(0,0,0,0)");
+    overlayCtx.save();
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(playerX, playerY);
+    overlayCtx.arc(playerX, playerY, coneLength, heading - coneAngle, heading + coneAngle);
+    overlayCtx.closePath();
+    overlayCtx.clip();
+    overlayCtx.fillStyle = beam;
+    overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    overlayCtx.restore();
+  }
 
   if (!LOW_PERFORMANCE_MODE) {
     overlayCtx.globalCompositeOperation = "screen";
@@ -5436,6 +6495,9 @@ function drawAimCursorBulletPip(ctx, x, y, filled, warning, angle = 0, scale = 1
 
 function getAimCursorProfile(stats) {
   const ui = stats.aimUi || stats.type || "pistol";
+  if (ui === "empty") {
+    return { kind: "empty", accent: "255, 126, 146", cool: "245, 248, 251", radius: 17, pipLimit: 0, pipSpacing: 12 };
+  }
   if (ui === "scope" || ui === "sniper") {
     return { kind: "scope", accent: "255, 71, 92", cool: "245, 248, 251", radius: 26, pipLimit: 5, pipSpacing: 15 };
   }
@@ -5576,6 +6638,9 @@ function drawAimCursorHud(ctx, state, data) {
   }
 
   const hud = getSelectedArmHud(run, data);
+  if (!hud.stats.equipped) {
+    return;
+  }
   const x = clamp(mouse.screenX ?? SCREEN_WIDTH / 2, 8, SCREEN_WIDTH - 8);
   const y = clamp(mouse.screenY ?? SCREEN_HEIGHT / 2, 8, SCREEN_HEIGHT - 8);
   const magazineSize = Math.max(1, Math.floor(hud.stats.magazineSize ?? 1));
@@ -6253,19 +7318,24 @@ function drawFaceOffSceneWeaponPanel(ctx, theme, run, data) {
   ctx.restore();
 }
 
-function drawFaceOffSceneAim(ctx, theme, data, faceOff) {
+function drawFaceOffSceneAim(ctx, theme, data, faceOff, run = null) {
   const aimY = faceOff?.aimY ?? SCREEN_HEIGHT * 0.5;
   const zones = getFaceOffTargetZones(data, aimY);
   const pulse = 0.5 + Math.sin(performance.now() * 0.006) * 0.5;
+  const meleeMode = run?.weapons?.selectedSlot === "melee";
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
   zones.forEach((zone) => {
     const active = zone.id === faceOff?.selectedPart || zone.id === faceOff?.hoverPart;
-    ctx.fillStyle = active ? "rgba(147,234,255,0.13)" : "rgba(245,248,251,0.025)";
-    ctx.strokeStyle = active ? `rgba(147,234,255,${0.7 + pulse * 0.22})` : "rgba(245,248,251,0.28)";
+    ctx.fillStyle = active
+      ? (meleeMode ? "rgba(243,255,154,0.13)" : "rgba(147,234,255,0.13)")
+      : "rgba(245,248,251,0.025)";
+    ctx.strokeStyle = active
+      ? (meleeMode ? `rgba(243,255,154,${0.68 + pulse * 0.22})` : `rgba(147,234,255,${0.7 + pulse * 0.22})`)
+      : "rgba(245,248,251,0.28)";
     ctx.lineWidth = active ? 2.1 : 1.1;
-    ctx.shadowColor = "rgba(147,234,255,0.42)";
+    ctx.shadowColor = meleeMode ? "rgba(243,255,154,0.38)" : "rgba(147,234,255,0.42)";
     ctx.shadowBlur = active ? 14 : 4;
     ctx.beginPath();
     if (zone.shape === "ellipse") {
@@ -6279,7 +7349,7 @@ function drawFaceOffSceneAim(ctx, theme, data, faceOff) {
     ctx.stroke();
 
     ctx.shadowBlur = 0;
-    ctx.fillStyle = active ? theme.accentSecondary : "rgba(245,248,251,0.54)";
+    ctx.fillStyle = active ? (meleeMode ? "#f3ff9a" : theme.accentSecondary) : "rgba(245,248,251,0.54)";
     ctx.font = "800 10px 'Segoe UI', sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(zone.label, zone.x + zone.width / 2, zone.y - 6);
@@ -6288,24 +7358,35 @@ function drawFaceOffSceneAim(ctx, theme, data, faceOff) {
   const x = clamp(faceOff?.aimX ?? SCREEN_WIDTH / 2, 8, SCREEN_WIDTH - 8);
   const y = clamp(faceOff?.aimY ?? SCREEN_HEIGHT / 2, 8, SCREEN_HEIGHT - 8);
   ctx.shadowBlur = 8;
-  ctx.strokeStyle = "rgba(245,248,251,0.82)";
-  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = meleeMode ? "rgba(243,255,154,0.88)" : "rgba(245,248,251,0.82)";
+  ctx.lineWidth = meleeMode ? 1.8 : 1.2;
   ctx.beginPath();
-  ctx.arc(x, y, 15, 0, Math.PI * 2);
-  ctx.moveTo(x - 34, y);
-  ctx.lineTo(x - 10, y);
-  ctx.moveTo(x + 10, y);
-  ctx.lineTo(x + 34, y);
-  ctx.moveTo(x, y - 34);
-  ctx.lineTo(x, y - 10);
-  ctx.moveTo(x, y + 10);
-  ctx.lineTo(x, y + 34);
+  if (meleeMode) {
+    ctx.arc(x, y, 22, -0.75 * Math.PI, 0.12 * Math.PI);
+    ctx.moveTo(x - 24, y + 18);
+    ctx.lineTo(x + 24, y - 18);
+    ctx.moveTo(x - 10, y + 28);
+    ctx.lineTo(x + 30, y - 12);
+  } else {
+    ctx.arc(x, y, 15, 0, Math.PI * 2);
+    ctx.moveTo(x - 34, y);
+    ctx.lineTo(x - 10, y);
+    ctx.moveTo(x + 10, y);
+    ctx.lineTo(x + 34, y);
+    ctx.moveTo(x, y - 34);
+    ctx.lineTo(x, y - 10);
+    ctx.moveTo(x, y + 10);
+    ctx.lineTo(x, y + 34);
+  }
   ctx.stroke();
 
   ctx.shadowBlur = 0;
-  ctx.fillStyle = "rgba(245,248,251,0.74)";
+  ctx.fillStyle = meleeMode ? "rgba(243,255,154,0.82)" : "rgba(245,248,251,0.74)";
   ctx.font = "800 12px 'Segoe UI', sans-serif";
   ctx.textAlign = "center";
+  if (meleeMode) {
+    ctx.fillText("ARM BLADE TARGET", SCREEN_WIDTH / 2, 92);
+  }
   ctx.fillText("부위 조준", SCREEN_WIDTH / 2, 108);
   ctx.restore();
   return;
@@ -6524,7 +7605,7 @@ function drawFaceOffOverlay(ctx, state, data, theme) {
   drawFaceOffSceneInfoPanel(ctx, theme);
   drawFaceOffScenePartPanel(ctx, theme, data, faceOff, enemy);
   drawFaceOffSceneWeaponPanel(ctx, theme, run, data);
-  drawFaceOffSceneAim(ctx, theme, data, faceOff);
+  drawFaceOffSceneAim(ctx, theme, data, faceOff, run);
   drawFaceOffSceneSpeech(ctx, theme, faceOff);
   drawFaceOffSceneChoices(ctx, theme, data, faceOff);
   drawFaceOffResultExitButton(ctx, theme, faceOff);
@@ -6651,6 +7732,8 @@ function renderExpedition(ctx, state, data) {
 
   ctx.save();
   applyFaceOffEntryCameraTransform(ctx, run, data, cameraZoom);
+  const weaponKickOffset = getWeaponKickCameraOffset(run);
+  ctx.translate(weaponKickOffset.x, weaponKickOffset.y);
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
   ctx.scale(cameraZoom, cameraZoom);
   drawWorldMegastructures(ctx, run);
@@ -6664,6 +7747,7 @@ function renderExpedition(ctx, state, data) {
   drawBackgroundTiles(ctx, data, run);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
+  drawSpilledLoot(ctx, run);
   drawEntity(ctx, run.encounters.guard, {
     body: "#86a9c7",
     flash: "#eef5ff",
@@ -7139,6 +8223,29 @@ function getObjectiveLinesV3(state, data) {
     return data.world.labObjectives.slice(0, 4);
   }
 
+  const run = state.run;
+  const lootItems = Array.isArray(run.lootInventory) ? run.lootInventory : [];
+  const lootValue = lootItems.reduce((total, item) => total + Math.max(0, Number(item?.value ?? 0)), 0);
+  const rareCount = lootItems.filter((item) => {
+    const rarity = String(item?.rarity || "common");
+    return rarity === "rare" || rarity === "epic" || rarity === "relic";
+  }).length;
+  const objectiveLines = (Array.isArray(run.objectives) ? run.objectives : []).map((objective) => {
+    let current = lootItems.length;
+    if (objective.type === "lootValue") {
+      current = Math.round(lootValue);
+    } else if (objective.type === "rareLoot") {
+      current = rareCount;
+    }
+    const target = Math.max(1, Number(objective.target ?? 1));
+    const prefix = current >= target ? "완료" : "목표";
+    return `${prefix}: ${objective.label || objective.id} ${Math.min(current, target)}/${target}`;
+  });
+  if (objectiveLines.length) {
+    objectiveLines.push(data.extractionGate ? "탈출 지점으로 복귀" : "다음 구역으로 이동");
+    return objectiveLines.slice(0, 4);
+  }
+
   const lines = [];
   if (!state.run.inventory.badge) {
     lines.push("배지 확보");
@@ -7591,16 +8698,114 @@ function drawShelterWorkbenchHudV3(ctx, theme, options = {}) {
   ctx.fillText("하얀 안개와 식생이 들어오는 임시 거점", 452, 462);
 }
 
+function summarizeMetaSecuredLoot(meta) {
+  const items = Array.isArray(meta?.securedLoot) ? meta.securedLoot : [];
+  return items.reduce((summary, item) => {
+    const value = Math.max(0, Number(item?.value ?? 0));
+    const rarity = item?.rarity || "common";
+    summary.count += 1;
+    summary.value += value;
+    summary.rarityCounts[rarity] = (summary.rarityCounts[rarity] || 0) + 1;
+    if (item?.name) {
+      summary.notable.push(item);
+    }
+    return summary;
+  }, { count: 0, value: 0, rarityCounts: {}, notable: [] });
+}
+
+function drawShelterSecuredLootPanel(ctx, theme, state) {
+  const summary = summarizeMetaSecuredLoot(state.meta);
+  const x = 430;
+  const y = 486;
+  const width = 334;
+  const height = 118;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: "rgba(7, 14, 18, 0.5)",
+    stroke: "rgba(231, 244, 126, 0.18)",
+    innerLines: false,
+  });
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText("SECURED LOOT", x + 22, y + 26);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 18px 'Segoe UI', sans-serif";
+  ctx.fillText(`회수품 ${summary.count}개`, x + 22, y + 54);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "700 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`총 가치 ${Math.round(summary.value)}`, x + 22, y + 78);
+  const latest = summary.notable.slice(-1)[0];
+  ctx.fillStyle = latest ? theme.textMain : theme.textMute;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(latest ? `최근 확보: ${latest.name}` : "탈출에 성공하면 회수품이 이곳에 보관됩니다.", x + 22, y + 100);
+}
+
+function drawShelterUpgradePanel(ctx, theme, state) {
+  const x = 790;
+  const y = 390;
+  const width = 386;
+  const height = 214;
+  const selectedIndex = clamp(Math.floor(state.shelterMenu?.upgradeIndex || 0), 0, Math.max(0, SHELTER_UPGRADES.length - 1));
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 12,
+    fill: "rgba(7, 14, 18, 0.54)",
+    stroke: "rgba(147, 234, 255, 0.2)",
+    innerLines: false,
+    glow: false,
+  });
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 10px 'Segoe UI', sans-serif";
+  ctx.fillText("REFUGE UPGRADES", x + 22, y + 28);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 17px 'Segoe UI', sans-serif";
+  ctx.fillText(`보유 자재 ${Math.max(0, Math.round(state.meta?.bankedMaterials || 0))}`, x + 22, y + 54);
+
+  SHELTER_UPGRADES.forEach((upgrade, index) => {
+    const rowY = y + 76 + index * 42;
+    const level = getShelterUpgradeLevel(state.meta, upgrade.id);
+    const cost = getShelterUpgradeCost(upgrade, level);
+    const active = index === selectedIndex;
+    drawBeveledPanel(ctx, theme, x + 18, rowY, width - 36, 34, {
+      cut: 4,
+      fill: active ? "rgba(29, 52, 60, 0.74)" : "rgba(9, 18, 24, 0.38)",
+      stroke: active ? "rgba(147, 234, 255, 0.38)" : "rgba(255,255,255,0.1)",
+      innerLines: false,
+    });
+    ctx.fillStyle = active ? theme.textMain : theme.textDim;
+    ctx.font = "800 13px 'Segoe UI', sans-serif";
+    ctx.fillText(`${upgrade.label} Lv.${level}/${upgrade.maxLevel}`, x + 32, rowY + 22);
+    ctx.fillStyle = cost === null ? theme.textMute : theme.accent;
+    ctx.font = "700 12px 'Segoe UI', sans-serif";
+    ctx.fillText(cost === null ? "MAX" : `자재 ${cost}`, x + width - 96, rowY + 22);
+  });
+
+  const selected = SHELTER_UPGRADES[selectedIndex] || SHELTER_UPGRADES[0];
+  ctx.fillStyle = theme.textDim;
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(selected?.description || "", x + 22, y + height - 34);
+  ctx.fillStyle = theme.accent;
+  ctx.font = "800 11px 'Segoe UI', sans-serif";
+  ctx.fillText("A/D 선택 · C/F 구매 · W/S 메뉴", x + 22, y + height - 14);
+}
+
 function drawShelterSceneV3(ctx, state, data, options = {}) {
   const theme = getUiTheme(data);
   const rest = options.rest || null;
   const inRunRest = Boolean(rest?.active);
   drawShelterHubBackdrop(ctx, theme, state, data);
   drawShelterMenuV3(ctx, theme, {
-    items: inRunRest ? SHELTER_REST_MENU : SHELTER_HUB_MENU,
-    selectedIndex: inRunRest ? rest.menuIndex : 0,
+    items: inRunRest ? SHELTER_REST_MENU : SHELTER_HUB_UPGRADE_MENU,
+    selectedIndex: inRunRest ? rest.menuIndex : state.shelterMenu?.menuIndex || 0,
   });
   drawShelterWorkbenchHudV3(ctx, theme, { rest });
+  if (!inRunRest) {
+    drawShelterSecuredLootPanel(ctx, theme, state);
+    drawShelterUpgradePanel(ctx, theme, state);
+  }
   drawShelterPartPanelV3(ctx, theme, state, {
     rest,
     actionText: inRunRest ? "W/S 메뉴   Z 선택   C: 밖으로" : undefined,
@@ -8228,7 +9433,26 @@ function drawShotCores(ctx, run, data, x, y) {
 
 function getSelectedArmHud(run, data) {
   const weapons = ensureWeaponLoadoutState(run, data);
-  const side = weapons.selectedSide === "right" ? "right" : "left";
+  const selectedSlot = weapons.selectedSlot === "melee" ? "melee" : weapons.selectedSide === "right" ? "right" : "left";
+  if (selectedSlot === "melee") {
+    return {
+      weapons,
+      side: "melee",
+      arm: { modules: [], reloadTimer: 0, reloadDuration: 0 },
+      stats: {
+        label: "BREACH TOOL",
+        type: "melee",
+        melee: true,
+        equipped: false,
+        ammoType: "melee",
+        magazineSize: 0,
+        reloadDuration: 0,
+      },
+      magazine: 0,
+      reserve: 0,
+    };
+  }
+  const side = selectedSlot;
   const arm = weapons.arms[side];
   const stats = computeArmWeaponStats(data, arm);
   return {
@@ -8272,32 +9496,35 @@ function drawWeaponHudV3(ctx, run, data, theme) {
 
   ctx.fillStyle = "rgba(245,248,251,0.66)";
   ctx.font = "800 10px 'Segoe UI', sans-serif";
-  ctx.fillText("DUAL ARMS", x + 18, y + 18);
+  ctx.fillText("WEAPON SLOTS", x + 18, y + 18);
 
   drawArmSlotChip(ctx, theme, "1 LEFT", hud.side === "left", x + 16, y + 28);
   drawArmSlotChip(ctx, theme, "2 RIGHT", hud.side === "right", x + 88, y + 28);
+  drawArmSlotChip(ctx, theme, "3 TOOL", hud.side === "melee", x + 160, y + 28);
 
   ctx.fillStyle = theme.textMain;
   ctx.font = "800 16px 'Segoe UI', sans-serif";
-  ctx.fillText(hud.stats.label, x + 174, y + 48);
+  ctx.fillText(hud.stats.melee ? hud.stats.label : hud.stats.equipped ? hud.stats.label : "NO WEAPON", x + 236, y + 48);
 
-  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.fillStyle = hud.stats.melee ? theme.accent : hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
   ctx.font = "900 28px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.magazine}/${hud.stats.magazineSize}`, x + 20, y + 82);
+  ctx.fillText(hud.stats.melee ? "HIT" : hud.stats.equipped ? `${hud.magazine}/${hud.stats.magazineSize}` : "--", x + 20, y + 82);
 
   ctx.fillStyle = theme.textDim;
   ctx.font = "800 12px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} ${hud.reserve}`, x + 104, y + 78);
-  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOAD" : "R RELOAD", x + 104, y + 94);
+  ctx.fillText(hud.stats.melee ? "ONE-HIT CRATE" : hud.stats.equipped ? `${hud.stats.ammoType.toUpperCase()} ${hud.reserve}` : "CRAFT / EQUIP", x + 104, y + 78);
+  ctx.fillText(hud.stats.melee ? "LMB / V" : hud.stats.equipped ? ((hud.arm.reloadTimer ?? 0) > 0 ? "RELOAD" : "R RELOAD") : "EMPTY SLOT", x + 104, y + 94);
 
   ctx.fillStyle = "rgba(255,255,255,0.1)";
-  ctx.fillRect(x + 174, y + 64, 112, 7);
-  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
-  ctx.fillRect(x + 174, y + 64, 112 * reloadRatio, 7);
+  ctx.fillRect(x + 236, y + 64, 76, 7);
+  ctx.fillStyle = hud.stats.melee ? theme.accent : !hud.stats.equipped ? "rgba(255,255,255,0.16)" : (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
+  ctx.fillRect(x + 236, y + 64, 76 * reloadRatio, 7);
 
-  const moduleLabels = (hud.arm.modules || []).slice(0, 3).map((moduleId) => data.weaponModules?.[moduleId]?.shortLabel || moduleId.slice(0, 3).toUpperCase());
+  const moduleLabels = hud.stats.equipped
+    ? (hud.arm.modules || []).slice(0, 3).map((moduleId) => data.weaponModules?.[moduleId]?.shortLabel || moduleId.slice(0, 3).toUpperCase())
+    : [];
   moduleLabels.forEach((label, index) => {
-    const chipX = x + 174 + index * 40;
+    const chipX = x + 236 + index * 26;
     drawBeveledPanel(ctx, theme, chipX, y + 78, 34, 20, {
       cut: 5,
       fill: "rgba(255,255,255,0.06)",
@@ -8524,20 +9751,22 @@ function drawOperatorHudV4(ctx, state, data, theme) {
   });
 
   drawEmotionSheetPortrait(ctx, data, getEmotionPortraitIndex(run, data), x + 18, y + 22, portraitSize);
-  drawPortraitHpVeil(ctx, clamp(run.hp / (data.player.maxHp || 100), 0, 1), x + 18, y + 22, portraitSize, run.player.invulnTimer ?? 0);
+  const maxHp = Math.max(1, run.maxHp || data.player.maxHp || 100);
+  const maxBattery = Math.max(1, run.maxBattery || data.player.maxBattery || 100);
+  drawPortraitHpVeil(ctx, clamp(run.hp / maxHp, 0, 1), x + 18, y + 22, portraitSize, run.player.invulnTimer ?? 0);
 
   drawHudPanelLabel(ctx, theme, "TYPE-07A", x + 124, y + 28);
   ctx.fillStyle = status.color;
   ctx.font = "900 18px 'Segoe UI', sans-serif";
   ctx.fillText(status.label, x + 124, y + 52);
 
-  drawMeterBarV4(ctx, theme, x + 124, y + 76, 224, "HP", run.hp / data.player.maxHp, "#fbfefe", {
-    active: run.hp / data.player.maxHp <= 0.3,
+  drawMeterBarV4(ctx, theme, x + 124, y + 76, 224, "HP", run.hp / maxHp, "#fbfefe", {
+    active: run.hp / maxHp <= 0.3,
   });
   drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#729cff", {
     active: run.focusActive,
   });
-  drawMeterBarV4(ctx, theme, x + 124, y + 132, 152, "BAT", run.battery / data.player.maxBattery, theme.accentSecondary);
+  drawMeterBarV4(ctx, theme, x + 124, y + 132, 152, "BAT", run.battery / maxBattery, theme.accentSecondary);
 }
 
 function drawWeaponHudV4(ctx, run, data, theme) {
@@ -8747,10 +9976,12 @@ function drawOperatorHudV5(ctx, state, data, theme) {
   const x = 22;
   const y = 618;
   const portraitSize = 48;
-  const hpRatio = clamp(run.hp / (data.player.maxHp || 100), 0, 1);
+  const maxHp = Math.max(1, run.maxHp || data.player.maxHp || 100);
+  const maxBattery = Math.max(1, run.maxBattery || data.player.maxBattery || 100);
+  const hpRatio = clamp(run.hp / maxHp, 0, 1);
   const focusMax = Math.max(1, run.focusMax ?? 100);
   const focusValue = clamp((run.focus ?? focusMax) / focusMax, 0, 1);
-  const batteryRatio = clamp(run.battery / data.player.maxBattery, 0, 1);
+  const batteryRatio = 1;
 
   drawBeveledPanel(ctx, theme, x, y, 376, 78, {
     cut: 14,
@@ -8768,14 +9999,15 @@ function drawOperatorHudV5(ctx, state, data, theme) {
 
   drawMeterBarV5(ctx, theme, x + 76, y + 32, 118, "HP", hpRatio, hpRatio <= 0.3 ? "#ff9fb4" : "#fbfefe", {
     active: hpRatio <= 0.3,
-    valueText: `${Math.max(0, Math.round(run.hp))}/${data.player.maxHp || 100}`,
+    valueText: `${Math.max(0, Math.round(run.hp))}/${maxHp}`,
   });
   drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#68d8ec", {
     active: run.focusActive,
     valueText: `${Math.round(run.focus ?? focusMax)}/${focusMax}`,
   });
-  drawMeterBarV5(ctx, theme, x + 76, y + 72, 92, "BAT", batteryRatio, theme.accentSecondary, {
-    valueText: `${Math.round(run.battery)}/${data.player.maxBattery}`,
+  drawMeterBarV5(ctx, theme, x + 76, y + 72, 92, "LIGHT", batteryRatio, run.player.lightActive ? theme.accent : theme.accentSecondary, {
+    active: run.player.lightActive,
+    valueText: "INF",
   });
 
   drawQuickSlotsHudV5(ctx, run, theme, x + 224, y + 34);
@@ -8901,7 +10133,44 @@ function drawCompassHudV5(ctx, state, data, theme) {
   ctx.fillStyle = theme.textMute;
   ctx.font = "900 10px 'Segoe UI', sans-serif";
   ctx.fillText(`DAY ${Math.max(1, Math.floor(run.day || 1))} · ${getRunTimePhaseLabel(run)}`, x + width * 0.5, y + 62);
-  ctx.textAlign = "left";
+  const visionPressure = getVisionPressure(run, data);
+  if (visionPressure > 0) {
+    const barX = x + width * 0.5 - 58;
+    const barY = y + 70;
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.fillRect(barX, barY, 116, 4);
+    ctx.fillStyle = run.player.lightActive ? theme.accent : theme.accentSecondary;
+    ctx.fillRect(barX, barY, 116 * clamp(1 - visionPressure * 0.72, 0.18, 1), 4);
+    ctx.fillStyle = run.player.lightActive ? theme.accent : theme.textMute;
+    ctx.font = "900 8px 'Segoe UI', sans-serif";
+    ctx.fillText(run.player.lightActive ? "LIGHT ASSIST" : "VISION CLOSING", x + width * 0.5, y + 84);
+  }
+  const timeInfo = getRunTimePressureInfo(run, data);
+  ctx.fillStyle = "rgba(3, 8, 13, 0.58)";
+  ctx.fillRect(x + 78, y + 52, width - 156, 60);
+  ctx.fillStyle = theme.textMute;
+  ctx.font = "900 10px 'Segoe UI', sans-serif";
+  ctx.fillText(`DAY ${Math.max(1, Math.floor(run.day || 1))} · ${getRunTimePhaseLabel(run)} · ${formatRunClock(run.time)}`, x + width * 0.5, y + 64);
+  ctx.fillStyle = timeInfo.urgent ? theme.accent : theme.textMute;
+  ctx.font = "900 9px 'Segoe UI', sans-serif";
+  ctx.fillText(timeInfo.label, x + width * 0.5, y + 78);
+  const timeBarX = x + width * 0.5 - 58;
+  const timeBarY = y + 84;
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(timeBarX, timeBarY, 116, 4);
+  ctx.fillStyle = timeInfo.urgent ? theme.accent : theme.accentSecondary;
+  ctx.fillRect(timeBarX, timeBarY, 116 * clamp(timeInfo.progress, 0, 1), 4);
+  if (visionPressure > 0) {
+    const visionBarX = x + width * 0.5 - 58;
+    const visionBarY = y + 96;
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.fillRect(visionBarX, visionBarY, 116, 4);
+    ctx.fillStyle = run.player.lightActive ? theme.accent : theme.accentSecondary;
+    ctx.fillRect(visionBarX, visionBarY, 116 * clamp(1 - visionPressure * 0.72, 0.18, 1), 4);
+    ctx.fillStyle = run.player.lightActive ? theme.accent : theme.textMute;
+    ctx.font = "900 8px 'Segoe UI', sans-serif";
+    ctx.fillText(run.player.lightActive ? "LIGHT ASSIST" : "VISION CLOSING", x + width * 0.5, y + 110);
+  }
   ctx.restore();
 }
 
@@ -9974,6 +11243,51 @@ function drawHudV5(ctx, state, data) {
   drawRunMapOverlay(ctx, state, data, theme);
 }
 
+function formatLootRarityCounts(counts = {}) {
+  const order = ["relic", "epic", "rare", "uncommon", "common"];
+  const labels = {
+    relic: "RELIC",
+    epic: "EPIC",
+    rare: "RARE",
+    uncommon: "UNCOMMON",
+    common: "COMMON",
+  };
+  const parts = order
+    .filter((rarity) => counts[rarity] > 0)
+    .map((rarity) => `${labels[rarity]} ${counts[rarity]}`);
+  return parts.length ? parts.join(" · ") : "회수품 없음";
+}
+
+function getResultLootLines(summary, isFailure = false) {
+  const loot = isFailure ? summary?.lostLoot : summary?.securedLoot;
+  if (!loot || !loot.itemCount) {
+    return [isFailure ? "분실 회수품 없음" : "확보 회수품 없음"];
+  }
+  const lines = [
+    `${isFailure ? "분실" : "확보"} 회수품 ${loot.itemCount}개 · 가치 ${loot.totalValue}`,
+    formatLootRarityCounts(loot.rarityCounts),
+  ];
+  (loot.notableItems || []).slice(0, 3).forEach((item) => {
+    lines.push(`${String(item.rarity || "common").toUpperCase()} · ${item.name} x${item.quantity ?? 1}`);
+  });
+  return lines;
+}
+
+function getResultObjectiveLines(summary) {
+  const objectives = summary?.objectives;
+  if (!objectives?.entries?.length) {
+    return ["런 목표 없음"];
+  }
+  const lines = [
+    `목표 완료 ${objectives.completedCount}/${objectives.totalCount} · 보너스 자재 ${objectives.rewardMaterials}`,
+  ];
+  objectives.entries.slice(0, 3).forEach((objective) => {
+    const current = Math.min(Math.round(objective.current), objective.target);
+    lines.push(`${objective.complete ? "완료" : "미완"} · ${objective.label} ${current}/${objective.target}`);
+  });
+  return lines;
+}
+
 function drawResultsSceneV3(ctx, state, data, isFailure = false) {
   const theme = getUiTheme(data);
   const layout = getUiLayoutV3(data);
@@ -10023,15 +11337,25 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
   const chips = [];
   if (isMovementLab(data)) {
     chips.push({ label: "자재", value: String(state.resultSummary?.materials || 0) });
+    chips.push({ label: "확보품", value: String(state.resultSummary?.securedLoot?.itemCount || 0) });
     chips.push({ label: "시간대", value: state.resultSummary?.timePhase === "night" ? "야간" : state.resultSummary?.timePhase === "dusk" ? "황혼" : "주간" });
     chips.push({ label: "상태", value: isFailure ? "다시 시작" : "검증 완료" });
   } else if (isFailure) {
     chips.push({ label: "손실", value: String(state.resultSummary?.lostMaterials || 0) });
+    chips.push({ label: "분실품", value: String(state.resultSummary?.lostLoot?.itemCount || 0) });
     chips.push({ label: "원인", value: state.resultSummary?.reason === "sanity" ? "정신 붕괴" : "체력 소진" });
   } else {
     chips.push({ label: "자재", value: String(state.resultSummary?.materials || 0) });
+    chips.push({ label: "확보품", value: String(state.resultSummary?.securedLoot?.itemCount || 0) });
     chips.push({ label: "신뢰", value: String(state.resultSummary?.trustDelta || 0) });
     chips.push({ label: "야간", value: state.resultSummary?.nightReached ? "도달" : "미도달" });
+  }
+
+  if (state.resultSummary?.objectives) {
+    chips.splice(2, 0, {
+      label: "목표",
+      value: `${state.resultSummary.objectives.completedCount || 0}/${state.resultSummary.objectives.totalCount || 0}`,
+    });
   }
 
   chips.forEach((chip, index) => {
@@ -10062,7 +11386,15 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
         `의식형 ${formatOutcome(state.resultSummary?.outcomes?.ritualist)}`,
       ];
 
-  detailLines.forEach((line, index) => {
+  if (isMovementLab(data)) {
+    detailLines.splice(1, detailLines.length - 1, ...getResultLootLines(state.resultSummary, isFailure));
+  } else if (isFailure) {
+    detailLines.splice(0, detailLines.length, "이번 런의 획득물은 확보되지 않았습니다.", ...getResultLootLines(state.resultSummary, true), ...getResultObjectiveLines(state.resultSummary));
+  } else {
+    detailLines.unshift(...getResultLootLines(state.resultSummary, false), ...getResultObjectiveLines(state.resultSummary));
+  }
+
+  detailLines.slice(0, 5).forEach((line, index) => {
     ctx.fillStyle = index === 0 ? theme.textMain : theme.textDim;
     ctx.font = "17px 'Segoe UI', sans-serif";
     ctx.fillText(line, 192, 392 + index * 34);

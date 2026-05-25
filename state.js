@@ -31,6 +31,8 @@ const CAMERA_FOCUS_Y = 360 / CAMERA_SCREEN_HEIGHT;
 const DEFAULT_META = {
   trust: 0,
   bankedMaterials: 0,
+  securedLoot: [],
+  upgrades: {},
   unlockedAbilities: [],
   storyFlags: [],
   partInventory: [],
@@ -43,6 +45,66 @@ const DEFAULT_META = {
   lastOutcome: null,
   completedRuns: 0,
 };
+
+export const SHELTER_UPGRADES = [
+  {
+    id: "reinforcedVest",
+    name: "Reinforced Vest",
+    label: "방호 조끼",
+    description: "다음 런부터 최대 HP가 증가합니다.",
+    maxLevel: 3,
+    baseCost: 60,
+    costStep: 45,
+    stat: "maxHp",
+    valuePerLevel: 15,
+  },
+  {
+    id: "batteryCell",
+    name: "Battery Cell",
+    label: "배터리 셀",
+    description: "다음 런부터 최대 배터리가 증가합니다.",
+    maxLevel: 3,
+    baseCost: 50,
+    costStep: 40,
+    stat: "maxBattery",
+    valuePerLevel: 18,
+  },
+  {
+    id: "fieldPack",
+    name: "Field Pack",
+    label: "필드 팩",
+    description: "회수품 적재 한도가 증가합니다.",
+    maxLevel: 3,
+    baseCost: 45,
+    costStep: 35,
+    stat: "lootCapacity",
+    valuePerLevel: 4,
+  },
+];
+
+const RUN_OBJECTIVE_POOL = [
+  {
+    id: "secure-items",
+    label: "회수품 확보",
+    type: "lootCount",
+    target: 2,
+    rewardMaterials: 30,
+  },
+  {
+    id: "secure-value",
+    label: "가치 확보",
+    type: "lootValue",
+    target: 100,
+    rewardMaterials: 40,
+  },
+  {
+    id: "secure-rare",
+    label: "희귀품 확보",
+    type: "rareLoot",
+    target: 1,
+    rewardMaterials: 45,
+  },
+];
 
 const MAX_CG_PHOTOS = 12;
 
@@ -102,6 +164,32 @@ function createShelterRestState() {
 
 function clampValue(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function createPlayerBodyStatus(data) {
+  const defaults = {
+    head: { label: "HEAD", hp: 100, maxHp: 100 },
+    core: { label: "CORE", hp: 100, maxHp: 100 },
+    leftArm: { label: "LEFT ARM", hp: 100, maxHp: 100 },
+    rightArm: { label: "RIGHT ARM", hp: 100, maxHp: 100 },
+    legs: { label: "LEGS", hp: 100, maxHp: 100 },
+  };
+  const configured = data.player?.bodyStatus || {};
+  return Object.fromEntries(
+    Object.entries(defaults).map(([key, fallback]) => {
+      const source = configured[key] || {};
+      const maxHp = Math.max(1, Number(source.maxHp ?? fallback.maxHp));
+      const hp = clampValue(Number(source.hp ?? fallback.hp), 0, maxHp);
+      return [key, {
+        label: source.label || fallback.label,
+        hp,
+        maxHp,
+        damaged: hp < maxHp,
+        broken: hp <= 0,
+        recentHit: 0,
+      }];
+    }),
+  );
 }
 
 function getCameraConfig(data) {
@@ -298,6 +386,7 @@ function createLootCrateState(definition, data, index) {
     : data.lootTables?.[definition.lootTable] || [];
   const items = tableItems.map((item, itemIndex) => createLootItemState(item, itemIndex));
   const searchTime = Math.max(0.2, Number(definition.searchTime ?? 0.75 + items.length * 0.18));
+  const maxHp = Math.max(1, Number(definition.maxHp ?? definition.hp ?? 48));
   items.forEach((item, itemIndex) => {
     if (item.revealDelay === null) {
       item.revealDelay = Math.min(searchTime * 0.92, (itemIndex + 1) * (searchTime / (items.length + 1)));
@@ -310,8 +399,13 @@ function createLootCrateState(definition, data, index) {
     width: Math.max(24, Number(definition.width ?? 72)),
     height: Math.max(24, Number(definition.height ?? 48)),
     label: definition.label || "Supply cache",
-    prompt: definition.prompt || "E: Open cache",
+    prompt: definition.prompt || "F: Open cache",
+    maxHp,
+    hp: Math.max(0, Math.min(maxHp, Number(definition.hp ?? maxHp))),
     opened: false,
+    broken: false,
+    spilled: false,
+    hitFlash: 0,
     searchTime,
     searchProgress: 0,
     scanComplete: items.length === 0,
@@ -367,6 +461,7 @@ export function createLevelRuntimeState(data) {
     dodgeFx: [],
     playerBullets: [],
     damageNumbers: [],
+    spilledLoot: [],
     faceOff: {
       active: false,
       targetId: null,
@@ -428,6 +523,13 @@ export function loadMetaState() {
     return {
       trust: Number.isFinite(parsed.trust) ? parsed.trust : DEFAULT_META.trust,
       bankedMaterials: Number.isFinite(parsed.bankedMaterials) ? parsed.bankedMaterials : DEFAULT_META.bankedMaterials,
+      securedLoot: Array.isArray(parsed.securedLoot)
+        ? parsed.securedLoot
+          .map((item) => (item && typeof item === "object" ? { ...item } : null))
+          .filter(Boolean)
+          .slice(-120)
+        : [],
+      upgrades: normalizeMetaUpgrades(parsed.upgrades),
       unlockedAbilities: Array.isArray(parsed.unlockedAbilities) ? parsed.unlockedAbilities.map(String) : [],
       storyFlags: Array.isArray(parsed.storyFlags) ? parsed.storyFlags.map(String) : [],
       partInventory: Array.isArray(parsed.partInventory) ? parsed.partInventory.map((part) => ({ ...part })) : [],
@@ -446,18 +548,78 @@ export function saveMetaState(meta) {
   window.localStorage.setItem(SAVE_KEY, JSON.stringify(meta));
 }
 
+export function normalizeMetaUpgrades(upgrades = {}) {
+  const source = upgrades && typeof upgrades === "object" ? upgrades : {};
+  return SHELTER_UPGRADES.reduce((normalized, upgrade) => {
+    normalized[upgrade.id] = Math.max(0, Math.min(
+      upgrade.maxLevel,
+      Math.floor(Number(source[upgrade.id] ?? 0)),
+    ));
+    return normalized;
+  }, {});
+}
+
+export function getShelterUpgradeLevel(meta, upgradeId) {
+  const upgrades = normalizeMetaUpgrades(meta?.upgrades);
+  return upgrades[upgradeId] || 0;
+}
+
+export function getShelterUpgradeCost(upgrade, level) {
+  if (!upgrade || level >= upgrade.maxLevel) {
+    return null;
+  }
+  return Math.max(0, Math.round(upgrade.baseCost + upgrade.costStep * level));
+}
+
+function createRunObjectives(meta = {}) {
+  const runIndex = Math.max(0, Math.floor(Number(meta.completedRuns ?? 0)));
+  const objectives = [
+    RUN_OBJECTIVE_POOL[runIndex % RUN_OBJECTIVE_POOL.length],
+    RUN_OBJECTIVE_POOL[(runIndex + 1) % RUN_OBJECTIVE_POOL.length],
+  ];
+  return objectives.map((objective) => ({ ...objective }));
+}
+
 export function hasUnlocked(meta, abilityId) {
   return meta.unlockedAbilities.includes(abilityId);
 }
 
 const ARM_SIDES = ["left", "right"];
+const LEGACY_DEFAULT_LEFT_ARM_ID = "shotgun-arm-a";
+const LEGACY_DEFAULT_RIGHT_ARM_ID = "pistol-arm-a";
+const LEGACY_DEFAULT_LEFT_MODULES = ["recoil-amplifier", "impact-barrier", "spread-reducer"];
+const LEGACY_DEFAULT_RIGHT_MODULES = ["magazine-extender", "knockdown-booster"];
+
+function hasSameModules(modules, expected) {
+  const source = Array.isArray(modules) ? modules : [];
+  return source.length === expected.length && expected.every((moduleId, index) => source[index] === moduleId);
+}
+
+function migrateLegacyDefaultArmState(side, armState, fallbackArm) {
+  if (side === "left"
+    && !fallbackArm.armId
+    && armState?.armId === LEGACY_DEFAULT_LEFT_ARM_ID
+    && hasSameModules(armState.modules, LEGACY_DEFAULT_LEFT_MODULES)) {
+    return { ...fallbackArm };
+  }
+  if (side === "right"
+    && fallbackArm.armId === LEGACY_DEFAULT_RIGHT_ARM_ID
+    && armState?.armId === LEGACY_DEFAULT_RIGHT_ARM_ID
+    && hasSameModules(armState.modules, LEGACY_DEFAULT_RIGHT_MODULES)) {
+    return {
+      ...armState,
+      modules: [],
+    };
+  }
+  return armState;
+}
 
 function getDefaultArmState(data, side) {
   const defaultLoadout = data.defaultLoadout || {};
   const defaultArm = defaultLoadout.arms?.[side] || {};
   return {
     side,
-    armId: defaultArm.armId || (side === "right" ? "pistol-arm-a" : "shotgun-arm-a"),
+    armId: defaultArm.armId ?? (side === "right" ? "pistol-arm-a" : null),
     magazine: defaultArm.magazine ?? null,
     modules: Array.isArray(defaultArm.modules) ? [...defaultArm.modules].slice(0, 3) : [],
     reloadTimer: 0,
@@ -551,6 +713,35 @@ export function createIdentityState(meta, data) {
 
 export function computeArmWeaponStats(data, armState = {}) {
   const weapon = getArmWeapon(data, armState.armId) || {};
+  if (!armState?.armId || !weapon.id) {
+    return {
+      id: armState?.armId || `empty-${armState?.side || "arm"}`,
+      label: "EMPTY",
+      type: "empty",
+      equipped: false,
+      fireMode: "semi",
+      aimUi: "empty",
+      ammoType: "none",
+      magazineSize: 0,
+      reloadDuration: 0,
+      damage: 0,
+      humanoidDamage: 0,
+      droneDamage: 0,
+      spread: 0,
+      recoil: 0,
+      fireCooldown: 0,
+      range: 0,
+      hitRadius: 0,
+      headshotMultiplier: 1,
+      knockdownPower: 0,
+      staggerDamage: 0,
+      airActionCost: 0,
+      missileCount: 0,
+      barrierDuration: 0,
+      barrierStrength: 0,
+      modules: [],
+    };
+  }
   const modules = Array.isArray(armState.modules) ? armState.modules.slice(0, 3) : [];
   const attachedPart = getPartDefinition(data, armState.attachedPartId);
   const attachedEffects = attachedPart?.statModifiers || {};
@@ -600,6 +791,7 @@ export function computeArmWeaponStats(data, armState = {}) {
     id: weapon.id || armState.armId || "unknown-arm",
     label: weapon.label || armState.armId || "Arm",
     type: weapon.type || "shotgun",
+    equipped: true,
     fireMode: weapon.fireMode === "auto" ? "auto" : "semi",
     aimUi: weapon.aimUi || weapon.type || "shotgun",
     ammoType: weapon.ammoType || "shell",
@@ -638,9 +830,11 @@ export function createWeaponLoadoutState(data) {
       armState.attachedPartId = attachedPart.id;
     }
     const stats = computeArmWeaponStats(data, armState);
-    armState.magazine = Number.isFinite(armState.magazine)
-      ? clampValue(Math.floor(armState.magazine), 0, stats.magazineSize)
-      : stats.magazineSize;
+    armState.magazine = stats.equipped
+      ? Number.isFinite(armState.magazine)
+        ? clampValue(Math.floor(armState.magazine), 0, stats.magazineSize)
+        : stats.magazineSize
+      : 0;
     arms[side] = armState;
     if (!Number.isFinite(reserveAmmo[stats.ammoType])) {
       reserveAmmo[stats.ammoType] = 0;
@@ -648,7 +842,8 @@ export function createWeaponLoadoutState(data) {
   });
 
   return {
-    selectedSide: defaultLoadout.selectedSide === "right" ? "right" : "left",
+    selectedSide: defaultLoadout.selectedSide === "left" ? "left" : "right",
+    selectedSlot: defaultLoadout.selectedSide === "left" ? "left" : "right",
     reserveAmmo,
     arms,
   };
@@ -658,10 +853,14 @@ export function ensureWeaponLoadoutState(run, data) {
   const fallback = createWeaponLoadoutState(data);
   if (!run.weapons || typeof run.weapons !== "object") {
     run.weapons = fallback;
+    run.weapons.selectedSlot = run.weapons.selectedSide;
     return run.weapons;
   }
 
   run.weapons.selectedSide = run.weapons.selectedSide === "right" ? "right" : "left";
+  run.weapons.selectedSlot = ["left", "right", "melee"].includes(run.weapons.selectedSlot)
+    ? run.weapons.selectedSlot
+    : run.weapons.selectedSide;
   run.weapons.reserveAmmo = {
     ...fallback.reserveAmmo,
     ...(run.weapons.reserveAmmo || {}),
@@ -672,9 +871,10 @@ export function ensureWeaponLoadoutState(run, data) {
 
   ARM_SIDES.forEach((side) => {
     const fallbackArm = fallback.arms[side];
+    const savedArm = migrateLegacyDefaultArmState(side, run.weapons.arms[side], fallbackArm);
     const armState = {
       ...fallbackArm,
-      ...(run.weapons.arms[side] || {}),
+      ...(savedArm || {}),
     };
     armState.side = side;
     armState.modules = Array.isArray(armState.modules) ? armState.modules.slice(0, 3) : [...fallbackArm.modules];
@@ -683,20 +883,37 @@ export function ensureWeaponLoadoutState(run, data) {
     armState.fireCooldownTimer = Math.max(0, Number(armState.fireCooldownTimer ?? 0));
 
     const stats = computeArmWeaponStats(data, armState);
-    armState.magazine = Number.isFinite(armState.magazine)
-      ? clampValue(Math.floor(armState.magazine), 0, stats.magazineSize)
-      : stats.magazineSize;
+    armState.magazine = stats.equipped
+      ? Number.isFinite(armState.magazine)
+        ? clampValue(Math.floor(armState.magazine), 0, stats.magazineSize)
+        : stats.magazineSize
+      : 0;
     if (!Number.isFinite(run.weapons.reserveAmmo[stats.ammoType])) {
       run.weapons.reserveAmmo[stats.ammoType] = fallback.reserveAmmo[stats.ammoType] ?? 0;
     }
     run.weapons.arms[side] = armState;
   });
 
+  const selectedArm = run.weapons.arms[run.weapons.selectedSide];
+  if (!computeArmWeaponStats(data, selectedArm).equipped) {
+    const equippedSide = ARM_SIDES.find((side) => computeArmWeaponStats(data, run.weapons.arms[side]).equipped);
+    if (equippedSide) {
+      run.weapons.selectedSide = equippedSide;
+      if (run.weapons.selectedSlot !== "melee") {
+        run.weapons.selectedSlot = equippedSide;
+      }
+    }
+  }
+
   return run.weapons;
 }
 
 export function createRunState(data, meta) {
   data.__meta = meta || {};
+  const upgrades = normalizeMetaUpgrades(meta?.upgrades);
+  const getUpgradeBonus = (stat) => SHELTER_UPGRADES
+    .filter((upgrade) => upgrade.stat === stat)
+    .reduce((total, upgrade) => total + (upgrades[upgrade.id] || 0) * upgrade.valuePerLevel, 0);
   const movement = data.player.movement;
   const maxDashCount = Math.max(1, Math.floor(movement.maxDashCount ?? 1));
   const startEntrance = (data.entrances || []).find((entry) => entry.id === "start")
@@ -717,6 +934,7 @@ export function createRunState(data, meta) {
     movementState: MOVEMENT_STATES.GROUNDED,
     attackCooldown: 0,
     attackWindow: 0,
+    attackToolActive: false,
     attackHits: new Set(),
     attackDamage: data.player.attackDamage,
     lightActive: false,
@@ -833,16 +1051,25 @@ export function createRunState(data, meta) {
   const currentLevelId = data.currentLevelId || data.defaultLevelId || "movement-lab-01";
 
   return {
-    hp: data.player.maxHp,
-    sanity: data.player.startingSanity,
-    battery: data.player.maxBattery,
+    maxHp: Math.max(1, Number(data.player.maxHp ?? 100) + getUpgradeBonus("maxHp")),
+    maxSanity: Math.max(1, Number(data.player.maxSanity ?? 100)),
+    maxBattery: Math.max(1, Number(data.player.maxBattery ?? 100) + getUpgradeBonus("maxBattery")),
+    hp: Math.max(1, Number(data.player.maxHp ?? 100) + getUpgradeBonus("maxHp")),
+    sanity: Math.min(
+      Math.max(1, Number(data.player.maxSanity ?? 100)),
+      Math.max(1, Number(data.player.startingSanity ?? data.player.maxSanity ?? 100)),
+    ),
+    battery: Math.max(1, Number(data.player.maxBattery ?? 100) + getUpgradeBonus("maxBattery")),
     materials: 0,
     lootWeight: 0,
-    lootCapacity: Math.max(1, Number(data.player.lootCapacity ?? 16)),
+    lootCapacity: Math.max(1, Number(data.player.lootCapacity ?? 16) + getUpgradeBonus("lootCapacity")),
+    objectives: createRunObjectives(meta || {}),
     focus: 100,
     focusMax: 100,
     focusDepleted: false,
     focusActive: false,
+    playerBody: createPlayerBodyStatus(data),
+    playerBodyVersion: 2,
     day: 1,
     time: 0,
     timePhase: "day",
@@ -873,6 +1100,8 @@ export function createRunState(data, meta) {
     },
     inventoryOverlay: {
       active: false,
+      category: "all",
+      selectedIndex: 0,
     },
     shelterRest: createShelterRestState(),
     weapons: createWeaponLoadoutState(data),
@@ -969,7 +1198,9 @@ export function createRunState(data, meta) {
     recoilFx: [],
     weaponMissiles: [],
     weaponBarriers: [],
+    weaponKick: null,
     particles: [],
+    spilledLoot: [],
     afterimages: [],
     recoilFocusAfterimages: [],
     recoilFocusAfterimageTimer: 0,
@@ -995,6 +1226,8 @@ export function createRunState(data, meta) {
     metaSnapshot: {
       trust: meta.trust,
       bankedMaterials: meta.bankedMaterials,
+      securedLootCount: Array.isArray(meta.securedLoot) ? meta.securedLoot.length : 0,
+      upgrades,
       unlockedAbilities: [...meta.unlockedAbilities],
     },
   };
@@ -1027,6 +1260,10 @@ export function createInitialState(data) {
       menuIndex: 0,
       confirmingNewRun: false,
       lastHasRun: null,
+    },
+    shelterMenu: {
+      menuIndex: 0,
+      upgradeIndex: 0,
     },
     sceneTimer: 0,
     debugFrame: 0,

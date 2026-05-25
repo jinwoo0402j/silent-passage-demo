@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260520-shelter-photo-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260523-loot-spill-v2";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -15,7 +15,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260521-faceoff-event-store-v1";
+} from "./level-store.js?v=20260523-loot-spill-v2";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -2366,6 +2366,7 @@ function renderSelectionFields(editor, dom) {
     addNumber("Width", "width", entity.width, { min: 24 });
     addNumber("Height", "height", entity.height, { min: 24 });
     addText("Prompt", "prompt", entity.prompt || "");
+    addNumber("HP", "maxHp", entity.maxHp ?? entity.hp ?? 48, { min: 1 });
     addText("Loot Table", "lootTable", entity.lootTable || "streetCache");
     addNumber("Search Time", "searchTime", entity.searchTime ?? 0.75, { min: 0, step: 0.05 });
   } else if (editor.selected.kind === "spawn") {
@@ -3875,7 +3876,8 @@ function placeLootCrateAt(editor, dom, point) {
     width,
     height,
     label: "Supply cache",
-    prompt: "E: Open cache",
+    prompt: "F: Open cache",
+    maxHp: 48,
     lootTable: "streetCache",
     searchTime: 0.75,
     items: [createDefaultCrateItem(crateId)],
@@ -4674,6 +4676,16 @@ function snapEntireLevelToScale(editor, dom) {
         height: Math.max(step, snapValue(prop.height, step)),
       }
       : {}),
+  }));
+
+  editor.data.lootCrates = (editor.data.lootCrates || []).map((crate) => ({
+    ...crate,
+    x: snapValue(crate.x, step),
+    y: snapValue(crate.y, step),
+    width: Math.max(tile, snapValue(crate.width, step)),
+    height: Math.max(tile, snapValue(crate.height, step)),
+    maxHp: Math.max(1, Math.round(Number(crate.maxHp ?? crate.hp ?? 48))),
+    prompt: crate.prompt || "F: Open cache",
   }));
 
   editor.snap = step;

@@ -435,7 +435,8 @@ function sanitizeLootCrate(crate, index, baseCrate = null) {
     width: 72,
     height: 48,
     label: "Supply cache",
-    prompt: "E: Open cache",
+    prompt: "F: Open cache",
+    maxHp: 48,
     lootTable: "streetCache",
     searchTime: 0.75,
   };
@@ -449,7 +450,8 @@ function sanitizeLootCrate(crate, index, baseCrate = null) {
     width: safeNumber(source.width, fallback.width, 24),
     height: safeNumber(source.height, fallback.height, 24),
     label: safeString(source.label, fallback.label || "Supply cache"),
-    prompt: safeString(source.prompt, fallback.prompt || "E: Open cache"),
+    prompt: safeString(source.prompt, fallback.prompt || "F: Open cache"),
+    maxHp: safeNumber(source.maxHp ?? source.hp, fallback.maxHp ?? fallback.hp ?? 48, 1),
     lootTable: safeString(source.lootTable, fallback.lootTable || "streetCache"),
     searchTime: safeNumber(source.searchTime, fallback.searchTime ?? 0.75, 0),
   };
@@ -1661,13 +1663,34 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
     return next;
   }
 
+  const fetchJson = async (url) => {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), 1800)
+      : null;
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      if (!response.ok) {
+        return { ok: false, status: response.status, document: null };
+      }
+      return { ok: true, status: response.status, document: await response.json() };
+    } finally {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+    }
+  };
+
   let manifest = null;
   try {
-    const response = await fetch(manifestUrl, { cache: "no-store" });
+    const response = await fetchJson(manifestUrl);
     if (!response.ok) {
       return next;
     }
-    manifest = await response.json();
+    manifest = response.document;
   } catch (error) {
     console.warn("Failed to load level manifest", error);
     return next;
@@ -1677,12 +1700,12 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
   for (const entry of entries) {
     const entryUrl = toManifestUrl(entry.path, manifestUrl);
     try {
-      const response = await fetch(entryUrl, { cache: "no-store" });
+      const response = await fetchJson(entryUrl);
       if (!response.ok) {
         console.warn(`Failed to load external level ${entry.path}: ${response.status}`);
         continue;
       }
-      const document = await response.json();
+      const document = response.document;
       getExternalLevelDocuments(document, getExternalLevelFallbackId(entry.path)).forEach((levelDocument) => {
         const levelId = safeId(levelDocument.levelId || levelDocument.id, getExternalLevelFallbackId(entry.path));
         const source = {

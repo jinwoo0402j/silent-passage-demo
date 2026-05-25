@@ -1,15 +1,19 @@
-import {
+﻿import {
   MOVEMENT_STATES,
   SCENES,
+  SHELTER_UPGRADES,
   computeArmWeaponStats,
   createLevelRuntimeState,
   createRunState,
   ensureWeaponLoadoutState,
   ensurePartInventory,
+  getShelterUpgradeCost,
+  getShelterUpgradeLevel,
   hasUnlocked,
+  normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260520-shelter-photo-v1";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260521-faceoff-event-store-v1";
+} from "./state.js?v=20260523-body-status-v7";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260523-body-status-v7";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -18,7 +22,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260520-shelter-photo-v1";
+} from "./save-game.js?v=20260523-body-status-v7";
 import {
   approach,
   clamp,
@@ -51,9 +55,10 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
-const INTERACT_KEYS = ["KeyZ"];
-const ATTACK_KEYS = ["KeyV", "KeyF"];
+const INTERACT_KEYS = ["KeyZ", "KeyF"];
+const ATTACK_KEYS = ["KeyV"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
+const INVENTORY_KEYS = ["Tab"];
 const NEW_RUN_KEYS = ["KeyN"];
 const TITLE_MENU_ITEMS = ["new", "continue"];
 const TITLE_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
@@ -70,17 +75,36 @@ const NIGHT_TRANSITION_SECONDS = 1.4;
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
+const ARM_MELEE_KEYS = ["Digit3"];
 const ARM_SWITCH_KEYS = ["MouseMiddle"];
+const ARM_WHEEL_PREV_KEYS = ["MouseWheelUp"];
+const ARM_WHEEL_NEXT_KEYS = ["MouseWheelDown"];
 const RELOAD_KEYS = ["KeyR"];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
+const INVENTORY_CATEGORY_KEYS = ["all", "weapon", "ammo", "healing", "material", "misc"];
+const INVENTORY_GRID_COLUMNS = 5;
+const INVENTORY_GRID_ROWS = 4;
+const INVENTORY_PANEL_X = 18;
+const INVENTORY_PANEL_Y = 28;
+const INVENTORY_RIGHT_X = INVENTORY_PANEL_X + 794;
+const INVENTORY_RIGHT_Y = INVENTORY_PANEL_Y + 58;
+const INVENTORY_RIGHT_W = 434;
+const INVENTORY_GRID_GAP = 4;
+const INVENTORY_GRID_CELL = Math.floor((INVENTORY_RIGHT_W - 34 - INVENTORY_GRID_GAP * (INVENTORY_GRID_COLUMNS - 1)) / INVENTORY_GRID_COLUMNS);
+const INVENTORY_GRID_X = INVENTORY_RIGHT_X + 17;
+const INVENTORY_GRID_Y = INVENTORY_RIGHT_Y + 68;
+const INVENTORY_TAB_X = INVENTORY_RIGHT_X + 17;
+const INVENTORY_TAB_Y = INVENTORY_RIGHT_Y + 14;
+const INVENTORY_TAB_W = (INVENTORY_RIGHT_W - 34) / INVENTORY_CATEGORY_KEYS.length;
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
 const SHELTER_MENU_ITEMS = ["photo", "records", "background", "rest", "exit"];
+const SHELTER_HUB_MENU_ITEMS = ["upgrade", "exit"];
 const SHELTER_ARRIVAL_SECONDS = 2.4;
 const SHELTER_EXIT_COOLDOWN_SECONDS = 1.2;
-const SHELTER_NIGHT_LOCK_MESSAGE = "밤에만 피난처 가능";
-const SHELTER_COOLDOWN_MESSAGE = "피난처 문이 닫히는 중";
+const SHELTER_NIGHT_LOCK_MESSAGE = "밤에만 피난처로 이동 가능.";
+const SHELTER_COOLDOWN_MESSAGE = "피난처 문이 닫히는 중.";
 const SHELTER_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
 const SHELTER_MENU_DOWN_KEYS = ["ArrowDown", "KeyS"];
 const SHELTER_VIEW_LEFT_KEYS = ["ArrowLeft", "KeyA"];
@@ -272,7 +296,210 @@ function isMapOverlayBlocked(state, run) {
   return state.scene !== SCENES.EXPEDITION
     || state.liveEdit?.active
     || run?.faceOff?.active
-    || run?.loot?.active;
+    || run?.loot?.active
+    || run?.inventoryOverlay?.active;
+}
+
+function isInventoryOverlayBlocked(state, run) {
+  return state.scene !== SCENES.EXPEDITION
+    || state.liveEdit?.active
+    || run?.faceOff?.active
+    || run?.loot?.active
+    || run?.mapOverlay?.active;
+}
+
+function getInventoryOverlayState(run) {
+  const overlay = run.inventoryOverlay || (run.inventoryOverlay = {});
+  overlay.active = Boolean(overlay.active);
+  overlay.category = INVENTORY_CATEGORY_KEYS.includes(overlay.category) ? overlay.category : "all";
+  overlay.selectedIndex = Math.max(0, Math.floor(Number(overlay.selectedIndex ?? 0)));
+  return overlay;
+}
+
+function countInventoryOverlayItems(run, data) {
+  const overlay = getInventoryOverlayState(run);
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const selectedArm = weapons.arms?.[weapons.selectedSide] || weapons.arms?.right || {};
+  const stats = computeArmWeaponStats(data, selectedArm);
+  const reserve = Math.max(0, Math.floor(weapons.reserveAmmo?.[stats.ammoType] ?? 0));
+  const materials = Math.max(0, Math.round(run.materials ?? 0));
+  const lootItems = Array.isArray(run.lootInventory) ? run.lootInventory : [];
+  const inventoryItems = Array.isArray(run.inventory?.items) ? run.inventory.items : [];
+  const base = [
+    { category: "weapon", label: stats.equipped ? stats.label : "M-9 PISTOL" },
+    { category: "ammo", label: "9MM", count: reserve },
+    { category: "healing", label: "MED", count: 3 },
+    { category: "misc", label: "CELL", count: 2 },
+    { category: "material", label: "PARTS", count: Math.max(1, materials || 12) },
+    { category: "healing", label: "VIAL", count: 2 },
+    { category: "healing", label: "INJ", count: 1 },
+    { category: "material", label: "MOD", count: 1 },
+    { category: "misc", label: "TAPE", count: 4 },
+    { category: "misc", label: "DOC", count: 9 },
+    ...inventoryItems,
+    ...lootItems,
+  ];
+  const seen = new Set();
+  const filtered = base.filter((item, index) => {
+    if (!item) {
+      return false;
+    }
+    const category = item.category || (item.slot ? "material" : "misc");
+    if (overlay.category !== "all" && category !== overlay.category) {
+      return false;
+    }
+    const key = `${category}:${item.id || item.name || item.label || index}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+  return Math.min(filtered.length, INVENTORY_GRID_COLUMNS * INVENTORY_GRID_ROWS);
+}
+
+function clampInventoryOverlaySelection(run, data) {
+  const overlay = getInventoryOverlayState(run);
+  const count = countInventoryOverlayItems(run, data);
+  overlay.selectedIndex = clamp(overlay.selectedIndex, 0, Math.max(0, count - 1));
+  return count;
+}
+
+function moveInventoryOverlaySelection(run, data, dx, dy) {
+  const overlay = getInventoryOverlayState(run);
+  const count = clampInventoryOverlaySelection(run, data);
+  if (count <= 0) {
+    overlay.selectedIndex = 0;
+    return;
+  }
+  const current = clamp(overlay.selectedIndex, 0, count - 1);
+  const column = current % INVENTORY_GRID_COLUMNS;
+  const row = Math.floor(current / INVENTORY_GRID_COLUMNS);
+  const nextColumn = clamp(column + dx, 0, INVENTORY_GRID_COLUMNS - 1);
+  const nextRow = clamp(row + dy, 0, INVENTORY_GRID_ROWS - 1);
+  overlay.selectedIndex = clamp(nextRow * INVENTORY_GRID_COLUMNS + nextColumn, 0, count - 1);
+}
+
+function hitInventoryOverlayCategory(mx, my) {
+  if (my < INVENTORY_TAB_Y - 8 || my > INVENTORY_TAB_Y + 34) {
+    return null;
+  }
+  const index = Math.floor((mx - INVENTORY_TAB_X) / INVENTORY_TAB_W);
+  return INVENTORY_CATEGORY_KEYS[index] || null;
+}
+
+function hitInventoryOverlayGridIndex(mx, my) {
+  for (let index = 0; index < INVENTORY_GRID_COLUMNS * INVENTORY_GRID_ROWS; index += 1) {
+    const column = index % INVENTORY_GRID_COLUMNS;
+    const row = Math.floor(index / INVENTORY_GRID_COLUMNS);
+    const x = INVENTORY_GRID_X + column * (INVENTORY_GRID_CELL + INVENTORY_GRID_GAP);
+    const y = INVENTORY_GRID_Y + row * (INVENTORY_GRID_CELL + INVENTORY_GRID_GAP);
+    if (mx >= x && mx <= x + INVENTORY_GRID_CELL && my >= y && my <= y + INVENTORY_GRID_CELL) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function updateActiveInventoryOverlayInput(state, data, run) {
+  const overlay = getInventoryOverlayState(run);
+  let interacted = false;
+
+  if (consumeEitherPress(state, ["ArrowLeft", "KeyA"])) {
+    moveInventoryOverlaySelection(run, data, -1, 0);
+    interacted = true;
+  }
+  if (consumeEitherPress(state, ["ArrowRight", "KeyD"])) {
+    moveInventoryOverlaySelection(run, data, 1, 0);
+    interacted = true;
+  }
+  if (consumeEitherPress(state, ["ArrowUp", "KeyW"])) {
+    moveInventoryOverlaySelection(run, data, 0, -1);
+    interacted = true;
+  }
+  if (consumeEitherPress(state, ["ArrowDown", "KeyS"])) {
+    moveInventoryOverlaySelection(run, data, 0, 1);
+    interacted = true;
+  }
+
+  for (let index = 0; index < INVENTORY_CATEGORY_KEYS.length; index += 1) {
+    if (consumeEitherPress(state, [`Digit${index + 1}`])) {
+      overlay.category = INVENTORY_CATEGORY_KEYS[index];
+      overlay.selectedIndex = 0;
+      interacted = true;
+    }
+  }
+
+  if (state.mouse?.primaryJustPressed) {
+    const mx = state.mouse.screenX ?? 0;
+    const my = state.mouse.screenY ?? 0;
+    const category = hitInventoryOverlayCategory(mx, my);
+    if (category) {
+      overlay.category = category;
+      overlay.selectedIndex = 0;
+      interacted = true;
+    } else {
+      const index = hitInventoryOverlayGridIndex(mx, my);
+      if (index >= 0 && index < countInventoryOverlayItems(run, data)) {
+        overlay.selectedIndex = index;
+        interacted = true;
+      }
+    }
+  }
+
+  clampInventoryOverlaySelection(run, data);
+  if (interacted) {
+    setStatus(state, `Inventory: ${overlay.category.toUpperCase()} #${overlay.selectedIndex + 1}`);
+  }
+  return interacted;
+}
+
+function updateInventoryOverlayInput(state, data) {
+  const run = state.run;
+  if (!run?.inventoryOverlay) {
+    return false;
+  }
+  const overlay = getInventoryOverlayState(run);
+
+  if (isInventoryOverlayBlocked(state, run)) {
+    if (overlay.active) {
+      overlay.active = false;
+    }
+    return false;
+  }
+
+  if (overlay.active) {
+    if (consumeEitherPress(state, [...INVENTORY_KEYS, ...LOOT_CLOSE_KEYS])) {
+      overlay.active = false;
+      clearTransientMapInput(state);
+      setStatus(state, "Inventory closed");
+      return true;
+    }
+    updateActiveInventoryOverlayInput(state, data, run);
+    clearTransientMapInput(state);
+    if (run.recoilAim) {
+      run.recoilAim.active = false;
+      run.recoilAim.aiming = false;
+    }
+    run.player.recoilFocusActive = false;
+    setStatus(state, "Inventory");
+    return true;
+  }
+
+  if (consumeEitherPress(state, INVENTORY_KEYS)) {
+    overlay.active = true;
+    clampInventoryOverlaySelection(run, data);
+    clearTransientMapInput(state);
+    if (run.recoilAim) {
+      run.recoilAim.active = false;
+      run.recoilAim.aiming = false;
+    }
+    run.player.recoilFocusActive = false;
+    setStatus(state, "Inventory");
+    return true;
+  }
+
+  return false;
 }
 
 function updateMapOverlayInput(state, data) {
@@ -517,6 +744,12 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
     effect.life -= dt;
     return effect.life > 0;
   });
+  if (run.weaponKick) {
+    run.weaponKick.timer = Math.max(0, (run.weaponKick.timer ?? 0) - visualDt);
+    if (run.weaponKick.timer <= 0) {
+      run.weaponKick = null;
+    }
+  }
 
   if (data) {
     updateTemporaryBlocks(run, dt);
@@ -560,6 +793,7 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
     run.loot.rareSignalTimer = Math.max(0, run.loot.rareSignalTimer - dt);
   }
   (run.lootCrates || []).forEach((crate) => {
+    crate.hitFlash = Math.max(0, (crate.hitFlash ?? 0) - visualDt);
     if (crate.rareSignalTimer > 0) {
       crate.rareSignalTimer = Math.max(0, crate.rareSignalTimer - dt);
     }
@@ -1877,12 +2111,179 @@ function damagePlayer(run, amount, direction, sourceText) {
   if (run.loot?.active) {
     closeLootCrate(run);
   }
-  run.hp = clamp(run.hp - amount, 0, 100);
+  const coreEffects = getPlayerBodyCoreEffects(run);
+  const hpDamage = Math.max(0, Number(amount || 0)) * coreEffects.incomingDamageMultiplier;
+  run.hp = clamp(run.hp - hpDamage, 0, run.maxHp || 100);
+  damagePlayerBodyPart(run, amount, direction);
   run.player.invulnTimer = 0.85;
   run.player.vx = direction * 190;
   run.player.vy = -260;
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+}
+
+function ensurePlayerBodyStatus(run) {
+  const defaults = {
+    head: { label: "HEAD", hp: 100, maxHp: 100 },
+    core: { label: "CORE", hp: 100, maxHp: 100 },
+    leftArm: { label: "LEFT ARM", hp: 100, maxHp: 100 },
+    rightArm: { label: "RIGHT ARM", hp: 100, maxHp: 100 },
+    legs: { label: "LEGS", hp: 100, maxHp: 100 },
+  };
+  const legacyMockHp = { head: 92, core: 76, leftArm: 44, rightArm: 88, legs: 61 };
+  if (!run.playerBodyVersion && run.playerBody && Object.entries(legacyMockHp).every(([key, hp]) => {
+    const part = run.playerBody[key];
+    return part && Number(part.hp) === hp && Number(part.maxHp ?? 100) === 100 && !(Number(part.recentHit) > 0);
+  })) {
+    run.playerBody = {};
+  }
+  run.playerBody = run.playerBody && typeof run.playerBody === "object" ? run.playerBody : {};
+  Object.entries(defaults).forEach(([key, fallback]) => {
+    const source = run.playerBody[key] || {};
+    const maxHp = Math.max(1, Number(source.maxHp ?? fallback.maxHp));
+    const hp = clamp(Number(source.hp ?? fallback.hp), 0, maxHp);
+    run.playerBody[key] = {
+      label: source.label || fallback.label,
+      hp,
+      maxHp,
+      damaged: hp < maxHp,
+      broken: hp <= 0,
+      recentHit: Math.max(0, Number(source.recentHit ?? 0)),
+    };
+  });
+  run.playerBodyVersion = 2;
+  return run.playerBody;
+}
+
+function getPlayerBodyPartRatio(run, key) {
+  const body = ensurePlayerBodyStatus(run);
+  const part = body[key];
+  if (!part) {
+    return 1;
+  }
+  return clamp(Number(part.hp ?? part.maxHp ?? 100) / Math.max(1, Number(part.maxHp ?? 100)), 0, 1);
+}
+
+function stageValue(ratio, normal, damaged, critical, broken) {
+  if (ratio <= 0) {
+    return broken;
+  }
+  if (ratio <= 0.4) {
+    return critical;
+  }
+  if (ratio <= 0.7) {
+    return damaged;
+  }
+  return normal;
+}
+
+function getPlayerBodyMovementEffects(run) {
+  const ratio = getPlayerBodyPartRatio(run, "legs");
+  return {
+    moveMultiplier: stageValue(ratio, 1, 0.88, 0.74, 0.52),
+    sprintMultiplier: stageValue(ratio, 1, 0.86, 0.62, 0),
+    jumpMultiplier: stageValue(ratio, 1, 0.9, 0.78, 0.62),
+    dashMultiplier: stageValue(ratio, 1, 0.86, 0.7, 0.52),
+    dashCooldownMultiplier: stageValue(ratio, 1, 1.12, 1.28, 1.55),
+  };
+}
+
+function getPlayerBodyArmEffects(run, side = null) {
+  const ratio = side === "left"
+    ? getPlayerBodyPartRatio(run, "leftArm")
+    : side === "right"
+      ? getPlayerBodyPartRatio(run, "rightArm")
+      : Math.min(getPlayerBodyPartRatio(run, "leftArm"), getPlayerBodyPartRatio(run, "rightArm"));
+  return {
+    recoilKickMultiplier: stageValue(ratio, 1, 1.18, 1.45, 1.95),
+    spreadMultiplier: stageValue(ratio, 1, 1.12, 1.3, 1.6),
+    reloadDurationMultiplier: stageValue(ratio, 1, 1.12, 1.3, 1.65),
+    fireCooldownMultiplier: stageValue(ratio, 1, 1.06, 1.16, 1.32),
+    meleeCooldownMultiplier: stageValue(ratio, 1, 1.15, 1.35, 1.75),
+  };
+}
+
+function getPlayerBodyHeadEffects(run) {
+  const ratio = getPlayerBodyPartRatio(run, "head");
+  return {
+    visionPenalty: stageValue(ratio, 0, 0.12, 0.24, 0.38),
+    spreadMultiplier: stageValue(ratio, 1, 1.1, 1.25, 1.55),
+    recoilKickMultiplier: stageValue(ratio, 1, 1.08, 1.18, 1.35),
+  };
+}
+
+function getPlayerBodyCoreEffects(run) {
+  const ratio = getPlayerBodyPartRatio(run, "core");
+  return {
+    incomingDamageMultiplier: stageValue(ratio, 1, 1.1, 1.25, 1.45),
+    bleedDamagePerSecond: ratio <= 0 ? 2.5 : 0,
+  };
+}
+
+function getPlayerBodyCombatEffects(run, side = null) {
+  const arm = getPlayerBodyArmEffects(run, side);
+  const head = getPlayerBodyHeadEffects(run);
+  return {
+    recoilKickMultiplier: arm.recoilKickMultiplier * head.recoilKickMultiplier,
+    spreadMultiplier: arm.spreadMultiplier * head.spreadMultiplier,
+    reloadDurationMultiplier: arm.reloadDurationMultiplier,
+    fireCooldownMultiplier: arm.fireCooldownMultiplier,
+    meleeCooldownMultiplier: arm.meleeCooldownMultiplier,
+  };
+}
+
+function applyPlayerBodyMovementPenalties(config, effects) {
+  const adjusted = { ...config };
+  const scaleNumber = (key, multiplier) => {
+    if (Number.isFinite(adjusted[key])) {
+      adjusted[key] *= multiplier;
+    }
+  };
+  scaleNumber("runSpeed", effects.moveMultiplier);
+  if (Number.isFinite(adjusted.sprintSpeed)) {
+    adjusted.sprintSpeed = effects.sprintMultiplier <= 0
+      ? adjusted.runSpeed
+      : adjusted.sprintSpeed * effects.moveMultiplier * effects.sprintMultiplier;
+  }
+  scaleNumber("jumpVelocity", effects.jumpMultiplier);
+  scaleNumber("wallJumpVertical", effects.jumpMultiplier);
+  scaleNumber("braceBoostVertical", effects.jumpMultiplier);
+  scaleNumber("dashDistance", effects.dashMultiplier);
+  scaleNumber("dashCarrySpeedMultiplier", effects.dashMultiplier);
+  scaleNumber("wallJumpHorizontal", effects.moveMultiplier);
+  scaleNumber("braceBoostHorizontal", effects.moveMultiplier);
+  if (Number.isFinite(adjusted.dashCooldownMs)) {
+    adjusted.dashCooldownMs *= effects.dashCooldownMultiplier;
+  }
+  return adjusted;
+}
+
+function applyPlayerBodyOngoingEffects(run, dt) {
+  const coreEffects = getPlayerBodyCoreEffects(run);
+  if (coreEffects.bleedDamagePerSecond > 0) {
+    run.hp = clamp((run.hp ?? 0) - coreEffects.bleedDamagePerSecond * dt, 0, run.maxHp || 100);
+  }
+}
+
+function damagePlayerBodyPart(run, amount, direction = 0) {
+  const body = ensurePlayerBodyStatus(run);
+  const roll = Math.random();
+  const sideArm = direction >= 0 ? "leftArm" : "rightArm";
+  const partKey = roll < 0.38
+    ? "core"
+    : roll < 0.62
+      ? sideArm
+      : roll < 0.82
+        ? "legs"
+        : roll < 0.92
+          ? (sideArm === "leftArm" ? "rightArm" : "leftArm")
+          : "head";
+  const part = body[partKey];
+  const partDamage = Math.max(1, Number(amount || 0) * (partKey === "head" ? 0.42 : partKey === "core" ? 0.58 : 0.72));
+  part.hp = clamp((part.hp ?? part.maxHp ?? 100) - partDamage, 0, part.maxHp ?? 100);
+  part.damaged = part.hp < (part.maxHp ?? 100);
+  part.broken = part.hp <= 0;
+  part.recentHit = 1.2;
 }
 
 function isPlayerDashDodging(player) {
@@ -2184,24 +2585,45 @@ function getFaceOffShotReactionLine(part, damageResult, lethalPart = false) {
   const partId = part?.id || "";
   const brokeNow = Boolean(damageResult?.brokeNow);
   if (lethalPart && partId === "head") {
-    return "아... 안 돼. 제발, 거긴 쏘지 마...";
+    return "??.. ???? ?쒕컻, 嫄곌릿 ?섏? 留?..";
   }
   if (lethalPart) {
-    return "숨이... 안 쉬어져. 그만... 제발...";
+    return "?⑥씠... ???ъ뼱?? 洹몃쭔... ?쒕컻...";
   }
   if (partId === "head") {
-    return brokeNow ? "머리가 울려... 아무것도 안 보여..." : "머리는 안 돼... 제발 거긴 쏘지 마...";
+    return brokeNow ? "癒몃━媛 ?몃젮... ?꾨Т寃껊룄 ??蹂댁뿬..." : "癒몃━??????.. ?쒕컻 嫄곌릿 ?섏? 留?..";
   }
   if (partId === "torso") {
-    return brokeNow ? "몸이 안 움직여... 숨이 막혀..." : "윽... 더는 못 버티겠어...";
+    return brokeNow ? "紐몄씠 ???吏곸뿬... ?⑥씠 留됲?..." : "??.. ?붾뒗 紐?踰꾪떚寃좎뼱...";
   }
   if (partId === "leftArm" || partId === "rightArm") {
-    return brokeNow ? "팔이... 팔이 말을 안 들어..." : "내 팔... 제발, 팔은 쏘지 마...";
+    return brokeNow ? "?붿씠... ?붿씠 留먯쓣 ???ㅼ뼱..." : "????.. ?쒕컻, ?붿? ?섏? 留?..";
   }
   if (partId === "leftLeg" || partId === "rightLeg") {
-    return brokeNow ? "다리가 풀렸어... 도망도 못 가..." : "다리만은... 제발 그만...";
+    return brokeNow ? "?ㅻ━媛 ??몄뼱... ?꾨쭩??紐?媛..." : "?ㅻ━留뚯?... ?쒕컻 洹몃쭔...";
   }
-  return brokeNow ? "망가졌어... 이제 못 움직여..." : "아파... 그만해...";
+  return brokeNow ? "留앷?議뚯뼱... ?댁젣 紐??吏곸뿬..." : "?꾪뙆... 洹몃쭔??..";
+}
+
+function getFaceOffBladeReactionLine(part, damageResult, lethalPart = false) {
+  const partId = part?.id || "";
+  const brokeNow = Boolean(damageResult?.brokeNow);
+  if (lethalPart && partId === "head") {
+    return "Blade to the head. It is over.";
+  }
+  if (lethalPart) {
+    return "The blade finds the center line.";
+  }
+  if (brokeNow) {
+    return `${part?.label || "Part"} disabled by the arm blade.`;
+  }
+  if (partId === "leftArm" || partId === "rightArm") {
+    return "The arm blade bites into the guard.";
+  }
+  if (partId === "leftLeg" || partId === "rightLeg") {
+    return "The blade cuts low and stops the advance.";
+  }
+  return "The arm blade carves through the opening.";
 }
 
 function playFaceOffBeep(faceOff) {
@@ -2294,6 +2716,176 @@ function playFaceOffShotSound() {
   }
 }
 
+function playFaceOffBladeSound() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return;
+    }
+    const context = window.__faceOffAudioContext || new AudioContextClass();
+    window.__faceOffAudioContext = context;
+    if (context.state === "suspended") {
+      context.resume?.();
+    }
+
+    const now = context.currentTime;
+    const duration = 0.13;
+    const bufferSize = Math.max(1, Math.floor(context.sampleRate * duration));
+    const noiseBuffer = context.createBuffer(1, bufferSize, context.sampleRate);
+    const channel = noiseBuffer.getChannelData(0);
+    for (let index = 0; index < bufferSize; index += 1) {
+      const progress = index / bufferSize;
+      channel[index] = (Math.random() * 2 - 1) * Math.pow(1 - progress, 1.7);
+    }
+
+    const hiss = context.createBufferSource();
+    hiss.buffer = noiseBuffer;
+    const filter = context.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.setValueAtTime(1400, now);
+    filter.frequency.exponentialRampToValueAtTime(520, now + duration);
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.09, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    hiss.connect(filter);
+    filter.connect(gain);
+    gain.connect(context.destination);
+    hiss.start(now);
+    hiss.stop(now + duration);
+
+    const scrape = context.createOscillator();
+    const scrapeGain = context.createGain();
+    scrape.type = "sawtooth";
+    scrape.frequency.setValueAtTime(420, now);
+    scrape.frequency.exponentialRampToValueAtTime(170, now + 0.09);
+    scrapeGain.gain.setValueAtTime(0.0001, now);
+    scrapeGain.gain.exponentialRampToValueAtTime(0.035, now + 0.004);
+    scrapeGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    scrape.connect(scrapeGain);
+    scrapeGain.connect(context.destination);
+    scrape.start(now);
+    scrape.stop(now + 0.11);
+  } catch {
+    // Blade feedback is optional; audio may be blocked by the browser.
+  }
+}
+
+function getShotAudioContext() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return null;
+  }
+  const context = window.__silentPassageAudioContext || new AudioContextClass();
+  window.__silentPassageAudioContext = context;
+  if (context.state === "suspended") {
+    context.resume?.();
+  }
+  return context;
+}
+
+function playWeaponShotSound(weaponStats = {}) {
+  const context = getShotAudioContext();
+  if (!context) {
+    return;
+  }
+  try {
+    const now = context.currentTime;
+    const type = weaponStats.type || "pistol";
+    const isShotgun = type === "shotgun";
+    const isHeavy = type === "rifle" || type === "sniper";
+    const duration = isShotgun ? 0.22 : isHeavy ? 0.16 : 0.12;
+    const bufferSize = Math.max(1, Math.floor(context.sampleRate * duration));
+    const noiseBuffer = context.createBuffer(1, bufferSize, context.sampleRate);
+    const channel = noiseBuffer.getChannelData(0);
+    for (let index = 0; index < bufferSize; index += 1) {
+      const progress = index / bufferSize;
+      const decay = Math.pow(1 - progress, isShotgun ? 1.45 : 2.15);
+      channel[index] = (Math.random() * 2 - 1) * decay;
+    }
+
+    const noise = context.createBufferSource();
+    noise.buffer = noiseBuffer;
+    const blastFilter = context.createBiquadFilter();
+    blastFilter.type = "bandpass";
+    blastFilter.frequency.setValueAtTime(isShotgun ? 760 : isHeavy ? 1280 : 1500, now);
+    blastFilter.Q.setValueAtTime(isShotgun ? 0.58 : 0.82, now);
+    const blastGain = context.createGain();
+    blastGain.gain.setValueAtTime(0.0001, now);
+    blastGain.gain.exponentialRampToValueAtTime(isShotgun ? 0.2 : isHeavy ? 0.16 : 0.11, now + 0.004);
+    blastGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    noise.connect(blastFilter);
+    blastFilter.connect(blastGain);
+    blastGain.connect(context.destination);
+    noise.start(now);
+    noise.stop(now + duration);
+
+    const thump = context.createOscillator();
+    const thumpGain = context.createGain();
+    thump.type = "triangle";
+    thump.frequency.setValueAtTime(isShotgun ? 78 : isHeavy ? 96 : 122, now);
+    thump.frequency.exponentialRampToValueAtTime(isShotgun ? 34 : 52, now + duration * 0.8);
+    thumpGain.gain.setValueAtTime(0.0001, now);
+    thumpGain.gain.exponentialRampToValueAtTime(isShotgun ? 0.18 : 0.11, now + 0.006);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.88);
+    thump.connect(thumpGain);
+    thumpGain.connect(context.destination);
+    thump.start(now);
+    thump.stop(now + duration);
+
+    const snap = context.createOscillator();
+    const snapGain = context.createGain();
+    snap.type = "square";
+    snap.frequency.setValueAtTime(isHeavy ? 420 : 520, now);
+    snapGain.gain.setValueAtTime(0.0001, now);
+    snapGain.gain.exponentialRampToValueAtTime(isShotgun ? 0.028 : 0.038, now + 0.002);
+    snapGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.028);
+    snap.connect(snapGain);
+    snapGain.connect(context.destination);
+    snap.start(now);
+    snap.stop(now + 0.032);
+
+    window.__lastWeaponShotSoundAt = Date.now();
+  } catch {
+    // Browser audio can be unavailable; firing still keeps visual feedback.
+  }
+}
+
+function triggerWeaponShotFeedback(run, state, weaponStats, aim) {
+  playWeaponShotSound(weaponStats);
+  const recoilAmount = clamp((weaponStats?.recoil ?? 840) / 980, 0.45, 1.75);
+  const duration = clamp((weaponStats?.fireCooldown ?? 0.16) * 0.72, 0.08, 0.18);
+  const dirX = -Number(aim?.shotDirX || 0);
+  const dirY = -Number(aim?.shotDirY || 0);
+  run.weaponKick = {
+    timer: duration,
+    duration,
+    intensity: 4.5 + recoilAmount * 5.5,
+    dirX,
+    dirY,
+    seed: Math.random() * 1000,
+  };
+  if (state?.mouse) {
+    const cursorKick = 3.2 + recoilAmount * 4.6;
+    state.mouse.screenX = clamp(
+      (state.mouse.screenX ?? CAMERA_SCREEN_WIDTH / 2) + dirX * cursorKick + (Math.random() - 0.5) * cursorKick * 0.75,
+      0,
+      CAMERA_SCREEN_WIDTH,
+    );
+    state.mouse.screenY = clamp(
+      (state.mouse.screenY ?? CAMERA_SCREEN_HEIGHT / 2) + dirY * cursorKick + (Math.random() - 0.5) * cursorKick * 0.75,
+      0,
+      CAMERA_SCREEN_HEIGHT,
+    );
+  }
+}
+
 function triggerFaceOffShotFeedback(run, data) {
   const faceOff = run.faceOff;
   if (!faceOff) {
@@ -2307,6 +2899,19 @@ function triggerFaceOffShotFeedback(run, data) {
   faceOff.visualState = "shot";
   faceOff.visualStateTimer = 0.75;
   playFaceOffShotSound();
+}
+
+function triggerFaceOffBladeFeedback(run, data) {
+  const faceOff = run.faceOff;
+  if (!faceOff) {
+    return;
+  }
+  faceOff.shotShakeDuration = Math.max(0.08, (getFaceOffConfig(data).shotShakeDuration ?? 0.22) * 0.62);
+  faceOff.shotShakeIntensity = Math.max(6, (getFaceOffConfig(data).shotShakeIntensity ?? 18) * 0.58);
+  faceOff.shotShakeTimer = faceOff.shotShakeDuration;
+  faceOff.shotFlashDuration = Math.max(0.06, (getFaceOffConfig(data).shotFlashDuration ?? 0.16) * 0.5);
+  faceOff.shotFlashTimer = faceOff.shotFlashDuration;
+  playFaceOffBladeSound();
 }
 
 function updateFaceOffEnemyLine(faceOff, dt) {
@@ -2438,7 +3043,7 @@ function enterFaceOff(run, data, enemy, state) {
       data,
       "knockdown",
       "knockdown",
-      "살려줘... 반격할 힘도 없어.",
+      "?대젮以?.. 諛섍꺽???섎룄 ?놁뼱.",
     );
   }
   run.player.vx = 0;
@@ -2663,6 +3268,43 @@ function getDialogueChance(enemy, option) {
 
 function applyFaceOffAttack(run, data, enemy) {
   const faceOff = run.faceOff;
+  const parts = getFaceOffBodyParts(data);
+  const part = parts.find((entry) => entry.id === faceOff.selectedPart) || parts.find((entry) => entry.id === "torso");
+  if (!part) {
+    return;
+  }
+
+  if (isMeleeSlotSelected(run, data)) {
+    const partDamage = Math.max(1, Number(part.damage ?? 0)) * 0.88;
+    const partDamageResult = applyFaceOffPartDamage(enemy, part.id, partDamage);
+    const lethalPart = part.id === "head" || partDamage >= 68;
+    const breakBonus = partDamageResult.brokeNow ? 34 : 0;
+    enemy.disableMeter = Math.max(0, (enemy.disableMeter ?? 0) + ((part.disable ?? 0) + breakBonus) * 1.18);
+    enemy.hitFlash = 0.2;
+    enemy.staggerTimer = Math.max(enemy.staggerTimer ?? 0, enemy.knockdownStaggerDuration ?? 0.45);
+    triggerFaceOffBladeFeedback(run, data);
+    faceOff.visualState = partDamageResult.brokeNow
+      ? getFaceOffPartBreakVisualState(part.id)
+      : getFaceOffPartHitVisualState(part.id);
+    faceOff.visualStateTimer = partDamageResult.brokeNow ? 1.15 : 0.82;
+    setFaceOffCustomLine(run, data, "shot", getFaceOffBladeReactionLine(part, partDamageResult, lethalPart));
+    spawnParticles(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.45, 10, "#f3ff9a");
+
+    if (lethalPart) {
+      enemy.hp = 0;
+      finishFaceOff(run, enemy, "kill", "kill");
+      return;
+    }
+    if (enemy.disableMeter >= (enemy.disableThreshold ?? 100)) {
+      finishFaceOff(run, enemy, "disable", "disable");
+      return;
+    }
+    faceOff.message = partDamageResult.brokeNow
+      ? `${part.label}: blade disabled`
+      : `${part.label}: blade ${Math.ceil(partDamageResult.hp)}/${partDamageResult.maxHp}`;
+    return;
+  }
+
   const weaponContext = getSelectedArmContext(run, data);
   if ((weaponContext.arm.reloadTimer ?? 0) > 0) {
     faceOff.message = `${weaponContext.stats.label}: reloading`;
@@ -2670,13 +3312,7 @@ function applyFaceOffAttack(run, data, enemy) {
   }
   if ((weaponContext.arm.magazine ?? 0) <= 0) {
     faceOff.message = `${weaponContext.stats.label}: empty`;
-    setFaceOffEnemyLine(run, data, "knockdown", "failed", "총도 비었네.");
-    return;
-  }
-
-  const parts = getFaceOffBodyParts(data);
-  const part = parts.find((entry) => entry.id === faceOff.selectedPart) || parts.find((entry) => entry.id === "torso");
-  if (!part) {
+    setFaceOffEnemyLine(run, data, "knockdown", "failed", "珥앸룄 鍮꾩뿀??");
     return;
   }
 
@@ -2741,19 +3377,19 @@ function applyFaceOffEventResult(state, run, data, enemy, option) {
       saveMetaState(state.meta);
       pushNotice(run, "Face-off: parts recovered.");
     }
-    setFaceOffCustomLine(run, data, "event", result.line || "회수 신호가 손끝으로 옮겨 왔다.");
+    setFaceOffCustomLine(run, data, "event", result.line || "?뚯닔 ?좏샇媛 ?먮걹?쇰줈 ??꺼 ?붾떎.");
     finishFaceOff(run, enemy, "disable", resultMessage || "parts recovered");
     return true;
   }
 
   if (type === "knockdown") {
-    setFaceOffCustomLine(run, data, "event", result.line || "상대가 완전히 무력화됐다.");
+    setFaceOffCustomLine(run, data, "event", result.line || "?곷?媛 ?꾩쟾??臾대젰?붾릱??");
     finishFaceOff(run, enemy, "disable", resultMessage || "disabled");
     return true;
   }
 
   if (type === "spare") {
-    setFaceOffCustomLine(run, data, "event", result.line || "길을 비켜준다.");
+    setFaceOffCustomLine(run, data, "event", result.line || "湲몄쓣 鍮꾩폒以??");
     finishFaceOff(run, enemy, "release", resultMessage || "released");
     return true;
   }
@@ -2773,7 +3409,7 @@ function applyFaceOffEventResult(state, run, data, enemy, option) {
     run.eventFlags = run.eventFlags || {};
     const flag = result.flag || `${run.faceOff?.eventId || enemy.id}:${option.eventChoiceId || option.key}`;
     run.eventFlags[flag] = result.value ?? true;
-    setFaceOffCustomLine(run, data, "event", result.line || "상태가 기록됐다.");
+    setFaceOffCustomLine(run, data, "event", result.line || "?곹깭媛 湲곕줉?먮떎.");
     finishFaceOff(run, enemy, "deal", resultMessage || "recorded");
     return true;
   }
@@ -2788,24 +3424,24 @@ function applyFaceOffDialogue(state, run, data, enemy, option) {
   const faceOff = run.faceOff;
   const chance = getDialogueChance(enemy, option);
   faceOff.selectedDialogueKey = option.key;
-  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "말로 끝내고 싶다면 빨리 말해.");
+  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "留먮줈 ?앸궡怨??띕떎硫?鍮⑤━ 留먰빐.");
 
   if (Math.random() <= chance) {
     if (option.successEffect === "dealProgress") {
       enemy.dialogueStage = (enemy.dialogueStage ?? 0) + 1;
       if (enemy.dialogueStage >= 2) {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "좋아. 루트 하나는 알려주지.");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "醫뗭븘. 猷⑦듃 ?섎굹???뚮젮二쇱?.");
         finishFaceOff(run, enemy, "deal", "deal");
       } else {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "정보? 네가 뭘 줄 수 있는데?");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "?뺣낫? ?ㅺ? 萸?以????덈뒗??");
         faceOff.message = "deal lead";
       }
       return;
     }
     if (option.type === "threaten") {
-      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "알았어. 총 내려놓을게.");
+      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "?뚯븯?? 珥??대젮?볦쓣寃?");
     } else if (option.type === "deescalate") {
-      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "좋아... 잠깐 멈추지.");
+      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "醫뗭븘... ?좉퉸 硫덉텛吏.");
     }
     finishFaceOff(run, enemy, "surrender", "surrender");
     return;
@@ -2818,11 +3454,11 @@ function applyFaceOffDialogue(state, run, data, enemy, option) {
   social.fear = clamp(Number(social.fear ?? 0.5) + 0.04, 0, 1);
   social.aggression = clamp(Number(social.aggression ?? 0.5) + 0.03, 0, 1);
   if (option.type === "threaten") {
-    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "그 협박은 안 통해.");
+    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "洹??묐컯? ???듯빐.");
   } else if (option.type === "deescalate") {
-    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "멈추는 건 네 쪽이야.");
+    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "硫덉텛??嫄???履쎌씠??");
   } else {
-    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "친구 같은 소리 하지 마.");
+    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "移쒓뎄 媛숈? ?뚮━ ?섏? 留?");
   }
   faceOff.message = "dialogue failed";
 }
@@ -2831,7 +3467,7 @@ function failFaceOff(run, data, enemy) {
   if (!enemy || !run.faceOff) {
     return;
   }
-  setFaceOffEnemyLine(run, data, "knockdown", "failed", "놓치면 기어서라도 도망칠 거야.");
+  setFaceOffEnemyLine(run, data, "knockdown", "failed", "?볦튂硫?湲곗뼱?쒕씪???꾨쭩移?嫄곗빞.");
   closeFaceOff(run, "cancelled");
 }
 
@@ -3111,16 +3747,65 @@ function setSelectedArm(run, data, side) {
   const weapons = ensureWeaponLoadoutState(run, data);
   const nextSide = side === "right" ? "right" : "left";
   if (weapons.selectedSide === nextSide) {
+    weapons.selectedSlot = nextSide;
+    return;
+  }
+  const nextStats = computeArmWeaponStats(data, weapons.arms[nextSide]);
+  if (!nextStats.equipped) {
+    pushNotice(run, `${nextSide === "left" ? "Left" : "Right"} arm empty`, 1.25);
     return;
   }
   weapons.selectedSide = nextSide;
+  weapons.selectedSlot = nextSide;
   const context = getSelectedArmContext(run, data);
   pushNotice(run, `${context.side === "left" ? "Left" : "Right"} arm: ${context.stats.label}`, 1.35);
 }
 
+function setSelectedMeleeSlot(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  if (weapons.selectedSlot === "melee") {
+    return;
+  }
+  weapons.selectedSlot = "melee";
+  pushNotice(run, "3 slot: Breach tool", 1.25);
+}
+
+function isMeleeSlotSelected(run, data) {
+  return ensureWeaponLoadoutState(run, data).selectedSlot === "melee";
+}
+
 function switchSelectedArm(run, data) {
   const weapons = ensureWeaponLoadoutState(run, data);
-  setSelectedArm(run, data, weapons.selectedSide === "right" ? "left" : "right");
+  const nextSide = weapons.selectedSide === "right" ? "left" : "right";
+  if (computeArmWeaponStats(data, weapons.arms[nextSide]).equipped) {
+    setSelectedArm(run, data, nextSide);
+  } else {
+    pushNotice(run, `${nextSide === "left" ? "Left" : "Right"} arm empty`, 1.25);
+  }
+}
+
+function getWeaponSlotCycle(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  return ["left", "right", "melee"].filter((slot) => (
+    slot === "melee" || computeArmWeaponStats(data, weapons.arms[slot]).equipped
+  ));
+}
+
+function cycleSelectedWeaponSlot(run, data, direction = 1) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const slots = getWeaponSlotCycle(run, data);
+  if (!slots.length) {
+    setSelectedMeleeSlot(run, data);
+    return;
+  }
+  const current = slots.includes(weapons.selectedSlot) ? weapons.selectedSlot : weapons.selectedSide;
+  const currentIndex = Math.max(0, slots.indexOf(current));
+  const nextSlot = slots[(currentIndex + (direction >= 0 ? 1 : -1) + slots.length) % slots.length];
+  if (nextSlot === "melee") {
+    setSelectedMeleeSlot(run, data);
+  } else {
+    setSelectedArm(run, data, nextSlot);
+  }
 }
 
 function getReserveAmmo(context) {
@@ -3132,6 +3817,9 @@ function isAutomaticWeaponContext(context) {
 }
 
 function isSelectedWeaponAutomatic(run, data) {
+  if (isMeleeSlotSelected(run, data)) {
+    return false;
+  }
   return isAutomaticWeaponContext(getSelectedArmContext(run, data));
 }
 
@@ -3155,10 +3843,16 @@ function canFireWeaponPose(player) {
 }
 
 function canFireSelectedWeapon(run, data, player) {
+  if (isMeleeSlotSelected(run, data)) {
+    return false;
+  }
   if (!canFireWeaponPose(player)) {
     return false;
   }
   const context = getSelectedArmContext(run, data);
+  if (!context.stats.equipped) {
+    return false;
+  }
   if ((context.arm.reloadTimer ?? 0) > 0 || (context.arm.fireCooldownTimer ?? 0) > 0) {
     return false;
   }
@@ -3170,7 +3864,15 @@ function canFireSelectedWeapon(run, data, player) {
 }
 
 function startReloadSelectedArm(run, data) {
+  if (isMeleeSlotSelected(run, data)) {
+    pushNotice(run, "Breach tool does not reload", 1.2);
+    return false;
+  }
   const context = getSelectedArmContext(run, data);
+  if (!context.stats.equipped) {
+    pushNotice(run, "No weapon equipped", 1.2);
+    return false;
+  }
   const reserve = getReserveAmmo(context);
   const currentMagazine = Math.max(0, Math.floor(context.arm.magazine ?? 0));
   if ((context.arm.reloadTimer ?? 0) > 0) {
@@ -3186,8 +3888,10 @@ function startReloadSelectedArm(run, data) {
     return false;
   }
 
-  context.arm.reloadTimer = context.stats.reloadDuration;
-  context.arm.reloadDuration = context.stats.reloadDuration;
+  const bodyEffects = getPlayerBodyCombatEffects(run, context.side);
+  const reloadDuration = context.stats.reloadDuration * bodyEffects.reloadDurationMultiplier;
+  context.arm.reloadTimer = reloadDuration;
+  context.arm.reloadDuration = reloadDuration;
   pushNotice(run, `Reloading ${context.stats.label}`, 1.2);
   return true;
 }
@@ -3205,6 +3909,13 @@ function updateWeaponTimers(run, data, dt) {
   const weapons = ensureWeaponLoadoutState(run, data);
   Object.values(weapons.arms || {}).forEach((arm) => {
     const stats = computeArmWeaponStats(data, arm);
+    if (!stats.equipped) {
+      arm.magazine = 0;
+      arm.reloadTimer = 0;
+      arm.reloadDuration = 0;
+      arm.fireCooldownTimer = 0;
+      return;
+    }
     arm.fireCooldownTimer = Math.max(0, (arm.fireCooldownTimer ?? 0) - dt);
     if ((arm.reloadTimer ?? 0) > 0) {
       arm.reloadTimer = Math.max(0, arm.reloadTimer - dt);
@@ -3229,8 +3940,17 @@ function updateWeaponRuntime(run, data, state, dt) {
   if (consumeEitherPress(state, ARM_RIGHT_KEYS)) {
     setSelectedArm(run, data, "right");
   }
+  if (consumeEitherPress(state, ARM_MELEE_KEYS)) {
+    setSelectedMeleeSlot(run, data);
+  }
   if (consumeEitherPress(state, ARM_SWITCH_KEYS)) {
-    switchSelectedArm(run, data);
+    cycleSelectedWeaponSlot(run, data, 1);
+  }
+  if (consumeEitherPress(state, ARM_WHEEL_PREV_KEYS)) {
+    cycleSelectedWeaponSlot(run, data, -1);
+  }
+  if (consumeEitherPress(state, ARM_WHEEL_NEXT_KEYS)) {
+    cycleSelectedWeaponSlot(run, data, 1);
   }
   if (consumeEitherPress(state, RELOAD_KEYS)) {
     startReloadSelectedArm(run, data);
@@ -3565,6 +4285,16 @@ function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
     }
   }
 
+  for (const crate of run.lootCrates || []) {
+    if (crate.searched || crate.spilled || crate.broken) {
+      continue;
+    }
+    const t = getSegmentRectHitT(startX, startY, endX, endY, crate, bullet.radius ?? 0);
+    if (t !== null) {
+      consider({ type: "lootCrate", target: crate, t, priority: 2 });
+    }
+  }
+
   for (const platform of data.platforms || []) {
     const t = getSegmentRectHitT(startX, startY, endX, endY, platform, bullet.radius ?? 0);
     if (t !== null) {
@@ -3636,6 +4366,15 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
     block.hitFlash = 0.18;
     spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "OPEN");
     spawnDirectedParticles(run, hitX, hitY, 16, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
+    return;
+  }
+
+  if (hit.type === "lootCrate") {
+    const crateDamage = Math.max(
+      1,
+      Math.ceil(Math.max(1, Number(hit.target.maxHp ?? hit.target.hp ?? 2)) / 2),
+    );
+    damageLootCrate(run, hit.target, crateDamage, bullet.dirX, bullet.dirY, hitX, hitY);
     return;
   }
 
@@ -4067,6 +4806,12 @@ function updateRecoilAim(run, data, state, dt) {
 }
 
 function performRecoilShot(player, run, data, config, state = null) {
+  if (isMeleeSlotSelected(run, data)) {
+    if (state) {
+      pushInputTrace(state, "shotBlock:melee", {});
+    }
+    return false;
+  }
   if (!run.recoilAim || !canFireWeaponPose(player)) {
     if (state) {
       pushInputTrace(state, "shotBlock:aim", {
@@ -4078,6 +4823,13 @@ function performRecoilShot(player, run, data, config, state = null) {
   }
 
   const context = getSelectedArmContext(run, data);
+  if (!context.stats.equipped) {
+    if (state) {
+      pushInputTrace(state, "shotBlock:empty", { side: context.side });
+    }
+    pushNotice(run, "No weapon equipped", 1.1);
+    return false;
+  }
   if ((context.arm.magazine ?? 0) <= 0) {
     if (state) {
       pushInputTrace(state, "shotBlock:mag", { mag: context.arm.magazine ?? 0 });
@@ -4124,7 +4876,8 @@ function performRecoilShot(player, run, data, config, state = null) {
     });
   }
   const aimed = Boolean(aim.aiming);
-  const spreadMultiplier = (aimed ? 0.65 : 2.65) * (run.focusActive ? 0.75 : 1);
+  const bodyEffects = getPlayerBodyCombatEffects(run, context.side);
+  const spreadMultiplier = (aimed ? 0.65 : 2.65) * (run.focusActive ? 0.75 : 1) * bodyEffects.spreadMultiplier;
   const spread = (context.stats.spread ?? 0) * spreadMultiplier;
   if (spread > 0.001) {
     const shotAngle = Math.atan2(aim.shotDirY, aim.shotDirX) + (Math.random() - 0.5) * spread;
@@ -4154,7 +4907,7 @@ function performRecoilShot(player, run, data, config, state = null) {
   clearWallRun(player);
   clearHover(player);
   context.arm.magazine = Math.max(0, Math.floor(context.arm.magazine ?? 0) - 1);
-  context.arm.fireCooldownTimer = context.stats.fireCooldown;
+  context.arm.fireCooldownTimer = context.stats.fireCooldown * bodyEffects.fireCooldownMultiplier;
   if (context.arm.magazine <= 0) {
     startReloadSelectedArm(run, data);
   }
@@ -4205,6 +4958,10 @@ function performRecoilShot(player, run, data, config, state = null) {
     duration: 0.2,
     weaponType: context.stats.type,
   });
+  triggerWeaponShotFeedback(run, state, {
+    ...context.stats,
+    recoil: context.stats.recoil * bodyEffects.recoilKickMultiplier,
+  }, aim);
   spawnPlayerBullet(run, context.stats, aim);
   spawnWeaponModuleEffects(run, data, aim, context.stats);
   pushAfterimage(run, player);
@@ -4388,7 +5145,7 @@ function enterBraceHold(player, run, config, wall, moveAxis) {
   refillDashFromWall(player, config);
   refillRecoilShot(player, config);
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 6, "#8fe1ff");
-  pushNotice(run, "벽 고정");
+  pushNotice(run, "踰?怨좎젙");
 }
 
 function updateBraceHold(player, data, config, wall, dt, moveAxis) {
@@ -4455,7 +5212,7 @@ function launchFromWallRun(player, run, config) {
   player.wallSlideGraceDirection = 0;
   player.wallRunBoostActive = true;
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#b8f0ff");
-  pushNotice(run, "벽 런 발사");
+  pushNotice(run, "踰???諛쒖궗");
   clearWallRun(player);
 }
 
@@ -4497,7 +5254,7 @@ function performBraceVault(player, run, config, wall, moveAxis) {
   player.braceReleaseTimer = 0.16;
   player.braceActive = true;
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 10, "#8fe1ff");
-  pushNotice(run, "벽 반동");
+  pushNotice(run, "踰?諛섎룞");
 }
 
 function updateMovementVfx(run, data, dt) {
@@ -4576,8 +5333,12 @@ function updateMovementVfx(run, data, dt) {
 
 function updatePlayer(run, data, state, dt, input) {
   const player = run.player;
-  const config = getMovementConfig(data);
+  const config = applyPlayerBodyMovementPenalties(
+    getMovementConfig(data),
+    getPlayerBodyMovementEffects(run),
+  );
   const attackPressed = Boolean(input?.attackPressed);
+  const meleeToolActive = Boolean(input?.meleeToolActive);
   const interactionPressed = Boolean(input?.interactionPressed);
   const recoilShotPressed = Boolean(input?.recoilShotPressed);
   const moveLeft = isEitherPressed(state, MOVE_LEFT_KEYS);
@@ -4604,7 +5365,14 @@ function updatePlayer(run, data, state, dt, input) {
   player.crouchRequested = crouchHeld;
   player.attackCooldown = Math.max(0, player.attackCooldown - dt);
   player.attackWindow = Math.max(0, player.attackWindow - dt);
+  if (player.attackWindow <= 0) {
+    player.attackToolActive = false;
+  }
   player.invulnTimer = Math.max(0, player.invulnTimer - dt);
+  Object.values(ensurePlayerBodyStatus(run)).forEach((part) => {
+    part.recentHit = Math.max(0, (part.recentHit ?? 0) - dt);
+  });
+  applyPlayerBodyOngoingEffects(run, dt);
   player.jumpBufferTimer = Math.max(0, player.jumpBufferTimer - dt);
   player.wallJumpLockTimer = Math.max(0, player.wallJumpLockTimer - dt);
   player.dashCooldownTimer = Math.max(0, player.dashCooldownTimer - dt);
@@ -4837,10 +5605,6 @@ function updatePlayer(run, data, state, dt, input) {
     if (direction !== 0) {
       startDash(player, run, config, direction);
     }
-  }
-
-  if (player.lightActive && player.dashTimer > 0) {
-    player.lightActive = false;
   }
 
   if (player.dashWindupTimer > 0) {
@@ -5130,18 +5894,19 @@ function updatePlayer(run, data, state, dt, input) {
     player.sprintActive = true;
   }
 
-  player.lightActive = isPressed(state, "KeyQ") && run.battery > 0 && player.dashTimer === 0 && player.dashWindupTimer === 0;
-  if (player.lightActive) {
-    run.battery = Math.max(0, run.battery - data.player.lightDrainPerSecond * dt);
-    if (run.battery === 0) {
-      player.lightActive = false;
-      pushNotice(run, "배터리 소진.");
-    }
+  if (consumeEitherPress(state, ["KeyQ"])) {
+    player.lightActive = !player.lightActive;
+    pushNotice(run, player.lightActive ? "Flashlight on." : "Flashlight off.", 0.9);
+  }
+  if (Number.isFinite(run.maxBattery)) {
+    run.battery = run.maxBattery;
   }
 
   if (attackPressed && player.attackCooldown === 0 && player.height === player.standHeight) {
-    player.attackCooldown = data.player.attackCooldown;
+    const meleeEffects = getPlayerBodyCombatEffects(run, null);
+    player.attackCooldown = data.player.attackCooldown * (meleeToolActive ? meleeEffects.meleeCooldownMultiplier : 1);
     player.attackWindow = 0.12;
+    player.attackToolActive = meleeToolActive;
     player.attackHits.clear();
     run.attackFx.push({
       x: player.x + player.width / 2,
@@ -5353,30 +6118,39 @@ function updateTimePhase(run, data, dt) {
 
   if (previousPhase !== run.timePhase) {
     if (run.timePhase === "dusk") {
-      pushNotice(run, "황혼 진입.");
-      pushClue(run, "phase-dusk", "빛이 약해진다. Q는 시야만 보조한다.");
+      pushNotice(run, "?⑺샎 吏꾩엯.");
+      pushClue(run, "phase-dusk", "鍮쏆씠 ?쏀빐吏꾨떎. Q???쒖빞留?蹂댁“?쒕떎.");
     } else if (run.timePhase === "night") {
       run.nightActive = true;
       run.nightTransitionTimer = NIGHT_TRANSITION_SECONDS;
-      pushNotice(run, "야간 위협 활성.");
-      pushClue(run, "phase-night", "밤엔 귀환 비용이 커진다.");
+      pushNotice(run, "?쇨컙 ?꾪삊 ?쒖꽦.");
+      pushClue(run, "phase-night", "諛ㅼ뿏 洹??鍮꾩슜??而ㅼ쭊??");
+    }
+  }
+
+  if (previousPhase !== run.timePhase) {
+    if (run.timePhase === "dusk") {
+      run.nightTransitionTimer = Math.max(run.nightTransitionTimer || 0, NIGHT_TRANSITION_SECONDS * 0.72);
+      pushNotice(run, "?⑺샎 吏꾩엯. ?쒖빞媛 醫곸븘吏꾨떎.");
+    } else if (run.timePhase === "night") {
+      pushNotice(run, "?쇨컙 ?꾪삊 ?쒖꽦. ?쒖빞媛 ?ш쾶 以꾩뼱?좊떎.");
     }
   }
 
   run.sanity = clamp(
     run.sanity - data.world.sanityDrain[run.timePhase] * dt,
     0,
-    data.player.maxSanity
+    run.maxSanity || data.player.maxSanity
   );
 }
 
 function getAttackRect(player) {
-  const width = 76;
+  const width = player.attackToolActive ? 132 : 76;
   return createRect(
     player.facing === 1 ? player.x + player.width - 4 : player.x - width + 4,
-    player.y + 10,
+    player.y + (player.attackToolActive ? 0 : 10),
     width,
-    player.height - 12
+    player.height - (player.attackToolActive ? 0 : 12)
   );
 }
 
@@ -5387,10 +6161,10 @@ function resolveHarvest(run, encounter, abilityId = "threatSense") {
   encounter.outcome = "harvested";
   encounter.state = "dead";
   run.materials += encounter.harvestReward;
-  run.sanity = clamp(run.sanity - encounter.harvestSanityCost, 0, 100);
+  run.sanity = clamp(run.sanity - encounter.harvestSanityCost, 0, run.maxSanity || 100);
   uniquePush(run.pendingUnlocks, abilityId);
   uniquePush(run.successfulHarvestIds, encounter.id);
-  pushNotice(run, `${encounter.label} 수확.`);
+  pushNotice(run, `${encounter.label} ?섑솗.`);
   spawnParticles(run, encounter.x + encounter.width / 2, encounter.y + 24, 16, "#ff8e72");
 }
 
@@ -5400,14 +6174,14 @@ function resolveRelease(run, encounter) {
   }
   encounter.outcome = "released";
   encounter.state = "released";
-  run.sanity = clamp(run.sanity + encounter.releaseSanity, 0, 100);
+  run.sanity = clamp(run.sanity + encounter.releaseSanity, 0, run.maxSanity || 100);
   uniquePush(run.pendingStoryFlags, encounter.storyFlag);
   uniquePush(run.successfulReleaseIds, encounter.id);
-  pushNotice(run, `${encounter.label} 구원.`);
+  pushNotice(run, `${encounter.label} 援ъ썝.`);
   spawnParticles(run, encounter.x + encounter.width / 2, encounter.y + 16, 16, "#a8f7cf");
 }
 
-function updateAttackHits(run) {
+function updateAttackHits(run, data) {
   if (run.player.attackWindow <= 0) {
     return;
   }
@@ -5418,6 +6192,7 @@ function updateAttackHits(run) {
     run.encounters.ritualist,
     ...run.threats,
     ...(run.hostileDrones || []),
+    ...(run.humanoidEnemies || []),
   ];
 
   for (const target of liveTargets) {
@@ -5435,20 +6210,24 @@ function updateAttackHits(run) {
     }
 
     run.player.attackHits.add(target.id);
-    target.hp = Math.max(0, target.hp - run.player.attackDamage);
+    const damage = run.player.attackToolActive && (target.type === "humanoid" || target.type === "humanoidEnemy")
+      ? Math.max(run.player.attackDamage, 60)
+      : run.player.attackDamage;
+    target.hp = Math.max(0, target.hp - damage);
     target.hitFlash = 0.14;
+    spawnDamageNumber(run, target.x + target.width * 0.5, target.y + 12, damage, "#ffd6ba");
     spawnParticles(run, target.x + target.width / 2, target.y + 22, 6, "#ffd6ba");
 
     if (target.type === "guard" && target.state !== "dead" && target.state !== "released") {
       target.state = "chase";
       target.wasProvoked = true;
-      pushNotice(run, "검문 절차가 깨졌다.");
+      pushNotice(run, "寃臾??덉감媛 源⑥죱??");
     }
 
     if (target.type === "ritualist" && target.state !== "dead" && target.state !== "released") {
       target.state = "hostile";
       target.wasProvoked = true;
-      pushNotice(run, "의식이 너를 향한다.");
+      pushNotice(run, "?섏떇???덈? ?ν븳??");
     }
 
     if (target.id.startsWith("shade")) {
@@ -5458,6 +6237,8 @@ function updateAttackHits(run) {
     if (target.hp === 0) {
       if (target.type === "hostileDrone") {
         destroyHostileDrone(run, target);
+      } else if (target.type === "humanoid" || target.type === "humanoidEnemy") {
+        knockDownHumanoidEnemy(run, data, target);
       } else if (target.type === "guard" || target.type === "ritualist") {
         resolveHarvest(run, target);
       } else {
@@ -5465,6 +6246,17 @@ function updateAttackHits(run) {
         spawnParticles(run, target.x + target.width / 2, target.y + 16, 12, "#9dd8ff");
       }
     }
+  }
+
+  for (const crate of run.lootCrates || []) {
+    if (crate.searched || crate.spilled || crate.broken || run.player.attackHits.has(crate.id)) {
+      continue;
+    }
+    if (!rectsOverlap(attackRect, crate)) {
+      continue;
+    }
+    run.player.attackHits.add(crate.id);
+    damageLootCrate(run, crate, Math.max(run.player.attackDamage, crate.maxHp ?? crate.hp ?? 1), run.player.facing || 1, -0.12);
   }
 }
 
@@ -5503,7 +6295,7 @@ function updateGuard(run, data, dt) {
       guard.state = "warn";
       guard.warningTimer = player.lightActive ? 0.2 : 0.8;
       pushClue(run, "guard-motion", guard.clues.motion);
-      pushNotice(run, "정지 경고.");
+      pushNotice(run, "?뺤? 寃쎄퀬.");
     }
   } else if (guard.state === "warn") {
     guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
@@ -5513,12 +6305,12 @@ function updateGuard(run, data, dt) {
       guard.state = "inspect";
       guard.inspectProgress = 0;
       pushClue(run, "guard-still", guard.clues.still);
-      pushNotice(run, "정지 유지.");
+      pushNotice(run, "?뺤? ?좎?.");
     } else if (guard.warningTimer === 0) {
       if (inDetection && (isMoving || player.lightActive)) {
         guard.state = "chase";
         guard.wasProvoked = true;
-        pushNotice(run, "감시자가 추적한다.");
+        pushNotice(run, "媛먯떆?먭? 異붿쟻?쒕떎.");
       } else {
         guard.state = "patrol";
       }
@@ -5535,7 +6327,7 @@ function updateGuard(run, data, dt) {
       guard.inspectProgress = 0;
       pushClue(run, "guard-badge", guard.clues.badge);
       pushClue(run, "guard-still", guard.clues.still);
-      pushNotice(run, "증표 확인. 움직이지 마.");
+      pushNotice(run, "利앺몴 ?뺤씤. ?吏곸씠吏 留?");
     }
 
     if (!inDetection) {
@@ -5550,7 +6342,7 @@ function updateGuard(run, data, dt) {
 
     if (canSeePlayer && distance < guard.attackRange && guard.attackCooldown === 0) {
       guard.attackCooldown = 1;
-      damagePlayer(run, guard.damage, direction, "감시자 근접 타격.");
+      damagePlayer(run, guard.damage, direction, "媛먯떆??洹쇱젒 ?寃?");
     }
   } else if (guard.state === "inspect") {
     guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
@@ -5558,7 +6350,7 @@ function updateGuard(run, data, dt) {
       guard.state = "warn";
       guard.warningTimer = 0.45;
       guard.inspectProgress = 0;
-      pushNotice(run, "검문 중단. 다시 멈춰라.");
+      pushNotice(run, "寃臾?以묐떒. ?ㅼ떆 硫덉떠??");
       return;
     }
 
@@ -5591,7 +6383,7 @@ function usePedestal(run, pedestal) {
     return;
   }
   if (ritualist.state === "hostile") {
-    pushNotice(run, "의식이 깨졌다. 잠시 물러서라.");
+    pushNotice(run, "?섏떇??源⑥죱?? ?좎떆 臾쇰윭?쒕씪.");
     return;
   }
 
@@ -5602,7 +6394,7 @@ function usePedestal(run, pedestal) {
       ritualist,
       "ritual-wrong",
       ritualist.clues.wrong,
-      "순서 오류. 의식이 뒤집힌다."
+      "?쒖꽌 ?ㅻ쪟. ?섏떇???ㅼ쭛?뚮떎."
     );
     return;
   }
@@ -5619,7 +6411,7 @@ function usePedestal(run, pedestal) {
     return;
   }
 
-  pushNotice(run, `${pedestal.label} 반응.`);
+  pushNotice(run, `${pedestal.label} 諛섏쓳.`);
 }
 
 function updateRitualist(run, data, dt) {
@@ -5659,7 +6451,7 @@ function updateRitualist(run, data, dt) {
         ritualist,
         "ritual-light",
         ritualist.clues.light,
-        "빛에 의식이 깨졌다."
+        "鍮쏆뿉 ?섏떇??源⑥죱??"
       );
     }
   } else if (ritualist.state === "hostile") {
@@ -5671,7 +6463,7 @@ function updateRitualist(run, data, dt) {
 
     if (canSeePlayer && distance < ritualist.attackRange && ritualist.attackCooldown === 0) {
       ritualist.attackCooldown = 1.1;
-      damagePlayer(run, ritualist.damage, direction, "의식자 타격.");
+      damagePlayer(run, ritualist.damage, direction, "?섏떇???寃?");
     }
 
     if (canSeePlayer && (inArea || distance < 360)) {
@@ -5682,7 +6474,7 @@ function updateRitualist(run, data, dt) {
         ritualist.state = "ritual";
         ritualist.calmTimer = 0;
         resetRitualPedestals(ritualist);
-        pushNotice(run, "의식이 다시 고요해진다.");
+        pushNotice(run, "?섏떇???ㅼ떆 怨좎슂?댁쭊??");
       }
     }
   }
@@ -5713,7 +6505,7 @@ function updateThreats(run, data, dt) {
 
       if (distance < threat.attackRange && threat.attackCooldown === 0) {
         threat.attackCooldown = 1;
-        damagePlayer(run, threat.damage, direction, "어둠 속 위협이 덮친다.");
+        damagePlayer(run, threat.damage, direction, "?대몺 ???꾪삊????튇??");
       }
     } else {
       threat.x += threat.patrolDirection * threat.speed * dt;
@@ -6748,21 +7540,94 @@ function closeLootCrate(run) {
   run.loot.holdProgress = 0;
 }
 
+function getLootItemColor(item) {
+  const rank = getLootRarityRank(item?.rarity);
+  if (rank >= 3) {
+    return "#f6e98a";
+  }
+  if (rank === 2) {
+    return "#87e1ff";
+  }
+  if (rank === 1) {
+    return "#a8f7cf";
+  }
+  return "#dce7ec";
+}
+
+function spillLootCrate(run, crate, options = {}) {
+  if (!crate || crate.spilled || crate.searched) {
+    return false;
+  }
+
+  const items = (crate.items || []).filter((item) => !item.looted);
+  crate.opened = true;
+  crate.spilled = true;
+  crate.broken = Boolean(options.broken);
+  crate.searched = items.length === 0;
+  crate.scanComplete = true;
+  crate.searchProgress = crate.searchTime;
+  crate.hp = options.broken ? 0 : Math.max(1, crate.hp ?? crate.maxHp ?? 1);
+  if (run.loot?.crateId === crate.id) {
+    closeLootCrate(run);
+  }
+
+  run.spilledLoot = run.spilledLoot || [];
+  const centerX = crate.x + crate.width * 0.5;
+  const centerY = crate.y + crate.height * 0.5;
+  const direction = Math.sign(options.directionX ?? run.player?.facing ?? 1) || 1;
+  items.forEach((item, index) => {
+    item.revealed = true;
+    item.transferProgress = 0;
+    item.lootProgress = 0;
+    const side = index % 2 === 0 ? -1 : 1;
+    const spread = (Math.floor(index / 2) + 1) * 42;
+    run.spilledLoot.push({
+      id: `${crate.id}-spill-${item.id || index}-${Math.round((run.time ?? 0) * 1000)}`,
+      crateId: crate.id,
+      item,
+      x: centerX,
+      y: centerY - 8,
+      vx: direction * 78 + side * spread + (Math.random() - 0.5) * 52,
+      vy: -280 - Math.random() * 155,
+      radius: Math.max(10, Math.min(18, 10 + getLootRarityRank(item.rarity) * 2)),
+      floorY: crate.y + crate.height - 8 + Math.random() * 16,
+      life: 0,
+      settled: false,
+      collectDelay: 0.35,
+      pulse: Math.random() * Math.PI * 2,
+    });
+  });
+
+  spawnDirectedParticles(run, centerX, centerY, options.broken ? 22 : 14, "#93eaff", direction, -0.35, options.broken ? 460 : 320, 0.9);
+  spawnDamageNumber(run, centerX, crate.y - 14, 0, options.broken ? "#ffd6ba" : "#93eaff", options.broken ? "BREAK" : "OPEN");
+  pushNotice(run, `${crate.label} ${options.broken ? "?뚯넀." : "媛쒕큺."}`);
+  return true;
+}
+
+function damageLootCrate(run, crate, amount, directionX = 0, directionY = 0, hitX = null, hitY = null) {
+  if (!crate || crate.spilled || crate.searched || crate.broken) {
+    return false;
+  }
+  const damage = Math.max(1, Number(amount ?? 1));
+  const maxHp = Math.max(1, Number(crate.maxHp ?? crate.hp ?? 1));
+  crate.maxHp = maxHp;
+  crate.hp = Math.max(0, Number(crate.hp ?? maxHp) - damage);
+  crate.hitFlash = 0.18;
+  const x = Number.isFinite(hitX) ? hitX : crate.x + crate.width * 0.5;
+  const y = Number.isFinite(hitY) ? hitY : crate.y + crate.height * 0.5;
+  spawnDamageNumber(run, x, y - 12, damage, "#ffd6ba");
+  spawnDirectedParticles(run, x, y, 9, "#ffd6ba", directionX || Math.sign(run.player?.facing ?? 1) || 1, directionY || -0.15, 280, 0.72);
+  if (crate.hp <= 0) {
+    return spillLootCrate(run, crate, { broken: true, directionX });
+  }
+  return true;
+}
+
 function openLootCrate(run, crate) {
   if (!crate || crate.searched) {
     return;
   }
-  const selectedIndex = findNextLootIndex(crate, 0, 1);
-  crate.opened = true;
-  crate.scanComplete = crate.scanComplete || crate.items.every((item) => item.revealed || item.looted);
-  run.loot.active = true;
-  run.loot.crateId = crate.id;
-  run.loot.selectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
-  run.loot.holdItemId = null;
-  run.loot.holdProgress = 0;
-  run.loot.lastRarity = null;
-  pushNotice(run, `${crate.label} 개봉.`);
-  spawnParticles(run, crate.x + crate.width / 2, crate.y + 8, 8, "#93eaff");
+  spillLootCrate(run, crate, { broken: false, directionX: Math.sign(run.player?.facing ?? 1) || 1 });
 }
 
 function moveLootSelection(crate, loot, delta) {
@@ -6836,7 +7701,7 @@ function collectLootItem(run, crate, item) {
     item.blockedTimer = 0.75;
     item.transferProgress = 0;
     item.lootProgress = 0;
-    pushNotice(run, "가방 공간 부족.");
+    pushNotice(run, "媛諛?怨듦컙 遺議?");
     return false;
   }
 
@@ -6866,19 +7731,78 @@ function collectLootItem(run, crate, item) {
     run.loot.rareSignalTimer = 1.15;
     run.loot.lastRarity = item.rarity;
     crate.rareSignalTimer = 1.15;
-    pushNotice(run, `${item.name} 확보. 희귀 반응 감지.`);
+    pushNotice(run, `${item.name} ?뺣낫. ?ш? 諛섏쓳 媛먯?.`);
     spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 18, "#87e1ff");
     spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 8, "#f6e98a");
   } else {
-    pushNotice(run, `${item.name} 확보.`);
+    pushNotice(run, `${item.name} ?뺣낫.`);
     spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 10, "#93eaff");
   }
 
   crate.searched = crate.items.every((entry) => entry.looted);
   if (crate.searched) {
-    pushNotice(run, `${crate.label} 수색 완료.`);
+    pushNotice(run, `${crate.label} ?섏깋 ?꾨즺.`);
   }
   return true;
+}
+
+function collectSpilledLootItem(run, drop) {
+  if (!drop?.item || drop.item.looted) {
+    return true;
+  }
+  const crate = (run.lootCrates || []).find((entry) => entry.id === drop.crateId) || {
+    id: drop.crateId || "spilled-loot",
+    x: drop.x,
+    y: drop.y,
+    width: 1,
+    height: 1,
+    items: [drop.item],
+  };
+  const collected = collectLootItem(run, crate, drop.item);
+  if (collected) {
+    spawnParticles(run, drop.x, drop.y, 8, getLootItemColor(drop.item));
+  } else {
+    drop.collectDelay = 0.6;
+  }
+  return collected;
+}
+
+function getPointRectDistance(point, rect) {
+  const closestX = clamp(point.x, rect.x, rect.x + rect.width);
+  const closestY = clamp(point.y, rect.y, rect.y + rect.height);
+  return distanceBetween(point, { x: closestX, y: closestY });
+}
+
+function updateSpilledLoot(run, data, dt) {
+  const drops = run.spilledLoot || [];
+  if (!drops.length) {
+    return;
+  }
+  const gravity = Math.max(1, data.world?.gravity ?? 2350);
+  run.spilledLoot = drops.filter((drop) => {
+    drop.life = (drop.life ?? 0) + dt;
+    drop.collectDelay = Math.max(0, (drop.collectDelay ?? 0) - dt);
+    if (!drop.settled) {
+      drop.vy += gravity * 0.82 * dt;
+      drop.x += drop.vx * dt;
+      drop.y += drop.vy * dt;
+      if (drop.y >= drop.floorY) {
+        drop.y = drop.floorY;
+        drop.vy = -Math.abs(drop.vy) * 0.24;
+        drop.vx *= 0.58;
+        if (Math.abs(drop.vy) < 72) {
+          drop.vy = 0;
+          drop.vx = 0;
+          drop.settled = true;
+        }
+      }
+    }
+
+    if ((drop.collectDelay ?? 0) <= 0 && getPointRectDistance({ x: drop.x, y: drop.y }, run.player) < 120) {
+      return !collectSpilledLootItem(run, drop);
+    }
+    return !drop.item?.looted;
+  });
 }
 
 function updateLootLockedPlayer(run, dt) {
@@ -7020,7 +7944,7 @@ function getInteractionTargets(run, data) {
         id: routeExit.id,
         kind: shelterBlockReason ? "shelterLocked" : "routeExit",
         routeExit,
-        text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "Z: 다음 구역"),
+        text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "Z: ?ㅼ쓬 援ъ뿭"),
         x: routeExit.x + routeExit.width / 2,
         y: routeExit.y - 12,
       });
@@ -7064,7 +7988,7 @@ function getInteractionTargets(run, data) {
   }
 
   for (const crate of run.lootCrates || []) {
-    if (crate.searched) {
+    if (crate.searched || crate.spilled) {
       continue;
     }
     if (distanceBetween(playerCenter, getCenter(crate)) < 104) {
@@ -7072,7 +7996,7 @@ function getInteractionTargets(run, data) {
         id: crate.id,
         kind: "lootCrate",
         crate,
-        text: normalizeInteractionPrompt(crate.opened ? "Z: 상자 확인" : crate.prompt),
+        text: normalizeInteractionPrompt(crate.prompt || "F: ?곸옄 ?닿린"),
         x: crate.x + crate.width / 2,
         y: crate.y - 12,
       });
@@ -7114,7 +8038,7 @@ function normalizeInteractionPrompt(prompt) {
 }
 
 function normalizeExtractionPrompt(prompt) {
-  return (prompt || "Z: 추출").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
+  return (prompt || "Z: 異붿텧").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
 }
 
 function getNearestZipLineInteractionTarget(run, data) {
@@ -7180,20 +8104,125 @@ function getEncounterOutcome(encounter) {
   return encounter.wasProvoked ? "failed" : "ignored";
 }
 
+function getRunSecuredLootItems(run) {
+  const source = Array.isArray(run?.lootInventory) && run.lootInventory.length
+    ? run.lootInventory
+    : (Array.isArray(run?.inventory?.items) ? run.inventory.items : []);
+  const seen = new Set();
+  const items = [];
+  source.forEach((item, index) => {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+    const key = `${item.crateId || "field"}:${item.id || item.name || index}:${item.acquiredAt ?? ""}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    items.push({
+      crateId: item.crateId || "field",
+      id: item.id || `loot-${index + 1}`,
+      name: item.name || "Unknown item",
+      rarity: item.rarity || "common",
+      type: item.type || "item",
+      quantity: Math.max(1, Math.floor(Number(item.quantity ?? 1))),
+      value: Math.max(0, Number(item.value ?? 0)),
+      weight: Math.max(0, Number(item.weight ?? 0)),
+      acquiredAt: Number.isFinite(item.acquiredAt) ? item.acquiredAt : run?.time ?? 0,
+    });
+  });
+  return items;
+}
+
+function summarizeSecuredLoot(run) {
+  const items = getRunSecuredLootItems(run);
+  const rarityCounts = {};
+  let totalValue = 0;
+  let totalWeight = 0;
+  items.forEach((item) => {
+    rarityCounts[item.rarity] = (rarityCounts[item.rarity] || 0) + 1;
+    totalValue += item.value;
+    totalWeight += item.weight;
+  });
+  const notableItems = [...items]
+    .sort((a, b) => (
+      getLootRarityRank(b.rarity) - getLootRarityRank(a.rarity)
+      || b.value - a.value
+      || a.name.localeCompare(b.name)
+    ))
+    .slice(0, 5);
+  return {
+    items,
+    itemCount: items.length,
+    totalValue: Math.round(totalValue),
+    totalWeight: Number(totalWeight.toFixed(1)),
+    rarityCounts,
+    notableItems,
+  };
+}
+
+function getRunObjectiveProgress(objective, run, securedLoot = summarizeSecuredLoot(run)) {
+  if (!objective) {
+    return { current: 0, target: 1, complete: false };
+  }
+  const target = Math.max(1, Number(objective.target ?? 1));
+  let current = 0;
+  if (objective.type === "lootValue") {
+    current = securedLoot.totalValue;
+  } else if (objective.type === "rareLoot") {
+    current = securedLoot.items.filter((item) => getLootRarityRank(item.rarity) >= 2).length;
+  } else {
+    current = securedLoot.itemCount;
+  }
+  return {
+    current: Math.max(0, current),
+    target,
+    complete: current >= target,
+  };
+}
+
+function summarizeRunObjectives(run, securedLoot = summarizeSecuredLoot(run)) {
+  const objectives = Array.isArray(run?.objectives) ? run.objectives : [];
+  const entries = objectives.map((objective) => {
+    const progress = getRunObjectiveProgress(objective, run, securedLoot);
+    return {
+      id: objective.id,
+      label: objective.label || objective.id,
+      type: objective.type,
+      target: progress.target,
+      current: progress.current,
+      complete: progress.complete,
+      rewardMaterials: Math.max(0, Math.round(Number(objective.rewardMaterials ?? 0))),
+    };
+  });
+  const completed = entries.filter((entry) => entry.complete);
+  return {
+    entries,
+    completed,
+    completedCount: completed.length,
+    totalCount: entries.length,
+    rewardMaterials: completed.reduce((total, entry) => total + entry.rewardMaterials, 0),
+  };
+}
+
 function applyExtraction(state, data) {
   const run = state.run;
+  const securedLoot = summarizeSecuredLoot(run);
+  const objectives = summarizeRunObjectives(run, securedLoot);
   if (isMovementLab(data)) {
     state.resultSummary = {
       success: true,
       labSession: true,
       materials: run.materials,
+      securedLoot,
+      objectives,
       timePhase: run.timePhase,
     };
     clearSavedGame();
     state.run = null;
     state.scene = SCENES.RESULTS;
     state.sceneTimer = 0;
-    setStatus(state, "실험 종료. C/Z");
+    setStatus(state, "?ㅽ뿕 醫낅즺. C/Z");
     return;
   }
 
@@ -7206,18 +8235,37 @@ function applyExtraction(state, data) {
     Object.values(outcomes).filter((entry) => entry === "harvested").length;
   const newUnlocks = run.pendingUnlocks.filter((abilityId) => !state.meta.unlockedAbilities.includes(abilityId));
   const newStories = run.pendingStoryFlags.filter((storyId) => !state.meta.storyFlags.includes(storyId));
+  const totalMaterials = run.materials + objectives.rewardMaterials;
+  const securedAt = Date.now();
+  const newlySecuredLoot = securedLoot.items.map((item) => ({
+    ...item,
+    runIndex: (state.meta.completedRuns || 0) + 1,
+    securedAt,
+  }));
 
   state.meta = {
     ...state.meta,
     trust: state.meta.trust + trustDelta,
-    bankedMaterials: state.meta.bankedMaterials + run.materials,
+    bankedMaterials: state.meta.bankedMaterials + totalMaterials,
+    securedLoot: [
+      ...(Array.isArray(state.meta.securedLoot) ? state.meta.securedLoot : []),
+      ...newlySecuredLoot,
+    ].slice(-120),
     unlockedAbilities: [...state.meta.unlockedAbilities, ...newUnlocks],
     storyFlags: [...state.meta.storyFlags, ...newStories],
     completedRuns: state.meta.completedRuns + 1,
     lastOutcome: {
       outcomes,
       trustDelta,
-      materials: run.materials,
+      materials: totalMaterials,
+      baseMaterials: run.materials,
+      objectiveRewardMaterials: objectives.rewardMaterials,
+      objectives,
+      securedLoot: {
+        itemCount: securedLoot.itemCount,
+        totalValue: securedLoot.totalValue,
+        rarityCounts: securedLoot.rarityCounts,
+      },
       nightReached: run.nightActive,
     },
   };
@@ -7228,7 +8276,11 @@ function applyExtraction(state, data) {
     success: true,
     outcomes,
     trustDelta,
-    materials: run.materials,
+    materials: totalMaterials,
+    baseMaterials: run.materials,
+    objectiveRewardMaterials: objectives.rewardMaterials,
+    objectives,
+    securedLoot,
     newUnlocks,
     newStories: data.encounters
       .filter((encounter) => newStories.includes(encounter.storyFlag))
@@ -7241,22 +8293,26 @@ function applyExtraction(state, data) {
   state.run = null;
   state.scene = SCENES.RESULTS;
   state.sceneTimer = 0;
-  setStatus(state, "귀환 완료. C/Z");
+  setStatus(state, "洹???꾨즺. C/Z");
 }
 
 function applyFailure(state, data, reason) {
+  const lostLoot = summarizeSecuredLoot(state.run);
+  const objectives = summarizeRunObjectives(state.run, lostLoot);
   if (isMovementLab(data)) {
     state.resultSummary = {
       success: false,
       labSession: true,
       reason,
       lostMaterials: 0,
+      lostLoot,
+      objectives,
     };
     clearSavedGame();
     state.run = null;
     state.scene = SCENES.GAME_OVER;
     state.sceneTimer = 0;
-    setStatus(state, "실험 리셋. C/Z");
+    setStatus(state, "?ㅽ뿕 由ъ뀑. C/Z");
     return;
   }
 
@@ -7264,12 +8320,14 @@ function applyFailure(state, data, reason) {
     success: false,
     reason,
     lostMaterials: state.run.materials,
+    lostLoot,
+    objectives,
   };
   clearSavedGame();
   state.run = null;
   state.scene = SCENES.GAME_OVER;
   state.sceneTimer = 0;
-  setStatus(state, "런 실패. C/Z");
+  setStatus(state, "???ㅽ뙣. C/Z");
 }
 
 function restartCurrentRun(state, data) {
@@ -7282,7 +8340,7 @@ function restartCurrentRun(state, data) {
     state.liveEdit.hoverPlatformIndex = null;
     state.liveEdit.drag = null;
   }
-  setStatus(state, "스폰으로 복귀.");
+  setStatus(state, "?ㅽ룿?쇰줈 蹂듦?.");
   saveCurrentGame(state, data);
 }
 
@@ -7311,6 +8369,8 @@ function installLevelRuntimeState(run, data, savedState = null) {
   run.enemyShots = [];
   run.playerBullets = [];
   run.damageNumbers = [];
+  run.spilledLoot = [];
+  run.weaponKick = null;
   run.faceOff = fresh.faceOff;
   run.prompt = "";
   run.promptWorld = null;
@@ -7333,6 +8393,7 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.movementState = MOVEMENT_STATES.GROUNDED;
   player.attackCooldown = 0;
   player.attackWindow = 0;
+  player.attackToolActive = false;
   player.attackHits = new Set();
   player.lightActive = false;
   player.dashTimer = 0;
@@ -7369,10 +8430,12 @@ function clearLevelTransitionEffects(run) {
   run.enemyShots = [];
   run.playerBullets = [];
   run.damageNumbers = [];
+  run.spilledLoot = [];
   run.attackFx = [];
   run.recoilFx = [];
   run.weaponMissiles = [];
   run.weaponBarriers = [];
+  run.weaponKick = null;
   run.particles = [];
   run.afterimages = [];
   run.recoilFocusAfterimages = [];
@@ -7465,7 +8528,7 @@ function getRunTimePhaseLabel(run) {
   if (run?.timePhase === "dusk") {
     return "황혼";
   }
-  return "낮";
+  return "주간";
 }
 
 function setDebugNightPhase(state, data) {
@@ -7478,7 +8541,7 @@ function setDebugNightPhase(state, data) {
   run.timePhase = "night";
   run.nightActive = true;
   run.nightTransitionTimer = NIGHT_TRANSITION_SECONDS;
-  setRunNotice(run, "테스트: 밤으로 전환", 2);
+  setRunNotice(run, "?뚯뒪?? 諛ㅼ쑝濡??꾪솚", 2);
   setStatus(state, run.message);
   saveCurrentGame(state, data);
   return true;
@@ -7645,6 +8708,13 @@ function refillWeaponsForShelter(run, data) {
   });
   Object.values(weapons.arms || {}).forEach((arm) => {
     const stats = computeArmWeaponStats(data, arm);
+    if (!stats.equipped) {
+      arm.magazine = 0;
+      arm.reloadTimer = 0;
+      arm.reloadDuration = 0;
+      arm.fireCooldownTimer = 0;
+      return;
+    }
     arm.magazine = stats.magazineSize;
     arm.reloadTimer = 0;
     arm.reloadDuration = 0;
@@ -7656,9 +8726,9 @@ function refillWeaponsForShelter(run, data) {
 }
 
 function applyShelterRestRecovery(run, data) {
-  run.hp = data.player.maxHp;
-  run.sanity = data.player.maxSanity;
-  run.battery = data.player.maxBattery;
+  run.hp = run.maxHp || data.player.maxHp;
+  run.sanity = run.maxSanity || data.player.maxSanity;
+  run.battery = run.maxBattery || data.player.maxBattery;
   run.focusMax = Number.isFinite(run.focusMax) ? run.focusMax : 100;
   run.focus = run.focusMax;
   run.focusActive = false;
@@ -7683,9 +8753,9 @@ function beginShelterRest(state, data, returnLevelId, returnEntranceId) {
   }
   ensureCgArchive(state.meta || {});
   preloadShelterCgIllustration(data, run.day);
-  run.message = `DAY ${run.day} · 피난처 도착`;
+  run.message = `DAY ${run.day} 쨌 ?쇰궃泥??꾩갑`;
   run.noticeTimer = 2.6;
-  setStatus(state, "피난처 폐쇄 중.");
+  setStatus(state, "?쇰궃泥??먯뇙 以?");
   saveCurrentGame(state, data);
 }
 
@@ -7732,7 +8802,7 @@ function saveShelterPhoto(state, data) {
   }
   const image = rest.photo?.capturedImage || createShelterPhotoImage(run, data, rest);
   if (!image) {
-    run.message = "CG 저장 실패.";
+    run.message = "CG ????ㅽ뙣.";
     run.noticeTimer = 1.8;
     return false;
   }
@@ -7754,7 +8824,7 @@ function saveShelterPhoto(state, data) {
   archive.photos = archive.photos.slice(-CG_PHOTO_LIMIT);
   saveMetaState(state.meta);
   rest.recordsIndex = Math.max(0, archive.photos.length - 1);
-  run.message = "CG 일러스트 저장.";
+  run.message = "CG ?쇰윭?ㅽ듃 ???";
   run.noticeTimer = 2.2;
   return true;
 }
@@ -7788,7 +8858,7 @@ function transitionToLevel(state, data, targetLevelId, entranceId = "start", opt
   snapCameraToPlayer(run, data);
   updateMapExploration(run, data);
 
-  run.message = options.message || `${data.levelLabel || resolvedTargetLevelId} 진입.`;
+  run.message = options.message || `${data.levelLabel || resolvedTargetLevelId} 吏꾩엯.`;
   run.noticeTimer = 2.6;
   setStatus(state, run.message);
   if (options.persist !== false) {
@@ -7819,7 +8889,7 @@ function transitionToRouteExit(state, data, routeExit) {
   }
   const result = transitionToLevel(state, data, routeExit.toLevelId, routeExit.toEntranceId || "start", {
     persist: !shelterRoute,
-    message: shelterRoute ? "피난처 진입." : undefined,
+    message: shelterRoute ? "?쇰궃泥?吏꾩엯." : undefined,
   });
   if (shelterRoute && result) {
     beginShelterRest(state, data, fromLevelId, routeExit.returnEntranceId || "start");
@@ -7836,7 +8906,7 @@ function leaveShelterRest(state, data) {
   const entranceId = rest.returnEntranceId || "start";
   const result = transitionToLevel(state, data, targetLevelId, entranceId, {
     persist: false,
-    message: "피난처 출발.",
+    message: "?쇰궃泥?異쒕컻.",
   });
   if (!result) {
     return;
@@ -7860,7 +8930,7 @@ function leaveShelterRest(state, data) {
     backgroundIndex: 0,
   };
   run.shelterExitCooldown = SHELTER_EXIT_COOLDOWN_SECONDS;
-  run.message = `${data.levelLabel || targetLevelId} 복귀.`;
+  run.message = `${data.levelLabel || targetLevelId} 蹂듦?.`;
   run.noticeTimer = 2.6;
   setStatus(state, run.message);
   saveCurrentGame(state, data);
@@ -8068,7 +9138,7 @@ function updateInteractions(state, data, canInteract) {
     !isMoving &&
     !player.lightActive
   ) {
-    run.prompt = "정지 유지";
+    run.prompt = "?뺤? ?좎?";
     run.promptWorld = {
       x: guard.checkpointZone.x + guard.checkpointZone.width / 2,
       y: guard.checkpointZone.y - 10,
@@ -8084,7 +9154,7 @@ function updateInteractions(state, data, canInteract) {
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0
   ) {
-    run.prompt = "C: 벽 짚기";
+    run.prompt = "C: 踰?吏싰린";
     run.promptWorld = {
       x: braceWall.x + braceWall.width * 0.5,
       y: braceWall.y - 12,
@@ -8156,7 +9226,7 @@ function updateInteractions(state, data, canInteract) {
   if (item.kind === "badge-locker") {
     run.inventory.badge = true;
     pushClue(run, "guard-badge", item.clue);
-    pushNotice(run, "통행 배지 확보.");
+    pushNotice(run, "?듯뻾 諛곗? ?뺣낫.");
     spawnParticles(run, item.x + item.width / 2, item.y + 12, 12, "#f4dda6");
     return;
   }
@@ -8164,7 +9234,7 @@ function updateInteractions(state, data, canInteract) {
   if (item.kind === "salvage") {
     run.materials += item.materials;
     pushClue(run, item.id, item.clue);
-    pushNotice(run, `${item.materials} 자재 확보.`);
+    pushNotice(run, `${item.materials} ?먯옱 ?뺣낫.`);
     spawnParticles(run, item.x + item.width / 2, item.y + 12, 10, "#8fe1ff");
   }
 }
@@ -8203,10 +9273,10 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
       rest.menuIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1);
-      setStatus(state, "피난처 대기.");
+      setStatus(state, "?쇰궃泥??湲?");
       saveCurrentGame(state, data);
     } else {
-      setStatus(state, "피난처 폐쇄 중.");
+      setStatus(state, "?쇰궃泥??먯뇙 以?");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8230,27 +9300,27 @@ function updateShelterRestMode(state, data, dt) {
         rest.timer = 0;
         resetShelterPhoto(rest);
         preloadShelterCgIllustration(data, run.day);
-        setStatus(state, "CG 촬영 모드.");
+        setStatus(state, "CG 珥ъ쁺 紐⑤뱶.");
       } else if (item === "records") {
         rest.phase = "records";
         rest.timer = 0;
         rest.recordsIndex = clamp(Math.floor(rest.recordsIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).photos.length - 1));
-        setStatus(state, "기록 보기.");
+        setStatus(state, "湲곕줉 蹂닿린.");
       } else if (item === "background") {
         rest.phase = "background";
         rest.timer = 0;
         rest.backgroundIndex = clamp(Math.floor(rest.backgroundIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).unlockedBackgroundIds.length - 1));
-        setStatus(state, "배경 보기.");
+        setStatus(state, "諛곌꼍 蹂닿린.");
       } else if (item === "exit") {
         leaveShelterRest(state, data);
         return true;
       } else {
-        run.message = "피난처 휴식 완료.";
+        run.message = "?쇰궃泥??댁떇 ?꾨즺.";
         run.noticeTimer = 1.8;
         setStatus(state, run.message);
       }
     } else {
-      setStatus(state, "피난처 · Z 선택 · C 밖으로");
+      setStatus(state, "피난처 · Z 선택 · C 나가기");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8274,7 +9344,7 @@ function updateShelterRestMode(state, data, dt) {
     } else if (consumeEitherPress(state, INTERACT_KEYS)) {
       if (!isShelterCgIllustrationReady(data, getShelterConfig(data).backgroundId, run.day)) {
         preloadShelterCgIllustration(data, run.day);
-        setStatus(state, "CG 로딩 중.");
+        setStatus(state, "CG 濡쒕뵫 以?");
         updateAutoSave(state, data, dt);
         return true;
       }
@@ -8282,9 +9352,9 @@ function updateShelterRestMode(state, data, dt) {
       rest.photo.flashTimer = 0.22;
       rest.phase = "photoPreview";
       rest.timer = 0;
-      setStatus(state, "CG 확인 · C 저장 / R 재촬영");
+      setStatus(state, "CG 확인 · C 저장 / R 다시");
     } else {
-      setStatus(state, "CG 촬영 · 방향키/WASD 프레임 · Z 촬영");
+      setStatus(state, "CG 珥ъ쁺 쨌 諛⑺뼢??WASD ?꾨젅??쨌 Z 珥ъ쁺");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8306,7 +9376,7 @@ function updateShelterRestMode(state, data, dt) {
         saveCurrentGame(state, data);
       }
     } else {
-      setStatus(state, "CG 확인 · C 저장 / R 재촬영 / Esc 취소");
+      setStatus(state, "CG ?뺤씤 쨌 C ???/ R ?ъ눋??/ Esc 痍⑥냼");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8324,7 +9394,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
     } else {
-      setStatus(state, "기록 보기 · A/D 넘기기 · Esc 뒤로");
+      setStatus(state, "湲곕줉 蹂닿린 쨌 A/D ?섍린湲?쨌 Esc ?ㅻ줈");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8342,7 +9412,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
     } else {
-      setStatus(state, "배경 보기 · A/D 넘기기 · Esc 뒤로");
+      setStatus(state, "諛곌꼍 蹂닿린 쨌 A/D ?섍린湲?쨌 Esc ?ㅻ줈");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8385,12 +9455,16 @@ function updateExpedition(state, data, dt) {
       state.liveEdit.saveFlashTimer = Math.max(0, state.liveEdit.saveFlashTimer - dt);
     }
     setStatus(state, state.liveEdit.saveFlashTimer > 0
-      ? "라이브 편집 · 저장됨 · F2/L 종료"
-      : "라이브 편집 · 블록 드래그 · F2/L 종료");
+      ? "?쇱씠釉??몄쭛 쨌 ??λ맖 쨌 F2/L 醫낅즺"
+      : "?쇱씠釉??몄쭛 쨌 釉붾줉 ?쒕옒洹?쨌 F2/L 醫낅즺");
     return;
   }
 
   updateMapExploration(run, data);
+
+  if (updateInventoryOverlayInput(state, data)) {
+    return;
+  }
 
   if (updateMapOverlayInput(state, data)) {
     return;
@@ -8408,7 +9482,14 @@ function updateExpedition(state, data, dt) {
   if (!lootWasActive && !run.faceOff?.active) {
     updateWeaponRuntime(run, data, state, dt);
   }
+  const meleeSlotSelected = !lootWasActive && isMeleeSlotSelected(run, data);
   if (lootWasActive) {
+    if (run.recoilAim) {
+      run.recoilAim.active = false;
+      run.recoilAim.aiming = false;
+    }
+    run.player.recoilFocusActive = false;
+  } else if (meleeSlotSelected) {
     if (run.recoilAim) {
       run.recoilAim.active = false;
       run.recoilAim.aiming = false;
@@ -8417,11 +9498,11 @@ function updateExpedition(state, data, dt) {
   } else {
     updateRecoilAim(run, data, state, dt);
   }
-  const selectedWeaponAutomatic = !lootWasActive && isSelectedWeaponAutomatic(run, data);
+  const selectedWeaponAutomatic = !lootWasActive && !meleeSlotSelected && isSelectedWeaponAutomatic(run, data);
   const heldAutoFire = selectedWeaponAutomatic
     && Boolean(state.mouse?.primaryDown)
     && canFireWeaponPose(run.player);
-  const queuedRecoilShotPressed = !lootWasActive && (Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
+  const queuedRecoilShotPressed = !lootWasActive && !meleeSlotSelected && (Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
   const reserveRecoilShotForWeapon = queuedRecoilShotPressed
     && (Boolean(run.recoilAim?.aiming) || selectedWeaponAutomatic);
   if (queuedRecoilShotPressed || state.mouse?.secondaryDown || run.recoilAim?.aiming || run.focusActive) {
@@ -8440,7 +9521,7 @@ function updateExpedition(state, data, dt) {
   const faceOffTimeScale = clamp(getFaceOffConfig(data).timeScale ?? 0.08, 0.02, 0.25);
   if (
     !reserveRecoilShotForWeapon &&
-    (run.faceOff?.active || !lootWasActive) &&
+    (run.faceOff?.active || (!meleeSlotSelected && !lootWasActive)) &&
     updateFaceOff(state, data, dt, dt * faceOffTimeScale)
   ) {
     if (run.recoilAim) {
@@ -8461,6 +9542,9 @@ function updateExpedition(state, data, dt) {
   const dodgeTimeScale = (run.dodgeSlowTimer ?? 0) > 0 ? 0.38 : 1;
   const simDt = dt * focusTimeScale * dodgeTimeScale;
   let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
+  if (!lootWasActive && meleeSlotSelected && Boolean(state.mouse?.primaryJustPressed)) {
+    attackPressed = true;
+  }
   const recoilShotPressed = reserveRecoilShotForWeapon || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
   if (recoilShotPressed || queuedRecoilShotPressed) {
     pushInputTrace(state, "shotQueued", {
@@ -8481,6 +9565,7 @@ function updateExpedition(state, data, dt) {
     tryBeginZipLineRideFromMountInput(state, data);
     updatePlayer(run, data, state, simDt, {
       attackPressed,
+      meleeToolActive: meleeSlotSelected,
       interactionPressed: false,
       recoilShotPressed,
     });
@@ -8496,7 +9581,8 @@ function updateExpedition(state, data, dt) {
   updateHumanoidEnemies(run, data, simDt);
   updateHostileDrones(run, data, simDt);
   updateEnemyShots(run, data, simDt);
-  updateAttackHits(run);
+  updateAttackHits(run, data);
+  updateSpilledLoot(run, data, simDt);
   if (lootActive) {
     run.prompt = "";
     run.promptWorld = null;
@@ -8524,23 +9610,89 @@ function updateExpedition(state, data, dt) {
 
   const timePhaseLabel = getRunTimePhaseLabel(run);
   const phaseLabel = isMovementLab(data)
-    ? `실험 중 · ${timePhaseLabel}.`
+    ? `?ㅽ뿕 以?쨌 ${timePhaseLabel}.`
     : run.timePhase === "day"
-      ? "낮 유지."
+      ? "???좎?."
       : run.timePhase === "dusk"
-        ? "황혼 압박."
-        : "야간 위협.";
+        ? "?⑺샎 ?뺣컯."
+        : "?쇨컙 ?꾪삊.";
   const notice = run.noticeTimer > 0 ? ` ${run.message}` : "";
   setStatus(state, `${phaseLabel}${notice}`);
   updateAutoSave(state, data, dt);
 }
 
-function updateShelter(state) {
-  setStatus(state, isMovementLab(state.data) ? "피난처 대기. C: 출격" : "피난처 대기. C: 출격");
+function updateShelterLegacy(state) {
+  setStatus(state, isMovementLab(state.data) ? "?쇰궃泥??湲? C: 異쒓꺽" : "?쇰궃泥??湲? C: 異쒓꺽");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     startNewSavedRun(state, state.data);
-    setStatus(state, "출격 중.");
+    setStatus(state, "異쒓꺽 以?");
   }
+}
+
+function updateShelter(state) {
+  const menu = state.shelterMenu && typeof state.shelterMenu === "object"
+    ? state.shelterMenu
+    : {};
+  menu.menuIndex = clamp(Math.floor(menu.menuIndex || 0), 0, SHELTER_HUB_MENU_ITEMS.length - 1);
+  menu.upgradeIndex = clamp(Math.floor(menu.upgradeIndex || 0), 0, Math.max(0, SHELTER_UPGRADES.length - 1));
+  state.shelterMenu = menu;
+
+  if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+    menu.menuIndex = (menu.menuIndex + SHELTER_HUB_MENU_ITEMS.length - 1) % SHELTER_HUB_MENU_ITEMS.length;
+    setStatus(state, "?쇰궃泥?硫붾돱");
+    return;
+  }
+  if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+    menu.menuIndex = (menu.menuIndex + 1) % SHELTER_HUB_MENU_ITEMS.length;
+    setStatus(state, "?쇰궃泥?硫붾돱");
+    return;
+  }
+
+  const selectedMenuItem = SHELTER_HUB_MENU_ITEMS[menu.menuIndex] || "upgrade";
+  if (selectedMenuItem === "upgrade") {
+    if (consumeEitherPress(state, SHELTER_VIEW_LEFT_KEYS)) {
+      menu.upgradeIndex = (menu.upgradeIndex + SHELTER_UPGRADES.length - 1) % SHELTER_UPGRADES.length;
+      setStatus(state, "?낃렇?덉씠???좏깮");
+      return;
+    }
+    if (consumeEitherPress(state, SHELTER_VIEW_RIGHT_KEYS)) {
+      menu.upgradeIndex = (menu.upgradeIndex + 1) % SHELTER_UPGRADES.length;
+      setStatus(state, "?낃렇?덉씠???좏깮");
+      return;
+    }
+  }
+
+  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    if (selectedMenuItem === "upgrade") {
+      const upgrade = SHELTER_UPGRADES[menu.upgradeIndex] || SHELTER_UPGRADES[0];
+      const level = getShelterUpgradeLevel(state.meta, upgrade.id);
+      const cost = getShelterUpgradeCost(upgrade, level);
+      if (cost === null) {
+        setStatus(state, `${upgrade.label} 理쒕? ?④퀎`);
+        return;
+      }
+      if ((state.meta.bankedMaterials || 0) < cost) {
+        setStatus(state, `?먯옱 遺議? ${cost} ?꾩슂`);
+        return;
+      }
+      state.meta.upgrades = normalizeMetaUpgrades(state.meta.upgrades);
+      state.meta.bankedMaterials = Math.max(0, (state.meta.bankedMaterials || 0) - cost);
+      state.meta.upgrades[upgrade.id] = level + 1;
+      saveMetaState(state.meta);
+      setStatus(state, `${upgrade.label} Lv.${level + 1} ?낃렇?덉씠???꾨즺`);
+      return;
+    }
+    startNewSavedRun(state, state.data);
+    setStatus(state, "출격 중");
+    return;
+  }
+
+  const selectedUpgrade = SHELTER_UPGRADES[menu.upgradeIndex] || SHELTER_UPGRADES[0];
+  const level = getShelterUpgradeLevel(state.meta, selectedUpgrade.id);
+  const cost = getShelterUpgradeCost(selectedUpgrade, level);
+  setStatus(state, selectedMenuItem === "upgrade"
+    ? `${selectedUpgrade.label} Lv.${level}/${selectedUpgrade.maxLevel} · ${cost === null ? "최대" : `자재 ${cost}`}`
+    : "출격 대기");
 }
 
 function ensureTitleMenuState(state, hasRun) {
@@ -8585,13 +9737,13 @@ function enterTitleNewRun(state, hasRun) {
   };
   state.scene = SCENES.SHELTER;
   state.sceneTimer = 0;
-  setStatus(state, "새 런 준비");
+  setStatus(state, "출격 준비");
 }
 
 function updateTitle(state) {
   if (shouldStartFromUrlLevel()) {
     startNewSavedRun(state, state.data, { clearSaved: false, persist: false });
-    setStatus(state, "・懋ｲｩ ・・");
+    setStatus(state, "?삥뇣節뀐쉘 ?삠꺕");
     return;
   }
 
@@ -8603,30 +9755,30 @@ function updateTitle(state) {
   if (titleMenu.confirmingNewRun) {
     if (consumeEitherPress(state, TITLE_MENU_CANCEL_KEYS)) {
       titleMenu.confirmingNewRun = false;
-      setStatus(state, "새 런 취소");
+      setStatus(state, "????痍⑥냼");
       return;
     }
     if (consumeEitherPress(state, TITLE_MENU_UP_KEYS) || consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
       titleMenu.confirmingNewRun = false;
-      setStatus(state, "메인 메뉴");
+      setStatus(state, "硫붿씤 硫붾돱");
       return;
     }
     if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
       enterTitleNewRun(state, hasRun);
       return;
     }
-    setStatus(state, "기존 저장 삭제 확인: C/Z");
+    setStatus(state, "湲곗〈 ?????젣 ?뺤씤: C/Z");
     return;
   }
 
   if (consumeEitherPress(state, TITLE_MENU_UP_KEYS)) {
     moveTitleMenu(titleMenu, hasRun, -1);
-    setStatus(state, "메인 메뉴");
+    setStatus(state, "硫붿씤 硫붾돱");
     return;
   }
   if (consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
     moveTitleMenu(titleMenu, hasRun, 1);
-    setStatus(state, "메인 메뉴");
+    setStatus(state, "硫붿씤 硫붾돱");
     return;
   }
 
@@ -8634,7 +9786,7 @@ function updateTitle(state) {
     titleMenu.menuIndex = 0;
     if (hasRun) {
       titleMenu.confirmingNewRun = true;
-      setStatus(state, "기존 저장 삭제 확인");
+      setStatus(state, "湲곗〈 ?????젣 ?뺤씤");
     } else {
       enterTitleNewRun(state, false);
     }
@@ -8650,23 +9802,23 @@ function updateTitle(state) {
       state.save.hasRun = false;
       titleMenu.menuIndex = 0;
       titleMenu.lastHasRun = false;
-      setStatus(state, "저장된 런 없음");
+      setStatus(state, "??λ맂 ???놁쓬");
       return;
     }
     if (hasRun) {
       titleMenu.confirmingNewRun = true;
-      setStatus(state, "기존 저장 삭제 확인");
+      setStatus(state, "湲곗〈 ?????젣 ?뺤씤");
       return;
     }
     enterTitleNewRun(state, false);
     return;
   }
 
-  setStatus(state, hasRun ? "W/S 선택 · C/Z 실행" : "처음부터 · C/Z 실행");
+  setStatus(state, hasRun ? "W/S ?좏깮 쨌 C/Z ?ㅽ뻾" : "泥섏쓬遺??쨌 C/Z ?ㅽ뻾");
 }
 
 function updateResults(state) {
-  setStatus(state, isMovementLab(state.data) ? "결과 화면. C/Z" : "귀환 결과. C/Z");
+  setStatus(state, isMovementLab(state.data) ? "寃곌낵 ?붾㈃. C/Z" : "洹??寃곌낵. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
@@ -8674,7 +9826,7 @@ function updateResults(state) {
 }
 
 function updateGameOver(state) {
-  setStatus(state, isMovementLab(state.data) ? "실패 화면. C/Z" : "런 실패. C/Z");
+  setStatus(state, isMovementLab(state.data) ? "?ㅽ뙣 ?붾㈃. C/Z" : "???ㅽ뙣. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
@@ -8683,7 +9835,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Tab", "CapsLock", "Digit1", "Digit2", "Digit3", "Digit8", "NumpadMultiply", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyF", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (!state.pressed.has(event.code)) {
@@ -8754,3 +9906,4 @@ export function updateGame(state, data, dt) {
 export function hasThreatSense(state) {
   return hasUnlocked(state.meta, "threatSense");
 }
+

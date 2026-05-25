@@ -1,10 +1,10 @@
-import { GAME_DATA } from "./level-data.js?v=20260522-faceoff-scene-main-v1";
+import { GAME_DATA } from "./level-data.js?v=20260523-body-status-v7";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260522-faceoff-scene-main-v1";
+} from "./level-store.js?v=20260523-body-status-v7";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,8 +13,8 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260522-faceoff-scene-main-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
+import { renderGame } from "./render.js?v=20260523-body-status-v7";
+import { saveCurrentGame } from "./save-game.js?v=20260523-body-status-v7";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -25,8 +25,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260522-faceoff-scene-main-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260522-faceoff-scene-main-v1";
+} from "./state.js?v=20260523-body-status-v7";
+import { bindInput, updateGame } from "./systems.js?v=20260523-body-status-v7";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -1487,8 +1487,37 @@ function bindUi(currentDom, currentState, data) {
     handleRecoilMouseDown(event);
   });
 
+  const handleWeaponWheel = (event) => {
+    if (
+      !isMapOverlayActive()
+      && !currentState.run?.inventoryOverlay?.active
+      && currentState.scene === SCENES.EXPEDITION
+      && !currentState.liveEdit.active
+    ) {
+      pressVirtualKey(currentState, event.deltaY < 0 ? "MouseWheelUp" : "MouseWheelDown");
+      window.setTimeout(() => {
+        releaseVirtualKey(currentState, "MouseWheelUp");
+        releaseVirtualKey(currentState, "MouseWheelDown");
+      }, 40);
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+    return false;
+  };
+
   currentDom.canvas.addEventListener("wheel", (event) => {
+    if (handleWeaponWheel(event)) {
+      return;
+    }
     zoomMapOverlay(event);
+  }, { passive: false });
+
+  window.addEventListener("wheel", (event) => {
+    if (event.defaultPrevented) {
+      return;
+    }
+    handleWeaponWheel(event);
   }, { passive: false });
 
   currentDom.canvas.addEventListener("auxclick", (event) => {

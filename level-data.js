@@ -654,23 +654,20 @@ export const GAME_DATA = {
     }
   },
   "defaultLoadout": {
-    "selectedSide": "left",
+    "selectedSide": "right",
     "reserveAmmo": {
-      "shell": 16,
-      "pistol": 48,
-      "rifle": 180,
-      "heavy": 240
+      "pistol": 48
     },
     "arms": {
       "left": {
-        "armId": "shotgun-arm-a",
+        "armId": null,
         "magazine": null,
-        "modules": ["recoil-amplifier", "impact-barrier", "spread-reducer"]
+        "modules": []
       },
       "right": {
         "armId": "pistol-arm-a",
         "magazine": null,
-        "modules": ["magazine-extender", "knockdown-booster"]
+        "modules": []
       }
     }
   },
@@ -691,7 +688,7 @@ export const GAME_DATA = {
     "startingSanity": 100,
     "attackDamage": 34,
     "attackCooldown": 0.42,
-    "lightDrainPerSecond": 10,
+    "lightDrainPerSecond": 0,
     "movement": {
       "runSpeed": 440,
       "sprintSpeed": 1180,
@@ -1336,9 +1333,10 @@ export const GAME_DATA = {
       "width": 78,
       "height": 50,
       "label": "거리 보급함",
-      "prompt": "E: 상자 열기",
+      "prompt": "F: 상자 열기",
       "lootTable": "streetCache",
-      "searchTime": 1.05
+      "searchTime": 1.05,
+      "maxHp": 48
     },
     {
       "id": "crate-rooftop-01",
@@ -1347,9 +1345,10 @@ export const GAME_DATA = {
       "width": 82,
       "height": 52,
       "label": "추락 보관함",
-      "prompt": "E: 상자 열기",
+      "prompt": "F: 상자 열기",
       "lootTable": "deepCache",
-      "searchTime": 1.25
+      "searchTime": 1.25,
+      "maxHp": 64
     }
   ],
   "interactables": [],
