@@ -204,6 +204,14 @@ function safeId(value, fallback) {
   return normalized || fallback;
 }
 
+function getDefaultRouteExitTrigger(kind = "route") {
+  return kind === "shelter" ? "interact" : "touch";
+}
+
+function normalizeRouteExitTrigger(value, fallback = "touch") {
+  return safeString(value, fallback) === "interact" ? "interact" : "touch";
+}
+
 function extractEntrance(entrance = {}) {
   return {
     id: safeString(entrance.id, "start"),
@@ -233,10 +241,11 @@ function sanitizeEntrance(entrance, index, fallback = null) {
 }
 
 function extractRouteExit(exit = {}) {
+  const kind = safeString(exit.kind, safeString(exit.type, "route"));
   return {
     id: safeString(exit.id, "route-exit"),
-    kind: safeString(exit.kind, safeString(exit.type, "route")),
-    type: safeString(exit.type, safeString(exit.kind, "route")),
+    kind,
+    type: safeString(exit.type, kind),
     label: safeString(exit.label, exit.id || "Route Exit"),
     x: safeNumber(exit.x, 0),
     y: safeNumber(exit.y, 0),
@@ -246,6 +255,8 @@ function extractRouteExit(exit = {}) {
     toLevelId: safeString(exit.toLevelId, ""),
     toEntranceId: safeString(exit.toEntranceId, "start"),
     returnEntranceId: safeString(exit.returnEntranceId, "start"),
+    trigger: normalizeRouteExitTrigger(exit.trigger ?? exit.activation, getDefaultRouteExitTrigger(kind)),
+    fadeSeconds: safeRange(exit.fadeSeconds, 0.42, 0.05, 2),
   };
 }
 
@@ -263,9 +274,12 @@ function sanitizeRouteExit(exit, index, fallback = null) {
     toLevelId: "",
     toEntranceId: "start",
     returnEntranceId: "start",
+    trigger: "interact",
+    fadeSeconds: 0.42,
   };
   const source = exit && typeof exit === "object" ? exit : {};
   const kind = safeString(source.kind, safeString(source.type, base.kind || base.type || "route"));
+  const defaultTrigger = getDefaultRouteExitTrigger(kind);
   return {
     id: safeId(source.id, base.id),
     kind,
@@ -279,6 +293,8 @@ function sanitizeRouteExit(exit, index, fallback = null) {
     toLevelId: safeString(source.toLevelId, base.toLevelId),
     toEntranceId: safeString(source.toEntranceId, base.toEntranceId || "start"),
     returnEntranceId: safeString(source.returnEntranceId, base.returnEntranceId || "start"),
+    trigger: normalizeRouteExitTrigger(source.trigger ?? source.activation, defaultTrigger),
+    fadeSeconds: safeRange(source.fadeSeconds, base.fadeSeconds ?? 0.42, 0.05, 2),
   };
 }
 
@@ -526,6 +542,11 @@ function sanitizePlatform(platform, index, basePlatform = null) {
       : ["up-right", "down-right"].includes(fallback.slopeDirection)
         ? fallback.slopeDirection
         : "down-right";
+  } else if (kind === "water") {
+    next.kind = "water";
+    next.damageRatio = safeRange(source?.damageRatio, fallback.damageRatio ?? 0.33, 0, 1);
+    next.respawn = safeBoolean(source?.respawn, fallback.respawn ?? true);
+    next.color = safeString(source?.color, fallback.color || "#1d8fb8");
   }
   return next;
 }
@@ -941,11 +962,13 @@ export function extractEditableLevelData(data) {
       data.levelLabel || data.label || data.currentLevelId || data.levelId || "Room",
     ),
     entrances: (data.entrances || []).map((entrance) => extractEntrance(entrance)),
-    routeExits: (data.routeExits || []).map((exit) => extractRouteExit(exit)),
+      routeExits: (data.routeExits || []).map((exit) => extractRouteExit(exit)),
     extractionGate: extractExtractionGate(data.extractionGate),
     platforms: (data.platforms || []).map((platform) => ({
       kind: platform.kind,
       slopeDirection: platform.slopeDirection,
+      damageRatio: platform.damageRatio,
+      respawn: platform.respawn,
       x: platform.x,
       y: platform.y,
       width: platform.width,
@@ -1375,10 +1398,13 @@ export function getLevelSummaries(baseData) {
       platforms: (effective.platforms || []).map((platform) => ({
         kind: platform.kind,
         slopeDirection: platform.slopeDirection,
+        damageRatio: platform.damageRatio,
+        respawn: platform.respawn,
         x: platform.x,
         y: platform.y,
         width: platform.width,
         height: platform.height,
+        color: platform.color,
       })),
       temporaryBlocks: (effective.temporaryBlocks || []).map((block) => ({
         id: block.id,

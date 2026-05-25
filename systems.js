@@ -12,8 +12,8 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260523-body-status-v7";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260523-body-status-v7";
+} from "./state.js?v=20260525-route-touch-v3";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260525-route-touch-v3";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -22,7 +22,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260523-body-status-v7";
+} from "./save-game.js?v=20260525-route-touch-v3";
 import {
   approach,
   clamp,
@@ -970,6 +970,9 @@ function findFallLandingSurfaceY(player, data, config) {
   let nearestY = Number.POSITIVE_INFINITY;
 
   data.platforms.forEach((platform) => {
+    if (isWaterPlatform(platform)) {
+      return;
+    }
     const gap = platform.y - footY;
     if (gap <= 0 || gap > probeDistance) {
       return;
@@ -1374,6 +1377,10 @@ function isSlopePlatform(platform) {
   return platform?.kind === "slope";
 }
 
+function isWaterPlatform(platform) {
+  return platform?.kind === "water";
+}
+
 function getSlopeSurfaceY(platform, worldX) {
   const t = clamp((worldX - platform.x) / Math.max(1, platform.width), 0, 1);
   return platform.slopeDirection === "up-right"
@@ -1460,7 +1467,7 @@ function getSlopePlatforms(data) {
 }
 
 function getSolidLevelPlatforms(data) {
-  return (data.platforms || []).filter((platform) => !isSlopePlatform(platform));
+  return (data.platforms || []).filter((platform) => !isSlopePlatform(platform) && !isWaterPlatform(platform));
 }
 
 function getCollisionPlatforms(data, run = null) {
@@ -2120,6 +2127,91 @@ function damagePlayer(run, amount, direction, sourceText) {
   run.player.vy = -260;
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+}
+
+function getWaterPlatforms(data) {
+  return (data.platforms || []).filter((platform) => isWaterPlatform(platform));
+}
+
+function isPlayerTouchingWater(player, data) {
+  const waterTiles = getWaterPlatforms(data);
+  if (!waterTiles.length) {
+    return false;
+  }
+  const probe = {
+    x: player.x + player.width * 0.12,
+    y: player.y + player.height * 0.08,
+    width: player.width * 0.76,
+    height: player.height * 0.9,
+  };
+  return waterTiles.some((tile) => rectsOverlap(probe, tile));
+}
+
+function updateWaterRespawnPoint(run, data) {
+  const player = run?.player;
+  if (!player || !player.onGround || isPlayerTouchingWater(player, data)) {
+    return;
+  }
+  run.waterRespawnPoint = {
+    levelId: run.currentLevelId || data.currentLevelId || data.defaultLevelId || "movement-lab-01",
+    x: player.x,
+    y: player.y,
+    facing: player.facing || 1,
+  };
+}
+
+function resetPlayerAfterWater(run, data) {
+  const player = run.player;
+  const checkpoint = run.waterRespawnPoint || {};
+  const sameLevel = !checkpoint.levelId || checkpoint.levelId === (run.currentLevelId || data.currentLevelId);
+  const entrance = (data.entrances || []).find((entry) => entry.id === "start")
+    || (data.entrances || [])[0]
+    || data.player.spawn;
+  player.x = sameLevel && Number.isFinite(checkpoint.x)
+    ? checkpoint.x
+    : Number.isFinite(entrance?.x) ? entrance.x : data.player.spawn.x;
+  player.y = sameLevel && Number.isFinite(checkpoint.y)
+    ? checkpoint.y
+    : Number.isFinite(entrance?.y) ? entrance.y : data.player.spawn.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.facing = Math.sign(checkpoint.facing ?? entrance?.facing ?? player.facing ?? 1) || 1;
+  player.onGround = false;
+  player.wasOnGround = false;
+  player.wallDirection = 0;
+  player.wallSliding = false;
+  player.wallRunActive = false;
+  player.braceHolding = false;
+  player.braceHoldActive = false;
+  player.dashTimer = 0;
+  player.slideTimer = 0;
+  clearZipLine(player);
+  snapCameraToPlayer(run, data);
+}
+
+function handleWaterHazards(run, data) {
+  const player = run?.player;
+  if (!player || player.waterHazardCooldown > 0 || !isPlayerTouchingWater(player, data)) {
+    updateWaterRespawnPoint(run, data);
+    return;
+  }
+  const tile = getWaterPlatforms(data).find((water) => rectsOverlap(player, water)) || {};
+  const damageRatio = clamp(Number(tile.damageRatio ?? 0.33), 0, 1);
+  const damage = Math.max(1, Math.ceil((run.maxHp || data.player.maxHp || 100) * damageRatio));
+  if (run.loot?.active) {
+    closeLootCrate(run);
+  }
+  run.hp = clamp((run.hp ?? run.maxHp ?? data.player.maxHp ?? 100) - damage, 0, run.maxHp || data.player.maxHp || 100);
+  damagePlayerBodyPart(run, damage, -(player.facing || 1));
+  player.invulnTimer = Math.max(player.invulnTimer || 0, 0.45);
+  pushNotice(run, "Water hazard.");
+  spawnParticles(run, player.x + player.width / 2, player.y + player.height * 0.72, 14, "#67d9ff");
+  player.waterHazardCooldown = 0.65;
+  if (tile.respawn !== false) {
+    resetPlayerAfterWater(run, data);
+    run.message = "물에 휩쓸려 체크포인트로 복귀.";
+    run.noticeTimer = 2;
+  }
 }
 
 function ensurePlayerBodyStatus(run) {
@@ -4295,7 +4387,7 @@ function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
     }
   }
 
-  for (const platform of data.platforms || []) {
+  for (const platform of getCollisionPlatforms(data, run)) {
     const t = getSegmentRectHitT(startX, startY, endX, endY, platform, bullet.radius ?? 0);
     if (t !== null) {
       consider({ type: "world", target: platform, t });
@@ -5369,6 +5461,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.attackToolActive = false;
   }
   player.invulnTimer = Math.max(0, player.invulnTimer - dt);
+  player.waterHazardCooldown = Math.max(0, Number(player.waterHazardCooldown || 0) - dt);
   Object.values(ensurePlayerBodyStatus(run)).forEach((part) => {
     part.recentHit = Math.max(0, (part.recentHit ?? 0) - dt);
   });
@@ -6099,6 +6192,7 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   player.canInteract = true;
+  handleWaterHazards(run, data);
   updateMovementVfx(run, data, dt);
   player.jumpHeldLastFrame = jumpHeld;
   setMovementState(player);
@@ -6843,7 +6937,7 @@ function doesRectBlockSight(rect, from, to, padding = 0) {
 }
 
 function hasLineOfSightToPlayer(run, data, from, to, padding = 1) {
-  for (const platform of data.platforms || []) {
+  for (const platform of getCollisionPlatforms(data, run)) {
     if (doesRectBlockSight(platform, from, to, padding)) {
       return false;
     }
@@ -7190,6 +7284,9 @@ function ensureHumanoidGroundState(enemy) {
 function getHumanoidGroundYAt(data, worldX, footY, maxDrop, lift = 8) {
   let bestY = Number.POSITIVE_INFINITY;
   for (const platform of data.platforms || []) {
+    if (isWaterPlatform(platform)) {
+      continue;
+    }
     if (worldX < platform.x || worldX > platform.x + platform.width) {
       continue;
     }
@@ -7935,6 +8032,12 @@ function getInteractionTargets(run, data) {
 
   for (const routeExit of data.routeExits || []) {
     const exitRect = createRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
+    if (isTouchRouteExit(routeExit)) {
+      if (distanceBetween(playerCenter, getCenter(exitRect)) < 118) {
+        discoverRouteExit(run, data, routeExit);
+      }
+      continue;
+    }
     if (distanceBetween(playerCenter, getCenter(exitRect)) < 118) {
       discoverRouteExit(run, data, routeExit);
       const shelterBlockReason = isShelterRouteExit(routeExit, data)
@@ -8416,6 +8519,12 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
   clearZipLine(player);
+  run.waterRespawnPoint = {
+    levelId: run.currentLevelId || data.currentLevelId || data.defaultLevelId || "movement-lab-01",
+    x: player.x,
+    y: player.y,
+    facing: player.facing || 1,
+  };
 }
 
 function clearLevelTransitionEffects(run) {
@@ -8870,9 +8979,91 @@ function transitionToLevel(state, data, targetLevelId, entranceId = "start", opt
   };
 }
 
-function transitionToRouteExit(state, data, routeExit) {
+function isTouchRouteExit(routeExit) {
+  return routeExit?.trigger === "touch" || routeExit?.activation === "touch";
+}
+
+function beginRouteFadeTransition(state, data, routeExit) {
+  const run = state.run;
+  if (!run || !routeExit?.toLevelId || run.routeTransition?.active) {
+    return false;
+  }
+  const shelterBlockReason = isShelterRouteExit(routeExit, data)
+    ? getShelterRouteBlockReason(run)
+    : "";
+  if (shelterBlockReason) {
+    setRunNotice(run, shelterBlockReason, 2);
+    setStatus(state, shelterBlockReason);
+    return false;
+  }
+  discoverRouteExit(run, data, routeExit);
+  run.routeTransition = {
+    active: true,
+    phase: "fadeOut",
+    timer: 0,
+    duration: clamp(Number(routeExit.fadeSeconds ?? 0.42), 0.05, 2),
+    routeExit: { ...routeExit },
+    fromLevelId: run.currentLevelId || data.currentLevelId || data.defaultLevelId || "movement-lab-01",
+  };
+  run.prompt = "";
+  run.promptWorld = null;
+  setStatus(state, `${routeExit.label || "Route"} 이동 중`);
+  return true;
+}
+
+function updateRouteFadeTransition(state, data, dt) {
+  const run = state.run;
+  const transition = run?.routeTransition;
+  if (!run || !transition?.active) {
+    return false;
+  }
+
+  run.prompt = "";
+  run.promptWorld = null;
+  transition.timer = Math.max(0, Number(transition.timer || 0) + dt);
+  const duration = clamp(Number(transition.duration ?? 0.42), 0.05, 2);
+  transition.duration = duration;
+
+  if (transition.phase === "fadeOut" && transition.timer >= duration) {
+    const routeExit = transition.routeExit;
+    transitionToRouteExit(state, data, routeExit, { skipFade: true });
+    if (!state.run) {
+      return true;
+    }
+    state.run.routeTransition = {
+      active: true,
+      phase: "fadeIn",
+      timer: 0,
+      duration,
+      routeExit: null,
+      fromLevelId: transition.fromLevelId || null,
+    };
+    snapCameraToPlayer(state.run, data);
+    return true;
+  }
+
+  if (transition.phase === "fadeIn" && transition.timer >= duration) {
+    run.routeTransition = {
+      active: false,
+      phase: "idle",
+      timer: 0,
+      duration,
+      routeExit: null,
+      fromLevelId: null,
+    };
+    return true;
+  }
+
+  return true;
+}
+
+function transitionToRouteExit(state, data, routeExit, options = {}) {
   const run = state.run;
   if (!run || !routeExit?.toLevelId) {
+    return;
+  }
+  if (!options.skipFade && isTouchRouteExit(routeExit)) {
+    beginRouteFadeTransition(state, data, routeExit);
     return;
   }
 
@@ -9120,12 +9311,33 @@ function updateZipLineRide(player, data, run, config, dt, jumpPressed) {
   return true;
 }
 
+function handleTouchRouteExits(state, data) {
+  const run = state.run;
+  const player = run?.player;
+  if (!run || !player || run.routeTransition?.active) {
+    return false;
+  }
+  for (const routeExit of data.routeExits || []) {
+    if (!isTouchRouteExit(routeExit) || !routeExit.toLevelId) {
+      continue;
+    }
+    const exitRect = createRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
+    if (rectsOverlap(player, exitRect)) {
+      return beginRouteFadeTransition(state, data, routeExit);
+    }
+  }
+  return false;
+}
+
 function updateInteractions(state, data, canInteract) {
   const run = state.run;
   run.prompt = "";
   run.promptWorld = null;
 
   const player = run.player;
+  if (handleTouchRouteExits(state, data)) {
+    return;
+  }
   const guard = run.encounters.guard;
   const isMoving = Math.abs(player.vx) > 24 || Math.abs(player.vy) > 90;
 
@@ -9435,6 +9647,7 @@ function updateExpedition(state, data, dt) {
   if (Number.isFinite(run.nightTransitionTimer) && run.nightTransitionTimer > 0) {
     run.nightTransitionTimer = Math.max(0, run.nightTransitionTimer - dt);
   }
+  updateRouteFadeTransition(state, data, dt);
   if (run.faceOff?.active && state.liveEdit?.active) {
     state.liveEdit.active = false;
   }

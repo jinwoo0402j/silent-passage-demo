@@ -7,7 +7,7 @@ import {
   getShelterUpgradeCost,
   getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260523-body-status-v7";
+} from "./state.js?v=20260525-route-touch-v3";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
@@ -19,7 +19,7 @@ const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
 const MAP_EXPLORE_CELL_SIZE = 320;
 const NIGHT_TRANSITION_SECONDS = 1.4;
-const INVENTORY_BODY_PORTRAIT_SRC = "./assets/ui/body-status-operator-v1.png?v=20260523-body-status-v7";
+const INVENTORY_BODY_PORTRAIT_SRC = "./assets/ui/body-status-operator-v1.png?v=20260525-route-touch-v3";
 const TITLE_MENU_OPTIONS = [
   { id: "new", label: "처음부터", detail: "새 런 준비" },
   { id: "continue", label: "이어하기", detail: "저장된 런 복귀" },
@@ -1111,6 +1111,32 @@ function drawWorldMegastructures(ctx, run) {
 }
 
 function drawPlatformMass(ctx, platform, theme) {
+  if (platform.kind === "water") {
+    const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+    gradient.addColorStop(0, "rgba(112, 218, 255, 0.72)");
+    gradient.addColorStop(0.46, "rgba(29, 143, 184, 0.76)");
+    gradient.addColorStop(1, "rgba(6, 48, 74, 0.9)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+    ctx.strokeStyle = "rgba(194, 244, 255, 0.58)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let x = platform.x - 16; x <= platform.x + platform.width + 18; x += 18) {
+      const y = platform.y + 8 + Math.sin((x + platform.y) * 0.04) * 3;
+      if (x <= platform.x - 16) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(2, 14, 24, 0.2)";
+    ctx.fillRect(platform.x, platform.y + platform.height - 8, platform.width, 8);
+    return;
+  }
+
   if (platform.kind === "slope") {
     const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
     gradient.addColorStop(0, "rgba(212, 230, 236, 0.28)");
@@ -11405,6 +11431,23 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
   ctx.fillText("C/Z: 계속", 192, 560);
 }
 
+function drawRouteFadeTransition(ctx, state) {
+  const transition = state.run?.routeTransition;
+  if (!transition?.active) {
+    return;
+  }
+  const duration = Math.max(0.05, Number(transition.duration ?? 0.42));
+  const progress = clamp(Number(transition.timer || 0) / duration, 0, 1);
+  const alpha = transition.phase === "fadeIn" ? 1 - progress : progress;
+  if (alpha <= 0) {
+    return;
+  }
+  ctx.save();
+  ctx.fillStyle = `rgba(2, 7, 12, ${clamp(alpha, 0, 1)})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.restore();
+}
+
 export function renderGame(dom, state, data) {
   const { ctx, canvas } = dom;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -11420,4 +11463,5 @@ export function renderGame(dom, state, data) {
   } else if (state.scene === SCENES.GAME_OVER) {
     drawResultsSceneV3(ctx, state, data, true);
   }
+  drawRouteFadeTransition(ctx, state);
 }

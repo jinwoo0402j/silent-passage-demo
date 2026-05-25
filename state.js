@@ -1076,6 +1076,20 @@ export function createRunState(data, meta) {
     nightActive: false,
     nightTransitionTimer: 0,
     shelterExitCooldown: 0,
+    routeTransition: {
+      active: false,
+      phase: "idle",
+      timer: 0,
+      duration: 0.42,
+      routeExit: null,
+      fromLevelId: currentLevelId,
+    },
+    waterRespawnPoint: {
+      levelId: currentLevelId,
+      x: player.x,
+      y: player.y,
+      facing: player.facing || 1,
+    },
     currentLevelId,
     levelStates: {},
     map: {

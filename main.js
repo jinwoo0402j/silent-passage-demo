@@ -1,10 +1,10 @@
-import { GAME_DATA } from "./level-data.js?v=20260523-body-status-v7";
+import { GAME_DATA } from "./level-data.js?v=20260525-route-touch-v3";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260523-body-status-v7";
+} from "./level-store.js?v=20260525-route-touch-v3";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,8 +13,8 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260523-body-status-v7";
-import { saveCurrentGame } from "./save-game.js?v=20260523-body-status-v7";
+import { renderGame } from "./render.js?v=20260525-route-touch-v3";
+import { saveCurrentGame } from "./save-game.js?v=20260525-route-touch-v3";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -25,8 +25,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260523-body-status-v7";
-import { bindInput, updateGame } from "./systems.js?v=20260523-body-status-v7";
+} from "./state.js?v=20260525-route-touch-v3";
+import { bindInput, updateGame } from "./systems.js?v=20260525-route-touch-v3";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

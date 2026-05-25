@@ -1,5 +1,5 @@
-import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260523-body-status-v7";
-import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260523-body-status-v7";
+import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260525-route-touch-v3";
+import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260525-route-touch-v3";
 
 const SAVE_SLOT_KEY = "rulebound-local-profile-v1";
 const SAVE_VERSION = 1;
@@ -34,6 +34,7 @@ const RUN_SCALAR_KEYS = [
   "nightActive",
   "nightTransitionTimer",
   "shelterExitCooldown",
+  "waterRespawnPoint",
   "currentLevelId",
   "message",
   "noticeTimer",
@@ -167,6 +168,14 @@ function clearTransientRunState(run) {
   };
   run.inventoryOverlay = {
     active: false,
+  };
+  run.routeTransition = {
+    active: false,
+    phase: "idle",
+    timer: 0,
+    duration: 0.42,
+    routeExit: null,
+    fromLevelId: null,
   };
   if (run.faceOff) {
     run.faceOff.active = false;

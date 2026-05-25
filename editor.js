@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260523-loot-spill-v2";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260525-route-touch-v3";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -15,16 +15,19 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260523-loot-spill-v2";
+} from "./level-store.js?v=20260525-route-touch-v3";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
 const ZIP_LINE_CONNECT_RANGE = 640;
 const ZIP_LINE_MAX_CONNECTIONS = 2;
+const ROUTE_EXIT_RESIZE_HANDLE_SIZE = 12;
+const ROUTE_EXIT_MIN_SIZE = 24;
 
 const TOOL_IDS = {
   SELECT: "select",
   PLATFORM: "platform",
+  WATER: "water",
   SLOPE_DOWN: "slopeDown",
   SLOPE_UP: "slopeUp",
   BRACE_WALL: "braceWall",
@@ -49,6 +52,7 @@ const TOOL_SHORTCUTS = {
   Numpad1: TOOL_IDS.SELECT,
   Digit2: TOOL_IDS.PLATFORM,
   Numpad2: TOOL_IDS.PLATFORM,
+  KeyW: TOOL_IDS.WATER,
   Digit9: TOOL_IDS.SLOPE_DOWN,
   Numpad9: TOOL_IDS.SLOPE_DOWN,
   KeyU: TOOL_IDS.SLOPE_UP,
@@ -77,6 +81,7 @@ const TOOL_SHORTCUTS = {
 const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.SELECT]: "1",
   [TOOL_IDS.PLATFORM]: "2",
+  [TOOL_IDS.WATER]: "W",
   [TOOL_IDS.SLOPE_DOWN]: "9",
   [TOOL_IDS.SLOPE_UP]: "U",
   [TOOL_IDS.BRACE_WALL]: "3",
@@ -98,6 +103,7 @@ const TOOL_SHORTCUT_LABELS = {
 const TOOL_HINTS = {
   [TOOL_IDS.SELECT]: "선택 후 드래그",
   [TOOL_IDS.PLATFORM]: "드래그로 플랫폼 생성",
+  [TOOL_IDS.WATER]: "Drag to place water hazard tile",
   [TOOL_IDS.SLOPE_DOWN]: "드래그로 오른쪽 내리막 경사로 생성",
   [TOOL_IDS.SLOPE_UP]: "드래그로 오른쪽 오르막 경사로 생성",
   [TOOL_IDS.SIGN]: "클릭으로 표지 배치",
@@ -585,7 +591,14 @@ function getScaleConfig(data = GAME_DATA) {
   };
 }
 
-function getDefaultPlatform(scale) {
+function getDefaultPlatform(scale, kind = "solid") {
+  if (kind === "water") {
+    return {
+      width: scale.tileSize * 6,
+      height: scale.tileSize,
+      color: "#1d8fb8",
+    };
+  }
   return {
     width: scale.tileSize * 6,
     height: scale.tileSize,
@@ -1830,6 +1843,81 @@ function getSelectionRect(editor, selection = editor.selected) {
   return null;
 }
 
+function getSelectedRouteExit(editor) {
+  if (editor.selected?.kind !== "routeExit") {
+    return null;
+  }
+  const routeExit = editor.data.routeExits[editor.selected.index];
+  return routeExit ? { routeExit, index: editor.selected.index } : null;
+}
+
+function getRouteExitResizeHandles(editor, routeExit) {
+  const size = ROUTE_EXIT_RESIZE_HANDLE_SIZE / editor.view.zoom;
+  const half = size / 2;
+  const left = routeExit.x;
+  const centerX = routeExit.x + routeExit.width / 2;
+  const right = routeExit.x + routeExit.width;
+  const top = routeExit.y;
+  const centerY = routeExit.y + routeExit.height / 2;
+  const bottom = routeExit.y + routeExit.height;
+  return [
+    { id: "nw", x: left - half, y: top - half, width: size, height: size, cursor: "nwse-resize" },
+    { id: "n", x: centerX - half, y: top - half, width: size, height: size, cursor: "ns-resize" },
+    { id: "ne", x: right - half, y: top - half, width: size, height: size, cursor: "nesw-resize" },
+    { id: "e", x: right - half, y: centerY - half, width: size, height: size, cursor: "ew-resize" },
+    { id: "se", x: right - half, y: bottom - half, width: size, height: size, cursor: "nwse-resize" },
+    { id: "s", x: centerX - half, y: bottom - half, width: size, height: size, cursor: "ns-resize" },
+    { id: "sw", x: left - half, y: bottom - half, width: size, height: size, cursor: "nesw-resize" },
+    { id: "w", x: left - half, y: centerY - half, width: size, height: size, cursor: "ew-resize" },
+  ];
+}
+
+function getSelectedRouteExitResizeHandle(editor, point) {
+  const selected = getSelectedRouteExit(editor);
+  if (!selected) {
+    return null;
+  }
+  const handle = getRouteExitResizeHandles(editor, selected.routeExit)
+    .find((candidate) => pointInRect(point, candidate));
+  return handle ? { ...selected, handle } : null;
+}
+
+function getRouteExitResizeCursor(editor, point) {
+  return getSelectedRouteExitResizeHandle(editor, point)?.handle.cursor || "";
+}
+
+function getResizedRouteExitRect(handleId, startRect, point, step) {
+  const snapped = snapPoint(point, step);
+  let left = startRect.x;
+  let top = startRect.y;
+  let right = startRect.x + startRect.width;
+  let bottom = startRect.y + startRect.height;
+
+  if (handleId.includes("w")) {
+    left = Math.min(snapped.x, right - ROUTE_EXIT_MIN_SIZE);
+  }
+  if (handleId.includes("e")) {
+    right = Math.max(snapped.x, left + ROUTE_EXIT_MIN_SIZE);
+  }
+  if (handleId.includes("n")) {
+    top = Math.min(snapped.y, bottom - ROUTE_EXIT_MIN_SIZE);
+  }
+  if (handleId.includes("s")) {
+    bottom = Math.max(snapped.y, top + ROUTE_EXIT_MIN_SIZE);
+  }
+
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function resizeRouteExitWithHandle(routeExit, handleId, startRect, point, step) {
+  Object.assign(routeExit, getResizedRouteExitRect(handleId, startRect, point, step));
+}
+
 function getSelectionOrigin(editor, selection = editor.selected) {
   if (!selection) {
     return null;
@@ -2258,11 +2346,19 @@ function renderSelectionFields(editor, dom) {
     addSelect("Type", "kind", entity.kind || "solid", [
       { value: "solid", label: "Solid block" },
       { value: "slope", label: "Slope block" },
+      { value: "water", label: "Water hazard" },
     ]);
     if (entity.kind === "slope") {
       addSelect("Slope", "slopeDirection", getPlatformSlopeDirection(entity), [
         { value: "down-right", label: "Down right" },
         { value: "up-right", label: "Up right" },
+      ]);
+    }
+    if (entity.kind === "water") {
+      addNumber("Damage %", "damageRatio", entity.damageRatio ?? 0.33, { min: 0, max: 1, step: 0.01 });
+      addSelect("Respawn", "respawn", entity.respawn === false ? "false" : "true", [
+        { value: "true", label: "Return to checkpoint" },
+        { value: "false", label: "Damage only" },
       ]);
     }
     addNumber("X", "x", entity.x);
@@ -2389,6 +2485,11 @@ function renderSelectionFields(editor, dom) {
     addNumber("Y", "y", entity.y);
     addNumber("Width", "width", entity.width, { min: 24 });
     addNumber("Height", "height", entity.height, { min: 24 });
+    addSelect("Trigger", "trigger", entity.trigger || "interact", [
+      { value: "interact", label: "Interact key" },
+      { value: "touch", label: "Touch auto fade" },
+    ]);
+    addNumber("Fade Sec", "fadeSeconds", entity.fadeSeconds ?? 0.42, { min: 0.05, max: 2, step: 0.05 });
     addText("Prompt", "prompt", entity.prompt || "");
     const levelOptions = getLevelSummaries(GAME_DATA).map((level) => ({
       value: level.id,
@@ -3093,6 +3194,7 @@ function applySelectionField(editor, dom, field, value) {
     || field === "toLevelId"
     || field === "toEntranceId"
     || field === "returnEntranceId"
+    || field === "trigger"
   ) {
     if (entity[field] === value) {
       return;
@@ -3102,9 +3204,19 @@ function applySelectionField(editor, dom, field, value) {
       if (value === "slope") {
         entity.kind = "slope";
         entity.slopeDirection = getPlatformSlopeDirection(entity);
+        delete entity.damageRatio;
+        delete entity.respawn;
+      } else if (value === "water") {
+        entity.kind = "water";
+        entity.damageRatio = Number.isFinite(entity.damageRatio) ? entity.damageRatio : 0.33;
+        entity.respawn = entity.respawn !== false;
+        entity.color = entity.color || "#1d8fb8";
+        delete entity.slopeDirection;
       } else {
         delete entity.kind;
         delete entity.slopeDirection;
+        delete entity.damageRatio;
+        delete entity.respawn;
       }
     } else if (field === "slopeDirection") {
       if (editor.selected?.kind !== "platform" || entity.kind !== "slope") {
@@ -3155,6 +3267,19 @@ function applySelectionField(editor, dom, field, value) {
     return;
   }
 
+  if (field === "respawn" && editor.selected?.kind === "platform" && entity.kind === "water") {
+    const nextValue = value !== "false";
+    if (entity.respawn === nextValue) {
+      return;
+    }
+    pushUndo(editor);
+    entity.respawn = nextValue;
+    renderSelectionFields(editor, dom);
+    markDirty(editor, dom);
+    queueRender(editor, dom);
+    return;
+  }
+
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
     return;
@@ -3183,6 +3308,9 @@ function applySelectionField(editor, dom, field, value) {
   let nextValue = numericValue;
   if (field === "width" || field === "height") {
     nextValue = Math.max(12, numericValue);
+  }
+  if (field === "fadeSeconds") {
+    nextValue = clamp(numericValue, 0.05, 2);
   }
 
   if (
@@ -3546,11 +3674,15 @@ function createPlatformFromPreview(editor, dom) {
     y: rect.y,
     width: rect.width,
     height: rect.height,
-    color: getDefaultPlatform(getScaleConfig(editor.data)).color,
+    color: getDefaultPlatform(getScaleConfig(editor.data), rect.kind).color,
   };
   if (rect.kind === "slope") {
     platform.kind = "slope";
     platform.slopeDirection = getPlatformSlopeDirection(rect);
+  } else if (rect.kind === "water") {
+    platform.kind = "water";
+    platform.damageRatio = 0.33;
+    platform.respawn = true;
   }
 
   editor.data.platforms.push(platform);
@@ -3721,6 +3853,8 @@ function placeRouteExitAt(editor, dom, point) {
     prompt: "E: 다음 구역",
     toLevelId: getDefaultRouteTarget(editor),
     toEntranceId: "start",
+    trigger: "touch",
+    fadeSeconds: 0.42,
   };
   editor.data.routeExits.push(routeExit);
   setSelection(editor, dom, { kind: "routeExit", index: editor.data.routeExits.length - 1 });
@@ -3929,6 +4063,25 @@ function handlePointerDown(editor, dom, event) {
   const snapped = snapPoint(world, editor.snap);
 
   if (editor.tool === TOOL_IDS.SELECT) {
+    const resizeHandle = getSelectedRouteExitResizeHandle(editor, world);
+    if (resizeHandle) {
+      editor.drag = {
+        kind: "resizeRouteExit",
+        index: resizeHandle.index,
+        handleId: resizeHandle.handle.id,
+        startRect: {
+          x: resizeHandle.routeExit.x,
+          y: resizeHandle.routeExit.y,
+          width: resizeHandle.routeExit.width,
+          height: resizeHandle.routeExit.height,
+        },
+        didMutate: false,
+        historyPushed: false,
+      };
+      queueRender(editor, dom);
+      return;
+    }
+
     const hit = hitTest(editor, world);
     if (hit) {
       const selection = isSelectionItemSelected(editor.selected, hit) ? editor.selected : hit;
@@ -3963,12 +4116,12 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
-  if (editor.tool === TOOL_IDS.PLATFORM || isSlopeTool(editor.tool)) {
+  if (editor.tool === TOOL_IDS.PLATFORM || editor.tool === TOOL_IDS.WATER || isSlopeTool(editor.tool)) {
     editor.preview = {
       kind: "platform",
       start: snapped,
       end: snapped,
-      platformKind: isSlopeTool(editor.tool) ? "slope" : "solid",
+      platformKind: editor.tool === TOOL_IDS.WATER ? "water" : isSlopeTool(editor.tool) ? "slope" : "solid",
       slopeDirection: getSlopeDirectionForTool(editor.tool),
     };
     editor.drag = {
@@ -4097,9 +4250,11 @@ function handlePointerMove(editor, dom, event) {
 
   if (!editor.drag) {
     if (editor.tool === TOOL_IDS.SELECT) {
+      dom.canvas.style.cursor = getRouteExitResizeCursor(editor, world) || "";
       return;
     }
 
+    dom.canvas.style.cursor = "";
     const previousSnap = snapPoint(previousPointer, editor.snap);
     const nextSnap = snapPoint(world, editor.snap);
     if (previousSnap.x === nextSnap.x && previousSnap.y === nextSnap.y) {
@@ -4111,6 +4266,7 @@ function handlePointerMove(editor, dom, event) {
   }
 
   if (editor.drag.kind === "pan") {
+    dom.canvas.style.cursor = "";
     const deltaX = (screen.x - editor.drag.startScreen.x) / editor.view.zoom;
     const deltaY = (screen.y - editor.drag.startScreen.y) / editor.view.zoom;
     editor.view.x = editor.drag.startView.x - deltaX;
@@ -4120,6 +4276,7 @@ function handlePointerMove(editor, dom, event) {
   }
 
   if (editor.drag.kind === "move") {
+    dom.canvas.style.cursor = "";
     const snapped = snapPoint(world, editor.snap);
     const deltaX = snapped.x - editor.drag.startWorld.x;
     const deltaY = snapped.y - editor.drag.startWorld.y;
@@ -4147,6 +4304,43 @@ function handlePointerMove(editor, dom, event) {
     queueRender(editor, dom);
     return;
   }
+
+  if (editor.drag.kind === "resizeRouteExit") {
+    dom.canvas.style.cursor = getRouteExitResizeHandles(editor, editor.drag.startRect)
+      .find((handle) => handle.id === editor.drag.handleId)?.cursor || "";
+    const routeExit = editor.data.routeExits[editor.drag.index];
+    if (!routeExit) {
+      return;
+    }
+
+    const before = {
+      x: routeExit.x,
+      y: routeExit.y,
+      width: routeExit.width,
+      height: routeExit.height,
+    };
+    const next = getResizedRouteExitRect(editor.drag.handleId, editor.drag.startRect, world, editor.snap);
+
+    if (
+      next.x === before.x
+      && next.y === before.y
+      && next.width === before.width
+      && next.height === before.height
+    ) {
+      return;
+    }
+
+    if (!editor.drag.historyPushed) {
+      pushUndo(editor);
+      editor.drag.historyPushed = true;
+    }
+    resizeRouteExitWithHandle(routeExit, editor.drag.handleId, editor.drag.startRect, world, editor.snap);
+    editor.drag.didMutate = true;
+    queueRender(editor, dom);
+    return;
+  }
+
+  dom.canvas.style.cursor = "";
 
   if (editor.drag.kind === "marquee" && editor.preview?.kind === "marquee") {
     const rect = getRectFromPoints(editor.preview.start, world);
@@ -4191,6 +4385,11 @@ function handlePointerMove(editor, dom, event) {
 
 function handlePointerUp(editor, dom) {
   if (editor.drag?.kind === "move" && editor.drag.didMutate) {
+    renderSelectionFields(editor, dom);
+    markDirty(editor, dom);
+  }
+
+  if (editor.drag?.kind === "resizeRouteExit" && editor.drag.didMutate) {
     renderSelectionFields(editor, dom);
     markDirty(editor, dom);
   }
@@ -5060,6 +5259,26 @@ function drawCameraGuide(ctx, editor) {
 }
 
 function drawPlatformBlock(ctx, editor, platform, selected) {
+  if (platform.kind === "water") {
+    const top = platform.color || "#1d8fb8";
+    const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+    gradient.addColorStop(0, "rgba(112, 218, 255, 0.7)");
+    gradient.addColorStop(1, top);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+    ctx.strokeStyle = selected ? COLORS.accent : "rgba(156, 232, 255, 0.7)";
+    ctx.lineWidth = (selected ? 3 : 1.4) / editor.view.zoom;
+    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+    ctx.strokeStyle = "rgba(245, 252, 255, 0.5)";
+    ctx.lineWidth = 1.2 / editor.view.zoom;
+    for (let x = platform.x + 10; x < platform.x + platform.width; x += 28) {
+      ctx.beginPath();
+      ctx.moveTo(x, platform.y + platform.height * 0.32);
+      ctx.quadraticCurveTo(x + 7, platform.y + platform.height * 0.2, x + 14, platform.y + platform.height * 0.32);
+      ctx.stroke();
+    }
+    return;
+  }
   ctx.fillStyle = platform.color || "#54697b";
   ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
 
@@ -5520,7 +5739,11 @@ function drawRouteExits(ctx, editor) {
     ctx.font = `${16 / editor.view.zoom}px Segoe UI`;
     ctx.textAlign = "center";
     ctx.fillText(routeExit.label || "Route", routeExit.x + routeExit.width / 2, routeExit.y - 12);
-    ctx.fillText(routeExit.toLevelId || "-", routeExit.x + routeExit.width / 2, routeExit.y + routeExit.height + 22);
+    ctx.fillText(
+      `${routeExit.trigger === "touch" ? "Touch -> " : ""}${routeExit.toLevelId || "-"}`,
+      routeExit.x + routeExit.width / 2,
+      routeExit.y + routeExit.height + 22,
+    );
     ctx.textAlign = "left";
   });
 }
@@ -5561,6 +5784,19 @@ function drawSelectionOutline(ctx, editor) {
     rect.width + 8 / editor.view.zoom,
     rect.height + 8 / editor.view.zoom,
   );
+  if (editor.selected?.kind === "routeExit") {
+    const routeExit = editor.data.routeExits[editor.selected.index];
+    if (routeExit) {
+      ctx.setLineDash([]);
+      ctx.fillStyle = COLORS.panel || "rgba(10, 16, 24, 0.92)";
+      ctx.strokeStyle = COLORS.accent;
+      ctx.lineWidth = 2 / editor.view.zoom;
+      getRouteExitResizeHandles(editor, routeExit).forEach((handle) => {
+        ctx.fillRect(handle.x, handle.y, handle.width, handle.height);
+        ctx.strokeRect(handle.x, handle.y, handle.width, handle.height);
+      });
+    }
+  }
   ctx.restore();
 }
 
