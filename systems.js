@@ -12,8 +12,8 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260525-route-touch-v3";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260525-route-touch-v3";
+} from "./state.js?v=20260526-sfx-v1";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260526-sfx-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -22,7 +22,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260525-route-touch-v3";
+} from "./save-game.js?v=20260526-sfx-v1";
 import {
   approach,
   clamp,
@@ -2127,6 +2127,7 @@ function damagePlayer(run, amount, direction, sourceText) {
   run.player.vy = -260;
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+  playGameSfx("damage", { cooldownMs: 120 });
 }
 
 function getWaterPlatforms(data) {
@@ -2206,6 +2207,7 @@ function handleWaterHazards(run, data) {
   player.invulnTimer = Math.max(player.invulnTimer || 0, 0.45);
   pushNotice(run, "Water hazard.");
   spawnParticles(run, player.x + player.width / 2, player.y + player.height * 0.72, 14, "#67d9ff");
+  playGameSfx("water", { cooldownMs: 280 });
   player.waterHazardCooldown = 0.65;
   if (tile.respawn !== false) {
     resetPlayerAfterWater(run, data);
@@ -2880,6 +2882,134 @@ function getShotAudioContext() {
     context.resume?.();
   }
   return context;
+}
+
+function createNoiseBuffer(context, duration, curve = 1.8) {
+  const bufferSize = Math.max(1, Math.floor(context.sampleRate * duration));
+  const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < bufferSize; index += 1) {
+    const progress = index / bufferSize;
+    channel[index] = (Math.random() * 2 - 1) * Math.pow(1 - progress, curve);
+  }
+  return buffer;
+}
+
+function playSfxTone(context, options = {}) {
+  const now = context.currentTime + (options.delay ?? 0);
+  const duration = Math.max(0.01, options.duration ?? 0.12);
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = options.type || "sine";
+  oscillator.frequency.setValueAtTime(Math.max(1, options.frequency ?? 220), now);
+  if (Number.isFinite(options.endFrequency)) {
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, options.endFrequency), now + duration);
+  }
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, options.gain ?? 0.05), now + (options.attack ?? 0.006));
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(now);
+  oscillator.stop(now + duration + 0.01);
+}
+
+function playSfxNoise(context, options = {}) {
+  const now = context.currentTime + (options.delay ?? 0);
+  const duration = Math.max(0.01, options.duration ?? 0.12);
+  const source = context.createBufferSource();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+  source.buffer = createNoiseBuffer(context, duration, options.curve ?? 1.8);
+  filter.type = options.filterType || "bandpass";
+  filter.frequency.setValueAtTime(Math.max(1, options.frequency ?? 900), now);
+  if (Number.isFinite(options.endFrequency)) {
+    filter.frequency.exponentialRampToValueAtTime(Math.max(1, options.endFrequency), now + duration);
+  }
+  filter.Q.setValueAtTime(Math.max(0.01, options.q ?? 0.9), now);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, options.gain ?? 0.05), now + (options.attack ?? 0.006));
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(context.destination);
+  source.start(now);
+  source.stop(now + duration + 0.01);
+}
+
+function playGameSfx(kind, options = {}) {
+  const context = getShotAudioContext();
+  if (!context) {
+    return;
+  }
+  try {
+    const cooldownMs = options.cooldownMs ?? 0;
+    if (cooldownMs > 0 && typeof window !== "undefined") {
+      const nowMs = Date.now();
+      const cooldowns = window.__silentPassageSfxCooldowns || {};
+      window.__silentPassageSfxCooldowns = cooldowns;
+      if (nowMs - (cooldowns[kind] || 0) < cooldownMs) {
+        return;
+      }
+      cooldowns[kind] = nowMs;
+    }
+
+    if (kind === "jump") {
+      playSfxTone(context, { type: "triangle", frequency: 180, endFrequency: 420, duration: 0.1, gain: 0.055 });
+      playSfxNoise(context, { filterType: "highpass", frequency: 900, duration: 0.08, gain: 0.026 });
+    } else if (kind === "wallJump" || kind === "braceVault") {
+      playSfxTone(context, { type: "sawtooth", frequency: 140, endFrequency: 520, duration: 0.13, gain: 0.045 });
+      playSfxNoise(context, { filterType: "bandpass", frequency: 1250, duration: 0.12, gain: 0.042 });
+    } else if (kind === "dash") {
+      playSfxNoise(context, { filterType: "highpass", frequency: 1800, endFrequency: 460, duration: 0.16, gain: 0.075 });
+      playSfxTone(context, { type: "square", frequency: 118, endFrequency: 72, duration: 0.12, gain: 0.035 });
+    } else if (kind === "land") {
+      const intensity = clamp(Number(options.intensity ?? 540) / 900, 0.4, 1.5);
+      playSfxTone(context, { type: "triangle", frequency: 92, endFrequency: 48, duration: 0.11, gain: 0.055 * intensity });
+      playSfxNoise(context, { filterType: "lowpass", frequency: 620, duration: 0.12, gain: 0.045 * intensity });
+    } else if (kind === "footstep") {
+      playSfxNoise(context, { filterType: "lowpass", frequency: 520, duration: 0.055, gain: 0.018, curve: 2.4 });
+    } else if (kind === "slide") {
+      playSfxNoise(context, { filterType: "bandpass", frequency: 860, endFrequency: 380, duration: 0.18, gain: 0.04 });
+    } else if (kind === "hover") {
+      playSfxTone(context, { type: "sine", frequency: 210, endFrequency: 310, duration: 0.18, gain: 0.034 });
+      playSfxNoise(context, { filterType: "highpass", frequency: 1300, duration: 0.16, gain: 0.026 });
+    } else if (kind === "damage") {
+      playSfxTone(context, { type: "sawtooth", frequency: 150, endFrequency: 58, duration: 0.18, gain: 0.085 });
+      playSfxNoise(context, { filterType: "bandpass", frequency: 760, duration: 0.16, gain: 0.07 });
+    } else if (kind === "water") {
+      playSfxNoise(context, { filterType: "lowpass", frequency: 980, endFrequency: 220, duration: 0.32, gain: 0.12, curve: 1.2 });
+      playSfxTone(context, { type: "sine", frequency: 130, endFrequency: 72, duration: 0.28, gain: 0.045 });
+    } else if (kind === "route") {
+      playSfxTone(context, { type: "sine", frequency: 196, endFrequency: 392, duration: 0.22, gain: 0.045 });
+      playSfxTone(context, { type: "triangle", frequency: 294, endFrequency: 588, duration: 0.22, gain: 0.026, delay: 0.04 });
+    } else if (kind === "routeArrive") {
+      playSfxTone(context, { type: "triangle", frequency: 520, endFrequency: 260, duration: 0.18, gain: 0.04 });
+    } else if (kind === "zipStart") {
+      playSfxNoise(context, { filterType: "highpass", frequency: 2400, endFrequency: 780, duration: 0.2, gain: 0.06 });
+      playSfxTone(context, { type: "sawtooth", frequency: 260, endFrequency: 180, duration: 0.18, gain: 0.025 });
+    } else if (kind === "zipExit") {
+      playSfxNoise(context, { filterType: "bandpass", frequency: 1500, duration: 0.11, gain: 0.04 });
+    } else if (kind === "lootOpen") {
+      playSfxTone(context, { type: "square", frequency: 118, endFrequency: 82, duration: 0.12, gain: 0.04 });
+      playSfxNoise(context, { filterType: "bandpass", frequency: 820, duration: 0.16, gain: 0.052 });
+    } else if (kind === "lootCollect") {
+      const rare = Number(options.rarityRank ?? 0) >= 2;
+      playSfxTone(context, { type: "triangle", frequency: rare ? 520 : 390, endFrequency: rare ? 1040 : 640, duration: 0.16, gain: rare ? 0.06 : 0.038 });
+      playSfxTone(context, { type: "sine", frequency: rare ? 780 : 520, endFrequency: rare ? 1320 : 780, duration: 0.14, gain: rare ? 0.035 : 0.02, delay: 0.045 });
+    } else if (kind === "lootDenied") {
+      playSfxTone(context, { type: "square", frequency: 180, endFrequency: 120, duration: 0.1, gain: 0.035 });
+    } else if (kind === "enemyShot") {
+      playSfxNoise(context, { filterType: "bandpass", frequency: 1320, duration: 0.1, gain: 0.07 });
+      playSfxTone(context, { type: "square", frequency: 330, endFrequency: 180, duration: 0.08, gain: 0.028 });
+    } else if (kind === "impact") {
+      playSfxNoise(context, { filterType: "bandpass", frequency: 900, endFrequency: 260, duration: 0.12, gain: 0.05 });
+    } else if (kind === "melee") {
+      playSfxNoise(context, { filterType: "highpass", frequency: 1700, endFrequency: 560, duration: 0.09, gain: 0.05 });
+    }
+  } catch {
+    // Procedural audio is optional; gameplay should never depend on it.
+  }
 }
 
 function playWeaponShotSound(weaponStats = {}) {
@@ -5099,6 +5229,7 @@ function startDash(player, run, config, direction) {
   player.dashTrailTimer = 0;
   pushAfterimage(run, player);
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#d1efff");
+  playGameSfx("dash", { cooldownMs: 80 });
 }
 
 function startDashBurst(player, config) {
@@ -5184,6 +5315,7 @@ function performJump(player, run, velocity) {
   player.jumpBufferTimer = 0;
   player.coyoteTimer = 0;
   spawnParticles(run, player.x + player.width / 2, player.y + player.height, 6, "#d8ebff");
+  playGameSfx("jump", { cooldownMs: 60 });
 }
 
 function performWallJump(player, run, config, wallDirection) {
@@ -5203,6 +5335,7 @@ function performWallJump(player, run, config, wallDirection) {
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#cde9ff");
+  playGameSfx("wallJump", { cooldownMs: 60 });
 }
 
 function enterBraceHold(player, run, config, wall, moveAxis) {
@@ -5237,6 +5370,7 @@ function enterBraceHold(player, run, config, wall, moveAxis) {
   refillDashFromWall(player, config);
   refillRecoilShot(player, config);
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 6, "#8fe1ff");
+  playGameSfx("wallJump", { cooldownMs: 80 });
   pushNotice(run, "踰?怨좎젙");
 }
 
@@ -5279,6 +5413,7 @@ function enterWallRun(player, run, config, wallDirection) {
   refillDashFromWall(player, config);
   refillRecoilShot(player, config);
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.45, 4, "#b8f0ff");
+  playGameSfx("wallJump", { cooldownMs: 90 });
 }
 
 function updateWallRun(player, config, dt) {
@@ -5304,6 +5439,7 @@ function launchFromWallRun(player, run, config) {
   player.wallSlideGraceDirection = 0;
   player.wallRunBoostActive = true;
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#b8f0ff");
+  playGameSfx("braceVault", { cooldownMs: 80 });
   pushNotice(run, "踰???諛쒖궗");
   clearWallRun(player);
 }
@@ -5328,6 +5464,7 @@ function startHover(player, run, config) {
     260,
     0.5
   );
+  playGameSfx("hover", { cooldownMs: 160 });
 }
 
 function performBraceVault(player, run, config, wall, moveAxis) {
@@ -5346,6 +5483,7 @@ function performBraceVault(player, run, config, wall, moveAxis) {
   player.braceReleaseTimer = 0.16;
   player.braceActive = true;
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 10, "#8fe1ff");
+  playGameSfx("braceVault", { cooldownMs: 80 });
   pushNotice(run, "踰?諛섎룞");
 }
 
@@ -5632,6 +5770,7 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.onGround) {
     if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
+      playGameSfx("slide", { cooldownMs: 140 });
       // Slide startup already resized the player and preserved the incoming speed.
     } else if (player.slideTimer > 0) {
       player.crouchBlocked = false;
@@ -5737,6 +5876,7 @@ function updatePlayer(run, data, state, dt, input) {
       clearHover(player);
       clearRecoilSpin(player);
       player.coyoteTimer = config.coyoteTimeMs / 1000;
+      playGameSfx("land", { intensity: contacts.landingSpeed, cooldownMs: 70 });
     }
     player.onGround = contacts.onGround;
     player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
@@ -5754,6 +5894,7 @@ function updatePlayer(run, data, state, dt, input) {
 
     if (player.onGround) {
       if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
+        playGameSfx("slide", { cooldownMs: 140 });
         // Slide startup already resized the player and preserved the incoming speed.
       } else if (player.slideTimer > 0) {
         player.crouchBlocked = false;
@@ -6007,6 +6148,7 @@ function updatePlayer(run, data, state, dt, input) {
       facing: player.facing,
       life: 0.12,
     });
+    playGameSfx("melee", { cooldownMs: 100 });
   }
 
   const wallSlideSourceDirection =
@@ -6136,6 +6278,7 @@ function updatePlayer(run, data, state, dt, input) {
     clearRecoilSpin(player);
     const burstSize = contacts.landingSpeed > 480 ? 10 : 5;
     spawnParticles(run, player.x + player.width / 2, player.y + player.height, burstSize, "#c5d8e6");
+    playGameSfx("land", { intensity: contacts.landingSpeed, cooldownMs: 70 });
     if (player.jumpBufferTimer > 0 && player.height === player.standHeight) {
       if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
         armSprintJumpCarry(player, config);
@@ -6159,6 +6302,7 @@ function updatePlayer(run, data, state, dt, input) {
     refillDashFromGround(player, config);
     refillRecoilShot(player, config);
     if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
+      playGameSfx("slide", { cooldownMs: 140 });
       // Slide startup already resized the player and preserved the incoming speed.
     } else if (player.slideTimer > 0) {
       player.slideGroundGraceTimer = (config.slideGroundGraceMs ?? 90) / 1000;
@@ -6192,6 +6336,21 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   player.canInteract = true;
+  if (
+    player.onGround &&
+    player.height === player.standHeight &&
+    player.slideTimer <= 0 &&
+    Math.abs(player.vx) > 150
+  ) {
+    player.footstepTimer = Math.max(0, (player.footstepTimer ?? 0) - dt);
+    if (player.footstepTimer === 0) {
+      playGameSfx("footstep", { cooldownMs: 55 });
+      const speedRatio = clamp(Math.abs(player.vx) / Math.max(1, config.sprintSpeed ?? config.runSpeed ?? 900), 0.45, 1.35);
+      player.footstepTimer = clamp(0.28 / speedRatio, 0.14, 0.34);
+    }
+  } else {
+    player.footstepTimer = 0;
+  }
   handleWaterHazards(run, data);
   updateMovementVfx(run, data, dt);
   player.jumpHeldLastFrame = jumpHeld;
@@ -6764,6 +6923,7 @@ function fireDroneBeam(run, drone) {
     hasHit: false,
   });
   spawnDirectedParticles(run, drone.aimStartX, drone.aimStartY, 7, "#87e1ff", drone.aimDirX || 1, drone.aimDirY || 0, 420, 0.22);
+  playGameSfx("enemyShot", { cooldownMs: 120 });
 }
 
 function fireFlyingRangedShot(run, drone, playerCenter) {
@@ -6790,6 +6950,7 @@ function fireFlyingRangedShot(run, drone, playerCenter) {
     color: drone.projectileColor || "#93eaff",
   });
   drone.hitFlash = Math.max(drone.hitFlash ?? 0, 0.08);
+  playGameSfx("enemyShot", { cooldownMs: 120 });
 }
 
 function startCrowDive(drone) {
@@ -7211,6 +7372,7 @@ function fireHumanoidProjectile(run, enemy, playerCenter) {
     color: enemy.projectileColor || "#ff9fb4",
   });
   enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.08);
+  playGameSfx("enemyShot", { cooldownMs: 120 });
 }
 
 function fireHumanoidArcProjectile(run, data, enemy, playerCenter) {
@@ -7250,6 +7412,7 @@ function fireHumanoidArcProjectile(run, data, enemy, playerCenter) {
     color: enemy.projectileColor || "#f6d36f",
   });
   enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.1);
+  playGameSfx("enemyShot", { cooldownMs: 120 });
 }
 
 function ensureHumanoidGroundState(enemy) {
@@ -7715,8 +7878,13 @@ function damageLootCrate(run, crate, amount, directionX = 0, directionY = 0, hit
   spawnDamageNumber(run, x, y - 12, damage, "#ffd6ba");
   spawnDirectedParticles(run, x, y, 9, "#ffd6ba", directionX || Math.sign(run.player?.facing ?? 1) || 1, directionY || -0.15, 280, 0.72);
   if (crate.hp <= 0) {
-    return spillLootCrate(run, crate, { broken: true, directionX });
+    const spilled = spillLootCrate(run, crate, { broken: true, directionX });
+    if (spilled) {
+      playGameSfx("lootOpen", { cooldownMs: 160 });
+    }
+    return spilled;
   }
+  playGameSfx("impact", { cooldownMs: 80 });
   return true;
 }
 
@@ -7724,7 +7892,9 @@ function openLootCrate(run, crate) {
   if (!crate || crate.searched) {
     return;
   }
-  spillLootCrate(run, crate, { broken: false, directionX: Math.sign(run.player?.facing ?? 1) || 1 });
+  if (spillLootCrate(run, crate, { broken: false, directionX: Math.sign(run.player?.facing ?? 1) || 1 })) {
+    playGameSfx("lootOpen", { cooldownMs: 160 });
+  }
 }
 
 function moveLootSelection(crate, loot, delta) {
@@ -7799,6 +7969,7 @@ function collectLootItem(run, crate, item) {
     item.transferProgress = 0;
     item.lootProgress = 0;
     pushNotice(run, "媛諛?怨듦컙 遺議?");
+    playGameSfx("lootDenied", { cooldownMs: 140 });
     return false;
   }
 
@@ -7835,6 +8006,7 @@ function collectLootItem(run, crate, item) {
     pushNotice(run, `${item.name} ?뺣낫.`);
     spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 10, "#93eaff");
   }
+  playGameSfx("lootCollect", { rarityRank, cooldownMs: 80 });
 
   crate.searched = crate.items.every((entry) => entry.looted);
   if (crate.searched) {
@@ -9007,6 +9179,7 @@ function beginRouteFadeTransition(state, data, routeExit) {
   };
   run.prompt = "";
   run.promptWorld = null;
+  playGameSfx("route", { cooldownMs: 200 });
   setStatus(state, `${routeExit.label || "Route"} 이동 중`);
   return true;
 }
@@ -9027,6 +9200,7 @@ function updateRouteFadeTransition(state, data, dt) {
   if (transition.phase === "fadeOut" && transition.timer >= duration) {
     const routeExit = transition.routeExit;
     transitionToRouteExit(state, data, routeExit, { skipFade: true });
+    playGameSfx("routeArrive", { cooldownMs: 200 });
     if (!state.run) {
       return true;
     }
@@ -9252,6 +9426,7 @@ function beginZipLineRide(run, data, zipLine) {
   clearWallRun(player);
   clearHover(player);
   clearRecoilSpin(player);
+  playGameSfx("zipStart", { cooldownMs: 160 });
   pushNotice(run, "Zipline engaged.");
 }
 
@@ -9274,6 +9449,7 @@ function updateZipLineRide(player, data, run, config, dt, jumpPressed) {
     player.facing = direction;
     armSprintJumpCarry(player, config);
     spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#e7f47e");
+    playGameSfx("zipExit", { cooldownMs: 120 });
     return false;
   }
 
@@ -9305,6 +9481,7 @@ function updateZipLineRide(player, data, run, config, dt, jumpPressed) {
       player.vx *= 0.82;
       player.vy = Math.max(player.vy, 120);
       player.canInteract = true;
+      playGameSfx("zipExit", { cooldownMs: 120 });
     }
   }
 

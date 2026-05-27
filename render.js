@@ -7,7 +7,7 @@ import {
   getShelterUpgradeCost,
   getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260525-route-touch-v3";
+} from "./state.js?v=20260526-sfx-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
@@ -19,7 +19,7 @@ const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
 const MAP_EXPLORE_CELL_SIZE = 320;
 const NIGHT_TRANSITION_SECONDS = 1.4;
-const INVENTORY_BODY_PORTRAIT_SRC = "./assets/ui/body-status-operator-v1.png?v=20260525-route-touch-v3";
+const INVENTORY_BODY_PORTRAIT_SRC = "./assets/ui/body-status-operator-v1.png?v=20260526-sfx-v1";
 const TITLE_MENU_OPTIONS = [
   { id: "new", label: "처음부터", detail: "새 런 준비" },
   { id: "continue", label: "이어하기", detail: "저장된 런 복귀" },

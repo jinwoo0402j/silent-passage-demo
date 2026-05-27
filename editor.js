@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260525-route-touch-v3";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260526-sfx-v1";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -15,7 +15,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260525-route-touch-v3";
+} from "./level-store.js?v=20260526-sfx-v1";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
