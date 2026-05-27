@@ -1514,6 +1514,19 @@ function getBraceWallById(data, wallId, run = null) {
   );
 }
 
+function getBraceWallId(wall) {
+  if (!wall) {
+    return null;
+  }
+  return wall.id
+    ?? wall.dynamicEntityId
+    ?? `${wall.x}:${wall.y}:${wall.width}:${wall.height}`;
+}
+
+function isPlayerInsideBraceWall(player, wall) {
+  return Boolean(wall && rectsOverlap(player, wall));
+}
+
 function setPlayerHeight(player, targetHeight) {
   const feetY = player.y + player.height;
   player.height = targetHeight;
@@ -2838,6 +2851,14 @@ function clearBraceHold(player) {
   player.braceHoldDirection = 0;
   player.braceHoldLaunchDirection = 0;
   player.braceHoldSpeed = 0;
+}
+
+function endBraceHoldWithCooldown(player, config, wallId = player.braceHoldWallId) {
+  if (wallId) {
+    player.braceConsumedWallId = wallId;
+    player.braceCooldownTimer = (config.braceCooldownMs ?? 420) / 1000;
+  }
+  clearBraceHold(player);
 }
 
 function clearWallRun(player) {
@@ -4199,13 +4220,18 @@ function enterBraceHold(player, run, config, wall, moveAxis) {
   const launchDirection = moveAxis || Math.sign(player.vx) || player.facing || holdDirection;
 
   player.braceHolding = true;
-  player.braceHoldWallId = wall.id;
+  player.braceHoldWallId = getBraceWallId(wall);
   player.braceHoldDirection = holdDirection;
   player.braceHoldLaunchDirection = launchDirection;
-  player.braceHoldSpeed = config.braceHoldStartSpeed ?? 0;
-  player.vx = 0;
-  player.vy = player.braceHoldSpeed;
-  player.facing = holdDirection;
+  player.braceHoldSpeed = Math.max(
+    Math.abs(player.vy),
+    Math.abs(player.vx),
+    config.braceHoldStartSpeed ?? 0,
+    config.runSpeed ?? 0,
+  );
+  player.vx = launchDirection * player.braceHoldSpeed;
+  player.vy = 0;
+  player.facing = launchDirection;
   player.onGround = false;
   player.coyoteTimer = 0;
   player.jumpBufferTimer = 0;
@@ -4224,22 +4250,23 @@ function enterBraceHold(player, run, config, wall, moveAxis) {
 }
 
 function updateBraceHold(player, data, config, wall, dt, moveAxis) {
-  const targetSpeed = moveAxis * config.runSpeed * (config.braceHoldMoveMultiplier ?? 0.7);
-  const accel = config.groundAccel * config.airControlMultiplier;
-  const decel = config.groundDecel * config.airControlMultiplier;
-
-  player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : decel) * dt);
   player.braceHoldSpeed = Math.min(
-    config.braceHoldFallSpeed ?? 0,
-    Math.max(player.braceHoldSpeed, config.braceHoldStartSpeed ?? 0) + (config.braceHoldAccel ?? 0) * dt
+    config.braceHoldMaxSpeed ?? config.wallRunMaxSpeed ?? 920,
+    Math.max(
+      player.braceHoldSpeed,
+      Math.abs(player.vx),
+      config.braceHoldStartSpeed ?? 0,
+      config.runSpeed ?? 0,
+    ) + (config.braceHoldAccel ?? config.wallRunAccel ?? 0) * dt
   );
-  player.vy = player.braceHoldSpeed;
   if (moveAxis !== 0) {
-    player.facing = moveAxis;
-    player.braceHoldLaunchDirection = moveAxis;
+    player.facing = player.braceHoldLaunchDirection || moveAxis;
   } else if (Math.abs(player.vx) > 12) {
     player.braceHoldLaunchDirection = Math.sign(player.vx);
   }
+  const direction = player.braceHoldLaunchDirection || player.facing || 1;
+  player.vx = direction * player.braceHoldSpeed;
+  player.vy = 0;
   player.onGround = false;
   player.canInteract = false;
   player.braceHoldActive = true;
@@ -4315,7 +4342,7 @@ function startHover(player, run, config) {
 
 function performBraceVault(player, run, config, wall, moveAxis) {
   const direction = moveAxis || player.braceHoldLaunchDirection || Math.sign(player.vx) || player.facing || 1;
-  clearBraceHold(player);
+  endBraceHoldWithCooldown(player, config, getBraceWallId(wall));
   player.vx = direction * Math.max(Math.abs(player.vx), config.braceBoostHorizontal ?? 0);
   player.vy = -(config.braceBoostVertical ?? Math.abs(config.jumpVelocity));
   player.facing = direction;
@@ -4454,6 +4481,9 @@ function updatePlayer(run, data, state, dt, input) {
   player.wallSlideGraceTimer = Math.max(0, player.wallSlideGraceTimer - dt);
   player.speedRetentionTimer = Math.max(0, player.speedRetentionTimer - dt);
   player.braceCooldownTimer = Math.max(0, player.braceCooldownTimer - dt);
+  if (player.braceCooldownTimer === 0) {
+    player.braceConsumedWallId = null;
+  }
   player.braceReleaseTimer = Math.max(0, player.braceReleaseTimer - dt);
   player.apexGravityActive = false;
   player.jumpCornerCorrected = false;
@@ -4797,6 +4827,10 @@ function updatePlayer(run, data, state, dt, input) {
   const canBrace =
     jumpPressed &&
     activeBraceWall &&
+    !(
+      player.braceConsumedWallId === getBraceWallId(activeBraceWall) &&
+      player.braceCooldownTimer > 0
+    ) &&
     !player.onGround &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
@@ -4811,8 +4845,12 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.braceHolding) {
     const braceWall = getBraceWallById(data, player.braceHoldWallId, run) ?? activeBraceWall;
-    if (!braceWall || player.height !== player.standHeight) {
-      clearBraceHold(player);
+    const braceDirectionReversed = moveAxis !== 0 &&
+      Math.sign(moveAxis) !== Math.sign(player.braceHoldLaunchDirection || player.facing || 1);
+    if (braceDirectionReversed) {
+      endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
+    } else if (!braceWall || !isPlayerInsideBraceWall(player, braceWall) || player.height !== player.standHeight) {
+      endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
     } else if (jumpReleased) {
       performBraceVault(player, run, config, braceWall, moveAxis);
       applySprintJumpCarry(player);
@@ -4833,8 +4871,16 @@ function updatePlayer(run, data, state, dt, input) {
         player.coyoteTimer = config.coyoteTimeMs / 1000;
       }
 
+      if (!isPlayerInsideBraceWall(player, braceWall)) {
+        endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
+        updateMovementVfx(run, data, dt);
+        player.jumpHeldLastFrame = jumpHeld;
+        setMovementState(player);
+        return;
+      }
+
       if (player.onGround) {
-        clearBraceHold(player);
+        endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
         player.wallGraceTimer = 0;
         player.wallGraceDirection = 0;
         player.wallSlideGraceTimer = 0;
@@ -4847,7 +4893,7 @@ function updatePlayer(run, data, state, dt, input) {
       setMovementState(player);
       return;
     } else {
-      clearBraceHold(player);
+      endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
     }
   }
 
@@ -7192,6 +7238,12 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.wallSliding = false;
   player.wallRunActive = false;
   player.braceHolding = false;
+  player.braceHoldWallId = null;
+  player.braceHoldDirection = 0;
+  player.braceHoldLaunchDirection = 0;
+  player.braceHoldSpeed = 0;
+  player.braceConsumedWallId = null;
+  player.braceCooldownTimer = 0;
   player.braceHoldActive = false;
   player.braceReleaseTimer = 0;
   player.recoilShotTimer = 0;
