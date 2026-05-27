@@ -40,8 +40,10 @@ const CAMERA_USER_ZOOM_OUT_KEYS = ["Minus", "NumpadSubtract"];
 const CAMERA_USER_ZOOM_MIN = 0.5;
 const CAMERA_USER_ZOOM_MAX = 2;
 const CAMERA_USER_ZOOM_STEP = 1.12;
-const CAMERA_ABSOLUTE_ZOOM_MIN = 0.25;
+const CAMERA_ABSOLUTE_ZOOM_MIN = 0.5;
 const CAMERA_ABSOLUTE_ZOOM_MAX = 5;
+const CAMERA_MAX_LERP_STEP_SECONDS = 1 / 30;
+const CAMERA_ACTION_ZOOM_OUT_SCALE = 0.5;
 const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const CROUCH_KEYS = ["ArrowDown", "KeyS"];
@@ -943,7 +945,7 @@ function getSpeedZoomState(player, config) {
   const start = config.speedZoomStart ?? 260;
   const full = Math.max(start + 1, config.speedZoomFull ?? 980);
   const ratio = clamp((getCameraSpeed(player, config) - start) / (full - start), 0, 1);
-  const speedZoomMin = baseZoom * clamp(config.speedZoomMin ?? config.minZoom ?? 0.88, 0.1, 1);
+  const speedZoomMin = baseZoom * getReducedCameraZoomRatio(config.speedZoomMin ?? config.minZoom, 0.88);
   return {
     ratio,
     zoom: clamp(lerp(baseZoom, speedZoomMin, ratio), CAMERA_ABSOLUTE_ZOOM_MIN, baseZoom),
@@ -951,7 +953,12 @@ function getSpeedZoomState(player, config) {
 }
 
 function getCameraScaledZoom(baseZoom, value, fallback) {
-  return clamp(baseZoom * clamp(value ?? fallback, 0.1, 1), CAMERA_ABSOLUTE_ZOOM_MIN, baseZoom);
+  return clamp(baseZoom * getReducedCameraZoomRatio(value, fallback), CAMERA_ABSOLUTE_ZOOM_MIN, baseZoom);
+}
+
+function getReducedCameraZoomRatio(value, fallback) {
+  const zoomRatio = clamp(value ?? fallback, 0.1, 1);
+  return 1 - (1 - zoomRatio) * CAMERA_ACTION_ZOOM_OUT_SCALE;
 }
 
 function getCameraTargetZoom(player, config, fallCamera = null) {
@@ -976,7 +983,7 @@ function getCameraTargetZoom(player, config, fallCamera = null) {
 
   const fallRatio = fallCamera?.ratio ?? 0;
   if (fallRatio > 0) {
-    const fallZoom = baseZoom * clamp(config.fallZoom ?? 0.9, 0.1, 1);
+    const fallZoom = baseZoom * getReducedCameraZoomRatio(config.fallZoom, 0.9);
     targetZoom = Math.min(targetZoom, lerp(baseZoom, fallZoom, fallRatio));
   }
 
@@ -989,15 +996,56 @@ function getCameraTargetZoom(player, config, fallCamera = null) {
   }
 
   const minZoom = clamp(
-    baseZoom * clamp(config.minZoom ?? config.speedZoomMin ?? 0.88, 0.1, 1),
+    baseZoom * getReducedCameraZoomRatio(config.minZoom ?? config.speedZoomMin, 0.88),
     CAMERA_ABSOLUTE_ZOOM_MIN,
     baseZoom,
   );
   return clamp(targetZoom, minZoom, baseZoom);
 }
 
+function constrainCameraToPlayer(cameraX, cameraY, run, data, viewportWidth, viewportHeight, config) {
+  const player = run.player;
+  const maxX = Math.max(0, data.world.width - viewportWidth);
+  const maxY = Math.max(0, data.world.height - viewportHeight);
+  const maxMarginX = Math.max(0, (viewportWidth - player.width) * 0.5);
+  const maxMarginY = Math.max(0, (viewportHeight - player.height) * 0.5);
+  const marginX = Math.min(
+    config.keepPlayerVisibleMarginX ?? viewportWidth * 0.16,
+    maxMarginX,
+  );
+  const marginY = Math.min(
+    config.keepPlayerVisibleMarginY ?? viewportHeight * 0.14,
+    maxMarginY,
+  );
+
+  let minCameraX = player.x + player.width + marginX - viewportWidth;
+  let maxCameraX = player.x - marginX;
+  let minCameraY = player.y + player.height + marginY - viewportHeight;
+  let maxCameraY = player.y - marginY;
+
+  if (minCameraX > maxCameraX) {
+    const centeredX = player.x + player.width * 0.5 - viewportWidth * 0.5;
+    minCameraX = centeredX;
+    maxCameraX = centeredX;
+  }
+  if (minCameraY > maxCameraY) {
+    const centeredY = player.y + player.height * 0.5 - viewportHeight * 0.5;
+    minCameraY = centeredY;
+    maxCameraY = centeredY;
+  }
+
+  return {
+    x: clamp(clamp(cameraX, minCameraX, maxCameraX), 0, maxX),
+    y: clamp(clamp(cameraY, minCameraY, maxCameraY), 0, maxY),
+  };
+}
+
 function syncCamera(run, data, dt) {
   const config = getEffectiveCameraConfig(data, run);
+  const cameraDt = Math.min(
+    Math.max(0, dt),
+    config.maxLerpStepSeconds ?? CAMERA_MAX_LERP_STEP_SECONDS,
+  );
   if (!config.lookAheadEnabled) {
     const zoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
     const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
@@ -1014,8 +1062,17 @@ function syncCamera(run, data, dt) {
     run.cameraTargetZoom = zoom;
     run.cameraLookAhead = 0;
     run.cameraSpeedRatio = 0;
-    run.cameraX = clamp(lerp(run.cameraX, targetX, Math.min(1, dt * 4.5)), 0, maxX);
-    run.cameraY = clamp(lerp(run.cameraY, targetY, Math.min(1, dt * 4.5)), 0, maxY);
+    const camera = constrainCameraToPlayer(
+      clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX),
+      clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY),
+      run,
+      data,
+      viewportWidth,
+      viewportHeight,
+      config,
+    );
+    run.cameraX = camera.x;
+    run.cameraY = camera.y;
     return;
   }
 
@@ -1025,7 +1082,7 @@ function syncCamera(run, data, dt) {
     || (isBraceCameraState(player) && config.braceAffectsCamera === false)
   );
   const recoilCamera = freezeActionCamera ? null : getRecoilCameraState(run, config);
-  const fallCamera = updateFallCameraState(run, player, data, config, dt);
+  const fallCamera = updateFallCameraState(run, player, data, config, cameraDt);
   const applyFallCamera = !freezeActionCamera && !recoilCamera && fallCamera.ratio > 0 && (
     fallCamera.active ||
     player.onGround
@@ -1035,9 +1092,9 @@ function syncCamera(run, data, dt) {
     : recoilCamera && Math.abs(recoilCamera.directionX) > 0.08
       ? Math.sign(recoilCamera.directionX)
     : getCameraLookDirection(player, run, config);
-  const directionLerp = Math.min(1, dt * (config.directionLerp ?? 6));
+  const directionLerp = Math.min(1, cameraDt * (config.directionLerp ?? 6));
   run.cameraLookDirection = lerp(run.cameraLookDirection || targetLookDirection, targetLookDirection, directionLerp);
-  const targetLookSign = Math.sign(targetLookDirection) || Math.sign(run.cameraLookDirection) || player.facing || 1;
+  const focusLookDirection = clamp(run.cameraLookDirection || targetLookDirection || player.facing || 1, -1, 1);
 
   const lookAhead = freezeActionCamera
     ? (run.cameraLookAhead ?? 0)
@@ -1047,7 +1104,7 @@ function syncCamera(run, data, dt) {
   const targetFocusX = freezeActionCamera
     ? clamp(run.cameraFocusX ?? (config.neutralFocusX ?? 0.5), 0.24, 0.76)
     : clamp(
-      (config.neutralFocusX ?? 0.5) - targetLookSign * lookAhead,
+      (config.neutralFocusX ?? 0.5) - focusLookDirection * lookAhead,
       0.24,
       0.76,
     );
@@ -1060,8 +1117,8 @@ function syncCamera(run, data, dt) {
         0.72,
       )
     : clamp(getCameraVerticalFocus(player, config, fallCamera), 0.28, 0.72);
-  const focusLerp = Math.min(1, dt * (config.focusLerp ?? 5.5));
-  const verticalFocusLerp = Math.min(1, dt * (
+  const focusLerp = Math.min(1, cameraDt * (config.focusLerp ?? 5.5));
+  const verticalFocusLerp = Math.min(1, cameraDt * (
     applyFallCamera
       ? (config.fallFocusLerp ?? 8.5)
       : fallCamera.ratio > 0
@@ -1077,7 +1134,7 @@ function syncCamera(run, data, dt) {
   const speedZoom = freezeActionCamera
     ? { ratio: 0, zoom: targetZoom }
     : getSpeedZoomState(player, config);
-  const zoomLerp = Math.min(1, dt * (config.zoomLerp ?? 4.2));
+  const zoomLerp = Math.min(1, cameraDt * (config.zoomLerp ?? 4.2));
   const zoom = clamp(
     lerp(run.cameraZoom ?? (config.zoom ?? 1), targetZoom, zoomLerp),
     CAMERA_ABSOLUTE_ZOOM_MIN,
@@ -1087,7 +1144,7 @@ function syncCamera(run, data, dt) {
 
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
-  const aimPan = updateAimCameraPan(run, config, viewportWidth, viewportHeight, dt, freezeActionCamera);
+  const aimPan = updateAimCameraPan(run, config, viewportWidth, viewportHeight, cameraDt, freezeActionCamera);
   const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
   const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
   const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
@@ -1098,8 +1155,17 @@ function syncCamera(run, data, dt) {
   run.cameraTargetZoom = targetZoom;
   run.cameraLookAhead = lookAhead;
   run.cameraSpeedRatio = speedZoom.ratio;
-  run.cameraX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
-  run.cameraY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
+  const camera = constrainCameraToPlayer(
+    clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX),
+    clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY),
+    run,
+    data,
+    viewportWidth,
+    viewportHeight,
+    config,
+  );
+  run.cameraX = camera.x;
+  run.cameraY = camera.y;
 }
 
 function getFaceOffCameraTarget(run) {
@@ -4360,6 +4426,7 @@ function updatePlayer(run, data, state, dt, input) {
   const activeBraceWall = getActiveBraceWall(player, data, run);
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
   const wasWallSliding = player.wallSliding;
+  const wasSprintActive = Boolean(player.sprintActive || player.sprintCharge > 0.55);
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
   player.noMoveInputTimer = moveAxis === 0
     ? (player.noMoveInputTimer ?? 0) + dt
@@ -4482,8 +4549,22 @@ function updatePlayer(run, data, state, dt, input) {
     player.sprintJumpCarrySpeed = 0;
   }
 
+  const sprintReleaseMaintained = Boolean(
+    !sprintHeld &&
+    player.sprintPrimed &&
+    wasSprintActive &&
+    player.onGround &&
+    player.height === player.standHeight &&
+    moveAxis !== 0 &&
+    (
+      player.sprintDirection === 0 ||
+      player.sprintDirection === moveAxis
+    )
+  );
+  const sprintInputHeld = sprintHeld || sprintReleaseMaintained;
+
   const canBuildSprint =
-    sprintHeld &&
+    sprintInputHeld &&
     player.sprintPrimed &&
     player.onGround &&
     player.height === player.standHeight &&
@@ -4496,7 +4577,7 @@ function updatePlayer(run, data, state, dt, input) {
       Math.sign(moveAxis) === Math.sign(player.sprintJumpCarrySpeed)
     );
   const preserveAirSprint =
-    (sprintHeld || sprintJumpCarryCompatible) &&
+    (sprintInputHeld || sprintJumpCarryCompatible) &&
     (player.sprintPrimed || sprintJumpCarryCompatible) &&
     !player.onGround &&
     player.height === player.standHeight &&
@@ -4530,7 +4611,7 @@ function updatePlayer(run, data, state, dt, input) {
     );
     if (player.sprintCharge === 0) {
       player.sprintDirection = 0;
-      if (!sprintHeld && player.dashTimer === 0) {
+      if (!sprintInputHeld && player.dashTimer === 0) {
         player.sprintPrimed = false;
       }
     }
@@ -4835,7 +4916,7 @@ function updatePlayer(run, data, state, dt, input) {
       : moveAxis * (
         downhillSprintActive
           ? (config.sprintSpeed ?? config.runSpeed)
-          : getSprintTargetSpeed(player, config, moveAxis, sprintHeld && player.sprintPrimed)
+          : getSprintTargetSpeed(player, config, moveAxis, sprintInputHeld && player.sprintPrimed)
       );
     const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
       ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
@@ -4896,7 +4977,6 @@ function updatePlayer(run, data, state, dt, input) {
   ) {
     player.sprintActive = true;
   }
-
   player.lightActive = isPressed(state, "KeyQ") && run.battery > 0 && player.dashTimer === 0 && player.dashWindupTimer === 0;
   if (player.lightActive) {
     run.battery = Math.max(0, run.battery - data.player.lightDrainPerSecond * dt);
