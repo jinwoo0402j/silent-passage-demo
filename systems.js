@@ -1418,6 +1418,28 @@ function collidesWithPlatforms(rect, data, run = null, collisionPlatforms = null
   return (collisionPlatforms || getCollisionPlatforms(data, run)).some((platform) => rectsOverlap(rect, platform));
 }
 
+function moveEntityHorizontallyWithWalls(entity, data, deltaX, run = null) {
+  if (!entity || deltaX === 0) {
+    return false;
+  }
+  const direction = Math.sign(deltaX);
+  const maxX = Math.max(0, (data.world?.width ?? entity.x + entity.width) - entity.width);
+  entity.x = clamp(entity.x + deltaX, 0, maxX);
+
+  let blocked = false;
+  for (const platform of getCollisionPlatforms(data, run)) {
+    if (!rectsOverlap(entity, platform)) {
+      continue;
+    }
+    blocked = true;
+    entity.x = direction > 0
+      ? Math.min(entity.x, platform.x - entity.width)
+      : Math.max(entity.x, platform.x + platform.width);
+  }
+  entity.x = clamp(entity.x, 0, maxX);
+  return blocked;
+}
+
 function getPlayerSlopeProbeXs(player) {
   const centerX = player.x + player.width * 0.5;
   const direction = Math.sign(player.vx || player.facing || 1);
@@ -3208,10 +3230,9 @@ function updateHumanoidStaggerState(enemy, data, dt) {
     enemy.trigger = 0;
     const knockback = enemy.staggerKnockbackVx ?? 0;
     if (Math.abs(knockback) > 0.5) {
-      const maxX = Math.max(0, (data.world?.width ?? enemy.x + enemy.width) - enemy.width);
-      enemy.x = clamp(enemy.x + knockback * dt, 0, maxX);
+      const blocked = moveEntityHorizontallyWithWalls(enemy, data, knockback * dt);
       enemy.staggerKnockbackVx = approach(
-        knockback,
+        blocked ? 0 : knockback,
         0,
         Math.max(0, enemy.staggerKnockbackFriction ?? 860) * dt,
       );
@@ -3383,6 +3404,8 @@ function spawnPlayerBullet(run, weaponStats, aim) {
   run.playerBullets = run.playerBullets || [];
   run.playerBullets.push({
     id: `player-bullet-${Math.round((run.time ?? 0) * 1000)}-${run.playerBullets.length}`,
+    originX: aim.originX,
+    originY: aim.originY,
     x: aim.originX + aim.shotDirX * startOffset,
     y: aim.originY + aim.shotDirY * startOffset,
     prevX: aim.originX,
@@ -3402,6 +3425,23 @@ function spawnPlayerBullet(run, weaponStats, aim) {
     duration: Math.max(0.08, range / speed + 0.12),
     color: weaponStats.type === "shotgun" ? "#ffd6ba" : "#e9f7ff",
   });
+}
+
+function getHumanoidBulletDamage(run, bullet, enemy) {
+  const baseDamage = bullet.humanoidDamage ?? 50;
+  if (bullet.weaponStats?.type !== "shotgun") {
+    return baseDamage;
+  }
+  const closeRange = Math.max(0, Number(bullet.weaponStats.closeRange ?? 0));
+  const closeRangeDamageMultiplier = Math.max(1, Number(bullet.weaponStats.closeRangeDamageMultiplier ?? 1));
+  if (closeRange <= 0 || closeRangeDamageMultiplier <= 1) {
+    return baseDamage;
+  }
+  const originX = Number.isFinite(bullet.originX) ? bullet.originX : run.player.x + run.player.width * 0.5;
+  const originY = Number.isFinite(bullet.originY) ? bullet.originY : run.player.y + run.player.height * 0.46;
+  return distanceFromPointToRect(originX, originY, enemy) <= closeRange
+    ? baseDamage * closeRangeDamageMultiplier
+    : baseDamage;
 }
 
 function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
@@ -3493,11 +3533,16 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
 
   if (hit.type === "temporaryBlock") {
     const block = hit.target;
-    block.destroyed = true;
-    block.hiddenTimer = 0;
+    const damage = Math.max(1, Number(bullet.damage ?? 1));
+    block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
+    block.hp = Math.max(0, Number(block.hp ?? block.maxHp) - damage);
     block.hitFlash = 0.18;
-    spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "OPEN");
-    spawnDirectedParticles(run, hitX, hitY, 16, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
+    spawnDamageNumber(run, hitX, hitY - 12, damage, "#93eaff", block.hp <= 0 ? "OPEN" : null);
+    spawnDirectedParticles(run, hitX, hitY, block.hp <= 0 ? 16 : 8, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
+    if (block.hp <= 0) {
+      block.destroyed = true;
+      block.hiddenTimer = 0;
+    }
     return;
   }
 
@@ -3529,7 +3574,7 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
       return;
     }
 
-    const baseDamage = bullet.humanoidDamage ?? 50;
+    const baseDamage = getHumanoidBulletDamage(run, bullet, enemy);
     const headshotMultiplier = bullet.weaponStats?.headshotMultiplier ?? 2;
     const damage = critical ? baseDamage * headshotMultiplier : baseDamage;
     const damageColor = critical ? "#ff334f" : "#ffd6ba";
@@ -5391,7 +5436,9 @@ function updateGuard(run, data, dt) {
   const canInspect = run.inventory.badge && inCheckpoint && canSeePlayer && !isMoving && !player.lightActive;
 
   if (guard.state === "patrol") {
-    guard.x += guard.patrolDirection * guard.speed * dt;
+    if (moveEntityHorizontallyWithWalls(guard, data, guard.patrolDirection * guard.speed * dt, run)) {
+      guard.patrolDirection *= -1;
+    }
     if (guard.x <= guard.patrol.left) {
       guard.x = guard.patrol.left;
       guard.patrolDirection = 1;
@@ -5430,7 +5477,7 @@ function updateGuard(run, data, dt) {
     const direction = playerCenter.x >= guardCenter.x ? 1 : -1;
     if (inDetection) {
       guard.facing = direction;
-      guard.x += direction * guard.chaseSpeed * dt;
+      moveEntityHorizontallyWithWalls(guard, data, direction * guard.chaseSpeed * dt, run);
     }
 
     if (canInspect) {
@@ -5553,7 +5600,9 @@ function updateRitualist(run, data, dt) {
     } else {
       const direction = dx > 0 ? 1 : -1;
       ritualist.facing = direction;
-      ritualist.x += direction * ritualist.speed * dt;
+      if (moveEntityHorizontallyWithWalls(ritualist, data, direction * ritualist.speed * dt, run)) {
+        ritualist.patrolIndex = (ritualist.patrolIndex + 1) % ritualist.patrolPoints.length;
+      }
     }
 
     if (inArea && canSeePlayer && player.lightActive) {
@@ -5569,7 +5618,7 @@ function updateRitualist(run, data, dt) {
     const direction = playerCenter.x >= ritualCenter.x ? 1 : -1;
     if (canSeePlayer) {
       ritualist.facing = direction;
-      ritualist.x += direction * ritualist.chaseSpeed * dt;
+      moveEntityHorizontallyWithWalls(ritualist, data, direction * ritualist.chaseSpeed * dt, run);
     }
 
     if (canSeePlayer && distance < ritualist.attackRange && ritualist.attackCooldown === 0) {
@@ -5612,14 +5661,16 @@ function updateThreats(run, data, dt) {
     if (canSeePlayer && distance < 340) {
       const direction = playerCenter.x >= threatCenter.x ? 1 : -1;
       threat.facing = direction;
-      threat.x += direction * threat.chaseSpeed * dt;
+      moveEntityHorizontallyWithWalls(threat, data, direction * threat.chaseSpeed * dt, run);
 
       if (distance < threat.attackRange && threat.attackCooldown === 0) {
         threat.attackCooldown = 1;
         damagePlayer(run, threat.damage, direction, "어둠 속 위협이 덮친다.");
       }
     } else {
-      threat.x += threat.patrolDirection * threat.speed * dt;
+      if (moveEntityHorizontallyWithWalls(threat, data, threat.patrolDirection * threat.speed * dt, run)) {
+        threat.patrolDirection *= -1;
+      }
       if (threat.x <= threat.patrol.left) {
         threat.x = threat.patrol.left;
         threat.patrolDirection = 1;
@@ -6192,12 +6243,23 @@ function updateKnockedDownHumanoid(run, data, enemy, dt) {
     : enemy.x + fallbackDirection * (enemy.escapeDistance ?? 360);
   const direction = Math.sign(targetX - enemy.x) || fallbackDirection;
   const speed = Math.max(0, enemy.crawlSpeed ?? 34);
-  const nextX = enemy.x + direction * speed * dt;
-  const reached = direction > 0 ? nextX >= targetX : nextX <= targetX;
   const maxX = Math.max(0, (data.world?.width ?? targetX + enemy.width) - enemy.width);
   enemy.knockdownFacing = direction;
   enemy.facing = direction;
-  enemy.x = clamp(reached ? targetX : nextX, 0, maxX);
+  const previousX = enemy.x;
+  const nextX = enemy.x + direction * speed * dt;
+  const reached = direction > 0 ? nextX >= targetX : nextX <= targetX;
+  const blocked = moveEntityHorizontallyWithWalls(
+    enemy,
+    data,
+    (reached ? targetX : nextX) - enemy.x,
+    run,
+  );
+
+  if (blocked) {
+    enemy.escapeTargetX = previousX;
+    return;
+  }
 
   if (reached || enemy.x <= 0 || enemy.x >= maxX) {
     markHumanoidEscaped(run, enemy);
@@ -6325,7 +6387,7 @@ function hasHumanoidGroundAhead(enemy, data, direction) {
   return getHumanoidGroundYAt(data, edgeX + direction * probeDistance, footY, maxDrop) !== null;
 }
 
-function isHumanoidWallAhead(enemy, data, direction) {
+function isHumanoidWallAhead(enemy, data, direction, run = null) {
   if (direction === 0) {
     return false;
   }
@@ -6336,13 +6398,13 @@ function isHumanoidWallAhead(enemy, data, direction) {
     width: enemy.width,
     height: Math.max(1, enemy.height - 8),
   };
-  return getCollisionPlatforms(data).some((platform) => (
+  return getCollisionPlatforms(data, run).some((platform) => (
     !isSlopePlatform(platform) &&
     rectsOverlap(probe, platform)
   ));
 }
 
-function getHumanoidPatrolDirection(enemy, data) {
+function getHumanoidPatrolDirection(enemy, data, run = null) {
   ensureHumanoidGroundState(enemy);
   let direction = Math.sign(enemy.patrolDirection || enemy.facing || 1) || 1;
   const centerX = enemy.x + enemy.width * 0.5;
@@ -6355,7 +6417,7 @@ function getHumanoidPatrolDirection(enemy, data) {
     direction = -1;
   }
 
-  if (isHumanoidWallAhead(enemy, data, direction) || !hasHumanoidGroundAhead(enemy, data, direction)) {
+  if (isHumanoidWallAhead(enemy, data, direction, run) || !hasHumanoidGroundAhead(enemy, data, direction)) {
     direction *= -1;
   }
 
@@ -6363,7 +6425,7 @@ function getHumanoidPatrolDirection(enemy, data) {
   return direction;
 }
 
-function updateHumanoidGroundPhysics(enemy, data, dt, direction = 0) {
+function updateHumanoidGroundPhysics(enemy, data, dt, direction = 0, run = null) {
   ensureHumanoidGroundState(enemy);
   const config = getMovementConfig(data);
   const desiredDirection = Math.sign(direction) || 0;
@@ -6373,7 +6435,7 @@ function updateHumanoidGroundPhysics(enemy, data, dt, direction = 0) {
   enemy.vx = enemy.onGround ? desiredDirection * speed : 0;
   enemy.vy = Math.min(maxFallSpeed, (enemy.vy ?? 0) + (data.world?.gravity ?? 0) * dt);
 
-  const contacts = resolvePlayerCollisions(enemy, data, dt, config, null);
+  const contacts = resolvePlayerCollisions(enemy, data, dt, config, run);
   enemy.onGround = contacts.onGround;
   enemy.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
   if (contacts.onGround) {
@@ -6425,12 +6487,12 @@ function updateHumanoidEnemies(run, data, dt) {
     }
 
     if (!enemy.active) {
-      const direction = getHumanoidPatrolDirection(enemy, data);
-      updateHumanoidGroundPhysics(enemy, data, dt, direction);
+      const direction = getHumanoidPatrolDirection(enemy, data, run);
+      updateHumanoidGroundPhysics(enemy, data, dt, direction, run);
       continue;
     }
 
-    updateHumanoidGroundPhysics(enemy, data, dt, 0);
+    updateHumanoidGroundPhysics(enemy, data, dt, 0, run);
 
     if (canSeePlayer && distance < (enemy.fireRange ?? 620)) {
       enemy.trigger = clamp((enemy.trigger ?? 0) + (enemy.triggerRate ?? 1) * dt * 0.35, 0, getFaceOffConfig(data).triggerLimit ?? 4.5);

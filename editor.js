@@ -2138,6 +2138,7 @@ function renderSelectionFields(editor, dom) {
     addNumber("Y", "y", entity.y);
     addNumber("Width", "width", entity.width, { min: 12 });
     addNumber("Height", "height", entity.height, { min: 12 });
+    addNumber("HP", "maxHp", entity.maxHp ?? 1, { min: 1 });
     addNumber("Hide Time", "hideDuration", entity.hideDuration ?? 1.6, { min: 0.1, step: 0.1 });
     addColor("Color", "color", entity.color || "#5f7588");
   } else if (editor.selected.kind === "zipLine" || editor.selected.kind === "zipLineNode") {
@@ -2168,7 +2169,7 @@ function renderSelectionFields(editor, dom) {
     addNumber("Y", "y", entity.y);
     addNumber("Width", "width", entity.width, { min: 12 });
     addNumber("Height", "height", entity.height, { min: 12 });
-    addNumber("HP", "maxHp", entity.maxHp ?? 140, { min: 1 });
+    addNumber("HP", "maxHp", entity.maxHp ?? 120, { min: 1 });
     addNumber("Damage", "damage", entity.damage ?? 12, { min: 0 });
     addNumber("Fire Range", "fireRange", entity.fireRange ?? 760, { min: 0 });
     addSelect("Attack", "attackPattern", entity.attackPattern || (entity.projectileArc ? "arc" : "rifle"), [
@@ -3330,6 +3331,7 @@ function createTemporaryBlockFromPreview(editor, dom) {
     y: rect.y,
     width: Math.max(12, rect.width || 96),
     height: Math.max(12, rect.height || 96),
+    maxHp: 1,
     color: "#5f7588",
     hideDuration: 1.6,
   };
@@ -3479,7 +3481,7 @@ function placeEnemyAt(editor, dom, point, options = {}) {
     y: snapped.y,
     width,
     height,
-    maxHp: 140,
+    maxHp: 120,
     damage: 12,
     fireRange: 760,
     triggerRate: 10,

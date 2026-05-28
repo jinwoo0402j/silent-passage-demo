@@ -651,6 +651,7 @@
       "y": 1824,
       "width": 32,
       "height": 192,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 9
     }
@@ -735,7 +736,7 @@
       "y": 1784,
       "width": 58,
       "height": 104,
-      "maxHp": 140,
+      "maxHp": 120,
       "damage": 12,
       "fireRange": 760,
       "initialCooldown": 1.1,
@@ -789,7 +790,7 @@
       "y": 1856,
       "width": 58,
       "height": 104,
-      "maxHp": 140,
+      "maxHp": 120,
       "damage": 12,
       "fireRange": 760,
       "triggerRate": 10,

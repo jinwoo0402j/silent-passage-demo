@@ -2400,6 +2400,7 @@
       "y": 2784,
       "width": 32,
       "height": 128,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2409,6 +2410,7 @@
       "y": 2464,
       "width": 32,
       "height": 128,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2418,6 +2420,7 @@
       "y": 2144,
       "width": 32,
       "height": 128,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2427,6 +2430,7 @@
       "y": 2336,
       "width": 256,
       "height": 64,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2436,6 +2440,7 @@
       "y": 1584,
       "width": 256,
       "height": 32,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2445,6 +2450,7 @@
       "y": 992,
       "width": 32,
       "height": 128,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2454,6 +2460,7 @@
       "y": 1120,
       "width": 32,
       "height": 128,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2463,6 +2470,7 @@
       "y": 1888,
       "width": 32,
       "height": 224,
+      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     }
