@@ -297,7 +297,7 @@
     "rooms": [
       {
         "id": "main",
-        "label": "New Level",
+        "label": "City Level",
         "x": 0,
         "y": 0,
         "width": 180,

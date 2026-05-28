@@ -3,6 +3,7 @@ import { deepClone } from "./utils.js";
 export const LEVEL_OVERRIDE_KEY = "rulebound-level-override-v2";
 export const LEVEL_OVERRIDES_KEY = "rulebound-level-overrides-v3";
 export const RUN_CONFIG_KEY = "rulebound-run-config-v1";
+const DELETED_LOCAL_LEVEL_IDS = new Set(["city-level-01"]);
 export const LEVEL_DATA_VERSION = 2;
 export const LEVEL_OVERRIDES_VERSION = 3;
 
@@ -1201,6 +1202,23 @@ function readLevelOverridesPayload() {
     if (!parsed || typeof parsed !== "object" || !parsed.levels || typeof parsed.levels !== "object") {
       return null;
     }
+    let changed = false;
+    DELETED_LOCAL_LEVEL_IDS.forEach((levelId) => {
+      if (Object.prototype.hasOwnProperty.call(parsed.levels, levelId)) {
+        delete parsed.levels[levelId];
+        changed = true;
+      }
+    });
+    if (changed) {
+      if (Object.keys(parsed.levels).length === 0) {
+        window.localStorage.removeItem(LEVEL_OVERRIDES_KEY);
+        return null;
+      }
+      window.localStorage.setItem(LEVEL_OVERRIDES_KEY, JSON.stringify({
+        version: LEVEL_OVERRIDES_VERSION,
+        levels: parsed.levels,
+      }));
+    }
     return parsed;
   } catch {
     return null;
@@ -1227,7 +1245,12 @@ function readLegacyLevelOverride(baseData) {
     if (!raw) {
       return null;
     }
-    return normalizeEditableLevelData(JSON.parse(raw), createBaseLevelData(baseData, getDefaultLevelId(baseData)));
+    const parsed = JSON.parse(raw);
+    if (DELETED_LOCAL_LEVEL_IDS.has(parsed?.levelId || parsed?.id)) {
+      window.localStorage.removeItem(LEVEL_OVERRIDE_KEY);
+      return null;
+    }
+    return normalizeEditableLevelData(parsed, createBaseLevelData(baseData, getDefaultLevelId(baseData)));
   } catch {
     return null;
   }

@@ -40,6 +40,7 @@ const RUN_SCALAR_KEYS = [
   "noticeTimer",
   "cameraX",
   "cameraY",
+  "cameraUserZoom",
   "cameraZoom",
   "cameraFocusX",
   "cameraFocusY",
