@@ -1006,6 +1006,7 @@ export function createInitialState(data) {
     pulse: 0,
     pressed: new Set(),
     justPressed: new Set(),
+    justReleased: new Set(),
     capsLockActive: false,
     mouse: {
       screenX: CAMERA_SCREEN_WIDTH / 2,

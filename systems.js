@@ -148,6 +148,14 @@ function consumeEitherPress(state, codes) {
   return codes.some((code) => consumePress(state, code));
 }
 
+function consumeRelease(state, code) {
+  if (state.justReleased?.has(code)) {
+    state.justReleased.delete(code);
+    return true;
+  }
+  return false;
+}
+
 function updateCapsLockDashInput(state, player, dt, moveLeft, moveRight) {
   player.capsDashTapTimer = Math.max(0, (player.capsDashTapTimer ?? 0) - dt);
   const capsLockActive = Boolean(state.capsLockActive);
@@ -338,6 +346,7 @@ function discoverRouteExit(run, data, routeExit) {
 
 function clearTransientMapInput(state) {
   state.justPressed.clear();
+  state.justReleased?.clear();
   if (state.mouse) {
     state.mouse.primaryJustPressed = false;
     state.mouse.secondaryJustPressed = false;
@@ -4446,6 +4455,7 @@ function updatePlayer(run, data, state, dt, input) {
   const crouchPressed = consumeEitherPress(state, CROUCH_KEYS);
   const jumpPressed = consumeEitherPress(state, JUMP_KEYS);
   const jumpHeld = isEitherPressed(state, JUMP_KEYS);
+  const wReleased = consumeRelease(state, "KeyW");
   const capsDashInput = updateCapsLockDashInput(state, player, dt, moveLeft, moveRight);
   const dashPressed = consumeEitherPress(state, DASH_KEYS) || capsDashInput.dashPressed;
   const sprintPressed = consumeEitherPress(state, SPRINT_KEYS);
@@ -4851,7 +4861,7 @@ function updatePlayer(run, data, state, dt, input) {
       endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
     } else if (!braceWall || !isPlayerInsideBraceWall(player, braceWall) || player.height !== player.standHeight) {
       endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
-    } else if (jumpReleased) {
+    } else if (jumpReleased || wReleased) {
       performBraceVault(player, run, config, braceWall, moveAxis);
       applySprintJumpCarry(player);
     } else if (jumpHeld) {
@@ -8609,6 +8619,9 @@ export function bindInput(state) {
     if (typeof event.getModifierState === "function") {
       state.capsLockActive = event.getModifierState("CapsLock");
     }
+    if (state.pressed.has(event.code)) {
+      state.justReleased?.add(event.code);
+    }
     state.pressed.delete(event.code);
   });
 }
@@ -8665,6 +8678,7 @@ export function updateGame(state, data, dt) {
     state.mouse.secondaryJustPressed = false;
   }
   state.justPressed.clear();
+  state.justReleased?.clear();
 }
 
 export function hasThreatSense(state) {
