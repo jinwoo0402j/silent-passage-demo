@@ -317,6 +317,8 @@
   "routeExits": [
     {
       "id": "route-exit-1777790347205",
+      "kind": "route",
+      "type": "route",
       "label": "Route Exit",
       "x": 8208,
       "y": 2144,
@@ -324,7 +326,8 @@
       "height": 192,
       "prompt": "E: 다음 구역",
       "toLevelId": "faceoff-checkpoint-01",
-      "toEntranceId": "start"
+      "toEntranceId": "start",
+      "returnEntranceId": "start"
     }
   ],
   "extractionGate": null,
@@ -2400,7 +2403,6 @@
       "y": 2784,
       "width": 32,
       "height": 128,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2410,7 +2412,6 @@
       "y": 2464,
       "width": 32,
       "height": 128,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2420,7 +2421,6 @@
       "y": 2144,
       "width": 32,
       "height": 128,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2430,7 +2430,6 @@
       "y": 2336,
       "width": 256,
       "height": 64,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2440,7 +2439,6 @@
       "y": 1584,
       "width": 256,
       "height": 32,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2450,7 +2448,6 @@
       "y": 992,
       "width": 32,
       "height": 128,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2460,7 +2457,6 @@
       "y": 1120,
       "width": 32,
       "height": 128,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     },
@@ -2470,7 +2466,6 @@
       "y": 1888,
       "width": 32,
       "height": 224,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 1.6
     }

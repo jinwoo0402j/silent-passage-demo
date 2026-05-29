@@ -55,7 +55,7 @@ const CAPSLOCK_DASH_TAP_SECONDS = 0.28;
 const BULLET_TIME_KEYS = [];
 const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
-const FOCUS_DRAIN_PER_SECOND = 36;
+const FOCUS_DRAIN_PER_SECOND = 18;
 const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
@@ -3122,6 +3122,10 @@ function updateWeaponRuntime(run, data, state, dt) {
   updateWeaponTimers(run, data, dt);
 }
 
+function isDashInputQueued(state) {
+  return DASH_KEYS.some((code) => state.justPressed.has(code));
+}
+
 function getMouseWorld(state, run) {
   const mouse = state.mouse || {};
   const zoom = clamp(run.cameraZoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
@@ -3399,7 +3403,12 @@ function getHumanoidBulletHitZones(enemy) {
 
 function spawnPlayerBullet(run, weaponStats, aim) {
   const speed = weaponStats.projectileSpeed ?? (weaponStats.type === "shotgun" ? 2050 : 2450);
-  const range = weaponStats.range ?? 520;
+  const baseRange = weaponStats.range ?? 520;
+  const aimDistance = distanceBetween(
+    { x: aim.originX, y: aim.originY },
+    { x: aim.targetX ?? aim.originX, y: aim.targetY ?? aim.originY },
+  );
+  const range = Math.max(baseRange, aimDistance + (weaponStats.aimOvershootRange ?? 320));
   const startOffset = 18;
   run.playerBullets = run.playerBullets || [];
   run.playerBullets.push({
@@ -3427,19 +3436,55 @@ function spawnPlayerBullet(run, weaponStats, aim) {
   });
 }
 
+function isPointInSector(originX, originY, dirX, dirY, pointX, pointY, range, angle) {
+  const dx = pointX - originX;
+  const dy = pointY - originY;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= EPSILON) {
+    return true;
+  }
+  if (distance > range) {
+    return false;
+  }
+  const dirLength = Math.max(0.001, Math.hypot(dirX, dirY));
+  const dot = ((dx / distance) * (dirX / dirLength)) + ((dy / distance) * (dirY / dirLength));
+  return dot >= Math.cos(angle * 0.5);
+}
+
+function isRectInSector(originX, originY, dirX, dirY, rect, range, angle) {
+  const nearestX = clamp(originX, rect.x, rect.x + rect.width);
+  const nearestY = clamp(originY, rect.y, rect.y + rect.height);
+  const samples = [
+    [rect.x + rect.width * 0.5, rect.y + rect.height * 0.5],
+    [nearestX, nearestY],
+    [rect.x, rect.y],
+    [rect.x + rect.width, rect.y],
+    [rect.x, rect.y + rect.height],
+    [rect.x + rect.width, rect.y + rect.height],
+    [rect.x + rect.width * 0.5, rect.y],
+    [rect.x + rect.width * 0.5, rect.y + rect.height],
+    [rect.x, rect.y + rect.height * 0.5],
+    [rect.x + rect.width, rect.y + rect.height * 0.5],
+  ];
+  return samples.some(([pointX, pointY]) => (
+    isPointInSector(originX, originY, dirX, dirY, pointX, pointY, range, angle)
+  ));
+}
+
 function getHumanoidBulletDamage(run, bullet, enemy) {
   const baseDamage = bullet.humanoidDamage ?? 50;
   if (bullet.weaponStats?.type !== "shotgun") {
     return baseDamage;
   }
   const closeRange = Math.max(0, Number(bullet.weaponStats.closeRange ?? 0));
+  const closeRangeAngle = Math.max(0.1, Number(bullet.weaponStats.closeRangeAngle ?? 1.35));
   const closeRangeDamageMultiplier = Math.max(1, Number(bullet.weaponStats.closeRangeDamageMultiplier ?? 1));
   if (closeRange <= 0 || closeRangeDamageMultiplier <= 1) {
     return baseDamage;
   }
   const originX = Number.isFinite(bullet.originX) ? bullet.originX : run.player.x + run.player.width * 0.5;
   const originY = Number.isFinite(bullet.originY) ? bullet.originY : run.player.y + run.player.height * 0.46;
-  return distanceFromPointToRect(originX, originY, enemy) <= closeRange
+  return isRectInSector(originX, originY, bullet.dirX, bullet.dirY, enemy, closeRange, closeRangeAngle)
     ? baseDamage * closeRangeDamageMultiplier
     : baseDamage;
 }
@@ -4520,6 +4565,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.crouchRequested = crouchHeld;
   player.attackCooldown = Math.max(0, player.attackCooldown - dt);
   player.attackWindow = Math.max(0, player.attackWindow - dt);
+  player.attackAirHoldTimer = Math.max(0, (player.attackAirHoldTimer ?? 0) - dt);
   player.invulnTimer = Math.max(0, player.invulnTimer - dt);
   player.jumpBufferTimer = Math.max(0, player.jumpBufferTimer - dt);
   player.wallJumpLockTimer = Math.max(0, player.wallJumpLockTimer - dt);
@@ -4577,6 +4623,9 @@ function updatePlayer(run, data, state, dt, input) {
   }
   if (player.attackWindow === 0) {
     player.attackHits.clear();
+  }
+  if (player.onGround) {
+    player.attackAirHoldTimer = 0;
   }
 
   if (player.zipLineActive) {
@@ -4904,8 +4953,11 @@ function updatePlayer(run, data, state, dt, input) {
       Math.sign(moveAxis) !== Math.sign(player.braceHoldLaunchDirection || player.facing || 1);
     if (braceDirectionReversed) {
       endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
-    } else if (!braceWall || !isPlayerInsideBraceWall(player, braceWall) || player.height !== player.standHeight) {
+    } else if (!braceWall || player.height !== player.standHeight) {
       endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
+    } else if (!isPlayerInsideBraceWall(player, braceWall)) {
+      performBraceVault(player, run, config, braceWall, moveAxis);
+      applySprintJumpCarry(player);
     } else if (jumpReleased || wReleased) {
       performBraceVault(player, run, config, braceWall, moveAxis);
       applySprintJumpCarry(player);
@@ -4920,14 +4972,30 @@ function updatePlayer(run, data, state, dt, input) {
       player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
       player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
       player.wallSliding = false;
+      const braceHitCollision = Boolean(
+        contacts.hitHead ||
+        contacts.onGround ||
+        contacts.wallLeft ||
+        contacts.wallRight ||
+        contacts.dashBlocked
+      );
 
       if (landed) {
         refillDashFromGround(player, config);
         player.coyoteTimer = config.coyoteTimeMs / 1000;
       }
 
-      if (!isPlayerInsideBraceWall(player, braceWall)) {
+      if (braceHitCollision) {
         endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
+        updateMovementVfx(run, data, dt);
+        player.jumpHeldLastFrame = jumpHeld;
+        setMovementState(player);
+        return;
+      }
+
+      if (!isPlayerInsideBraceWall(player, braceWall)) {
+        performBraceVault(player, run, config, braceWall, moveAxis);
+        applySprintJumpCarry(player);
         updateMovementVfx(run, data, dt);
         player.jumpHeldLastFrame = jumpHeld;
         setMovementState(player);
@@ -5090,6 +5158,12 @@ function updatePlayer(run, data, state, dt, input) {
   if (attackPressed && player.attackCooldown === 0 && player.height === player.standHeight) {
     player.attackCooldown = data.player.attackCooldown;
     player.attackWindow = 0.12;
+    if (!player.onGround) {
+      player.attackAirHoldTimer = (config.attackAirHoldMs ?? 160) / 1000;
+      if (player.vy > 0) {
+        player.vy = 0;
+      }
+    }
     player.attackHits.clear();
     run.attackFx.push({
       x: player.x + player.width / 2,
@@ -5140,11 +5214,16 @@ function updatePlayer(run, data, state, dt, input) {
 
   const gravityMultiplier = player.hoverActive
     ? (config.hoverGravityMultiplier ?? 0.18)
+    : player.attackAirHoldTimer > 0
+      ? 0
     : player.apexGravityActive
       ? (config.apexGravityMultiplier ?? 1)
       : 1;
   if (!player.wallRunActive) {
     player.vy += data.world.gravity * gravityMultiplier * dt;
+  }
+  if (player.attackAirHoldTimer > 0) {
+    player.vy = approach(player.vy, 0, (config.attackAirHoldBrake ?? 4200) * dt);
   }
   if (player.hoverActive) {
     player.vy = Math.min(player.vy, config.hoverFallSpeed ?? 160);
@@ -7298,6 +7377,7 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.movementState = MOVEMENT_STATES.GROUNDED;
   player.attackCooldown = 0;
   player.attackWindow = 0;
+  player.attackAirHoldTimer = 0;
   player.attackHits = new Set();
   player.lightActive = false;
   player.dashTimer = 0;
@@ -8441,7 +8521,13 @@ function updateExpedition(state, data, dt) {
     ? clamp(data.player.movement.focusTimeScale ?? FOCUS_TIME_SCALE, 0.05, 1)
     : 1;
   const dodgeTimeScale = (run.dodgeSlowTimer ?? 0) > 0 ? 0.38 : 1;
-  const simDt = dt * focusTimeScale * dodgeTimeScale;
+  const dashActionActive = Boolean(
+    isDashInputQueued(state) ||
+    run.player.dashWindupTimer > 0 ||
+    run.player.dashTimer > 0
+  );
+  const actionTimeScale = dashActionActive ? 1 : focusTimeScale;
+  const simDt = dt * actionTimeScale * dodgeTimeScale;
   let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
   const recoilShotPressed = reserveRecoilShotForWeapon || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
   if (recoilShotPressed || queuedRecoilShotPressed) {

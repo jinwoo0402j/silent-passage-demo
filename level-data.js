@@ -455,6 +455,7 @@ export const GAME_DATA = {
       "fireCooldown": 0.28,
       "range": 540,
       "closeRange": 320,
+      "closeRangeAngle": 1.35,
       "closeRangeDamageMultiplier": 2,
       "hitRadius": 44,
       "headshotMultiplier": 1,

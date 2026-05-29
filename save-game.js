@@ -183,6 +183,7 @@ function clearTransientRunState(run) {
   }
   if (run.player) {
     run.player.attackWindow = 0;
+    run.player.attackAirHoldTimer = 0;
     run.player.attackHits = new Set();
     run.player.lightActive = false;
     run.player.recoilFocusActive = false;

@@ -107,6 +107,9 @@
       "hoverAirControlMultiplier": 0.9,
       "groundAccel": 3400,
       "groundDecel": 4200,
+      "stopInertiaInitialDecelMultiplier": 0.26,
+      "stopInertiaMaxDecelMultiplier": 1.28,
+      "stopInertiaRampSeconds": 0.52,
       "airControlMultiplier": 0.75,
       "jumpVelocity": -930,
       "coyoteTimeMs": 100,
@@ -116,6 +119,7 @@
       "apexGravityThreshold": 180,
       "jumpCornerCorrectionPx": 12,
       "dashDurationMs": 120,
+      "dashWindupMs": 55,
       "dashDistance": 162,
       "maxDashCount": 2,
       "dashCooldownMs": 450,
@@ -175,6 +179,10 @@
       "runHeightRatio": 1.025,
       "sprintWidthRatio": 1,
       "sprintHeightRatio": 1.013,
+      "zipLineAssetKey": "playerZipline",
+      "zipLineWidthRatio": 0.95,
+      "zipLineHeightRatio": 1.02,
+      "zipLineFootAnchorY": 0.55,
       "jumpWidthRatio": 1,
       "jumpHeightRatio": 1.15,
       "fallWidthRatio": 1,
@@ -195,15 +203,10 @@
       "braceHoldHeightRatio": 1.5,
       "braceReleaseWidthRatio": 1,
       "braceReleaseHeightRatio": 1.56,
-      "recoilAirShotWidthRatio": 1.08,
-      "recoilAirShotHeightRatio": 1.48,
-      "recoilAirShotUpWidthRatio": 1.08,
-      "recoilAirShotUpHeightRatio": 1.48,
-      "recoilAirShotDownWidthRatio": 1.08,
-      "recoilAirShotDownHeightRatio": 1.48,
       "idleAnchorX": 0.58,
       "runAnchorX": 0.651,
       "sprintAnchorX": 0.53,
+      "zipLineAnchorX": 0.42,
       "jumpAnchorX": 0.63,
       "fallAnchorX": 0.46,
       "dashAnchorX": 0.51,
@@ -214,31 +217,255 @@
       "wallRunAnchorX": 0.34,
       "braceHoldAnchorX": 0.38,
       "braceReleaseAnchorX": 0.34,
-      "recoilAirShotAnchorX": 0.34,
-      "recoilAirShotUpAnchorX": 0.34,
-      "recoilAirShotDownAnchorX": 0.34,
       "footAnchorY": 0.978
     }
   },
-  "platforms": [
-    { "x": 0, "y": 1040, "width": 480, "height": 64, "color": "#54697b" },
-    { "kind": "slope", "slopeDirection": "down-right", "x": 480, "y": 1040, "width": 560, "height": 260, "color": "#54697b" },
-    { "x": 1040, "y": 1300, "width": 260, "height": 64, "color": "#54697b" },
-    { "kind": "slope", "slopeDirection": "down-right", "x": 1300, "y": 1300, "width": 620, "height": 280, "color": "#54697b" },
-    { "x": 1920, "y": 1580, "width": 360, "height": 64, "color": "#54697b" },
-    { "kind": "slope", "slopeDirection": "up-right", "x": 2280, "y": 1300, "width": 480, "height": 280, "color": "#54697b" },
-    { "x": 2760, "y": 1300, "width": 480, "height": 64, "color": "#54697b" },
-    { "kind": "slope", "slopeDirection": "down-right", "x": 3240, "y": 1300, "width": 640, "height": 300, "color": "#54697b" },
-    { "x": 3880, "y": 1600, "width": 560, "height": 64, "color": "#54697b" },
-    { "x": 0, "y": 1680, "width": 4600, "height": 220, "color": "#34485a" }
-  ],
+  "ui": {
+    "layout": {
+      "toast": {
+        "x": 52,
+        "y": 42,
+        "width": 176
+      },
+      "minimap": {
+        "x": 1148,
+        "y": 122,
+        "radius": 48
+      },
+      "objective": {
+        "x": 1062,
+        "y": 256,
+        "gap": 34
+      },
+      "status": {
+        "x": 932,
+        "y": 608,
+        "width": 156,
+        "gap": 20
+      },
+      "portrait": {
+        "x": 1168,
+        "y": 624,
+        "radius": 30
+      },
+      "actions": {
+        "moveX": 46,
+        "moveY": 648,
+        "dashX": 168,
+        "dashY": 649,
+        "jumpX": 44,
+        "jumpY": 699,
+        "crouchX": 126,
+        "crouchY": 706,
+        "useX": 210,
+        "useY": 690
+      },
+      "results": {
+        "cardX": 150,
+        "cardY": 104,
+        "cardW": 980,
+        "cardH": 512,
+        "artX": 560,
+        "artY": 144,
+        "artW": 514,
+        "artH": 244
+      }
+    }
+  },
+  "faceOff": {
+    "enemyLineCharDelay": 0.045,
+    "enemyLineHoldDuration": 0.85,
+    "choiceSlideDuration": 0.32,
+    "targetAimScale": 1.62,
+    "targetAimTop": 128,
+    "targetAimPivotY": 362,
+    "targetAimPanMax": 330,
+    "targetAimAssistY": 386,
+    "targetArtAimHeight": 1160,
+    "targetArtAimY": 18,
+    "targetArtPanMultiplier": 0.82
+  },
+  "map": {
+    "rooms": [
+      {
+        "id": "main",
+        "label": "Room",
+        "x": 0,
+        "y": 0,
+        "width": 180,
+        "height": 82
+      }
+    ]
+  },
   "entrances": [
-    { "id": "start", "label": "Start", "x": 160, "y": 960, "facing": 1 }
+    {
+      "id": "start",
+      "label": "Start",
+      "x": 160,
+      "y": 960,
+      "facing": 1
+    }
   ],
+  "routeExits": [],
+  "extractionGate": {
+    "x": 8640,
+    "y": 496,
+    "width": 96,
+    "height": 192,
+    "prompt": "D: 추출"
+  },
+  "platforms": [
+    {
+      "x": 0,
+      "y": 1040,
+      "width": 480,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 480,
+      "y": 1040,
+      "width": 560,
+      "height": 260,
+      "color": "#54697b"
+    },
+    {
+      "x": 1040,
+      "y": 1300,
+      "width": 260,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 1300,
+      "y": 1300,
+      "width": 620,
+      "height": 280,
+      "color": "#54697b"
+    },
+    {
+      "x": 1920,
+      "y": 1580,
+      "width": 360,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 2280,
+      "y": 1300,
+      "width": 480,
+      "height": 280,
+      "color": "#54697b"
+    },
+    {
+      "x": 2760,
+      "y": 1300,
+      "width": 480,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 3240,
+      "y": 1300,
+      "width": 640,
+      "height": 300,
+      "color": "#54697b"
+    },
+    {
+      "x": 3880,
+      "y": 1600,
+      "width": 560,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 0,
+      "y": 1680,
+      "width": 4600,
+      "height": 220,
+      "color": "#34485a"
+    }
+  ],
+  "temporaryBlocks": [],
   "props": [],
   "braceWalls": [],
+  "zipLineNodes": [],
+  "zipLines": [],
   "humanoidEnemies": [],
   "hostileDrones": [],
-  "routeExits": [],
+  "lootTables": {
+    "streetCache": [
+      {
+        "id": "alloy-shards",
+        "name": "합금 파편",
+        "rarity": "common",
+        "type": "material",
+        "quantity": 12,
+        "value": 24,
+        "weight": 1.2,
+        "lootTime": 0.35
+      },
+      {
+        "id": "bio-gel",
+        "name": "생체 젤",
+        "rarity": "uncommon",
+        "type": "material",
+        "quantity": 8,
+        "value": 42,
+        "weight": 1.8,
+        "lootTime": 0.55
+      },
+      {
+        "id": "servo-core",
+        "name": "서보 코어",
+        "rarity": "rare",
+        "type": "component",
+        "quantity": 1,
+        "value": 110,
+        "weight": 2.6,
+        "lootTime": 0.95
+      }
+    ],
+    "deepCache": [
+      {
+        "id": "stabilizer-coil",
+        "name": "안정화 코일",
+        "rarity": "uncommon",
+        "type": "component",
+        "quantity": 2,
+        "value": 68,
+        "weight": 2.2,
+        "lootTime": 0.7
+      },
+      {
+        "id": "neural-prism",
+        "name": "신경 프리즘",
+        "rarity": "rare",
+        "type": "artifact",
+        "quantity": 1,
+        "value": 145,
+        "weight": 3.1,
+        "lootTime": 1.05
+      },
+      {
+        "id": "blackbox-seed",
+        "name": "블랙박스 시드",
+        "rarity": "epic",
+        "type": "artifact",
+        "quantity": 1,
+        "value": 260,
+        "weight": 4.4,
+        "lootTime": 1.55
+      }
+    ]
+  },
   "lootCrates": []
 }

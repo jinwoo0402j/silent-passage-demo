@@ -8,8 +8,8 @@
     "height": 4270,
     "gravity": 2350,
     "groundY": 3900,
-    "duskAt": 90,
-    "nightAt": 150,
+    "duskAt": 9999,
+    "nightAt": 19999,
     "sanityDrain": {
       "day": 0,
       "dusk": 0,
@@ -30,42 +30,39 @@
     ],
     "camera": {
       "zoom": 1,
-      "minZoom": 0.72,
+      "minZoom": 0.15,
       "neutralFocusX": 0.5,
-      "neutralFocusY": 0.55,
+      "neutralFocusY": 0.6,
       "walkLookAhead": 0.15,
-      "sprintLookAhead": 0.28,
-      "sprintJumpLookAhead": 0.28,
+      "sprintLookAhead": 0.34,
+      "sprintJumpLookAhead": 0.34,
       "dashLookAhead": 0,
-      "wallRunLookAhead": 0.24,
-      "wallRunUpLookAhead": 0.16,
-      "braceLookAhead": 0.18,
-      "fallLookAhead": 0.22,
+      "wallRunLookAhead": 0.33,
+      "wallRunUpLookAhead": 0.22,
+      "braceLookAhead": 0.25,
+      "fallLookAhead": 0.3,
       "directionSpeedThreshold": 300,
       "sprintCameraMinSpeed": 430,
-      "speedZoomStart": 640,
-      "speedZoomFull": 1180,
-      "speedZoomMin": 0.72,
-      "upwardFocusOffset": -0.22,
-      "fallingFocusOffset": 0.22,
-      "sprintZoom": 0.82,
-      "sprintJumpZoom": 0.82,
+      "speedZoomStart": 600,
+      "speedZoomFull": 980,
+      "speedZoomMin": 0.15,
+      "upwardFocusOffset": -0.35,
+      "fallingFocusOffset": 0.35,
+      "sprintZoom": 0.6,
+      "sprintJumpZoom": 0.6,
       "dashZoom": 0.95,
-      "wallRunZoom": 0.78,
-      "braceZoom": 0.82,
-      "directionLerp": 1.6,
-      "focusLerp": 2.3,
-      "zoomLerp": 0.85,
-      "aimPanMaxX": 0.24,
-      "aimPanMaxY": 0.18,
-      "aimPanLerp": 4.2,
-      "aimPanReturnLerp": 3.4,
+      "wallRunZoom": 0.35,
+      "braceZoom": 0.36,
+      "directionLerp": 2.5,
+      "focusLerp": 4,
+      "zoomLerp": 1.5,
+      "aimPanMaxX": 0.36,
+      "aimPanMaxY": 0.27,
+      "aimPanLerp": 8.25,
+      "aimPanReturnLerp": 7.5,
       "lookAheadEnabled": true,
       "dashAffectsCamera": false,
       "braceAffectsCamera": false,
-      "boundarySlackY": 0.55,
-      "playerSafeTopY": 0.28,
-      "playerSafeBottomY": 0.68,
       "mousePanAlways": true
     }
   },
@@ -315,40 +312,22 @@
       "x": 1088,
       "y": 1888,
       "facing": 1
-    },
-    {
-      "id": "from-shelter",
-      "label": "피난처 복귀",
-      "x": 1144,
-      "y": 1888,
-      "facing": 1
     }
   ],
   "routeExits": [
     {
-      "id": "to-shelter",
+      "id": "route-exit-1777804540897",
       "kind": "shelter",
       "type": "shelter",
-      "label": "피난처",
-      "x": 1052,
-      "y": 1792,
-      "width": 120,
-      "height": 192,
-      "prompt": "D/Z: 피난처",
-      "toLevelId": "shelter-hub-01",
-      "toEntranceId": "start",
-      "returnEntranceId": "from-shelter"
-    },
-    {
-      "id": "route-exit-1777804540897",
       "label": "Route Exit",
       "x": 7840,
       "y": 1824,
       "width": 96,
       "height": 192,
       "prompt": "E: 다음 구역",
-      "toLevelId": "city-level-01",
-      "toEntranceId": "start"
+      "toLevelId": "new-level",
+      "toEntranceId": "start",
+      "returnEntranceId": "from-shelter"
     }
   ],
   "extractionGate": null,
@@ -651,7 +630,6 @@
       "y": 1824,
       "width": 32,
       "height": 192,
-      "maxHp": 1,
       "color": "#5f7588",
       "hideDuration": 9
     }
@@ -736,7 +714,7 @@
       "y": 1784,
       "width": 58,
       "height": 104,
-      "maxHp": 120,
+      "maxHp": 140,
       "damage": 12,
       "fireRange": 760,
       "initialCooldown": 1.1,
@@ -760,23 +738,6 @@
       "escapeDistance": 300,
       "exhaustionLimit": 2,
       "knockdownStaggerDuration": 0.58,
-      "parts": {
-        "arm": {
-          "hp": 36,
-          "broken": false,
-          "dropPartId": "watchman-right-arm"
-        },
-        "leg": {
-          "hp": 45,
-          "broken": false,
-          "dropPartId": null
-        },
-        "core": {
-          "hp": 80,
-          "broken": false,
-          "dropPartId": null
-        }
-      },
       "patrol": {
         "left": 2088,
         "right": 2308
@@ -790,7 +751,7 @@
       "y": 1856,
       "width": 58,
       "height": 104,
-      "maxHp": 120,
+      "maxHp": 140,
       "damage": 12,
       "fireRange": 760,
       "triggerRate": 10,
