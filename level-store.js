@@ -3,7 +3,7 @@ import { deepClone } from "./utils.js";
 export const LEVEL_OVERRIDE_KEY = "rulebound-level-override-v2";
 export const LEVEL_OVERRIDES_KEY = "rulebound-level-overrides-v3";
 export const RUN_CONFIG_KEY = "rulebound-run-config-v1";
-const DELETED_LOCAL_LEVEL_IDS = new Set(["city-level-01"]);
+const DELETED_LOCAL_LEVEL_IDS = new Set();
 export const LEVEL_DATA_VERSION = 2;
 export const LEVEL_OVERRIDES_VERSION = 3;
 

@@ -61,18 +61,29 @@
 
       <details class="editor-panel is-collapsible" open>
         <summary class="panel-toggle">
-          <span>도구</span>
-          <span class="panel-toggle-meta">배치</span>
+          <span>블록</span>
+          <span class="panel-toggle-meta">지형</span>
         </summary>
         <div class="panel-body">
-          <div class="tool-grid" id="toolButtons">
-            <button type="button" class="tool-button is-active" data-tool="select">선택</button>
+          <div class="tool-grid">
             <button type="button" class="tool-button" data-tool="platform">플랫폼</button>
             <button type="button" class="tool-button" data-tool="slopeDown">Slope v</button>
             <button type="button" class="tool-button" data-tool="slopeUp">Slope ^</button>
             <button type="button" class="tool-button" data-tool="braceWall">벽 짚기</button>
             <button type="button" class="tool-button" data-tool="backgroundTile">BG Tile</button>
             <button type="button" class="tool-button" data-tool="temporaryBlock">Temp Block</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>도구</span>
+          <span class="panel-toggle-meta">배치</span>
+        </summary>
+        <div class="panel-body">
+          <div class="tool-grid" id="toolButtons">
+            <button type="button" class="tool-button is-active" data-tool="select">선택</button>
             <button type="button" class="tool-button" data-tool="zipLine">Zipline</button>
             <button type="button" class="tool-button" data-tool="sign">표지판</button>
             <button type="button" class="tool-button" data-tool="lantern">랜턴</button>

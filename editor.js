@@ -3441,6 +3441,29 @@ function getDefaultRouteTarget(editor) {
   return target?.id || currentId || editor.data.defaultLevelId || "movement-lab-01";
 }
 
+function getNextReturnEntranceId(editor) {
+  const existingIds = new Set((editor.data.entrances || []).map((entrance) => entrance.id));
+  for (let index = 1; index < 1000; index += 1) {
+    const id = `return-entrance-${String(index).padStart(2, "0")}`;
+    if (!existingIds.has(id)) {
+      return id;
+    }
+  }
+  return `return-entrance-${Date.now()}`;
+}
+
+function createReturnEntranceForRouteExit(editor, routeExit) {
+  const id = getNextReturnEntranceId(editor);
+  const label = `Return Entrance ${id.match(/\d+$/)?.[0] || ""}`.trim();
+  return {
+    id,
+    label,
+    x: routeExit.x + routeExit.width / 2,
+    y: routeExit.y + routeExit.height,
+    facing: 1,
+  };
+}
+
 function placeRouteExitAt(editor, dom, point) {
   pushUndo(editor);
   const width = 96;
@@ -3460,9 +3483,13 @@ function placeRouteExitAt(editor, dom, point) {
     toLevelId: getDefaultRouteTarget(editor),
     toEntranceId: "start",
   };
+  const returnEntrance = createReturnEntranceForRouteExit(editor, routeExit);
+  routeExit.returnEntranceId = returnEntrance.id;
+  editor.data.entrances.push(returnEntrance);
   editor.data.routeExits.push(routeExit);
   setSelection(editor, dom, { kind: "routeExit", index: editor.data.routeExits.length - 1 });
   markDirty(editor, dom);
+  setStatus(editor, dom, `Route Exit 생성 (${editor.data.routeExits.length}개)`, "", true);
 }
 
 function placeEnemyAt(editor, dom, point, options = {}) {
@@ -3997,7 +4024,11 @@ function loadEditorLevel(editor, dom, levelId, options = {}) {
     return;
   }
   if (editor.dirty && options.saveCurrent !== false) {
-    saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
+    const saved = saveCurrentLevelOverride(editor, dom, { refresh: false });
+    if (!saved) {
+      renderLevelControls(editor, dom);
+      return;
+    }
   }
   editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
     applyLevelOverride: true,
@@ -4022,7 +4053,9 @@ function duplicateCurrentLevel(editor, dom) {
   const baseName = copy.levelId || editor.data.currentLevelId || "level";
   copy.levelId = createUniqueLevelId(editor, `${baseName}-copy`);
   copy.label = `${copy.label || baseName} Copy`;
-  saveLevelOverride(copy, GAME_DATA, copy.levelId);
+  if (!saveLevelDocument(editor, dom, copy, copy.levelId)) {
+    return;
+  }
   loadEditorLevel(editor, dom, copy.levelId, { saveCurrent: false });
 }
 
@@ -4049,7 +4082,9 @@ function createNewLevel(editor, dom) {
       height: 82,
     }],
   };
-  saveLevelOverride(copy, GAME_DATA, copy.levelId);
+  if (!saveLevelDocument(editor, dom, copy, copy.levelId)) {
+    return;
+  }
   loadEditorLevel(editor, dom, copy.levelId, { saveCurrent: false });
 }
 
@@ -4112,9 +4147,36 @@ function updateRunStartLevel(editor, dom, levelId) {
   setStatus(editor, dom, `Run start level set to ${nextLevelId}.`, "", editor.dirty);
 }
 
+function saveLevelDocument(editor, dom, document, levelId) {
+  try {
+    return saveLevelOverride(document, GAME_DATA, levelId);
+  } catch (error) {
+    console.warn("Level save failed", error);
+    setStatus(editor, dom, "로컬 저장 실패", "error", true);
+    return null;
+  }
+}
+
+function saveCurrentLevelOverride(editor, dom, options = {}) {
+  const editable = extractEditableLevelData(editor.data);
+  const saved = saveLevelDocument(editor, dom, editable, editor.data.currentLevelId);
+  if (!saved) {
+    return null;
+  }
+  if (options.refresh !== false) {
+    editor.data = prepareEditorData(mergeLevelData(createBaseLevelData(GAME_DATA, saved.levelId), saved));
+    renderLevelControls(editor, dom);
+    renderSelectionFields(editor, dom);
+    queueRender(editor, dom);
+  }
+  return saved;
+}
+
 function saveEditorLevel(editor, dom) {
-  saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
-  renderLevelControls(editor, dom);
+  const saved = saveCurrentLevelOverride(editor, dom);
+  if (!saved) {
+    return;
+  }
   setStatus(editor, dom, "로컬 저장 완료", "", false);
 }
 
@@ -4239,7 +4301,7 @@ async function saveLevelJsonToDraftFolder(editor, dom, fileName, json) {
     ])).sort();
     await writeLevelManifestToDirectory(directory, manifest);
 
-    setStatus(editor, dom, `Saved ${targetDraftPath} and updated levels/manifest.json.`, "", editor.dirty);
+    setStatus(editor, dom, `Saved ${targetDraftPath} and updated levels/manifest.json.`, "", false);
     return true;
   } catch (error) {
     if (error?.name !== "AbortError") {
@@ -4263,8 +4325,6 @@ async function downloadLevelJson(editor, dom) {
   anchor.click();
   URL.revokeObjectURL(url);
   setStatus(editor, dom, `Downloaded ${fileName}. Move it to levels/drafts/.`, "", editor.dirty);
-  return;
-  setStatus(editor, dom, "JSON 저장 완료", "", editor.dirty);
 }
 
 async function importLevelFile(editor, dom, file) {
@@ -4285,12 +4345,14 @@ async function importLevelFile(editor, dom, file) {
       previewPose: "idle",
       selected: null,
     };
+    if (!saveLevelDocument(editor, dom, normalized, normalized.levelId)) {
+      return;
+    }
     if (getSnapshotKey(before) !== getSnapshotKey(nextSnapshot)) {
       pushUndoSnapshot(editor, before);
     }
     editor.data = prepareEditorData(mergeLevelData(baseLevel, normalized));
     editor.snap = getScaleConfig(editor.data).subTileSize;
-    saveLevelOverride(normalized, GAME_DATA, normalized.levelId);
     editor.previewPose = "idle";
     setSelection(editor, dom, null);
     syncWorldInputs(editor, dom);
@@ -4608,7 +4670,10 @@ function bindEvents(editor, dom) {
 
     if (event.code === "KeyG") {
       event.preventDefault();
-      saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
+      const saved = saveCurrentLevelOverride(editor, dom);
+      if (!saved) {
+        return;
+      }
       const levelId = encodeURIComponent(editor.data.currentLevelId || editor.data.defaultLevelId || "movement-lab-01");
       window.location.href = `./index.html?level=${levelId}&directLevel=1&localOverride=1`;
       return;

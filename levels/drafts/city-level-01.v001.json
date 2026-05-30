@@ -312,6 +312,13 @@
       "x": 272,
       "y": 3824,
       "facing": 1
+    },
+    {
+      "id": "return-entrance-01",
+      "label": "Return Entrance 01",
+      "x": 272,
+      "y": 3824,
+      "facing": 1
     }
   ],
   "routeExits": [
@@ -328,6 +335,20 @@
       "toLevelId": "faceoff-checkpoint-01",
       "toEntranceId": "start",
       "returnEntranceId": "start"
+    },
+    {
+      "id": "route-exit-1780158229650",
+      "kind": "route",
+      "type": "route",
+      "label": "Route Exit",
+      "x": 240,
+      "y": 3712,
+      "width": 96,
+      "height": 192,
+      "prompt": "E: 다음 구역",
+      "toLevelId": "new-level",
+      "toEntranceId": "return-entrance-01",
+      "returnEntranceId": "return-entrance-01"
     }
   ],
   "extractionGate": null,

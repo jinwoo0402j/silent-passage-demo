@@ -6451,11 +6451,11 @@ function renderExpedition(ctx, state, data) {
   drawTemporaryBlocks(ctx, run, theme);
   drawZipLines(ctx, data, theme);
   drawGate(ctx, data, theme);
-  drawRouteExits(ctx, data, theme, state.pulse, run);
   drawBraceWalls(ctx, data, theme);
   drawBackgroundTiles(ctx, data, run);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
+  drawRouteExits(ctx, data, theme, state.pulse, run);
   drawEntity(ctx, run.encounters.guard, {
     body: "#86a9c7",
     flash: "#eef5ff",
