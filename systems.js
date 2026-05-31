@@ -1403,7 +1403,7 @@ function getSlopePlatforms(data) {
 }
 
 function getSolidLevelPlatforms(data) {
-  return (data.platforms || []).filter((platform) => !isSlopePlatform(platform));
+  return (data.platforms || []).filter((platform) => !isSlopePlatform(platform) && platform.kind !== "damage");
 }
 
 function getCollisionPlatforms(data, run = null) {
@@ -2095,6 +2095,30 @@ function damagePlayer(run, amount, direction, sourceText) {
   run.player.vy = -260;
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+}
+
+function getPlayerDamageBlockContact(player, data) {
+  const probe = {
+    x: player.x - 1,
+    y: player.y - 1,
+    width: player.width + 2,
+    height: player.height + 2,
+  };
+  return (data.platforms || []).find((platform) => (
+    platform.kind === "damage" &&
+    rectsOverlap(probe, platform)
+  )) || null;
+}
+
+function updateDamageBlockContact(run, data) {
+  const block = getPlayerDamageBlockContact(run.player, data);
+  if (!block) {
+    return;
+  }
+  const playerCenter = getCenter(run.player);
+  const blockCenter = getCenter(block);
+  const direction = Math.sign(playerCenter.x - blockCenter.x) || run.player.facing || 1;
+  damagePlayer(run, block.damage ?? 10, direction, "Damage block contact.");
 }
 
 function isPlayerDashDodging(player) {
@@ -4851,6 +4875,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.canInteract = false;
 
     const contacts = resolvePlayerCollisions(player, data, dt, config, run);
+    updateDamageBlockContact(run, data);
     const landed = !player.wasOnGround && contacts.onGround;
     player.dashCornerCorrected = contacts.dashCornerCorrected;
     if (contacts.dashBlocked) {
@@ -5234,6 +5259,7 @@ function updatePlayer(run, data, state, dt, input) {
 
   const vxBeforeResolve = player.vx;
   const contacts = resolvePlayerCollisions(player, data, dt, config, run);
+  updateDamageBlockContact(run, data);
   const landed = !player.wasOnGround && contacts.onGround;
   player.jumpCornerCorrected = contacts.jumpCornerCorrected;
   player.dashCornerCorrected = contacts.dashCornerCorrected;

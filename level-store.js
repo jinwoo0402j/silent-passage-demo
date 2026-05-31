@@ -525,6 +525,9 @@ function sanitizePlatform(platform, index, basePlatform = null) {
       : ["up-right", "down-right"].includes(fallback.slopeDirection)
         ? fallback.slopeDirection
         : "down-right";
+  } else if (kind === "damage") {
+    next.kind = "damage";
+    next.damage = safeNumber(source?.damage, fallback.damage ?? 10, 0);
   }
   return next;
 }
@@ -895,6 +898,7 @@ export function extractEditableLevelData(data) {
     platforms: (data.platforms || []).map((platform) => ({
       kind: platform.kind,
       slopeDirection: platform.slopeDirection,
+      damage: platform.damage,
       x: platform.x,
       y: platform.y,
       width: platform.width,
@@ -1339,6 +1343,7 @@ export function getLevelSummaries(baseData) {
       platforms: (effective.platforms || []).map((platform) => ({
         kind: platform.kind,
         slopeDirection: platform.slopeDirection,
+        damage: platform.damage,
         x: platform.x,
         y: platform.y,
         width: platform.width,

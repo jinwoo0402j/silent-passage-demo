@@ -1027,6 +1027,32 @@ function drawPlatformMass(ctx, platform, theme) {
     return;
   }
 
+  if (platform.kind === "damage") {
+    const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+    gradient.addColorStop(0, "rgba(255, 126, 102, 0.68)");
+    gradient.addColorStop(0.38, platform.color || "#8b3446");
+    gradient.addColorStop(1, "rgba(34, 12, 18, 0.92)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+    ctx.fillStyle = "rgba(255, 226, 126, 0.25)";
+    ctx.fillRect(platform.x, platform.y, platform.width, Math.max(3, platform.height * 0.16));
+
+    ctx.strokeStyle = "rgba(255, 190, 102, 0.7)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+
+    ctx.strokeStyle = "rgba(255, 226, 126, 0.42)";
+    ctx.lineWidth = 1.5;
+    for (let x = platform.x - platform.height; x < platform.x + platform.width; x += 26) {
+      ctx.beginPath();
+      ctx.moveTo(x, platform.y + platform.height);
+      ctx.lineTo(x + platform.height, platform.y);
+      ctx.stroke();
+    }
+    return;
+  }
+
   const topGradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
   topGradient.addColorStop(0, "rgba(212, 230, 236, 0.24)");
   topGradient.addColorStop(0.18, "rgba(112, 130, 139, 0.46)");
@@ -1061,7 +1087,11 @@ function drawPlatformMass(ctx, platform, theme) {
 }
 
 function drawTerrain(ctx, data) {
-  data.platforms.forEach((platform) => {
+  data.platforms.filter((platform) => platform.kind === "damage").forEach((platform) => {
+    drawPlatformMass(ctx, platform, getUiTheme(data));
+  });
+
+  data.platforms.filter((platform) => platform.kind !== "damage").forEach((platform) => {
     drawPlatformMass(ctx, platform, getUiTheme(data));
   });
 

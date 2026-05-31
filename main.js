@@ -12,7 +12,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260501-run-start-v1";
+} from "./movement-tuning.js?v=20260531-realistic-speed-v1";
 import { renderGame } from "./render.js?v=20260520-shelter-photo-v1";
 import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
@@ -37,11 +37,14 @@ const movementTuningPanel = document.getElementById("movementTuningPanel");
 const movementTuningFields = document.getElementById("movementTuningFields");
 const movementTuningCloseButton = document.getElementById("movementTuningCloseButton");
 const movementTuningSaveButton = document.getElementById("movementTuningSaveButton");
+const movementTuningSaveTestButton = document.getElementById("movementTuningSaveTestButton");
+const movementTuningLoadTestButton = document.getElementById("movementTuningLoadTestButton");
 const movementTuningResetButton = document.getElementById("movementTuningResetButton");
 const sceneActionButton = document.getElementById("sceneActionButton");
 const touchControls = document.getElementById("touchControls");
 const touchButtons = Array.from(document.querySelectorAll(".touch-button"));
 const stageShell = document.querySelector(".stage-shell");
+const MOVEMENT_TUNING_TEST_KEY = "rulebound-movement-tuning-test-v1";
 const testDebugButton = document.createElement("button");
 testDebugButton.id = "testDebugButton";
 testDebugButton.className = "test-debug-button";
@@ -62,6 +65,7 @@ testDebugPanel.innerHTML = `
   </div>
   <div class="test-debug-actions">
     <button type="button" data-test-action="maxAmmo">탄환 최대로 수정</button>
+    <button type="button" data-test-action="applyLevelZeroMovement">Lv.0</button>
     <button type="button" data-test-action="restartRun">다시 시작하기</button>
     <button type="button" data-test-action="resetLevel">레벨 처음으로 돌아가기</button>
     <button type="button" data-test-action="respawnEnemies">맵의 적 전부 리스폰</button>
@@ -169,6 +173,59 @@ const FACE_OFF_TUNING_FIELDS = [
   { key: "enemyLineHoldDuration", label: "Enemy Line Hold", min: 0.2, max: 3, step: 0.05 },
   { key: "choiceSlideDuration", label: "Choice Slide", min: 0.08, max: 1, step: 0.02 },
 ];
+const LEVEL_ZERO_MOVEMENT_TUNING = {
+  runSpeed: 410,
+  sprintSpeed: 640,
+  sprintBuildMs: 260,
+  sprintDecayMs: 180,
+  sprintJumpCarryMs: 340,
+  sprintJumpMinSpeed: 540,
+  slideMinSpeed: 430,
+  slideDurationMs: 420,
+  slideFriction: 980,
+  slideSpeedMultiplier: 1.16,
+  slideJumpCarryMs: 360,
+  slideJumpMinSpeed: 690,
+  slideJumpSpeedMultiplier: 1.14,
+  hoverFallSpeed: 185,
+  hoverGravityMultiplier: 0.22,
+  hoverStartMaxFallSpeed: 280,
+  hoverAirControlMultiplier: 1.0,
+  groundAccel: 5200,
+  groundDecel: 6200,
+  airControlMultiplier: 0.88,
+  jumpVelocity: -920,
+  dashDurationMs: 95,
+  dashWindupMs: 35,
+  dashDistance: 124,
+  dashCarryWindowMs: 130,
+  dashCarrySpeedMultiplier: 0.58,
+  dashJumpMinSpeed: 520,
+  braceDetectPaddingX: 24,
+  braceDetectPaddingY: 24,
+  braceHoldStartSpeed: 24,
+  braceHoldAccel: 780,
+  braceHoldFallSpeed: 130,
+  braceHoldMoveMultiplier: 0.82,
+  braceBoostHorizontal: 520,
+  braceBoostVertical: 900,
+  wallSpeedRetentionMinSpeed: 220,
+  wallRunStartSpeed: 300,
+  wallRunAccel: 1700,
+  wallRunMaxSpeed: 760,
+  wallRunExitMinBoost: 640,
+  wallRunExitHorizontal: 210,
+  wallJumpHorizontal: 540,
+  wallJumpVertical: 900,
+  recoilShotCharges: 1,
+  recoilShotForce: 1250,
+  recoilShotMaxHorizontalSpeed: 1900,
+  recoilShotMaxUpSpeed: 1650,
+  recoilShotMaxFallSpeed: 720,
+  recoilShotFocusTimeScale: 0.05,
+  recoilSpinDurationMs: 180,
+  recoilSpinLoopCount: 2,
+};
 
 const dom = {
   canvas,
@@ -182,6 +239,8 @@ const dom = {
   movementTuningFields,
   movementTuningCloseButton,
   movementTuningSaveButton,
+  movementTuningSaveTestButton,
+  movementTuningLoadTestButton,
   movementTuningResetButton,
   sceneActionButton,
   touchControls,
@@ -705,6 +764,86 @@ function syncMovementTuningToRun(currentState, data) {
   }
 }
 
+function extractTuningValues(fields, source = {}) {
+  return Object.fromEntries(
+    fields.map(({ key }) => [key, source?.[key]]),
+  );
+}
+
+function getPrimaryCrowTuningSource(data) {
+  return data.hostileDrones?.find((entry) => entry.visualKind === "crow") ?? data.hostileDrones?.[0] ?? null;
+}
+
+function createMovementTuningTestSnapshot(data) {
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    movement: extractSprintTuning(data.player.movement),
+    crow: extractTuningValues(CROW_TUNING_FIELDS, getPrimaryCrowTuningSource(data)),
+    faceOff: extractTuningValues(FACE_OFF_TUNING_FIELDS, data.faceOff),
+  };
+}
+
+function saveMovementTuningTestSnapshot(data) {
+  const snapshot = createMovementTuningTestSnapshot(data);
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(MOVEMENT_TUNING_TEST_KEY, JSON.stringify(snapshot));
+  }
+  return snapshot;
+}
+
+function loadMovementTuningTestSnapshot() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(MOVEMENT_TUNING_TEST_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyMovementTuningTestSnapshot(data, currentState, snapshot) {
+  if (!snapshot) {
+    return false;
+  }
+
+  applySprintTuning(data.player.movement, snapshot.movement, GAME_DATA.player.movement);
+
+  CROW_TUNING_FIELDS.forEach(({ key }) => {
+    if (snapshot.crow?.[key] !== undefined) {
+      applyCrowFieldValue(data, key, snapshot.crow[key]);
+    }
+  });
+
+  FACE_OFF_TUNING_FIELDS.forEach(({ key }) => {
+    if (snapshot.faceOff?.[key] !== undefined) {
+      applyFaceOffFieldValue(data, key, snapshot.faceOff[key]);
+    }
+  });
+
+  syncMovementTuningToRun(currentState, data);
+  syncCrowTuningToRun(currentState, data);
+  syncFaceOffTuningToRun(currentState, data);
+  return true;
+}
+
+function applyLevelZeroMovementTuning(data, currentState) {
+  applySprintTuning(data.player.movement, LEVEL_ZERO_MOVEMENT_TUNING, GAME_DATA.player.movement);
+  Object.entries(LEVEL_ZERO_MOVEMENT_TUNING).forEach(([key, value]) => {
+    if (!SPRINT_TUNING_FIELDS.some((field) => field.key === key)) {
+      data.player.movement[key] = value;
+    }
+  });
+  syncMovementTuningToRun(currentState, data);
+  return true;
+}
+
 function ensureExpeditionRun(currentState, data) {
   if (currentState.scene === SCENES.EXPEDITION && currentState.run) {
     return currentState.run;
@@ -952,6 +1091,10 @@ function runTestDebugAction(currentDom, currentState, data, action) {
   }
   if (action === "maxAmmo") {
     fillDebugAmmo(currentState, data);
+  } else if (action === "applyLevelZeroMovement") {
+    applyLevelZeroMovementTuning(data, currentState);
+    renderMovementTuningFields(currentDom, data.player.movement);
+    setRunNotice(currentState, "테스트: Lv.0 이동 튜닝 적용");
   } else if (action === "restartRun") {
     restartDebugRun(currentDom, currentState, data);
   } else if (action === "resetLevel") {
@@ -1367,6 +1510,21 @@ function bindUi(currentDom, currentState, data) {
     syncCrowTuningToRun(currentState, data);
     syncFaceOffTuningToRun(currentState, data);
     renderMovementTuningFields(currentDom, data.player.movement);
+  });
+
+  currentDom.movementTuningSaveTestButton?.addEventListener("click", () => {
+    saveMovementTuningTestSnapshot(data);
+    setRunNotice(currentState, "TEST 이동 튜닝 저장.");
+  });
+
+  currentDom.movementTuningLoadTestButton?.addEventListener("click", () => {
+    const loaded = applyMovementTuningTestSnapshot(data, currentState, loadMovementTuningTestSnapshot());
+    if (!loaded) {
+      setRunNotice(currentState, "TEST 이동 튜닝 없음.");
+      return;
+    }
+    renderMovementTuningFields(currentDom, data.player.movement);
+    setRunNotice(currentState, "TEST 이동 튜닝 불러옴.");
   });
 
   currentDom.movementTuningResetButton?.addEventListener("click", () => {

@@ -335,6 +335,20 @@
       "toLevelId": "city-level-01",
       "toEntranceId": "start",
       "returnEntranceId": "return-entrance-01"
+    },
+    {
+      "id": "route-exit-1780222548504",
+      "kind": "route",
+      "type": "route",
+      "label": "Route Exit",
+      "x": 832,
+      "y": 2640,
+      "width": 96,
+      "height": 192,
+      "prompt": "E: 다음 구역",
+      "toLevelId": "new-level-2",
+      "toEntranceId": "return-entrance-01",
+      "returnEntranceId": "return-entrance-02"
     }
   ],
   "extractionGate": null,

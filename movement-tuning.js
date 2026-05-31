@@ -1,4 +1,4 @@
-export const SPRINT_TUNING_KEY = "rulebound-sprint-tuning-v1";
+export const SPRINT_TUNING_KEY = "rulebound-sprint-tuning-v2";
 
 export const SPRINT_TUNING_FIELDS = [
   { key: "runSpeed", label: "Run Speed", min: 120, max: 900, step: 10 },

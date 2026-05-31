@@ -435,12 +435,14 @@ body.is-inventory-overlay-active .touch-controls {
 .movement-tuning-actions {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
 }
 
 .movement-tuning-action {
-  flex: 1 1 0;
+  flex: 1 1 128px;
+  min-width: 0;
 }
 
 .movement-tuning-action.is-primary {
