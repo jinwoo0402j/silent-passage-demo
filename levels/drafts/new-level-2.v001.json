@@ -68,7 +68,7 @@
   },
   "player": {
     "spawn": {
-      "x": 816,
+      "x": 736,
       "y": 3552
     },
     "speed": 360,
@@ -309,7 +309,7 @@
     {
       "id": "start",
       "label": "Start",
-      "x": 816,
+      "x": 736,
       "y": 3552,
       "facing": 1
     },
@@ -318,6 +318,13 @@
       "label": "Return Entrance 01",
       "x": 7888,
       "y": 2336,
+      "facing": 1
+    },
+    {
+      "id": "return-entrance-02",
+      "label": "Return Entrance 02",
+      "x": 736,
+      "y": 3552,
       "facing": 1
     }
   ],
@@ -335,6 +342,20 @@
       "toLevelId": "new-level",
       "toEntranceId": "start",
       "returnEntranceId": "return-entrance-01"
+    },
+    {
+      "id": "route-exit-1780388378669",
+      "kind": "route",
+      "type": "route",
+      "label": "Route Exit",
+      "x": 704,
+      "y": 3440,
+      "width": 96,
+      "height": 192,
+      "prompt": "E: 다음 구역",
+      "toLevelId": "new-level-3",
+      "toEntranceId": "return-entrance-01",
+      "returnEntranceId": "return-entrance-02"
     }
   ],
   "extractionGate": null,

@@ -1044,12 +1044,17 @@ function drawPlatformMass(ctx, platform, theme) {
 
     ctx.strokeStyle = "rgba(255, 226, 126, 0.42)";
     ctx.lineWidth = 1.5;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(platform.x, platform.y, platform.width, platform.height);
+    ctx.clip();
     for (let x = platform.x - platform.height; x < platform.x + platform.width; x += 26) {
       ctx.beginPath();
       ctx.moveTo(x, platform.y + platform.height);
       ctx.lineTo(x + platform.height, platform.y);
       ctx.stroke();
     }
+    ctx.restore();
     return;
   }
 

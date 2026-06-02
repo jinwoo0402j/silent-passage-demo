@@ -849,7 +849,6 @@ function getEditorDom() {
     collapseAllButton: document.getElementById("collapseAllButton"),
     expandAllButton: document.getElementById("expandAllButton"),
     fitViewButton: document.getElementById("fitViewButton"),
-    resetButton: document.getElementById("resetButton"),
     playLevelLink: document.getElementById("playLevelLink"),
     statusLabel: document.getElementById("statusLabel"),
     toolHint: document.getElementById("toolHint"),
@@ -4392,30 +4391,6 @@ async function importLevelFile(editor, dom, file) {
   }
 }
 
-function resetEditorLevel(editor, dom) {
-  const before = captureEditorSnapshot(editor);
-  const levelId = editor.data.currentLevelId || GAME_DATA.defaultLevelId;
-  clearLevelOverride(GAME_DATA, levelId);
-  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
-    applyLevelOverride: isLocalOnlyLevel(GAME_DATA, levelId),
-  }));
-  editor.snap = getScaleConfig(editor.data).subTileSize;
-  editor.preview = null;
-  editor.drag = null;
-  editor.previewPose = "idle";
-  setSelection(editor, dom, null);
-  syncWorldInputs(editor, dom);
-  renderSelectionFields(editor, dom);
-  renderPlayerRenderFields(editor, dom);
-  renderHudLayoutFields(editor, dom);
-  const after = captureEditorSnapshot(editor);
-  if (getSnapshotKey(before) !== getSnapshotKey(after)) {
-    pushUndoSnapshot(editor, before);
-  }
-  setStatus(editor, dom, "기본값 복원", "", false);
-  fitViewToWorld(editor, dom);
-}
-
 function snapEntireLevelToScale(editor, dom) {
   const before = captureEditorSnapshot(editor);
   const scale = getScaleConfig(editor.data);
@@ -4634,7 +4609,6 @@ function bindEvents(editor, dom) {
     importLevelFile(editor, dom, dom.importInput.files?.[0] || null);
     dom.importInput.value = "";
   });
-  dom.resetButton.addEventListener("click", () => resetEditorLevel(editor, dom));
   dom.fitViewButton.addEventListener("click", () => fitViewToWorld(editor, dom));
 
   dom.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -4875,12 +4849,17 @@ function drawPlatformBlock(ctx, editor, platform, selected) {
     ctx.strokeStyle = "rgba(255, 226, 126, 0.55)";
     ctx.lineWidth = 1.4 / editor.view.zoom;
     const step = Math.max(18 / editor.view.zoom, 24);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(platform.x, platform.y, platform.width, platform.height);
+    ctx.clip();
     for (let x = platform.x - platform.height; x < platform.x + platform.width; x += step) {
       ctx.beginPath();
       ctx.moveTo(x, platform.y + platform.height);
       ctx.lineTo(x + platform.height, platform.y);
       ctx.stroke();
     }
+    ctx.restore();
     return;
   }
 
