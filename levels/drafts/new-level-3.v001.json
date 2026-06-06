@@ -2480,13 +2480,6 @@
       "color": "#54697b"
     },
     {
-      "x": 8608,
-      "y": 1984,
-      "width": 64,
-      "height": 32,
-      "color": "#54697b"
-    },
-    {
       "x": 6752,
       "y": 2464,
       "width": 128,
@@ -2619,22 +2612,8 @@
     {
       "x": 8512,
       "y": 2048,
-      "width": 64,
+      "width": 160,
       "height": 32,
-      "color": "#54697b"
-    },
-    {
-      "x": 8544,
-      "y": 2016,
-      "width": 32,
-      "height": 32,
-      "color": "#54697b"
-    },
-    {
-      "x": 8544,
-      "y": 2000,
-      "width": 64,
-      "height": 16,
       "color": "#54697b"
     }
   ],
@@ -3251,7 +3230,7 @@
       "connectRange": 640
     },
     {
-      "id": "zipline-node-1780388092478",
+      "id": "zipline-node-1780407168433",
       "x": 8176,
       "y": 2560,
       "connectRange": 640
@@ -3319,9 +3298,9 @@
       "prompt": "E: Zipline"
     },
     {
-      "id": "zipline-1780388092478",
+      "id": "zipline-1780407168433",
       "startNodeId": "zipline-node-1780388072430",
-      "endNodeId": "zipline-node-1780388092478",
+      "endNodeId": "zipline-node-1780407168433",
       "start": {
         "x": 7968,
         "y": 2256
