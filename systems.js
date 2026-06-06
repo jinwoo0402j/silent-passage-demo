@@ -3286,9 +3286,6 @@ function getKeyboardAimVector(state, player) {
   let dirX = (right ? 1 : 0) - (left ? 1 : 0);
   let dirY = (down ? 1 : 0) - (up ? 1 : 0);
 
-  if (dirY > 0 && player.onGround) {
-    dirY = 0;
-  }
   if (dirX === 0 && dirY === 0) {
     dirX = Math.sign(player.recoilAimX || player.facing || 1) || 1;
     dirY = 0;
@@ -4259,19 +4256,17 @@ function performRecoilShot(player, run, data, config, state = null) {
   const aimed = Boolean(aim.aiming);
   const spreadMultiplier = (aimed ? 0.65 : 2.65) * (run.focusActive ? 0.75 : 1);
   const spread = (context.stats.spread ?? 0) * spreadMultiplier;
+  const recoilX = aim.recoilDirX;
+  const recoilY = aim.recoilDirY;
   if (spread > 0.001) {
     const shotAngle = Math.atan2(aim.shotDirY, aim.shotDirX) + (Math.random() - 0.5) * spread;
     aim.shotDirX = Math.cos(shotAngle);
     aim.shotDirY = Math.sin(shotAngle);
-    aim.recoilDirX = -aim.shotDirX;
-    aim.recoilDirY = -aim.shotDirY;
   }
   const force = context.stats.recoil ?? config.recoilShotForce ?? 840;
   const maxHorizontal = config.recoilShotMaxHorizontalSpeed ?? 1180;
   const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180);
   const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760);
-  const recoilX = aim.recoilDirX;
-  const recoilY = aim.recoilDirY;
   const firedAirborne = !player.onGround;
   const verticalPoseThreshold = config.recoilAimVerticalPoseThreshold ?? 0.45;
   const shotFacing = Math.abs(aim.shotDirX) > 0.08
