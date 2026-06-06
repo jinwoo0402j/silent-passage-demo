@@ -818,6 +818,7 @@ export function createRunState(data, meta) {
     recoilFocusBlend: 0,
     recoilAimFacing: 1,
     recoilAimPitch: 0,
+    weaponReloadHoldConsumed: false,
     recoilAimX: 0,
     recoilAimY: 1,
     recoilDirX: 0,
@@ -1013,6 +1014,8 @@ export function createInitialState(data) {
     pressed: new Set(),
     justPressed: new Set(),
     justReleased: new Set(),
+    keyHoldSeconds: new Map(),
+    releasedKeyHoldSeconds: new Map(),
     capsLockActive: false,
     mouse: {
       screenX: CAMERA_SCREEN_WIDTH / 2,

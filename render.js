@@ -5608,6 +5608,7 @@ function drawAimCursorHud(ctx, state, data) {
   const mouse = state.mouse || {};
   if (
     state.scene !== SCENES.EXPEDITION ||
+    !state.capsLockActive ||
     !run ||
     mouse.onCanvas === false ||
     state.liveEdit?.active ||

@@ -44,15 +44,28 @@ const CAMERA_ABSOLUTE_ZOOM_MIN = 0.5;
 const CAMERA_ABSOLUTE_ZOOM_MAX = 5;
 const CAMERA_MAX_LERP_STEP_SECONDS = 1 / 30;
 const CAMERA_ACTION_ZOOM_OUT_SCALE = 0.5;
-const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
-const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
-const CROUCH_KEYS = ["ArrowDown", "KeyS"];
-const JUMP_KEYS = ["Space", "KeyW"];
-const ZIPLINE_MOUNT_KEYS = ["Space"];
-const DASH_KEYS = ["ShiftLeft", "ShiftRight", "KeyX"];
+const MOVE_LEFT_KEYS = ["ArrowLeft"];
+const MOVE_RIGHT_KEYS = ["ArrowRight"];
+const CROUCH_KEYS = ["ArrowDown"];
+const JUMP_KEYS = ["KeyZ"];
+const ZIPLINE_MOUNT_KEYS = ["KeyC"];
+const DASH_KEYS = ["ShiftLeft", "ShiftRight"];
 const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
+const LEGACY_MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
+const LEGACY_MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
+const LEGACY_CROUCH_KEYS = ["ArrowDown", "KeyS"];
+const LEGACY_JUMP_KEYS = ["Space", "KeyW"];
+const LEGACY_ZIPLINE_MOUNT_KEYS = ["Space"];
+const LEGACY_DASH_KEYS = ["ShiftLeft", "ShiftRight", "KeyX"];
+const LEGACY_INTERACT_KEYS = ["KeyZ"];
+const LEGACY_ARM_SWITCH_KEYS = ["MouseMiddle"];
+const LEGACY_RELOAD_KEYS = ["KeyR"];
 const CAPSLOCK_DASH_TAP_SECONDS = 0.28;
 const BULLET_TIME_KEYS = [];
+const FOCUS_KEYS = ["KeyC"];
+const INTERACTION_HOLD_SECONDS = 0.25;
+const FIRE_KEYS = ["KeyX"];
+const FIRE_RELOAD_HOLD_SECONDS = 0.35;
 const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
 const FOCUS_DRAIN_PER_SECOND = 18;
@@ -60,7 +73,7 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
-const INTERACT_KEYS = ["KeyZ"];
+const INTERACT_KEYS = ["KeyC"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
 const NEW_RUN_KEYS = ["KeyN"];
@@ -79,8 +92,8 @@ const NIGHT_TRANSITION_SECONDS = 1.4;
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
-const ARM_SWITCH_KEYS = ["MouseMiddle"];
-const RELOAD_KEYS = ["KeyR"];
+const ARM_SWITCH_KEYS = ["KeyA", "MouseMiddle"];
+const RELOAD_KEYS = [];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
 const MAP_EXPLORE_CELL_SIZE = 320;
@@ -97,7 +110,7 @@ const SHELTER_VIEW_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const SHELTER_EXIT_KEYS = ["KeyC"];
 const SHELTER_BACK_KEYS = ["Escape"];
 const CG_PHOTO_LIMIT = 12;
-const FACE_OFF_ENTRY_KEYS = ["KeyZ"];
+const FACE_OFF_ENTRY_KEYS = ["KeyC"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD", "KeyS"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
 const FACE_OFF_RELEASE_KEY = "KeyQ";
@@ -136,6 +149,50 @@ function isEitherPressed(state, codes) {
   return codes.some((code) => isPressed(state, code));
 }
 
+function useLegacyControls(state) {
+  return Boolean(state.capsLockActive);
+}
+
+function getMoveLeftKeys(state) {
+  return useLegacyControls(state) ? LEGACY_MOVE_LEFT_KEYS : MOVE_LEFT_KEYS;
+}
+
+function getMoveRightKeys(state) {
+  return useLegacyControls(state) ? LEGACY_MOVE_RIGHT_KEYS : MOVE_RIGHT_KEYS;
+}
+
+function getCrouchKeys(state) {
+  return useLegacyControls(state) ? LEGACY_CROUCH_KEYS : CROUCH_KEYS;
+}
+
+function getJumpKeys(state) {
+  return useLegacyControls(state) ? LEGACY_JUMP_KEYS : JUMP_KEYS;
+}
+
+function getZipLineMountKeys(state) {
+  return useLegacyControls(state) ? LEGACY_ZIPLINE_MOUNT_KEYS : ZIPLINE_MOUNT_KEYS;
+}
+
+function getDashKeys(state) {
+  return useLegacyControls(state) ? LEGACY_DASH_KEYS : DASH_KEYS;
+}
+
+function getInteractKeys(state) {
+  return useLegacyControls(state) ? LEGACY_INTERACT_KEYS : INTERACT_KEYS;
+}
+
+function getFaceOffEntryKeys(state) {
+  return useLegacyControls(state) ? LEGACY_INTERACT_KEYS : FACE_OFF_ENTRY_KEYS;
+}
+
+function getArmSwitchKeys(state) {
+  return useLegacyControls(state) ? LEGACY_ARM_SWITCH_KEYS : ARM_SWITCH_KEYS;
+}
+
+function getReloadKeys(state) {
+  return useLegacyControls(state) ? LEGACY_RELOAD_KEYS : RELOAD_KEYS;
+}
+
 function consumePress(state, code) {
   if (state.justPressed.has(code)) {
     state.justPressed.delete(code);
@@ -154,6 +211,41 @@ function consumeRelease(state, code) {
     return true;
   }
   return false;
+}
+
+function consumeEitherRelease(state, codes) {
+  return codes.some((code) => consumeRelease(state, code));
+}
+
+function getKeyHoldSeconds(state, code) {
+  return Number(state.keyHoldSeconds?.get(code) ?? 0);
+}
+
+function consumeReleasedKeyHoldSeconds(state, code) {
+  const duration = Number(state.releasedKeyHoldSeconds?.get(code) ?? 0);
+  state.releasedKeyHoldSeconds?.delete(code);
+  return duration;
+}
+
+function consumeShortReleasedKey(state, codes, maxSeconds = INTERACTION_HOLD_SECONDS) {
+  const code = codes.find((entry) => state.justReleased?.has(entry));
+  if (!code) {
+    return false;
+  }
+  consumeRelease(state, code);
+  return consumeReleasedKeyHoldSeconds(state, code) <= maxSeconds;
+}
+
+function updateKeyHoldDurations(state, dt) {
+  if (!state.keyHoldSeconds) {
+    state.keyHoldSeconds = new Map();
+  }
+  if (!state.releasedKeyHoldSeconds) {
+    state.releasedKeyHoldSeconds = new Map();
+  }
+  state.pressed.forEach((code) => {
+    state.keyHoldSeconds.set(code, Number(state.keyHoldSeconds.get(code) ?? 0) + dt);
+  });
 }
 
 function updateCapsLockDashInput(state, player, dt, moveLeft, moveRight) {
@@ -2763,7 +2855,7 @@ function updateFaceOffArmSelection(run, data, state) {
 
 function updateFaceOffWeaponRuntime(run, data, state, dt) {
   updateFaceOffArmSelection(run, data, state);
-  if (consumeEitherPress(state, RELOAD_KEYS)) {
+  if (consumeEitherPress(state, getReloadKeys(state))) {
     startReloadSelectedArm(run, data);
   }
   updateWeaponTimers(run, data, dt);
@@ -3137,17 +3229,44 @@ function updateWeaponRuntime(run, data, state, dt) {
   if (consumeEitherPress(state, ARM_RIGHT_KEYS)) {
     setSelectedArm(run, data, "right");
   }
-  if (consumeEitherPress(state, ARM_SWITCH_KEYS)) {
+  if (consumeEitherPress(state, getArmSwitchKeys(state))) {
     switchSelectedArm(run, data);
   }
-  if (consumeEitherPress(state, RELOAD_KEYS)) {
+  if (consumeEitherPress(state, getReloadKeys(state))) {
     startReloadSelectedArm(run, data);
   }
   updateWeaponTimers(run, data, dt);
 }
 
+function updateWeaponFireReloadInput(run, data, state) {
+  if (useLegacyControls(state)) {
+    return false;
+  }
+  const player = run.player;
+  const fireHeld = FIRE_KEYS.some((code) => isPressed(state, code));
+  const fireHoldSeconds = Math.max(...FIRE_KEYS.map((code) => getKeyHoldSeconds(state, code)), 0);
+  const reloadHoldReached = fireHeld && fireHoldSeconds >= FIRE_RELOAD_HOLD_SECONDS;
+
+  if (reloadHoldReached && !player.weaponReloadHoldConsumed) {
+    player.weaponReloadHoldConsumed = true;
+    startReloadSelectedArm(run, data);
+    return false;
+  }
+
+  const fireReleasedCode = FIRE_KEYS.find((code) => state.justReleased?.has(code));
+  if (!fireReleasedCode) {
+    return false;
+  }
+
+  consumeRelease(state, fireReleasedCode);
+  const heldSeconds = consumeReleasedKeyHoldSeconds(state, fireReleasedCode);
+  const shouldFire = heldSeconds < FIRE_RELOAD_HOLD_SECONDS && !player.weaponReloadHoldConsumed;
+  player.weaponReloadHoldConsumed = false;
+  return shouldFire;
+}
+
 function isDashInputQueued(state) {
-  return DASH_KEYS.some((code) => state.justPressed.has(code));
+  return getDashKeys(state).some((code) => state.justPressed.has(code));
 }
 
 function getMouseWorld(state, run) {
@@ -3156,6 +3275,38 @@ function getMouseWorld(state, run) {
   return {
     x: (mouse.screenX ?? CAMERA_SCREEN_WIDTH / 2) / zoom + run.cameraX,
     y: (mouse.screenY ?? CAMERA_SCREEN_HEIGHT / 2) / zoom + run.cameraY,
+  };
+}
+
+function getKeyboardAimVector(state, player) {
+  const left = isPressed(state, "ArrowLeft");
+  const right = isPressed(state, "ArrowRight");
+  const up = isPressed(state, "ArrowUp");
+  const down = isPressed(state, "ArrowDown");
+  let dirX = (right ? 1 : 0) - (left ? 1 : 0);
+  let dirY = (down ? 1 : 0) - (up ? 1 : 0);
+
+  if (dirY > 0 && player.onGround) {
+    dirY = 0;
+  }
+  if (dirX === 0 && dirY === 0) {
+    dirX = Math.sign(player.recoilAimX || player.facing || 1) || 1;
+    dirY = 0;
+  }
+
+  const length = Math.max(0.001, Math.hypot(dirX, dirY));
+  return {
+    x: dirX / length,
+    y: dirY / length,
+  };
+}
+
+function getKeyboardAimWorldTarget(state, run, origin, player) {
+  const keyboardAim = getKeyboardAimVector(state, player);
+  const range = 640;
+  return {
+    x: origin.x + keyboardAim.x * range,
+    y: origin.y + keyboardAim.y * range,
   };
 }
 
@@ -3691,7 +3842,8 @@ function updateFocusState(run, state, dt) {
 
   const requested =
     BULLET_TIME_KEYS.some((key) => isPressed(state, key)) ||
-    Boolean(state.mouse?.secondaryDown && canAimWeapon(player));
+    (!useLegacyControls(state) && FOCUS_KEYS.some((key) => isPressed(state, key))) ||
+    Boolean(useLegacyControls(state) && state.mouse?.secondaryDown && canAimWeapon(player));
   const wasActive = Boolean(run.focusActive);
   const canStart = (
     !run.focusDepleted &&
@@ -3981,7 +4133,9 @@ function updateRecoilAim(run, data, state, dt) {
   ensureWeaponLoadoutState(run, data);
 
   const origin = getRecoilShotOrigin(player);
-  const target = getMouseWorld(state, run);
+  const target = useLegacyControls(state)
+    ? getMouseWorld(state, run)
+    : getKeyboardAimWorldTarget(state, run, origin, player);
   let dx = target.x - origin.x;
   let dy = target.y - origin.y;
   const length = Math.hypot(dx, dy);
@@ -3994,7 +4148,10 @@ function updateRecoilAim(run, data, state, dt) {
   const shotDirY = dy / safeLength;
   const recoilDirX = -shotDirX;
   const recoilDirY = -shotDirY;
-  const aiming = Boolean(state.mouse?.secondaryDown && canAimWeapon(player));
+  const aiming = Boolean((
+    (!useLegacyControls(state) && FOCUS_KEYS.some((key) => isPressed(state, key))) ||
+    (useLegacyControls(state) && state.mouse?.secondaryDown)
+  ) && canAimWeapon(player));
   const active = Boolean(run.focusActive);
   const edgePan = getAimCameraEdgePan(state.mouse);
   const aimFacing = Math.abs(shotDirX) > 0.08
@@ -4562,16 +4719,18 @@ function updatePlayer(run, data, state, dt, input) {
   const attackPressed = Boolean(input?.attackPressed);
   const interactionPressed = Boolean(input?.interactionPressed);
   const recoilShotPressed = Boolean(input?.recoilShotPressed);
-  const moveLeft = isEitherPressed(state, MOVE_LEFT_KEYS);
-  const moveRight = isEitherPressed(state, MOVE_RIGHT_KEYS);
-  const moveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
-  const crouchHeld = isEitherPressed(state, CROUCH_KEYS);
-  const crouchPressed = consumeEitherPress(state, CROUCH_KEYS);
-  const jumpPressed = consumeEitherPress(state, JUMP_KEYS);
-  const jumpHeld = isEitherPressed(state, JUMP_KEYS);
-  const wReleased = consumeRelease(state, "KeyW");
+  const jumpKeys = getJumpKeys(state);
+  const moveLeft = isEitherPressed(state, getMoveLeftKeys(state));
+  const moveRight = isEitherPressed(state, getMoveRightKeys(state));
+  const rawMoveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
+  let moveAxis = rawMoveAxis;
+  const crouchHeld = isEitherPressed(state, getCrouchKeys(state));
+  const crouchPressed = consumeEitherPress(state, getCrouchKeys(state));
+  const jumpPressed = consumeEitherPress(state, jumpKeys);
+  const jumpHeld = isEitherPressed(state, jumpKeys);
+  const jumpKeyReleased = consumeEitherRelease(state, jumpKeys);
   const capsDashInput = updateCapsLockDashInput(state, player, dt, moveLeft, moveRight);
-  const dashPressed = consumeEitherPress(state, DASH_KEYS) || capsDashInput.dashPressed;
+  let dashPressed = consumeEitherPress(state, getDashKeys(state)) || capsDashInput.dashPressed;
   const sprintPressed = consumeEitherPress(state, SPRINT_KEYS);
   const sprintHeld = isEitherPressed(state, SPRINT_KEYS) || capsDashInput.sprintHeld;
   const activeBraceWall = getActiveBraceWall(player, data, run);
@@ -4579,9 +4738,6 @@ function updatePlayer(run, data, state, dt, input) {
   const wasWallSliding = player.wallSliding;
   const wasSprintActive = Boolean(player.sprintActive || player.sprintCharge > 0.55);
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
-  player.noMoveInputTimer = moveAxis === 0
-    ? (player.noMoveInputTimer ?? 0) + dt
-    : 0;
 
   player.dashInvulnerable = config.dashInvulnerable;
   player.slideInvulnerable = config.slideInvulnerable ?? true;
@@ -4627,6 +4783,14 @@ function updatePlayer(run, data, state, dt, input) {
   player.dashResetActive = false;
   player.hoverBoostActive = Boolean(player.hoverActive && !player.onGround);
   player.recoilShotActive = player.recoilShotTimer > 0;
+  const recoilMovementLocked = Boolean(player.recoilShotActive || player.recoilSpinTimer > 0);
+  if (recoilMovementLocked) {
+    moveAxis = 0;
+    dashPressed = false;
+  }
+  player.noMoveInputTimer = moveAxis === 0
+    ? (player.noMoveInputTimer ?? 0) + dt
+    : 0;
 
   syncDashCapacity(player, config);
   syncRecoilShotCapacity(player, config);
@@ -4983,7 +5147,7 @@ function updatePlayer(run, data, state, dt, input) {
     } else if (!isPlayerInsideBraceWall(player, braceWall)) {
       performBraceVault(player, run, config, braceWall, moveAxis);
       applySprintJumpCarry(player);
-    } else if (jumpReleased || wReleased) {
+    } else if (jumpReleased || jumpKeyReleased) {
       performBraceVault(player, run, config, braceWall, moveAxis);
       applySprintJumpCarry(player);
     } else if (jumpHeld) {
@@ -5103,6 +5267,8 @@ function updatePlayer(run, data, state, dt, input) {
     player.facing = player.wallRunDirection === 0 ? player.facing : player.wallRunDirection;
   } else if (player.slideTimer > 0 && player.onGround && updateSlide(player, config, dt)) {
     player.crouchBlocked = false;
+  } else if (recoilMovementLocked) {
+    // Preserve weapon recoil velocity while its inertia window is active.
   } else {
     const downhillSprintActive = isMovingDownhillOnSlope(player, moveAxis);
     const baseTargetSpeed = player.height === player.crouchHeight && player.onGround
@@ -7020,7 +7186,7 @@ function updateLootInteraction(state, data, dt) {
   }
 
   const item = getSelectedLootItem(crate, loot);
-  if (isSelectableLootItem(item) && isEitherPressed(state, INTERACT_KEYS)) {
+  if (isSelectableLootItem(item) && isEitherPressed(state, getInteractKeys(state))) {
     if (loot.holdItemId !== item.id) {
       loot.holdItemId = item.id;
       loot.holdProgress = item.transferProgress;
@@ -7176,15 +7342,15 @@ function getInteractionTargets(run, data) {
 
 function getZipLinePrompt(zipLine) {
   const prompt = zipLine?.prompt || "E: Zipline";
-  return prompt.replace(/^(?:Space\/D|D\/Z|D|E)\s*:/i, "Space/Z:");
+  return prompt.replace(/^(?:Space\/D|Space\/Z|D\/Z|D|E|Z)\s*:/i, "C:");
 }
 
 function normalizeInteractionPrompt(prompt) {
-  return (prompt || "").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
+  return (prompt || "").replace(/^(?:D\/Z|D|E|Z)\s*:/i, "C:");
 }
 
 function normalizeExtractionPrompt(prompt) {
-  return (prompt || "Z: 추출").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
+  return (prompt || "C: 추출").replace(/^(?:D\/Z|D|E|Z)\s*:/i, "C:");
 }
 
 function getNearestZipLineInteractionTarget(run, data) {
@@ -7230,7 +7396,10 @@ function tryBeginZipLineRideFromMountInput(state, data) {
   }
 
   const nearest = getNearestZipLineInteractionTarget(run, data);
-  if (!nearest || !consumeEitherPress(state, ZIPLINE_MOUNT_KEYS)) {
+  const mountPressed = useLegacyControls(state)
+    ? consumeEitherPress(state, getZipLineMountKeys(state))
+    : consumeShortReleasedKey(state, getZipLineMountKeys(state));
+  if (!nearest || !mountPressed) {
     return false;
   }
 
@@ -8191,14 +8360,20 @@ function updateInteractions(state, data, canInteract) {
   }
 
   if (nearest.kind === "faceOff") {
-    if (!consumeEitherPress(state, FACE_OFF_ENTRY_KEYS)) {
+    const faceOffPressed = useLegacyControls(state)
+      ? consumeEitherPress(state, getFaceOffEntryKeys(state))
+      : consumeShortReleasedKey(state, getFaceOffEntryKeys(state));
+    if (!faceOffPressed) {
       return;
     }
     enterFaceOff(run, data, nearest.enemy, state);
     return;
   }
 
-  if (!consumeEitherPress(state, INTERACT_KEYS)) {
+  const interactPressed = useLegacyControls(state)
+    ? consumeEitherPress(state, getInteractKeys(state))
+    : consumeShortReleasedKey(state, getInteractKeys(state));
+  if (!interactPressed) {
     return;
   }
 
@@ -8496,6 +8671,9 @@ function updateExpedition(state, data, dt) {
   if (!lootWasActive && !run.faceOff?.active) {
     updateWeaponRuntime(run, data, state, dt);
   }
+  const keyboardRecoilShotPressed = !lootWasActive && !run.faceOff?.active
+    ? updateWeaponFireReloadInput(run, data, state)
+    : false;
   if (lootWasActive) {
     if (run.recoilAim) {
       run.recoilAim.active = false;
@@ -8506,10 +8684,11 @@ function updateExpedition(state, data, dt) {
     updateRecoilAim(run, data, state, dt);
   }
   const selectedWeaponAutomatic = !lootWasActive && isSelectedWeaponAutomatic(run, data);
-  const heldAutoFire = selectedWeaponAutomatic
-    && Boolean(state.mouse?.primaryDown)
-    && canFireWeaponPose(run.player);
-  const queuedRecoilShotPressed = !lootWasActive && (Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
+  const heldAutoFire = useLegacyControls(state) &&
+    selectedWeaponAutomatic &&
+    Boolean(state.mouse?.primaryDown) &&
+    canFireWeaponPose(run.player);
+  const queuedRecoilShotPressed = !lootWasActive && (keyboardRecoilShotPressed || Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
   const reserveRecoilShotForWeapon = queuedRecoilShotPressed
     && (Boolean(run.recoilAim?.aiming) || selectedWeaponAutomatic);
   if (queuedRecoilShotPressed || state.mouse?.secondaryDown || run.recoilAim?.aiming || run.focusActive) {
@@ -8555,7 +8734,7 @@ function updateExpedition(state, data, dt) {
   const actionTimeScale = dashActionActive ? 1 : focusTimeScale;
   const simDt = dt * actionTimeScale * dodgeTimeScale;
   let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
-  const recoilShotPressed = reserveRecoilShotForWeapon || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
+  const recoilShotPressed = reserveRecoilShotForWeapon || keyboardRecoilShotPressed || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
   if (recoilShotPressed || queuedRecoilShotPressed) {
     pushInputTrace(state, "shotQueued", {
       shot: Number(Boolean(recoilShotPressed)),
@@ -8785,6 +8964,7 @@ export function bindInput(state) {
     }
     if (!state.pressed.has(event.code)) {
       state.justPressed.add(event.code);
+      state.keyHoldSeconds?.set(event.code, 0);
     }
     state.pressed.add(event.code);
   });
@@ -8794,15 +8974,18 @@ export function bindInput(state) {
       state.capsLockActive = event.getModifierState("CapsLock");
     }
     if (state.pressed.has(event.code)) {
+      state.releasedKeyHoldSeconds?.set(event.code, getKeyHoldSeconds(state, event.code));
       state.justReleased?.add(event.code);
     }
     state.pressed.delete(event.code);
+    state.keyHoldSeconds?.delete(event.code);
   });
 }
 
 export function updateGame(state, data, dt) {
   state.pulse += dt;
   state.sceneTimer += dt;
+  updateKeyHoldDurations(state, dt);
 
   if (consumeEitherPress(state, DEBUG_KEYS)) {
     state.debug.active = !state.debug.active;
@@ -8853,6 +9036,7 @@ export function updateGame(state, data, dt) {
   }
   state.justPressed.clear();
   state.justReleased?.clear();
+  state.releasedKeyHoldSeconds?.clear();
 }
 
 export function hasThreatSense(state) {
