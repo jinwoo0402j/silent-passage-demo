@@ -190,6 +190,9 @@ function clearTransientRunState(run) {
     run.player.recoilFocusBlend = 0;
     run.player.zipLineActive = false;
     run.player.zipLineId = null;
+    run.player.dashVectorX = 1;
+    run.player.dashVectorY = 0;
+    run.player.dashDistanceScale = 1;
   }
 }
 

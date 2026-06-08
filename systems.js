@@ -3107,6 +3107,22 @@ function getSelectedArmContext(run, data) {
   };
 }
 
+function getShotgunArmContext(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const side = ["left", "right"].find((candidate) => {
+    const stats = computeArmWeaponStats(data, weapons.arms[candidate]);
+    return stats.type === "shotgun";
+  }) || "left";
+  const arm = weapons.arms[side];
+  const stats = computeArmWeaponStats(data, arm);
+  return {
+    weapons,
+    side,
+    arm,
+    stats,
+  };
+}
+
 function setSelectedArm(run, data, side) {
   const weapons = ensureWeaponLoadoutState(run, data);
   const nextSide = side === "right" ? "right" : "left";
@@ -3169,8 +3185,7 @@ function canFireSelectedWeapon(run, data, player) {
   return (player.recoilShotCharges ?? 0) >= airActionCost;
 }
 
-function startReloadSelectedArm(run, data) {
-  const context = getSelectedArmContext(run, data);
+function startReloadArmContext(run, context) {
   const reserve = getReserveAmmo(context);
   const currentMagazine = Math.max(0, Math.floor(context.arm.magazine ?? 0));
   if ((context.arm.reloadTimer ?? 0) > 0) {
@@ -3190,6 +3205,10 @@ function startReloadSelectedArm(run, data) {
   context.arm.reloadDuration = context.stats.reloadDuration;
   pushNotice(run, `Reloading ${context.stats.label}`, 1.2);
   return true;
+}
+
+function startReloadSelectedArm(run, data) {
+  return startReloadArmContext(run, getSelectedArmContext(run, data));
 }
 
 function completeArmReload(weapons, arm, stats) {
@@ -3298,12 +3317,68 @@ function getKeyboardAimVector(state, player) {
   };
 }
 
+function getKeyboardDirectionVector(state, player, fallbackX = player?.facing || 1) {
+  const left = isPressed(state, "ArrowLeft");
+  const right = isPressed(state, "ArrowRight");
+  const up = isPressed(state, "ArrowUp");
+  const down = isPressed(state, "ArrowDown");
+  let dirX = (right ? 1 : 0) - (left ? 1 : 0);
+  let dirY = (down ? 1 : 0) - (up ? 1 : 0);
+
+  if (dirX === 0 && dirY === 0) {
+    dirX = Math.sign(fallbackX || 1) || 1;
+    dirY = 0;
+  }
+
+  const length = Math.max(0.001, Math.hypot(dirX, dirY));
+  return {
+    x: dirX / length,
+    y: dirY / length,
+  };
+}
+
 function getKeyboardAimWorldTarget(state, run, origin, player) {
   const keyboardAim = getKeyboardAimVector(state, player);
   const range = 640;
   return {
     x: origin.x + keyboardAim.x * range,
     y: origin.y + keyboardAim.y * range,
+  };
+}
+
+function getRecoilAimFromShotDirection(player, shotDirX, shotDirY, options = {}) {
+  const origin = getRecoilShotOrigin(player);
+  const length = Math.max(0.001, Math.hypot(shotDirX, shotDirY));
+  const shotX = shotDirX / length;
+  const shotY = shotDirY / length;
+  const recoilX = -shotX;
+  const recoilY = -shotY;
+  const range = options.range ?? 640;
+  const aimFacing = Math.abs(shotX) > 0.08
+    ? Math.sign(shotX)
+    : (player.recoilAimFacing || player.facing || 1);
+  const aimPitch = shotY < -0.45
+    ? -1
+    : shotY > 0.45
+      ? 1
+      : 0;
+  return {
+    active: Boolean(options.active),
+    aiming: Boolean(options.aiming),
+    focusBlend: player.recoilFocusBlend ?? 0,
+    canFire: true,
+    originX: origin.x,
+    originY: origin.y,
+    targetX: origin.x + shotX * range,
+    targetY: origin.y + shotY * range,
+    aimFacing,
+    aimPitch,
+    edgePanX: 0,
+    edgePanY: 0,
+    shotDirX: shotX,
+    shotDirY: shotY,
+    recoilDirX: recoilX,
+    recoilDirY: recoilY,
   };
 }
 
@@ -4196,24 +4271,28 @@ function updateRecoilAim(run, data, state, dt) {
   };
 }
 
-function performRecoilShot(player, run, data, config, state = null) {
-  if (!run.recoilAim || !canFireWeaponPose(player)) {
+function performRecoilShot(player, run, data, config, state = null, options = {}) {
+  const aim = options.aimOverride || run.recoilAim;
+  if (!aim || !canFireWeaponPose(player)) {
     if (state) {
       pushInputTrace(state, "shotBlock:aim", {
-        hasAim: Number(Boolean(run.recoilAim)),
+        hasAim: Number(Boolean(aim)),
         canAim: Number(canFireWeaponPose(player)),
       });
     }
     return false;
   }
 
-  const context = getSelectedArmContext(run, data);
+  const context = options.contextOverride || getSelectedArmContext(run, data);
+  if (options.requireWeaponType && context.stats.type !== options.requireWeaponType) {
+    return false;
+  }
   if ((context.arm.magazine ?? 0) <= 0) {
     if (state) {
       pushInputTrace(state, "shotBlock:mag", { mag: context.arm.magazine ?? 0 });
     }
-    startReloadSelectedArm(run, data);
-    spawnParticles(run, run.recoilAim.originX, run.recoilAim.originY, 3, "#d5e7ef");
+    startReloadArmContext(run, context);
+    spawnParticles(run, aim.originX, aim.originY, 3, "#d5e7ef");
     return false;
   }
   if ((context.arm.reloadTimer ?? 0) > 0) {
@@ -4244,7 +4323,6 @@ function performRecoilShot(player, run, data, config, state = null) {
     return false;
   }
 
-  const aim = run.recoilAim;
   if (state) {
     pushInputTrace(state, "shotGo", {
       aim: Number(Boolean(aim.aiming)),
@@ -4347,21 +4425,52 @@ function performRecoilShot(player, run, data, config, state = null) {
   spawnDirectedParticles(run, aim.originX, aim.originY, 12, "#e9f7ff", aim.shotDirX, aim.shotDirY, 520, 0.68);
   spawnDirectedParticles(run, aim.originX, aim.originY, 7, "#93eaff", recoilX, recoilY, 260, 0.9);
   pushNotice(run, `${context.stats.label} fired`, 1.15);
-  run.recoilAim.active = Boolean(run.focusActive);
+  if (options.aimOverride) {
+    run.recoilAim = {
+      ...aim,
+      active: Boolean(run.focusActive),
+    };
+  } else {
+    run.recoilAim.active = Boolean(run.focusActive);
+  }
   player.recoilFocusActive = Boolean(run.focusActive);
   return true;
 }
 
-function startDash(player, run, config, direction) {
+function performAirDashShotgun(player, run, data, config, state) {
+  const dashVector = getKeyboardDirectionVector(state, player, player.facing || 1);
+  const shotgunContext = getShotgunArmContext(run, data);
+  if (shotgunContext.stats.type !== "shotgun") {
+    return false;
+  }
+
+  const aim = getRecoilAimFromShotDirection(player, -dashVector.x, -dashVector.y, {
+    aiming: true,
+    active: run.focusActive,
+  });
+  return performRecoilShot(player, run, data, config, state, {
+    contextOverride: shotgunContext,
+    aimOverride: aim,
+    requireWeaponType: "shotgun",
+  });
+}
+
+function startDash(player, run, config, direction, directionY = 0, distanceScale = 1) {
   clearBraceHold(player);
   clearWallRun(player);
   clearSlide(player);
   clearHover(player);
   clearRecoilSpin(player);
+  const length = Math.max(0.001, Math.hypot(direction, directionY));
+  const dashX = direction / length;
+  const dashY = directionY / length;
   syncDashCapacity(player, config);
   player.dashCharges = Math.max(0, player.dashCharges - 1);
   player.dashAvailable = false;
-  player.dashDirection = direction;
+  player.dashDirection = Math.sign(dashX) || player.facing || 1;
+  player.dashVectorX = dashX;
+  player.dashVectorY = dashY;
+  player.dashDistanceScale = Math.max(0.05, Number(distanceScale) || 1);
   player.dashWindupTimer = (config.dashWindupMs ?? 0) / 1000;
   player.dashTimer = player.dashWindupTimer > 0 ? 0 : config.dashDurationMs / 1000;
   player.dashCooldownTimer = config.dashCooldownMs / 1000;
@@ -4371,9 +4480,10 @@ function startDash(player, run, config, direction) {
   player.retainedSpeed = 0;
   player.wallJumpLockTimer = 0;
   player.wallJumpLockDirection = 0;
-  player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * direction;
-  player.vy = 0;
-  player.facing = direction;
+  const speed = (config.dashDistance * player.dashDistanceScale) / (config.dashDurationMs / 1000);
+  player.vx = speed * dashX;
+  player.vy = speed * dashY;
+  player.facing = Math.sign(dashX) || player.facing || 1;
   player.canInteract = false;
   player.dashTrailTimer = 0;
   pushAfterimage(run, player);
@@ -4383,8 +4493,9 @@ function startDash(player, run, config, direction) {
 function startDashBurst(player, config) {
   player.dashWindupTimer = 0;
   player.dashTimer = config.dashDurationMs / 1000;
-  player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * player.dashDirection;
-  player.vy = 0;
+  const speed = (config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000);
+  player.vx = speed * (player.dashVectorX ?? player.dashDirection ?? 1);
+  player.vy = speed * (player.dashVectorY ?? 0);
 }
 
 function getStopInertiaDecel(player, config, baseDecel) {
@@ -4998,9 +5109,30 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallJumpLockTimer === 0 &&
     player.height === player.standHeight
   ) {
-    const direction = moveAxis || player.facing;
-    if (direction !== 0) {
-      startDash(player, run, config, direction);
+    if (!player.onGround && !useLegacyControls(state)) {
+      if (performAirDashShotgun(player, run, data, config, state)) {
+        const contacts = resolvePlayerCollisions(player, data, dt, config, run);
+        updateDamageBlockContact(run, data);
+        player.onGround = contacts.onGround;
+        player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
+        player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+        player.wallSliding = false;
+        if (player.onGround) {
+          refillDashFromGround(player, config);
+          refillRecoilShot(player, config);
+          clearRecoilSpin(player);
+          player.coyoteTimer = config.coyoteTimeMs / 1000;
+        }
+        updateMovementVfx(run, data, dt);
+        player.jumpHeldLastFrame = jumpHeld;
+        setMovementState(player);
+        return;
+      }
+    } else {
+      const direction = moveAxis || player.facing;
+      if (direction !== 0) {
+        startDash(player, run, config, direction, 0, 1);
+      }
     }
   }
 
@@ -5013,7 +5145,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.vx = 0;
     player.vy = 0;
     player.canInteract = false;
-    player.facing = player.dashDirection || player.facing;
+    player.facing = Math.sign(player.dashVectorX || player.dashDirection || 0) || player.facing;
     player.onGround = false;
     player.wallSliding = false;
     player.wallDirection = 0;
@@ -5028,9 +5160,10 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.dashTimer > 0) {
     player.dashTimer = Math.max(0, player.dashTimer - dt);
-    player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * player.dashDirection;
-    player.vy = 0;
-    player.facing = player.dashDirection;
+    const dashSpeed = (config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000);
+    player.vx = dashSpeed * (player.dashVectorX ?? player.dashDirection ?? 1);
+    player.vy = dashSpeed * (player.dashVectorY ?? 0);
+    player.facing = Math.sign(player.dashVectorX || player.dashDirection || 0) || player.facing;
     player.canInteract = false;
 
     const contacts = resolvePlayerCollisions(player, data, dt, config, run);
@@ -5077,11 +5210,12 @@ function updatePlayer(run, data, state, dt, input) {
       player.canInteract = true;
     }
 
-    if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && player.dashDirection !== 0) {
-      const dashSpeed = (config.dashDistance / (config.dashDurationMs / 1000))
+    const dashCarryDirection = player.dashVectorX ?? player.dashDirection ?? 0;
+    if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && dashCarryDirection !== 0) {
+      const dashCarrySpeed = ((config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000))
         * (config.dashCarrySpeedMultiplier ?? 1)
-        * player.dashDirection;
-      armDashCarry(player, config, dashSpeed);
+        * dashCarryDirection;
+      armDashCarry(player, config, dashCarrySpeed);
     }
 
     if (landed && player.jumpBufferTimer > 0 && player.height === player.standHeight) {
@@ -7574,6 +7708,9 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.dashWindupTimer = 0;
   player.dashCooldownTimer = 0;
   player.dashDirection = 0;
+  player.dashVectorX = 1;
+  player.dashVectorY = 0;
+  player.dashDistanceScale = 1;
   player.slideTimer = 0;
   player.hoverActive = false;
   player.hoverBoostActive = false;
