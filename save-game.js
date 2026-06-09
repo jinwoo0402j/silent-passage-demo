@@ -193,6 +193,11 @@ function clearTransientRunState(run) {
     run.player.dashVectorX = 1;
     run.player.dashVectorY = 0;
     run.player.dashDistanceScale = 1;
+    run.player.dashStartedAirborne = false;
+    run.player.airDashHoverTimer = 0;
+    run.player.airDashDirectionGraceTimer = 0;
+    run.player.airDashDirectionPending = false;
+    run.player.airDashHoverConsumed = false;
   }
 }
 

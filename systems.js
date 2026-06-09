@@ -125,6 +125,10 @@ const shelterCgImageCache = new Map();
 const RECOIL_FOCUS_AFTERIMAGE_INTERVAL = LOW_PERFORMANCE_MODE ? 0.14 : 0.08;
 const RECOIL_FOCUS_AFTERIMAGE_LIFE = 1;
 const RECOIL_FOCUS_AFTERIMAGE_MAX = LOW_PERFORMANCE_MODE ? 6 : 12;
+const AIR_DASH_HOVER_SECONDS = 0.5;
+const AIR_DASH_HOVER_RISE_SPEED = 35;
+const AIR_DASH_HOVER_BRAKE = 420;
+const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
 const LOOT_RARITY_RANKS = {
   common: 0,
   uncommon: 1,
@@ -1318,6 +1322,12 @@ function lockCameraToFaceOffTarget(run, data, dt = 0, instant = true) {
 
 function getMovementConfig(data) {
   return data.player.movement;
+}
+
+function getJumpMaxHeight(data, config) {
+  const jumpVelocity = Math.abs(config.jumpVelocity ?? data.player.jumpVelocity ?? 0);
+  const gravity = Math.max(1, Number(data.world?.gravity ?? 1));
+  return (jumpVelocity * jumpVelocity) / (2 * gravity);
 }
 
 function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
@@ -3020,6 +3030,12 @@ function clearHover(player) {
   player.hoverParticleTimer = 0;
 }
 
+function clearAirDashHover(player) {
+  player.airDashHoverTimer = 0;
+  player.airDashDirectionGraceTimer = 0;
+  player.airDashDirectionPending = false;
+}
+
 function clearRecoilSpin(player) {
   player.recoilSpinTimer = 0;
   player.recoilSpinDuration = 0;
@@ -3053,6 +3069,7 @@ function refillDashFromGround(player, config) {
   syncDashCapacity(player, config);
   player.dashCharges = player.dashMaxCount;
   player.dashAvailable = player.dashCharges > 0 && player.dashCooldownTimer === 0;
+  player.airDashHoverConsumed = false;
 }
 
 function refillDashFromWall(player, config) {
@@ -3097,22 +3114,6 @@ function refillRecoilShot(player, config) {
 function getSelectedArmContext(run, data) {
   const weapons = ensureWeaponLoadoutState(run, data);
   const side = weapons.selectedSide === "right" ? "right" : "left";
-  const arm = weapons.arms[side];
-  const stats = computeArmWeaponStats(data, arm);
-  return {
-    weapons,
-    side,
-    arm,
-    stats,
-  };
-}
-
-function getShotgunArmContext(run, data) {
-  const weapons = ensureWeaponLoadoutState(run, data);
-  const side = ["left", "right"].find((candidate) => {
-    const stats = computeArmWeaponStats(data, weapons.arms[candidate]);
-    return stats.type === "shotgun";
-  }) || "left";
   const arm = weapons.arms[side];
   const stats = computeArmWeaponStats(data, arm);
   return {
@@ -3330,6 +3331,23 @@ function getKeyboardDirectionVector(state, player, fallbackX = player?.facing ||
     dirY = 0;
   }
 
+  const length = Math.max(0.001, Math.hypot(dirX, dirY));
+  return {
+    x: dirX / length,
+    y: dirY / length,
+  };
+}
+
+function getKeyboardDirectionPressedVector(state) {
+  const left = isPressed(state, "ArrowLeft");
+  const right = isPressed(state, "ArrowRight");
+  const up = isPressed(state, "ArrowUp");
+  const down = isPressed(state, "ArrowDown");
+  const dirX = (right ? 1 : 0) - (left ? 1 : 0);
+  const dirY = (down ? 1 : 0) - (up ? 1 : 0);
+  if (dirX === 0 && dirY === 0) {
+    return null;
+  }
   const length = Math.max(0.001, Math.hypot(dirX, dirY));
   return {
     x: dirX / length,
@@ -4437,40 +4455,61 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   return true;
 }
 
-function performAirDashShotgun(player, run, data, config, state) {
-  const dashVector = getKeyboardDirectionVector(state, player, player.facing || 1);
-  const shotgunContext = getShotgunArmContext(run, data);
-  if (shotgunContext.stats.type !== "shotgun") {
-    return false;
-  }
-
-  const aim = getRecoilAimFromShotDirection(player, -dashVector.x, -dashVector.y, {
-    aiming: true,
-    active: run.focusActive,
-  });
-  return performRecoilShot(player, run, data, config, state, {
-    contextOverride: shotgunContext,
-    aimOverride: aim,
-    requireWeaponType: "shotgun",
-  });
-}
-
-function startDash(player, run, config, direction, directionY = 0, distanceScale = 1) {
+function startAirDashHover(player, run, config) {
   clearBraceHold(player);
   clearWallRun(player);
   clearSlide(player);
   clearHover(player);
   clearRecoilSpin(player);
+  syncDashCapacity(player, config);
+  player.dashCharges = Math.max(0, player.dashCharges - 1);
+  player.dashAvailable = false;
+  player.dashCooldownTimer = config.dashCooldownMs / 1000;
+  player.airDashHoverTimer = AIR_DASH_HOVER_SECONDS;
+  player.airDashDirectionGraceTimer = 0;
+  player.airDashDirectionPending = false;
+  player.airDashHoverConsumed = true;
+  player.hoverActive = true;
+  player.hoverBoostActive = true;
+  player.hoverParticleTimer = 0;
+  player.jumpBufferTimer = 0;
+  player.coyoteTimer = 0;
+  player.onGround = false;
+  player.canInteract = false;
+  player.vy = Math.min(player.vy, -AIR_DASH_HOVER_RISE_SPEED);
+  spawnDirectedParticles(
+    run,
+    player.x + player.width * 0.5,
+    player.y + player.height + 4,
+    10,
+    "#93eaff",
+    0,
+    1,
+    280,
+    0.5
+  );
+}
+
+function startDash(player, run, config, direction, directionY = 0, distanceScale = 1, consumeDashCharge = true) {
+  clearBraceHold(player);
+  clearWallRun(player);
+  clearSlide(player);
+  clearHover(player);
+  clearAirDashHover(player);
+  clearRecoilSpin(player);
   const length = Math.max(0.001, Math.hypot(direction, directionY));
   const dashX = direction / length;
   const dashY = directionY / length;
   syncDashCapacity(player, config);
-  player.dashCharges = Math.max(0, player.dashCharges - 1);
+  if (consumeDashCharge) {
+    player.dashCharges = Math.max(0, player.dashCharges - 1);
+  }
   player.dashAvailable = false;
   player.dashDirection = Math.sign(dashX) || player.facing || 1;
   player.dashVectorX = dashX;
   player.dashVectorY = dashY;
   player.dashDistanceScale = Math.max(0.05, Number(distanceScale) || 1);
+  player.dashStartedAirborne = !player.onGround;
   player.dashWindupTimer = (config.dashWindupMs ?? 0) / 1000;
   player.dashTimer = player.dashWindupTimer > 0 ? 0 : config.dashDurationMs / 1000;
   player.dashCooldownTimer = config.dashCooldownMs / 1000;
@@ -4496,6 +4535,24 @@ function startDashBurst(player, config) {
   const speed = (config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000);
   player.vx = speed * (player.dashVectorX ?? player.dashDirection ?? 1);
   player.vy = speed * (player.dashVectorY ?? 0);
+}
+
+function stopAirDashOnTerrainCollision(player) {
+  player.dashTimer = 0;
+  player.dashWindupTimer = 0;
+  player.vx = 0;
+  player.vy = 0;
+  player.dashCarryTimer = 0;
+  player.dashCarrySpeed = 0;
+  player.speedRetentionTimer = 0;
+  player.retainedSpeed = 0;
+  player.sprintJumpCarryTimer = 0;
+  player.sprintJumpCarrySpeed = 0;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.dashStartedAirborne = false;
 }
 
 function getStopInertiaDecel(player, config, baseDecel) {
@@ -4829,6 +4886,7 @@ function updatePlayer(run, data, state, dt, input) {
   const moveLeft = isEitherPressed(state, getMoveLeftKeys(state));
   const moveRight = isEitherPressed(state, getMoveRightKeys(state));
   const rawMoveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
+  const airDashDirection = useLegacyControls(state) ? null : getKeyboardDirectionPressedVector(state);
   let moveAxis = rawMoveAxis;
   const crouchHeld = isEitherPressed(state, getCrouchKeys(state));
   const crouchPressed = consumeEitherPress(state, getCrouchKeys(state));
@@ -4857,6 +4915,12 @@ function updatePlayer(run, data, state, dt, input) {
   player.wallJumpLockTimer = Math.max(0, player.wallJumpLockTimer - dt);
   player.dashCooldownTimer = Math.max(0, player.dashCooldownTimer - dt);
   player.dashCarryTimer = Math.max(0, player.dashCarryTimer - dt);
+  const wasAirDashHovering = (player.airDashHoverTimer ?? 0) > 0;
+  player.airDashHoverTimer = Math.max(0, (player.airDashHoverTimer ?? 0) - dt);
+  player.airDashDirectionGraceTimer = Math.max(0, (player.airDashDirectionGraceTimer ?? 0) - dt);
+  if (wasAirDashHovering && player.airDashHoverTimer === 0) {
+    clearHover(player);
+  }
   player.recoilShotCooldownTimer = Math.max(0, player.recoilShotCooldownTimer - dt);
   player.recoilShotTimer = Math.max(0, player.recoilShotTimer - dt);
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
@@ -5099,9 +5163,41 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallJumpLockTimer === 0 &&
     !player.braceHolding;
 
+  if ((player.airDashHoverTimer ?? 0) > 0 && !airDashDirection) {
+    player.airDashDirectionPending = false;
+    player.airDashDirectionGraceTimer = 0;
+  }
+
+  if (
+    (player.airDashHoverTimer ?? 0) > 0 &&
+    airDashDirection &&
+    player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
+    player.wallJumpLockTimer === 0 &&
+    player.height === player.standHeight
+  ) {
+    const airDashDiagonalReady = Math.abs(airDashDirection.x) > 0.001 && Math.abs(airDashDirection.y) > 0.001;
+    if (!player.airDashDirectionPending && !airDashDiagonalReady) {
+      player.airDashDirectionPending = true;
+      player.airDashDirectionGraceTimer = Math.min(
+        AIR_DASH_DIAGONAL_GRACE_SECONDS,
+        player.airDashHoverTimer ?? AIR_DASH_DIAGONAL_GRACE_SECONDS
+      );
+    }
+    if (
+      airDashDiagonalReady ||
+      (player.airDashDirectionPending && (player.airDashDirectionGraceTimer ?? 0) === 0) ||
+      (player.airDashHoverTimer ?? 0) <= dt
+    ) {
+      const airDashDistanceScale = getJumpMaxHeight(data, config) / Math.max(1, Number(config.dashDistance ?? 1));
+      startDash(player, run, config, airDashDirection.x, airDashDirection.y, airDashDistanceScale, false);
+    }
+  }
+
   if (
     dashPressed &&
     !wantsWallRun &&
+    !player.airDashHoverConsumed &&
     player.dashAvailable &&
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0 &&
@@ -5110,24 +5206,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.height === player.standHeight
   ) {
     if (!player.onGround && !useLegacyControls(state)) {
-      if (performAirDashShotgun(player, run, data, config, state)) {
-        const contacts = resolvePlayerCollisions(player, data, dt, config, run);
-        updateDamageBlockContact(run, data);
-        player.onGround = contacts.onGround;
-        player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
-        player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
-        player.wallSliding = false;
-        if (player.onGround) {
-          refillDashFromGround(player, config);
-          refillRecoilShot(player, config);
-          clearRecoilSpin(player);
-          player.coyoteTimer = config.coyoteTimeMs / 1000;
-        }
-        updateMovementVfx(run, data, dt);
-        player.jumpHeldLastFrame = jumpHeld;
-        setMovementState(player);
-        return;
-      }
+      startAirDashHover(player, run, config);
     } else {
       const direction = moveAxis || player.facing;
       if (direction !== 0) {
@@ -5170,12 +5249,19 @@ function updatePlayer(run, data, state, dt, input) {
     updateDamageBlockContact(run, data);
     const landed = !player.wasOnGround && contacts.onGround;
     player.dashCornerCorrected = contacts.dashCornerCorrected;
-    if (contacts.dashBlocked) {
+    const airDashHitTerrain = Boolean(
+      player.dashStartedAirborne &&
+      (contacts.dashBlocked || contacts.hitHead || contacts.onGround)
+    );
+    if (airDashHitTerrain) {
+      stopAirDashOnTerrainCollision(player);
+    } else if (contacts.dashBlocked) {
       player.dashTimer = 0;
     }
     if (landed) {
       refillDashFromGround(player, config);
       refillRecoilShot(player, config);
+      clearAirDashHover(player);
       clearHover(player);
       clearRecoilSpin(player);
       player.coyoteTimer = config.coyoteTimeMs / 1000;
@@ -5184,10 +5270,10 @@ function updatePlayer(run, data, state, dt, input) {
     player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
     player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
     player.wallSliding = false;
-    if (!player.onGround && player.wallDirection !== 0) {
+    if (!airDashHitTerrain && !player.onGround && player.wallDirection !== 0) {
       player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
       player.wallGraceDirection = player.wallDirection;
-    } else if (player.onGround) {
+    } else if (player.onGround || airDashHitTerrain) {
       player.wallGraceTimer = 0;
       player.wallGraceDirection = 0;
       player.wallSlideGraceTimer = 0;
@@ -5211,11 +5297,14 @@ function updatePlayer(run, data, state, dt, input) {
     }
 
     const dashCarryDirection = player.dashVectorX ?? player.dashDirection ?? 0;
-    if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && dashCarryDirection !== 0) {
+    if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && !airDashHitTerrain && dashCarryDirection !== 0) {
       const dashCarrySpeed = ((config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000))
         * (config.dashCarrySpeedMultiplier ?? 1)
         * dashCarryDirection;
       armDashCarry(player, config, dashCarrySpeed);
+    }
+    if (player.dashTimer === 0) {
+      player.dashStartedAirborne = false;
     }
 
     if (landed && player.jumpBufferTimer > 0 && player.height === player.standHeight) {
@@ -5380,6 +5469,7 @@ function updatePlayer(run, data, state, dt, input) {
     !player.wallRunActive &&
     !player.braceHolding &&
     !player.wallSliding &&
+    (player.airDashHoverTimer ?? 0) === 0 &&
     !canWallJump &&
     !canBrace &&
     !canGroundJump &&
@@ -5520,7 +5610,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (
     player.hoverActive &&
     (
-      !jumpHeld ||
+      (!jumpHeld && (player.airDashHoverTimer ?? 0) === 0) ||
       player.onGround ||
       player.height !== player.standHeight ||
       player.wallRunActive ||
@@ -5532,7 +5622,13 @@ function updatePlayer(run, data, state, dt, input) {
     clearHover(player);
   }
 
-  const gravityMultiplier = player.hoverActive
+  if ((player.airDashHoverTimer ?? 0) > 0) {
+    player.vy = approach(player.vy, 0, AIR_DASH_HOVER_BRAKE * dt);
+  }
+
+  const gravityMultiplier = (player.airDashHoverTimer ?? 0) > 0
+    ? 0
+    : player.hoverActive
     ? (config.hoverGravityMultiplier ?? 0.18)
     : player.attackAirHoldTimer > 0
       ? 0
@@ -5622,6 +5718,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (landed) {
     refillDashFromGround(player, config);
     refillRecoilShot(player, config);
+    clearAirDashHover(player);
     clearHover(player);
     clearRecoilSpin(player);
     const burstSize = contacts.landingSpeed > 480 ? 10 : 5;
@@ -5644,6 +5741,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallSlideGraceTimer = 0;
     player.wallSlideGraceDirection = 0;
     clearBraceHold(player);
+    clearAirDashHover(player);
     clearHover(player);
     clearRecoilSpin(player);
     refillDashFromGround(player, config);
@@ -7711,7 +7809,10 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.dashVectorX = 1;
   player.dashVectorY = 0;
   player.dashDistanceScale = 1;
+  player.dashStartedAirborne = false;
   player.slideTimer = 0;
+  clearAirDashHover(player);
+  player.airDashHoverConsumed = false;
   player.hoverActive = false;
   player.hoverBoostActive = false;
   player.wallSliding = false;
