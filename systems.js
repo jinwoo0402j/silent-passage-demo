@@ -1324,12 +1324,6 @@ function getMovementConfig(data) {
   return data.player.movement;
 }
 
-function getJumpMaxHeight(data, config) {
-  const jumpVelocity = Math.abs(config.jumpVelocity ?? data.player.jumpVelocity ?? 0);
-  const gravity = Math.max(1, Number(data.world?.gravity ?? 1));
-  return (jumpVelocity * jumpVelocity) / (2 * gravity);
-}
-
 function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
   if (
     !runHeld ||
@@ -3077,6 +3071,7 @@ function refillDashFromWall(player, config) {
   player.dashCharges = player.dashMaxCount;
   player.dashAvailable = true;
   player.dashCooldownTimer = 0;
+  player.airDashHoverConsumed = false;
   player.dashResetActive = true;
 }
 
@@ -3122,6 +3117,32 @@ function getSelectedArmContext(run, data) {
     arm,
     stats,
   };
+}
+
+function getShotgunArmContext(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const side = ["left", "right"].find((candidate) => {
+    const stats = computeArmWeaponStats(data, weapons.arms[candidate]);
+    return stats.type === "shotgun";
+  }) || "left";
+  const arm = weapons.arms[side];
+  const stats = computeArmWeaponStats(data, arm);
+  return {
+    weapons,
+    side,
+    arm,
+    stats,
+  };
+}
+
+function resetShotgunFireCooldown(run, data) {
+  const shotgunContext = getShotgunArmContext(run, data);
+  shotgunContext.arm.fireCooldownTimer = 0;
+  const selected = getSelectedArmContext(run, data);
+  run.player.recoilShotCooldownTimer = Math.max(
+    selected.arm.fireCooldownTimer ?? 0,
+    selected.arm.reloadTimer ?? 0,
+  );
 }
 
 function setSelectedArm(run, data, side) {
@@ -4455,6 +4476,32 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   return true;
 }
 
+function performAirDashShotgunRecoil(player, run, data, config, state, direction) {
+  const shotgunContext = getShotgunArmContext(run, data);
+  if (shotgunContext.stats.type !== "shotgun") {
+    return false;
+  }
+  const rawX = direction?.x ?? player.facing ?? 1;
+  const rawY = direction?.y ?? 0;
+  const length = Math.max(0.001, Math.hypot(rawX, rawY));
+  const moveX = rawX / length;
+  const moveY = rawY / length;
+  const aim = getRecoilAimFromShotDirection(player, -moveX, -moveY, {
+    aiming: true,
+    active: run.focusActive,
+  });
+  clearAirDashHover(player);
+  const fired = performRecoilShot(player, run, data, config, state, {
+    contextOverride: shotgunContext,
+    aimOverride: aim,
+    requireWeaponType: "shotgun",
+  });
+  if (fired) {
+    player.airDashHoverConsumed = false;
+  }
+  return fired;
+}
+
 function startAirDashHover(player, run, config) {
   clearBraceHold(player);
   clearWallRun(player);
@@ -4652,7 +4699,7 @@ function performWallJump(player, run, config, wallDirection) {
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#cde9ff");
 }
 
-function enterBraceHold(player, run, config, wall, moveAxis) {
+function enterBraceHold(player, run, data, config, wall, moveAxis) {
   clearWallRun(player);
   clearSlide(player);
   clearHover(player);
@@ -4688,6 +4735,7 @@ function enterBraceHold(player, run, config, wall, moveAxis) {
   player.braceHoldActive = true;
   refillDashFromWall(player, config);
   refillRecoilShot(player, config);
+  resetShotgunFireCooldown(run, data);
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 6, "#8fe1ff");
   pushNotice(run, "벽 고정");
 }
@@ -4715,7 +4763,7 @@ function updateBraceHold(player, data, config, wall, dt, moveAxis) {
   player.braceHoldActive = true;
 }
 
-function enterWallRun(player, run, config, wallDirection) {
+function enterWallRun(player, run, data, config, wallDirection) {
   clearBraceHold(player);
   clearSlide(player);
   clearHover(player);
@@ -4731,6 +4779,7 @@ function enterWallRun(player, run, config, wallDirection) {
   player.onGround = false;
   refillDashFromWall(player, config);
   refillRecoilShot(player, config);
+  resetShotgunFireCooldown(run, data);
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.45, 4, "#b8f0ff");
 }
 
@@ -5189,8 +5238,24 @@ function updatePlayer(run, data, state, dt, input) {
       (player.airDashDirectionPending && (player.airDashDirectionGraceTimer ?? 0) === 0) ||
       (player.airDashHoverTimer ?? 0) <= dt
     ) {
-      const airDashDistanceScale = getJumpMaxHeight(data, config) / Math.max(1, Number(config.dashDistance ?? 1));
-      startDash(player, run, config, airDashDirection.x, airDashDirection.y, airDashDistanceScale, false);
+      if (performAirDashShotgunRecoil(player, run, data, config, state, airDashDirection)) {
+        const contacts = resolvePlayerCollisions(player, data, dt, config, run);
+        updateDamageBlockContact(run, data);
+        player.onGround = contacts.onGround;
+        player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
+        player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+        player.wallSliding = false;
+        if (player.onGround) {
+          refillDashFromGround(player, config);
+          refillRecoilShot(player, config);
+          clearRecoilSpin(player);
+          player.coyoteTimer = config.coyoteTimeMs / 1000;
+        }
+        updateMovementVfx(run, data, dt);
+        player.jumpHeldLastFrame = jumpHeld;
+        setMovementState(player);
+        return;
+      }
     }
   }
 
@@ -5351,7 +5416,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (canWallJump) {
     performWallJump(player, run, config, wallJumpSourceDirection);
   } else if (canBrace) {
-    enterBraceHold(player, run, config, activeBraceWall, moveAxis);
+    enterBraceHold(player, run, data, config, activeBraceWall, moveAxis);
   }
 
   if (player.braceHolding) {
@@ -5429,7 +5494,7 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (canWallRun) {
     if (!player.wallRunActive || player.wallRunDirection !== wallJumpSourceDirection) {
-      enterWallRun(player, run, config, wallJumpSourceDirection);
+      enterWallRun(player, run, data, config, wallJumpSourceDirection);
     }
   } else if (player.wallRunActive && jumpReleased) {
     launchFromWallRun(player, run, config);
@@ -5678,6 +5743,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (player.wallSliding && !wasWallSliding) {
     refillDashFromWall(player, config);
     refillRecoilShot(player, config);
+    resetShotgunFireCooldown(run, data);
   }
 
   if (player.wallSliding) {
