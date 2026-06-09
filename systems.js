@@ -129,6 +129,9 @@ const AIR_DASH_HOVER_SECONDS = 0.5;
 const AIR_DASH_HOVER_RISE_SPEED = 35;
 const AIR_DASH_HOVER_BRAKE = 420;
 const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
+const AIR_DASH_DISTANCE_MULTIPLIER = 1.25;
+const AIR_DASH_INERTIA_RETAIN_RATIO = 0.25;
+const CELESTE_END_DASH_SPEED_RATIO = 2 / 3;
 const LOOT_RARITY_RANKS = {
   common: 0,
   uncommon: 1,
@@ -1322,6 +1325,12 @@ function lockCameraToFaceOffTarget(run, data, dt = 0, instant = true) {
 
 function getMovementConfig(data) {
   return data.player.movement;
+}
+
+function getJumpMaxHeight(data, config) {
+  const jumpVelocity = Math.abs(config.jumpVelocity ?? data.player.jumpVelocity ?? 0);
+  const gravity = Math.max(1, Number(data.world?.gravity ?? 1));
+  return (jumpVelocity * jumpVelocity) / (2 * gravity);
 }
 
 function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
@@ -4476,32 +4485,6 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   return true;
 }
 
-function performAirDashShotgunRecoil(player, run, data, config, state, direction) {
-  const shotgunContext = getShotgunArmContext(run, data);
-  if (shotgunContext.stats.type !== "shotgun") {
-    return false;
-  }
-  const rawX = direction?.x ?? player.facing ?? 1;
-  const rawY = direction?.y ?? 0;
-  const length = Math.max(0.001, Math.hypot(rawX, rawY));
-  const moveX = rawX / length;
-  const moveY = rawY / length;
-  const aim = getRecoilAimFromShotDirection(player, -moveX, -moveY, {
-    aiming: true,
-    active: run.focusActive,
-  });
-  clearAirDashHover(player);
-  const fired = performRecoilShot(player, run, data, config, state, {
-    contextOverride: shotgunContext,
-    aimOverride: aim,
-    requireWeaponType: "shotgun",
-  });
-  if (fired) {
-    player.airDashHoverConsumed = false;
-  }
-  return fired;
-}
-
 function startAirDashHover(player, run, config) {
   clearBraceHold(player);
   clearWallRun(player);
@@ -4537,6 +4520,16 @@ function startAirDashHover(player, run, config) {
   );
 }
 
+function getDashDurationSeconds(config) {
+  return Math.max(0.001, (config.dashDurationMs ?? 0) / 1000);
+}
+
+function getDashSpeed(config, player) {
+  const duration = getDashDurationSeconds(config);
+  const distance = (config.dashDistance ?? 0) * (player.dashDistanceScale ?? 1);
+  return distance / duration;
+}
+
 function startDash(player, run, config, direction, directionY = 0, distanceScale = 1, consumeDashCharge = true) {
   clearBraceHold(player);
   clearWallRun(player);
@@ -4558,7 +4551,7 @@ function startDash(player, run, config, direction, directionY = 0, distanceScale
   player.dashDistanceScale = Math.max(0.05, Number(distanceScale) || 1);
   player.dashStartedAirborne = !player.onGround;
   player.dashWindupTimer = (config.dashWindupMs ?? 0) / 1000;
-  player.dashTimer = player.dashWindupTimer > 0 ? 0 : config.dashDurationMs / 1000;
+  player.dashTimer = player.dashWindupTimer > 0 ? 0 : getDashDurationSeconds(config);
   player.dashCooldownTimer = config.dashCooldownMs / 1000;
   player.dashCarryTimer = 0;
   player.dashCarrySpeed = 0;
@@ -4566,7 +4559,7 @@ function startDash(player, run, config, direction, directionY = 0, distanceScale
   player.retainedSpeed = 0;
   player.wallJumpLockTimer = 0;
   player.wallJumpLockDirection = 0;
-  const speed = (config.dashDistance * player.dashDistanceScale) / (config.dashDurationMs / 1000);
+  const speed = getDashSpeed(config, player);
   player.vx = speed * dashX;
   player.vy = speed * dashY;
   player.facing = Math.sign(dashX) || player.facing || 1;
@@ -4578,23 +4571,24 @@ function startDash(player, run, config, direction, directionY = 0, distanceScale
 
 function startDashBurst(player, config) {
   player.dashWindupTimer = 0;
-  player.dashTimer = config.dashDurationMs / 1000;
-  const speed = (config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000);
+  player.dashTimer = getDashDurationSeconds(config);
+  const speed = getDashSpeed(config, player);
   player.vx = speed * (player.dashVectorX ?? player.dashDirection ?? 1);
   player.vy = speed * (player.dashVectorY ?? 0);
+}
+
+function retainAirDashInertia(value) {
+  return Number.isFinite(value) ? value * AIR_DASH_INERTIA_RETAIN_RATIO : 0;
 }
 
 function stopAirDashOnTerrainCollision(player) {
   player.dashTimer = 0;
   player.dashWindupTimer = 0;
-  player.vx = 0;
-  player.vy = 0;
-  player.dashCarryTimer = 0;
-  player.dashCarrySpeed = 0;
-  player.speedRetentionTimer = 0;
-  player.retainedSpeed = 0;
-  player.sprintJumpCarryTimer = 0;
-  player.sprintJumpCarrySpeed = 0;
+  player.vx = retainAirDashInertia(player.vx);
+  player.vy = retainAirDashInertia(player.vy);
+  player.dashCarrySpeed = retainAirDashInertia(player.dashCarrySpeed);
+  player.retainedSpeed = retainAirDashInertia(player.retainedSpeed);
+  player.sprintJumpCarrySpeed = retainAirDashInertia(player.sprintJumpCarrySpeed);
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
   player.wallSlideGraceTimer = 0;
@@ -4610,8 +4604,12 @@ function getStopInertiaDecel(player, config, baseDecel) {
   return baseDecel * lerp(initialMultiplier, maxMultiplier, progress * progress);
 }
 
-function armDashCarry(player, config, speed) {
-  if (!Number.isFinite(speed) || speed === 0) {
+function armDashCarry(player, config, speed, dashDirection) {
+  const carryDirection = Math.sign(speed);
+  const expectedDirection = Math.sign(dashDirection);
+  if (!Number.isFinite(speed) || speed === 0 || (expectedDirection !== 0 && carryDirection !== expectedDirection)) {
+    player.dashCarryTimer = 0;
+    player.dashCarrySpeed = 0;
     return;
   }
   player.dashCarryTimer = (config.dashCarryWindowMs ?? 0) / 1000;
@@ -5074,8 +5072,10 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (
     player.dashCarryTimer > 0 &&
-    moveAxis !== 0 &&
-    Math.sign(moveAxis) !== Math.sign(player.dashCarrySpeed)
+    (
+      (moveAxis !== 0 && Math.sign(moveAxis) !== Math.sign(player.dashCarrySpeed)) ||
+      (Math.abs(player.vx) > EPSILON && Math.sign(player.vx) !== Math.sign(player.dashCarrySpeed))
+    )
   ) {
     player.dashCarryTimer = 0;
     player.dashCarrySpeed = 0;
@@ -5238,24 +5238,8 @@ function updatePlayer(run, data, state, dt, input) {
       (player.airDashDirectionPending && (player.airDashDirectionGraceTimer ?? 0) === 0) ||
       (player.airDashHoverTimer ?? 0) <= dt
     ) {
-      if (performAirDashShotgunRecoil(player, run, data, config, state, airDashDirection)) {
-        const contacts = resolvePlayerCollisions(player, data, dt, config, run);
-        updateDamageBlockContact(run, data);
-        player.onGround = contacts.onGround;
-        player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
-        player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
-        player.wallSliding = false;
-        if (player.onGround) {
-          refillDashFromGround(player, config);
-          refillRecoilShot(player, config);
-          clearRecoilSpin(player);
-          player.coyoteTimer = config.coyoteTimeMs / 1000;
-        }
-        updateMovementVfx(run, data, dt);
-        player.jumpHeldLastFrame = jumpHeld;
-        setMovementState(player);
-        return;
-      }
+      const airDashDistanceScale = (getJumpMaxHeight(data, config) * AIR_DASH_DISTANCE_MULTIPLIER) / Math.max(1, Number(config.dashDistance ?? 1));
+      startDash(player, run, config, airDashDirection.x, airDashDirection.y, airDashDistanceScale, false);
     }
   }
 
@@ -5304,7 +5288,7 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.dashTimer > 0) {
     player.dashTimer = Math.max(0, player.dashTimer - dt);
-    const dashSpeed = (config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000);
+    const dashSpeed = getDashSpeed(config, player);
     player.vx = dashSpeed * (player.dashVectorX ?? player.dashDirection ?? 1);
     player.vy = dashSpeed * (player.dashVectorY ?? 0);
     player.facing = Math.sign(player.dashVectorX || player.dashDirection || 0) || player.facing;
@@ -5314,12 +5298,21 @@ function updatePlayer(run, data, state, dt, input) {
     updateDamageBlockContact(run, data);
     const landed = !player.wasOnGround && contacts.onGround;
     player.dashCornerCorrected = contacts.dashCornerCorrected;
+    const dashStartedAirborne = Boolean(player.dashStartedAirborne);
     const airDashHitTerrain = Boolean(
-      player.dashStartedAirborne &&
+      dashStartedAirborne &&
       (contacts.dashBlocked || contacts.hitHead || contacts.onGround)
     );
     if (airDashHitTerrain) {
       stopAirDashOnTerrainCollision(player);
+      player.onGround = contacts.onGround;
+      player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
+      player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+      player.wallSliding = false;
+      updateMovementVfx(run, data, dt);
+      player.jumpHeldLastFrame = jumpHeld;
+      setMovementState(player);
+      return;
     } else if (contacts.dashBlocked) {
       player.dashTimer = 0;
     }
@@ -5345,7 +5338,7 @@ function updatePlayer(run, data, state, dt, input) {
       player.wallSlideGraceDirection = 0;
     }
 
-    if (player.onGround) {
+    if (player.onGround && !dashStartedAirborne) {
       if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
         // Slide startup already resized the player and preserved the incoming speed.
       } else if (player.slideTimer > 0) {
@@ -5359,20 +5352,33 @@ function updatePlayer(run, data, state, dt, input) {
 
     if (player.dashTimer === 0) {
       player.canInteract = true;
+    } else if (player.onGround) {
+      player.crouchBlocked = false;
     }
 
     const dashCarryDirection = player.dashVectorX ?? player.dashDirection ?? 0;
-    if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && !airDashHitTerrain && dashCarryDirection !== 0) {
-      const dashCarrySpeed = ((config.dashDistance * (player.dashDistanceScale ?? 1)) / (config.dashDurationMs / 1000))
-        * (config.dashCarrySpeedMultiplier ?? 1)
-        * dashCarryDirection;
-      armDashCarry(player, config, dashCarrySpeed);
+    if ((landed || player.dashTimer === 0) && dashStartedAirborne) {
+      player.vx = retainAirDashInertia(player.vx);
+      player.vy = retainAirDashInertia(player.vy);
+      player.dashCarrySpeed = retainAirDashInertia(player.dashCarrySpeed);
+      player.retainedSpeed = retainAirDashInertia(player.retainedSpeed);
+      player.sprintJumpCarrySpeed = retainAirDashInertia(player.sprintJumpCarrySpeed);
+    } else if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && !airDashHitTerrain && dashCarryDirection !== 0) {
+      const resolvedVelocityDirection = Math.sign(player.vx);
+      const expectedCarryDirection = Math.sign(dashCarryDirection);
+      if (resolvedVelocityDirection === 0 || resolvedVelocityDirection !== expectedCarryDirection) {
+        player.dashCarryTimer = 0;
+        player.dashCarrySpeed = 0;
+      } else {
+        const dashCarrySpeed = player.vx * CELESTE_END_DASH_SPEED_RATIO;
+        armDashCarry(player, config, dashCarrySpeed, dashCarryDirection);
+      }
     }
     if (player.dashTimer === 0) {
       player.dashStartedAirborne = false;
     }
 
-    if (landed && player.jumpBufferTimer > 0 && player.height === player.standHeight) {
+    if (!dashStartedAirborne && landed && player.jumpBufferTimer > 0 && player.height === player.standHeight) {
       if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
         armSprintJumpCarry(player, config);
       }
@@ -5587,12 +5593,18 @@ function updatePlayer(run, data, state, dt, input) {
       (moveAxis === 0 || Math.sign(moveAxis) === Math.sign(player.dashCarrySpeed)) &&
       Math.abs(player.vx) < Math.abs(player.dashCarrySpeed)
     ) {
-      player.vx = approach(
-        player.vx,
-        player.dashCarrySpeed,
-        config.groundAccel * 1.2 * dt
-      );
-      player.dashCarryActive = true;
+      const dashCarryExpectedDirection = Math.sign(player.dashVectorX ?? player.dashDirection ?? 0);
+      if (dashCarryExpectedDirection !== 0 && Math.sign(player.dashCarrySpeed) !== dashCarryExpectedDirection) {
+        player.dashCarryTimer = 0;
+        player.dashCarrySpeed = 0;
+      } else {
+        player.vx = approach(
+          player.vx,
+          player.dashCarrySpeed,
+          config.groundAccel * 1.2 * dt
+        );
+        player.dashCarryActive = true;
+      }
     }
 
     if (
