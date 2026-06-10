@@ -464,6 +464,114 @@ function sanitizeLootCrate(crate, index, baseCrate = null) {
   return next;
 }
 
+function extractVaultDoor(door = {}) {
+  return {
+    id: safeString(door.id, "vault-door"),
+    label: safeString(door.label, door.id || "Vault"),
+    x: safeNumber(door.x, 0),
+    y: safeNumber(door.y, 0),
+    width: safeNumber(door.width, 96, 24),
+    height: safeNumber(door.height, 144, 24),
+    prompt: safeString(door.prompt, "E: Hack vault"),
+    duration: safeNumber(door.duration, 60, 1),
+  };
+}
+
+function sanitizeVaultDoor(door, index, fallback = null) {
+  const base = fallback || {
+    id: `vault-door-${index + 1}`,
+    label: `Vault ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 144,
+    prompt: "E: Hack vault",
+    duration: 60,
+  };
+  const source = door && typeof door === "object" ? door : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    prompt: safeString(source.prompt, base.prompt),
+    duration: safeNumber(source.duration, base.duration, 1),
+  };
+}
+
+function extractVaultLoot(loot = {}) {
+  return {
+    id: safeString(loot.id, "vault-loot"),
+    label: safeString(loot.label, loot.id || "Supplies"),
+    x: safeNumber(loot.x, 0),
+    y: safeNumber(loot.y, 0),
+    width: safeNumber(loot.width, 48, 16),
+    height: safeNumber(loot.height, 48, 16),
+    value: safeNumber(loot.value, 25, 0),
+    prompt: safeString(loot.prompt, "E: Take supplies"),
+  };
+}
+
+function sanitizeVaultLoot(loot, index, fallback = null) {
+  const base = fallback || {
+    id: `vault-loot-${index + 1}`,
+    label: `Supply ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 48,
+    height: 48,
+    value: 25,
+    prompt: "E: Take supplies",
+  };
+  const source = loot && typeof loot === "object" ? loot : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 16),
+    height: safeNumber(source.height, base.height, 16),
+    value: safeNumber(source.value, base.value, 0),
+    prompt: safeString(source.prompt, base.prompt),
+  };
+}
+
+function extractEscapeExit(exit = {}) {
+  return {
+    id: safeString(exit.id, "escape-exit"),
+    label: safeString(exit.label, exit.id || "Escape"),
+    x: safeNumber(exit.x, 0),
+    y: safeNumber(exit.y, 0),
+    width: safeNumber(exit.width, 96, 24),
+    height: safeNumber(exit.height, 192, 24),
+    prompt: safeString(exit.prompt, "E: Escape"),
+  };
+}
+
+function sanitizeEscapeExit(exit, index, fallback = null) {
+  const base = fallback || {
+    id: `escape-exit-${index + 1}`,
+    label: `Escape ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 192,
+    prompt: "E: Escape",
+  };
+  const source = exit && typeof exit === "object" ? exit : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    prompt: safeString(source.prompt, base.prompt),
+  };
+}
+
 function extractCamera(camera = {}) {
   return {
     ...Object.fromEntries(
@@ -894,6 +1002,9 @@ export function extractEditableLevelData(data) {
     ),
     entrances: (data.entrances || []).map((entrance) => extractEntrance(entrance)),
     routeExits: (data.routeExits || []).map((exit) => extractRouteExit(exit)),
+    vaultDoors: (data.vaultDoors || []).map((door) => extractVaultDoor(door)),
+    vaultLoot: (data.vaultLoot || []).map((loot) => extractVaultLoot(loot)),
+    escapeExits: (data.escapeExits || []).map((exit) => extractEscapeExit(exit)),
     extractionGate: extractExtractionGate(data.extractionGate),
     platforms: (data.platforms || []).map((platform) => ({
       kind: platform.kind,
@@ -1011,6 +1122,15 @@ export function normalizeEditableLevelData(raw, baseData) {
     routeExits: Array.isArray(source.routeExits)
       ? source.routeExits.map((exit, index) => sanitizeRouteExit(exit, index, fallback.routeExits?.[index]))
       : (fallback.routeExits || []).map((exit, index) => sanitizeRouteExit(exit, index)),
+    vaultDoors: Array.isArray(source.vaultDoors)
+      ? source.vaultDoors.map((door, index) => sanitizeVaultDoor(door, index, fallback.vaultDoors?.[index]))
+      : (fallback.vaultDoors || []).map((door, index) => sanitizeVaultDoor(door, index)),
+    vaultLoot: Array.isArray(source.vaultLoot)
+      ? source.vaultLoot.map((loot, index) => sanitizeVaultLoot(loot, index, fallback.vaultLoot?.[index]))
+      : (fallback.vaultLoot || []).map((loot, index) => sanitizeVaultLoot(loot, index)),
+    escapeExits: Array.isArray(source.escapeExits)
+      ? source.escapeExits.map((exit, index) => sanitizeEscapeExit(exit, index, fallback.escapeExits?.[index]))
+      : (fallback.escapeExits || []).map((exit, index) => sanitizeEscapeExit(exit, index)),
     extractionGate: Object.prototype.hasOwnProperty.call(source, "extractionGate")
       ? sanitizeExtractionGate(source.extractionGate, fallback.extractionGate)
       : sanitizeExtractionGate(fallback.extractionGate),
@@ -1095,6 +1215,9 @@ export function mergeLevelData(baseData, override) {
   next.map = normalized.map;
   next.entrances = normalized.entrances;
   next.routeExits = normalized.routeExits;
+  next.vaultDoors = normalized.vaultDoors;
+  next.vaultLoot = normalized.vaultLoot;
+  next.escapeExits = normalized.escapeExits;
   next.extractionGate = normalized.extractionGate ? { ...normalized.extractionGate } : null;
   next.platforms = normalized.platforms;
   next.temporaryBlocks = normalized.temporaryBlocks;
@@ -1321,19 +1444,21 @@ export function loadLevelOverride(baseData, requestedLevelId = null) {
   return loadLevelOverrides(baseData)[levelId] || null;
 }
 
-export function getLevelSummaries(baseData) {
+export function getLevelSummaries(baseData, options = {}) {
+  const applyLevelOverride = options.applyLevelOverride !== false;
   const overrides = loadLevelOverrides(baseData);
   return getLevelIds(baseData).map((id) => {
     const definition = getLevelDefinition(baseData, id);
     const override = overrides[id];
+    const useOverride = Boolean(override && (applyLevelOverride || !definition));
     const baseLevel = createBaseLevelData(baseData, id);
-    const effective = override ? mergeLevelData(baseLevel, override) : baseLevel;
-    const label = override?.label || definition?.label || effective.levelLabel || id;
+    const effective = useOverride ? mergeLevelData(baseLevel, override) : baseLevel;
+    const label = useOverride ? (override?.label || effective.levelLabel || id) : (definition?.label || effective.levelLabel || id);
     return {
       id,
       label,
       builtIn: Boolean(definition),
-      hasOverride: Boolean(override),
+      hasOverride: useOverride,
       map: extractMapConfig(effective.map, id, label),
       world: {
         width: safeNumber(effective.world?.width, 1280, 1),

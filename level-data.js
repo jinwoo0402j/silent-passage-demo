@@ -1463,6 +1463,61 @@ GAME_DATA.levels = {
         "toEntranceId": "start"
       }
     ],
+    "vaultDoors": [
+      {
+        "id": "vault-door-test-01",
+        "label": "Supply Vault",
+        "x": 1936,
+        "y": 1664,
+        "width": 112,
+        "height": 144,
+        "prompt": "Up: Hack vault",
+        "duration": 45
+      }
+    ],
+    "vaultLoot": [
+      {
+        "id": "vault-loot-test-01",
+        "label": "Cells",
+        "x": 2072,
+        "y": 1748,
+        "width": 46,
+        "height": 46,
+        "value": 35,
+        "prompt": "Up: Take supplies"
+      },
+      {
+        "id": "vault-loot-test-02",
+        "label": "Parts",
+        "x": 2140,
+        "y": 1748,
+        "width": 46,
+        "height": 46,
+        "value": 45,
+        "prompt": "Up: Take supplies"
+      },
+      {
+        "id": "vault-loot-test-03",
+        "label": "Core",
+        "x": 2208,
+        "y": 1748,
+        "width": 46,
+        "height": 46,
+        "value": 80,
+        "prompt": "Up: Take supplies"
+      }
+    ],
+    "escapeExits": [
+      {
+        "id": "escape-exit-test-01",
+        "label": "Emergency Exit",
+        "x": 928,
+        "y": 1648,
+        "width": 112,
+        "height": 192,
+        "prompt": "Up: Escape"
+      }
+    ],
     "map": {
       "rooms": [
         {

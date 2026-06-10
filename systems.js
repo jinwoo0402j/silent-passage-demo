@@ -1,4 +1,4 @@
-import {
+﻿import {
   MOVEMENT_STATES,
   SCENES,
   computeArmWeaponStats,
@@ -48,7 +48,7 @@ const MOVE_LEFT_KEYS = ["ArrowLeft"];
 const MOVE_RIGHT_KEYS = ["ArrowRight"];
 const CROUCH_KEYS = ["ArrowDown"];
 const JUMP_KEYS = ["KeyZ"];
-const ZIPLINE_MOUNT_KEYS = ["KeyC"];
+const ZIPLINE_MOUNT_KEYS = ["ArrowUp"];
 const DASH_KEYS = ["ShiftLeft", "ShiftRight"];
 const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
 const LEGACY_MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
@@ -73,7 +73,8 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
-const INTERACT_KEYS = ["KeyC"];
+const INTERACT_KEYS = ["KeyE"];
+const WORLD_INTERACT_KEYS = ["ArrowUp"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
 const NEW_RUN_KEYS = ["KeyN"];
@@ -101,8 +102,8 @@ const MAP_EXPLORE_RADIUS_CELLS = 1;
 const SHELTER_MENU_ITEMS = ["photo", "records", "background", "rest", "exit"];
 const SHELTER_ARRIVAL_SECONDS = 2.4;
 const SHELTER_EXIT_COOLDOWN_SECONDS = 1.2;
-const SHELTER_NIGHT_LOCK_MESSAGE = "밤에만 피난처 가능";
-const SHELTER_COOLDOWN_MESSAGE = "피난처 문이 닫히는 중";
+const SHELTER_NIGHT_LOCK_MESSAGE = "Shelter opens only at night.";
+const SHELTER_COOLDOWN_MESSAGE = "Shelter door is still closing.";
 const SHELTER_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
 const SHELTER_MENU_DOWN_KEYS = ["ArrowDown", "KeyS"];
 const SHELTER_VIEW_LEFT_KEYS = ["ArrowLeft", "KeyA"];
@@ -110,7 +111,7 @@ const SHELTER_VIEW_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const SHELTER_EXIT_KEYS = ["KeyC"];
 const SHELTER_BACK_KEYS = ["Escape"];
 const CG_PHOTO_LIMIT = 12;
-const FACE_OFF_ENTRY_KEYS = ["KeyC"];
+const FACE_OFF_ENTRY_KEYS = ["ArrowUp"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD", "KeyS"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
 const FACE_OFF_RELEASE_KEY = "KeyQ";
@@ -128,6 +129,8 @@ const RECOIL_FOCUS_AFTERIMAGE_MAX = LOW_PERFORMANCE_MODE ? 6 : 12;
 const AIR_DASH_HOVER_SECONDS = 0.5;
 const AIR_DASH_HOVER_RISE_SPEED = 35;
 const AIR_DASH_HOVER_BRAKE = 420;
+const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
+const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
 const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
 const AIR_DASH_DISTANCE_MULTIPLIER = 1.25;
 const AIR_DASH_INERTIA_RETAIN_RATIO = 0.25;
@@ -185,7 +188,7 @@ function getDashKeys(state) {
 }
 
 function getInteractKeys(state) {
-  return useLegacyControls(state) ? LEGACY_INTERACT_KEYS : INTERACT_KEYS;
+  return useLegacyControls(state) ? LEGACY_INTERACT_KEYS : WORLD_INTERACT_KEYS;
 }
 
 function getFaceOffEntryKeys(state) {
@@ -2501,6 +2504,265 @@ function playFaceOffShotSound() {
   }
 }
 
+function getGameAudioContext() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return null;
+  }
+  const context = window.__faceOffAudioContext || new AudioContextClass();
+  window.__faceOffAudioContext = context;
+  if (context.state === "suspended") {
+    context.resume?.();
+  }
+  return context;
+}
+
+function getLoopingAudioTrack(slotName, src, volume = 0.45) {
+  if (typeof window === "undefined" || typeof window.Audio === "undefined") {
+    return null;
+  }
+  const existing = window[slotName];
+  if (existing?.kind === "file" && existing.src === src && existing.element) {
+    return existing;
+  }
+  const element = new window.Audio(src);
+  element.loop = true;
+  element.preload = "auto";
+  element.volume = volume;
+  const track = {
+    kind: "file",
+    src,
+    element,
+    pending: false,
+    blocked: false,
+    lastPlayAttemptAt: 0,
+  };
+  window[slotName] = track;
+  return track;
+}
+
+function playLoopingAudioTrack(slotName, src, volume = 0.45, playbackRate = 1) {
+  const track = getLoopingAudioTrack(slotName, src, volume);
+  const element = track?.element;
+  if (!element) {
+    return null;
+  }
+  element.volume = volume;
+  element.playbackRate = playbackRate;
+  if (!element.paused || track.pending) {
+    return track;
+  }
+  const now = Date.now();
+  if (track.blocked && now - (track.lastPlayAttemptAt || 0) < 1000) {
+    return track;
+  }
+  track.lastPlayAttemptAt = now;
+  track.pending = true;
+  track.blocked = false;
+  const playPromise = element.play();
+  if (playPromise?.then) {
+    playPromise
+      .then(() => {
+        track.pending = false;
+        track.blocked = false;
+      })
+      .catch(() => {
+        track.pending = false;
+        track.blocked = true;
+      });
+  } else {
+    track.pending = false;
+  }
+  return track;
+}
+
+function stopLoopingAudioTrack(slotName, reset = false) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const track = window[slotName];
+  const element = track?.element;
+  if (!element) {
+    return;
+  }
+  try {
+    element.pause();
+    if (reset) {
+      element.currentTime = 0;
+    }
+    track.pending = false;
+  } catch {
+    // Music should never affect gameplay.
+  }
+}
+
+function updateSearchMusic(run) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const vault = run?.vaultEscape;
+  if (!run || vault?.active || vault?.lockdownActive || run.faceOff?.active) {
+    stopLoopingAudioTrack("__searchMusic");
+    return;
+  }
+  playLoopingAudioTrack("__searchMusic", SEARCH_MUSIC_SRC, 0.34, 1);
+}
+
+function stopSearchMusic(reset = false) {
+  stopLoopingAudioTrack("__searchMusic", reset);
+}
+
+function playVaultPulse(audio, frequency, duration, gainValue, type = "square") {
+  const context = audio?.context;
+  const master = audio?.master;
+  if (!context || !master) {
+    return;
+  }
+  const now = context.currentTime;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, now);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  oscillator.connect(gain);
+  gain.connect(master);
+  oscillator.start(now);
+  oscillator.stop(now + duration + 0.02);
+}
+
+function startVaultEscapeMusic(run) {
+  if (!run?.vaultEscape || typeof window === "undefined") {
+    return;
+  }
+  stopSearchMusic();
+  const fileTrack = playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, 0.58, 1);
+  if (fileTrack) {
+    return;
+  }
+  try {
+    const context = getGameAudioContext();
+    if (!context) {
+      return;
+    }
+    stopVaultEscapeMusic(0.02);
+    const master = context.createGain();
+    const bass = context.createOscillator();
+    const bassFilter = context.createBiquadFilter();
+    const bassGain = context.createGain();
+    const now = context.currentTime;
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(0.055, now + 0.08);
+    bass.type = "sawtooth";
+    bass.frequency.setValueAtTime(55, now);
+    bassFilter.type = "lowpass";
+    bassFilter.frequency.setValueAtTime(210, now);
+    bassGain.gain.setValueAtTime(0.028, now);
+    bass.connect(bassFilter);
+    bassFilter.connect(bassGain);
+    bassGain.connect(master);
+    master.connect(context.destination);
+    bass.start(now);
+    window.__vaultEscapeMusic = {
+      context,
+      master,
+      bass,
+      bassFilter,
+      bassGain,
+      nextBeatAt: now,
+      step: 0,
+    };
+  } catch {
+    // Music is optional; browsers may block audio until a user gesture.
+  }
+}
+
+function stopVaultEscapeMusic(fadeSeconds = 0.16) {
+  if (typeof window === "undefined" || !window.__vaultEscapeMusic) {
+    return;
+  }
+  const audio = window.__vaultEscapeMusic;
+  if (audio.kind === "file") {
+    stopLoopingAudioTrack("__vaultEscapeMusic", true);
+    window.__vaultEscapeMusic = null;
+    return;
+  }
+  window.__vaultEscapeMusic = null;
+  try {
+    const now = audio.context.currentTime;
+    audio.master?.gain.cancelScheduledValues(now);
+    audio.master?.gain.setValueAtTime(Math.max(0.0001, audio.master.gain.value || 0.0001), now);
+    audio.master?.gain.exponentialRampToValueAtTime(0.0001, now + fadeSeconds);
+    audio.bass?.stop(now + fadeSeconds + 0.02);
+    window.setTimeout(() => {
+      try {
+        audio.master?.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+    }, Math.ceil((fadeSeconds + 0.05) * 1000));
+  } catch {
+    // Audio shutdown should never affect gameplay.
+  }
+}
+
+function updateVaultEscapeMusic(run) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const vault = run?.vaultEscape;
+  if (!vault?.active && !vault?.lockdownActive) {
+    stopVaultEscapeMusic();
+    return;
+  }
+  let audio = window.__vaultEscapeMusic;
+  if (!audio) {
+    startVaultEscapeMusic(run);
+    audio = window.__vaultEscapeMusic;
+  }
+  if (audio?.kind === "file") {
+    const duration = Math.max(1, Number(vault.duration ?? 45));
+    const timeLeft = Math.max(0, Number(vault.timeLeft ?? 0));
+    const urgency = vault.lockdownActive ? 1 : clamp(1 - timeLeft / duration, 0, 1);
+    const volume = vault.lockdownActive ? 0.68 : lerp(0.52, 0.62, urgency);
+    const playbackRate = vault.lockdownActive ? 1.08 : lerp(1, 1.04, urgency);
+    playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, volume, playbackRate);
+    return;
+  }
+  if (!audio?.context) {
+    return;
+  }
+  try {
+    const now = audio.context.currentTime;
+    const duration = Math.max(1, Number(vault.duration ?? 45));
+    const timeLeft = Math.max(0, Number(vault.timeLeft ?? 0));
+    const urgency = vault.lockdownActive ? 1 : clamp(1 - timeLeft / duration, 0, 1);
+    const interval = vault.lockdownActive ? 0.115 : lerp(0.34, 0.15, urgency);
+    const bassFrequency = vault.lockdownActive ? 42 : lerp(52, 76, urgency);
+    audio.master.gain.setTargetAtTime(vault.lockdownActive ? 0.075 : 0.055, now, 0.04);
+    audio.bass.frequency.setTargetAtTime(bassFrequency, now, 0.05);
+    audio.bassFilter.frequency.setTargetAtTime(vault.lockdownActive ? 440 : lerp(190, 340, urgency), now, 0.05);
+    if (now < audio.nextBeatAt) {
+      return;
+    }
+    const pattern = [0, 3, 7, 10, 12, 10, 7, 3];
+    const note = pattern[audio.step % pattern.length];
+    const frequency = 220 * 2 ** (note / 12);
+    playVaultPulse(audio, frequency, 0.075, vault.lockdownActive ? 0.06 : 0.038, "square");
+    if (audio.step % 4 === 0 || vault.lockdownActive) {
+      playVaultPulse(audio, vault.lockdownActive ? 76 : 62, 0.11, 0.052, "triangle");
+    }
+    audio.step += 1;
+    audio.nextBeatAt = now + interval;
+  } catch {
+    stopVaultEscapeMusic(0.02);
+  }
+}
+
 function triggerFaceOffShotFeedback(run, data) {
   const faceOff = run.faceOff;
   if (!faceOff) {
@@ -2605,7 +2867,7 @@ function enterFaceOff(run, data, enemy, state) {
     data,
     "knockdown",
     "knockdown",
-    "살려줘... 반격할 힘도 없어.",
+    "?대젮以?.. 諛섍꺽???섎룄 ?놁뼱.",
   );
   run.player.vx = 0;
   run.player.vy = Math.min(run.player.vy, 0);
@@ -2757,7 +3019,7 @@ function applyFaceOffAttack(run, data, enemy) {
   }
   if ((weaponContext.arm.magazine ?? 0) <= 0) {
     faceOff.message = `${weaponContext.stats.label}: empty`;
-    setFaceOffEnemyLine(run, data, "knockdown", "failed", "총도 비었네.");
+    setFaceOffEnemyLine(run, data, "knockdown", "failed", "珥앸룄 鍮꾩뿀??");
     return;
   }
 
@@ -2778,7 +3040,7 @@ function applyFaceOffAttack(run, data, enemy) {
   enemy.hitFlash = 0.18;
   enemy.staggerTimer = enemy.knockdownStaggerDuration ?? 0.45;
   triggerFaceOffShotFeedback(run, data);
-  setFaceOffEnemyLine(run, data, "knockdown", "hit", "윽...!");
+  setFaceOffEnemyLine(run, data, "knockdown", "hit", "??..!");
   spawnParticles(run, enemy.x + enemy.width * 0.5, enemy.y + enemy.height * 0.45, 8, "#ffd6ba");
 
   if (lethalPart) {
@@ -2797,24 +3059,24 @@ function applyFaceOffDialogue(run, data, enemy, option) {
   const faceOff = run.faceOff;
   const chance = getDialogueChance(enemy, option);
   faceOff.selectedDialogueKey = option.key;
-  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "말로 끝내고 싶다면 빨리 말해.");
+  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "留먮줈 ?앸궡怨??띕떎硫?鍮⑤━ 留먰빐.");
 
   if (Math.random() <= chance) {
     if (option.successEffect === "dealProgress") {
       enemy.dialogueStage = (enemy.dialogueStage ?? 0) + 1;
       if (enemy.dialogueStage >= 2) {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "좋아. 루트 하나는 알려주지.");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "醫뗭븘. 猷⑦듃 ?섎굹???뚮젮二쇱?.");
         finishFaceOff(run, enemy, "deal", "deal");
       } else {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "정보? 네가 뭘 줄 수 있는데?");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "?뺣낫? ?ㅺ? 萸?以????덈뒗??");
         faceOff.message = "deal lead";
       }
       return;
     }
     if (option.type === "threaten") {
-      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "알았어. 총 내려놓을게.");
+      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "?뚯븯?? 珥??대젮?볦쓣寃?");
     } else if (option.type === "deescalate") {
-      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "좋아... 잠깐 멈추지.");
+      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "醫뗭븘... ?좉퉸 硫덉텛吏.");
     }
     finishFaceOff(run, enemy, "surrender", "surrender");
     return;
@@ -2827,11 +3089,11 @@ function applyFaceOffDialogue(run, data, enemy, option) {
   social.fear = clamp(Number(social.fear ?? 0.5) + 0.04, 0, 1);
   social.aggression = clamp(Number(social.aggression ?? 0.5) + 0.03, 0, 1);
   if (option.type === "threaten") {
-    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "그 협박은 안 통해.");
+    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "洹??묐컯? ???듯빐.");
   } else if (option.type === "deescalate") {
-    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "멈추는 건 네 쪽이야.");
+    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "硫덉텛??嫄???履쎌씠??");
   } else {
-    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "친구 같은 소리 하지 마.");
+    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "移쒓뎄 媛숈? ?뚮━ ?섏? 留?");
   }
   faceOff.message = "dialogue failed";
 }
@@ -2840,7 +3102,7 @@ function failFaceOff(run, data, enemy) {
   if (!enemy || !run.faceOff) {
     return;
   }
-  setFaceOffEnemyLine(run, data, "knockdown", "failed", "놓치면 기어서라도 도망칠 거야.");
+  setFaceOffEnemyLine(run, data, "knockdown", "failed", "?볦튂硫?湲곗뼱?쒕씪???꾨쭩移?嫄곗빞.");
   closeFaceOff(run, "cancelled");
 }
 
@@ -4735,7 +4997,7 @@ function enterBraceHold(player, run, data, config, wall, moveAxis) {
   refillRecoilShot(player, config);
   resetShotgunFireCooldown(run, data);
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 6, "#8fe1ff");
-  pushNotice(run, "벽 고정");
+  pushNotice(run, "踰?怨좎젙");
 }
 
 function updateBraceHold(player, data, config, wall, dt, moveAxis) {
@@ -4804,7 +5066,7 @@ function launchFromWallRun(player, run, config) {
   player.wallSlideGraceDirection = 0;
   player.wallRunBoostActive = true;
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#b8f0ff");
-  pushNotice(run, "벽 런 발사");
+  pushNotice(run, "踰???諛쒖궗");
   clearWallRun(player);
 }
 
@@ -4846,7 +5108,7 @@ function performBraceVault(player, run, config, wall, moveAxis) {
   player.braceReleaseTimer = 0.16;
   player.braceActive = true;
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 10, "#8fe1ff");
-  pushNotice(run, "벽 반동");
+  pushNotice(run, "踰?諛섎룞");
 }
 
 function updateMovementVfx(run, data, dt) {
@@ -5638,7 +5900,7 @@ function updatePlayer(run, data, state, dt, input) {
     run.battery = Math.max(0, run.battery - data.player.lightDrainPerSecond * dt);
     if (run.battery === 0) {
       player.lightActive = false;
-      pushNotice(run, "배터리 소진.");
+      pushNotice(run, "諛고꽣由??뚯쭊.");
     }
   }
 
@@ -5877,13 +6139,13 @@ function updateTimePhase(run, data, dt) {
 
   if (previousPhase !== run.timePhase) {
     if (run.timePhase === "dusk") {
-      pushNotice(run, "황혼 진입.");
-      pushClue(run, "phase-dusk", "빛이 약해진다. Q는 시야만 보조한다.");
+      pushNotice(run, "?⑺샎 吏꾩엯.");
+      pushClue(run, "phase-dusk", "鍮쏆씠 ?쏀빐吏꾨떎. Q???쒖빞留?蹂댁“?쒕떎.");
     } else if (run.timePhase === "night") {
       run.nightActive = true;
       run.nightTransitionTimer = NIGHT_TRANSITION_SECONDS;
-      pushNotice(run, "야간 위협 활성.");
-      pushClue(run, "phase-night", "밤엔 귀환 비용이 커진다.");
+      pushNotice(run, "?쇨컙 ?꾪삊 ?쒖꽦.");
+      pushClue(run, "phase-night", "諛ㅼ뿏 洹??鍮꾩슜??而ㅼ쭊??");
     }
   }
 
@@ -5914,7 +6176,7 @@ function resolveHarvest(run, encounter, abilityId = "threatSense") {
   run.sanity = clamp(run.sanity - encounter.harvestSanityCost, 0, 100);
   uniquePush(run.pendingUnlocks, abilityId);
   uniquePush(run.successfulHarvestIds, encounter.id);
-  pushNotice(run, `${encounter.label} 수확.`);
+  pushNotice(run, `${encounter.label} ?섑솗.`);
   spawnParticles(run, encounter.x + encounter.width / 2, encounter.y + 24, 16, "#ff8e72");
 }
 
@@ -5927,7 +6189,7 @@ function resolveRelease(run, encounter) {
   run.sanity = clamp(run.sanity + encounter.releaseSanity, 0, 100);
   uniquePush(run.pendingStoryFlags, encounter.storyFlag);
   uniquePush(run.successfulReleaseIds, encounter.id);
-  pushNotice(run, `${encounter.label} 구원.`);
+  pushNotice(run, `${encounter.label} 援ъ썝.`);
   spawnParticles(run, encounter.x + encounter.width / 2, encounter.y + 16, 16, "#a8f7cf");
 }
 
@@ -5966,13 +6228,13 @@ function updateAttackHits(run) {
     if (target.type === "guard" && target.state !== "dead" && target.state !== "released") {
       target.state = "chase";
       target.wasProvoked = true;
-      pushNotice(run, "검문 절차가 깨졌다.");
+      pushNotice(run, "寃臾??덉감媛 源⑥죱??");
     }
 
     if (target.type === "ritualist" && target.state !== "dead" && target.state !== "released") {
       target.state = "hostile";
       target.wasProvoked = true;
-      pushNotice(run, "의식이 너를 향한다.");
+      pushNotice(run, "?섏떇???덈? ?ν븳??");
     }
 
     if (target.id.startsWith("shade")) {
@@ -6029,7 +6291,7 @@ function updateGuard(run, data, dt) {
       guard.state = "warn";
       guard.warningTimer = player.lightActive ? 0.2 : 0.8;
       pushClue(run, "guard-motion", guard.clues.motion);
-      pushNotice(run, "정지 경고.");
+      pushNotice(run, "?뺤? 寃쎄퀬.");
     }
   } else if (guard.state === "warn") {
     guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
@@ -6039,12 +6301,12 @@ function updateGuard(run, data, dt) {
       guard.state = "inspect";
       guard.inspectProgress = 0;
       pushClue(run, "guard-still", guard.clues.still);
-      pushNotice(run, "정지 유지.");
+      pushNotice(run, "?뺤? ?좎?.");
     } else if (guard.warningTimer === 0) {
       if (inDetection && (isMoving || player.lightActive)) {
         guard.state = "chase";
         guard.wasProvoked = true;
-        pushNotice(run, "감시자가 추적한다.");
+        pushNotice(run, "媛먯떆?먭? 異붿쟻?쒕떎.");
       } else {
         guard.state = "patrol";
       }
@@ -6061,7 +6323,7 @@ function updateGuard(run, data, dt) {
       guard.inspectProgress = 0;
       pushClue(run, "guard-badge", guard.clues.badge);
       pushClue(run, "guard-still", guard.clues.still);
-      pushNotice(run, "증표 확인. 움직이지 마.");
+      pushNotice(run, "利앺몴 ?뺤씤. ?吏곸씠吏 留?");
     }
 
     if (!inDetection) {
@@ -6076,7 +6338,7 @@ function updateGuard(run, data, dt) {
 
     if (canSeePlayer && distance < guard.attackRange && guard.attackCooldown === 0) {
       guard.attackCooldown = 1;
-      damagePlayer(run, guard.damage, direction, "감시자 근접 타격.");
+      damagePlayer(run, guard.damage, direction, "媛먯떆??洹쇱젒 ?寃?");
     }
   } else if (guard.state === "inspect") {
     guard.facing = playerCenter.x >= guardCenter.x ? 1 : -1;
@@ -6084,7 +6346,7 @@ function updateGuard(run, data, dt) {
       guard.state = "warn";
       guard.warningTimer = 0.45;
       guard.inspectProgress = 0;
-      pushNotice(run, "검문 중단. 다시 멈춰라.");
+      pushNotice(run, "寃臾?以묐떒. ?ㅼ떆 硫덉떠??");
       return;
     }
 
@@ -6117,7 +6379,7 @@ function usePedestal(run, pedestal) {
     return;
   }
   if (ritualist.state === "hostile") {
-    pushNotice(run, "의식이 깨졌다. 잠시 물러서라.");
+    pushNotice(run, "?섏떇??源⑥죱?? ?좎떆 臾쇰윭?쒕씪.");
     return;
   }
 
@@ -6128,7 +6390,7 @@ function usePedestal(run, pedestal) {
       ritualist,
       "ritual-wrong",
       ritualist.clues.wrong,
-      "순서 오류. 의식이 뒤집힌다."
+      "?쒖꽌 ?ㅻ쪟. ?섏떇???ㅼ쭛?뚮떎."
     );
     return;
   }
@@ -6145,7 +6407,7 @@ function usePedestal(run, pedestal) {
     return;
   }
 
-  pushNotice(run, `${pedestal.label} 반응.`);
+  pushNotice(run, `${pedestal.label} 諛섏쓳.`);
 }
 
 function updateRitualist(run, data, dt) {
@@ -6187,7 +6449,7 @@ function updateRitualist(run, data, dt) {
         ritualist,
         "ritual-light",
         ritualist.clues.light,
-        "빛에 의식이 깨졌다."
+        "鍮쏆뿉 ?섏떇??源⑥죱??"
       );
     }
   } else if (ritualist.state === "hostile") {
@@ -6199,7 +6461,7 @@ function updateRitualist(run, data, dt) {
 
     if (canSeePlayer && distance < ritualist.attackRange && ritualist.attackCooldown === 0) {
       ritualist.attackCooldown = 1.1;
-      damagePlayer(run, ritualist.damage, direction, "의식자 타격.");
+      damagePlayer(run, ritualist.damage, direction, "?섏떇???寃?");
     }
 
     if (canSeePlayer && (inArea || distance < 360)) {
@@ -6210,7 +6472,7 @@ function updateRitualist(run, data, dt) {
         ritualist.state = "ritual";
         ritualist.calmTimer = 0;
         resetRitualPedestals(ritualist);
-        pushNotice(run, "의식이 다시 고요해진다.");
+        pushNotice(run, "?섏떇???ㅼ떆 怨좎슂?댁쭊??");
       }
     }
   }
@@ -6241,7 +6503,7 @@ function updateThreats(run, data, dt) {
 
       if (distance < threat.attackRange && threat.attackCooldown === 0) {
         threat.attackCooldown = 1;
-        damagePlayer(run, threat.damage, direction, "어둠 속 위협이 덮친다.");
+        damagePlayer(run, threat.damage, direction, "?대몺 ???꾪삊????튇??");
       }
     } else {
       if (moveEntityHorizontallyWithWalls(threat, data, threat.patrolDirection * threat.speed * dt, run)) {
@@ -7302,7 +7564,7 @@ function openLootCrate(run, crate) {
   run.loot.holdItemId = null;
   run.loot.holdProgress = 0;
   run.loot.lastRarity = null;
-  pushNotice(run, `${crate.label} 개봉.`);
+  pushNotice(run, `${crate.label} 媛쒕큺.`);
   spawnParticles(run, crate.x + crate.width / 2, crate.y + 8, 8, "#93eaff");
 }
 
@@ -7377,7 +7639,7 @@ function collectLootItem(run, crate, item) {
     item.blockedTimer = 0.75;
     item.transferProgress = 0;
     item.lootProgress = 0;
-    pushNotice(run, "가방 공간 부족.");
+    pushNotice(run, "媛諛?怨듦컙 遺議?");
     return false;
   }
 
@@ -7407,17 +7669,17 @@ function collectLootItem(run, crate, item) {
     run.loot.rareSignalTimer = 1.15;
     run.loot.lastRarity = item.rarity;
     crate.rareSignalTimer = 1.15;
-    pushNotice(run, `${item.name} 확보. 희귀 반응 감지.`);
+    pushNotice(run, `${item.name} ?뺣낫. ?ш? 諛섏쓳 媛먯?.`);
     spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 18, "#87e1ff");
     spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 8, "#f6e98a");
   } else {
-    pushNotice(run, `${item.name} 확보.`);
+    pushNotice(run, `${item.name} ?뺣낫.`);
     spawnParticles(run, crate.x + crate.width / 2, crate.y + crate.height / 2, 10, "#93eaff");
   }
 
   crate.searched = crate.items.every((entry) => entry.looted);
   if (crate.searched) {
-    pushNotice(run, `${crate.label} 수색 완료.`);
+    pushNotice(run, `${crate.label} ?섏깋 ?꾨즺.`);
   }
   return true;
 }
@@ -7522,6 +7784,7 @@ function updateLootInteraction(state, data, dt) {
 function getInteractionTargets(run, data) {
   const playerCenter = getCenter(run.player);
   const targets = [];
+  const escapeActive = isVaultEscapeActive(run);
 
   const faceOffEnemy = findFaceOffInteractionCandidate(run, data);
   if (faceOffEnemy) {
@@ -7537,7 +7800,7 @@ function getInteractionTargets(run, data) {
   }
 
   const gate = data.extractionGate;
-  if (gate) {
+  if (gate && !escapeActive) {
     const gateRect = createRect(gate.x, gate.y, gate.width, gate.height);
     if (distanceBetween(playerCenter, getCenter(gateRect)) < 110) {
       targets.push({
@@ -7550,7 +7813,27 @@ function getInteractionTargets(run, data) {
     }
   }
 
+  for (const exit of run.escapeExits || []) {
+    if (!escapeActive) {
+      continue;
+    }
+    const exitRect = createRect(exit.x, exit.y, exit.width, exit.height);
+    if (distanceBetween(playerCenter, getCenter(exitRect)) < 118) {
+      targets.push({
+        id: exit.id,
+        kind: "escapeExit",
+        escapeExit: exit,
+        text: normalizeInteractionPrompt(exit.prompt || "E: Escape"),
+        x: exit.x + exit.width / 2,
+        y: exit.y - 12,
+      });
+    }
+  }
+
   for (const routeExit of data.routeExits || []) {
+    if (escapeActive) {
+      continue;
+    }
     const exitRect = createRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
     if (distanceBetween(playerCenter, getCenter(exitRect)) < 118) {
       discoverRouteExit(run, data, routeExit);
@@ -7561,7 +7844,7 @@ function getInteractionTargets(run, data) {
         id: routeExit.id,
         kind: shelterBlockReason ? "shelterLocked" : "routeExit",
         routeExit,
-        text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "Z: 다음 구역"),
+        text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "Z: ?ㅼ쓬 援ъ뿭"),
         x: routeExit.x + routeExit.width / 2,
         y: routeExit.y - 12,
       });
@@ -7604,6 +7887,38 @@ function getInteractionTargets(run, data) {
     }
   }
 
+  for (const door of run.vaultDoors || []) {
+    if (door.hacked || run.vaultEscape?.completed) {
+      continue;
+    }
+    if (distanceBetween(playerCenter, getCenter(door)) < 112) {
+      targets.push({
+        id: door.id,
+        kind: "vaultDoor",
+        vaultDoor: door,
+        text: normalizeInteractionPrompt(door.prompt || "E: Hack vault"),
+        x: door.x + door.width / 2,
+        y: door.y - 12,
+      });
+    }
+  }
+
+  for (const loot of run.vaultLoot || []) {
+    if (loot.collected || !escapeActive) {
+      continue;
+    }
+    if (distanceBetween(playerCenter, getCenter(loot)) < 86) {
+      targets.push({
+        id: loot.id,
+        kind: "vaultLoot",
+        vaultLoot: loot,
+        text: normalizeInteractionPrompt(loot.prompt || "E: Take supplies"),
+        x: loot.x + loot.width / 2,
+        y: loot.y - 12,
+      });
+    }
+  }
+
   for (const crate of run.lootCrates || []) {
     if (crate.searched) {
       continue;
@@ -7613,7 +7928,7 @@ function getInteractionTargets(run, data) {
         id: crate.id,
         kind: "lootCrate",
         crate,
-        text: normalizeInteractionPrompt(crate.opened ? "Z: 상자 확인" : crate.prompt),
+        text: normalizeInteractionPrompt(crate.opened ? "Z: ?곸옄 ?뺤씤" : crate.prompt),
         x: crate.x + crate.width / 2,
         y: crate.y - 12,
       });
@@ -7646,16 +7961,116 @@ function getInteractionTargets(run, data) {
 }
 
 function getZipLinePrompt(zipLine) {
-  const prompt = zipLine?.prompt || "E: Zipline";
-  return prompt.replace(/^(?:Space\/D|Space\/Z|D\/Z|D|E|Z)\s*:/i, "C:");
+  const prompt = zipLine?.prompt || "Up: Zipline";
+  return prompt.replace(/^(?:Space\/D|Space\/Z|D\/Z|D|C|E|Z|Up)\s*:/i, "Up:");
 }
 
 function normalizeInteractionPrompt(prompt) {
-  return (prompt || "").replace(/^(?:D\/Z|D|E|Z)\s*:/i, "C:");
+  return (prompt || "").replace(/^(?:D\/Z|D|C|E|Z|Up)\s*:/i, "Up:");
 }
 
 function normalizeExtractionPrompt(prompt) {
-  return (prompt || "C: 추출").replace(/^(?:D\/Z|D|E|Z)\s*:/i, "C:");
+  return (prompt || "Up: Exit").replace(/^(?:D\/Z|D|C|E|Z|Up)\s*:/i, "Up:");
+}
+
+function isVaultEscapeActive(run) {
+  return Boolean(run?.vaultEscape?.active && !run.vaultEscape.completed && !run.vaultEscape.failed);
+}
+
+function isVaultLockdownActive(run) {
+  return Boolean(run?.vaultEscape?.lockdownActive && !run.vaultEscape.completed);
+}
+
+export function beginVaultEscape(run, door) {
+  if (!run?.vaultEscape || !door || isVaultEscapeActive(run) || run.vaultEscape.completed) {
+    return false;
+  }
+  door.hacked = true;
+  const duration = Math.max(1, Number(door.duration ?? run.vaultEscape.duration ?? 60));
+  run.vaultEscape.active = true;
+  run.vaultEscape.failed = false;
+  run.vaultEscape.lockdownActive = false;
+  run.vaultEscape.lockdownTimer = 0;
+  run.vaultEscape.completed = false;
+  run.vaultEscape.doorId = door.id;
+  run.vaultEscape.duration = duration;
+  run.vaultEscape.timeLeft = duration;
+  run.vaultEscape.collected = (run.vaultLoot || []).filter((loot) => loot.collected).length;
+  run.vaultEscape.valueCollected = (run.vaultLoot || []).reduce((sum, loot) => (
+    sum + (loot.collected ? Math.max(0, Number(loot.value ?? 25)) : 0)
+  ), 0);
+  run.vaultEscape.totalLoot = (run.vaultLoot || []).length;
+  run.vaultEscape.totalValue = (run.vaultLoot || []).reduce((sum, loot) => sum + Math.max(0, Number(loot.value ?? 25)), 0);
+  closeLootCrate(run);
+  pushNotice(run, "Vault alarm armed. Grab supplies and escape.");
+  spawnParticles(run, door.x + door.width / 2, door.y + door.height / 2, 18, "#ff7a66");
+  startVaultEscapeMusic(run);
+  return true;
+}
+
+function beginVaultLockdown(run) {
+  if (!run?.vaultEscape || isVaultLockdownActive(run)) {
+    return false;
+  }
+  run.vaultEscape.active = false;
+  run.vaultEscape.failed = true;
+  run.vaultEscape.lockdownActive = true;
+  run.vaultEscape.lockdownDuration = Math.max(0.4, Number(run.vaultEscape.lockdownDuration ?? 1.6));
+  run.vaultEscape.lockdownTimer = run.vaultEscape.lockdownDuration;
+  run.vaultEscape.timeLeft = 0;
+  closeLootCrate(run);
+  run.message = "LOCKDOWN. All exits sealed.";
+  run.noticeTimer = Math.max(run.noticeTimer ?? 0, run.vaultEscape.lockdownDuration);
+  pushNotice(run, run.message);
+  spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + run.player.height / 2, 24, "#ff7a66");
+  updateVaultEscapeMusic(run);
+  return true;
+}
+
+function collectVaultLoot(run, loot) {
+  if (!run?.vaultEscape || !loot || loot.collected || !isVaultEscapeActive(run)) {
+    return false;
+  }
+  const value = Math.max(0, Number(loot.value ?? 25));
+  loot.collected = true;
+  loot.collectedAt = run.time ?? 0;
+  run.materials += value;
+  run.vaultEscape.collected = Math.min(
+    run.vaultEscape.totalLoot,
+    (run.vaultEscape.collected ?? 0) + 1,
+  );
+  run.vaultEscape.valueCollected = Math.min(
+    run.vaultEscape.totalValue,
+    (run.vaultEscape.valueCollected ?? 0) + value,
+  );
+  pushNotice(run, `${loot.label || "Supplies"} secured.`);
+  spawnParticles(run, loot.x + loot.width / 2, loot.y + loot.height / 2, 12, "#e7f47e");
+  return true;
+}
+
+function updateVaultEscapeTimer(state, data, dt) {
+  const run = state.run;
+  if (isVaultLockdownActive(run)) {
+    updateLootLockedPlayer(run, dt);
+    run.vaultEscape.lockdownTimer = Math.max(0, (run.vaultEscape.lockdownTimer ?? 0) - dt);
+    updateVaultEscapeMusic(run);
+    if (run.vaultEscape.lockdownTimer > 0) {
+      return true;
+    }
+    run.vaultEscape.lockdownActive = false;
+    applyFailure(state, data, "vaultLockdown");
+    return true;
+  }
+  if (!isVaultEscapeActive(run)) {
+    return false;
+  }
+  run.vaultEscape.timeLeft = Math.max(0, (run.vaultEscape.timeLeft ?? 0) - dt);
+  updateVaultEscapeMusic(run);
+  if (run.vaultEscape.timeLeft > 0) {
+    return false;
+  }
+  beginVaultLockdown(run);
+  return true;
 }
 
 function getNearestZipLineInteractionTarget(run, data) {
@@ -7701,10 +8116,11 @@ function tryBeginZipLineRideFromMountInput(state, data) {
   }
 
   const nearest = getNearestZipLineInteractionTarget(run, data);
-  const mountPressed = useLegacyControls(state)
-    ? consumeEitherPress(state, getZipLineMountKeys(state))
-    : consumeShortReleasedKey(state, getZipLineMountKeys(state));
-  if (!nearest || !mountPressed) {
+  if (!nearest) {
+    return false;
+  }
+  const mountPressed = consumeEitherPress(state, getZipLineMountKeys(state));
+  if (!mountPressed) {
     return false;
   }
 
@@ -7724,20 +8140,71 @@ function getEncounterOutcome(encounter) {
   return encounter.wasProvoked ? "failed" : "ignored";
 }
 
+function getVaultResultSummary(run) {
+  const vault = run?.vaultEscape;
+  const loot = run?.vaultLoot || [];
+  const doors = run?.vaultDoors || [];
+  const attempted = Boolean(
+    vault?.active ||
+    vault?.completed ||
+    vault?.failed ||
+    vault?.doorId ||
+    doors.some((door) => door.hacked) ||
+    loot.some((item) => item.collected),
+  );
+  if (!attempted && loot.length === 0 && doors.length === 0) {
+    return null;
+  }
+
+  const totalLoot = Math.max(0, Number(vault?.totalLoot ?? loot.length) || 0);
+  const totalValue = Math.max(0, Number(vault?.totalValue ?? loot.reduce((sum, item) => (
+    sum + Math.max(0, Number(item.value ?? 25))
+  ), 0)) || 0);
+  const collected = Math.max(0, Number(vault?.collected ?? loot.filter((item) => item.collected).length) || 0);
+  const valueCollected = Math.max(0, Number(vault?.valueCollected ?? loot.reduce((sum, item) => (
+    sum + (item.collected ? Math.max(0, Number(item.value ?? 25)) : 0)
+  ), 0)) || 0);
+  const recoveryRate = totalValue > 0
+    ? valueCollected / totalValue
+    : totalLoot > 0
+      ? collected / totalLoot
+      : 0;
+
+  return {
+    attempted,
+    completed: Boolean(vault?.completed),
+    failed: Boolean(vault?.failed),
+    lockedDown: Boolean(vault?.failed || vault?.lockdownActive),
+    doorId: vault?.doorId || null,
+    collected,
+    totalLoot,
+    valueCollected,
+    totalValue,
+    recoveryRate,
+    perfect: totalLoot > 0 && collected >= totalLoot,
+    duration: Math.max(0, Number(vault?.duration ?? 0) || 0),
+    timeLeft: Math.max(0, Number(vault?.timeLeft ?? 0) || 0),
+  };
+}
+
 function applyExtraction(state, data) {
   const run = state.run;
+  const vaultSummary = getVaultResultSummary(run);
+  stopVaultEscapeMusic();
+  stopSearchMusic();
   if (isMovementLab(data)) {
     state.resultSummary = {
       success: true,
       labSession: true,
       materials: run.materials,
       timePhase: run.timePhase,
+      vault: vaultSummary,
     };
     clearSavedGame();
     state.run = null;
     state.scene = SCENES.RESULTS;
     state.sceneTimer = 0;
-    setStatus(state, "실험 종료. C/Z");
+    setStatus(state, "?ㅽ뿕 醫낅즺. C/Z");
     return;
   }
 
@@ -7763,6 +8230,7 @@ function applyExtraction(state, data) {
       trustDelta,
       materials: run.materials,
       nightReached: run.nightActive,
+      vault: vaultSummary,
     },
   };
   saveMetaState(state.meta);
@@ -7773,6 +8241,7 @@ function applyExtraction(state, data) {
     outcomes,
     trustDelta,
     materials: run.materials,
+    vault: vaultSummary,
     newUnlocks,
     newStories: data.encounters
       .filter((encounter) => newStories.includes(encounter.storyFlag))
@@ -7785,22 +8254,26 @@ function applyExtraction(state, data) {
   state.run = null;
   state.scene = SCENES.RESULTS;
   state.sceneTimer = 0;
-  setStatus(state, "귀환 완료. C/Z");
+  setStatus(state, "洹???꾨즺. C/Z");
 }
 
 function applyFailure(state, data, reason) {
+  const vaultSummary = getVaultResultSummary(state.run);
+  stopVaultEscapeMusic();
+  stopSearchMusic();
   if (isMovementLab(data)) {
     state.resultSummary = {
       success: false,
       labSession: true,
       reason,
       lostMaterials: 0,
+      vault: vaultSummary,
     };
     clearSavedGame();
     state.run = null;
     state.scene = SCENES.GAME_OVER;
     state.sceneTimer = 0;
-    setStatus(state, "실험 리셋. C/Z");
+    setStatus(state, "?ㅽ뿕 由ъ뀑. C/Z");
     return;
   }
 
@@ -7808,15 +8281,18 @@ function applyFailure(state, data, reason) {
     success: false,
     reason,
     lostMaterials: state.run.materials,
+    vault: vaultSummary,
   };
   clearSavedGame();
   state.run = null;
   state.scene = SCENES.GAME_OVER;
   state.sceneTimer = 0;
-  setStatus(state, "런 실패. C/Z");
+  setStatus(state, "???ㅽ뙣. C/Z");
 }
 
 function restartCurrentRun(state, data) {
+  stopVaultEscapeMusic();
+  stopSearchMusic(true);
   clearSavedGame();
   state.run = createRunState(data, state.meta);
   state.scene = SCENES.EXPEDITION;
@@ -7826,13 +8302,17 @@ function restartCurrentRun(state, data) {
     state.liveEdit.hoverPlatformIndex = null;
     state.liveEdit.drag = null;
   }
-  setStatus(state, "스폰으로 복귀.");
+  setStatus(state, "?ㅽ룿?쇰줈 蹂듦?.");
   saveCurrentGame(state, data);
 }
 
 const LEVEL_STATE_KEYS = [
   "interactables",
   "lootCrates",
+  "vaultDoors",
+  "vaultLoot",
+  "escapeExits",
+  "vaultEscape",
   "encounters",
   "threats",
   "hostileDrones",
@@ -8017,12 +8497,12 @@ function setRunNotice(run, message, duration = 1.8) {
 
 function getRunTimePhaseLabel(run) {
   if (run?.timePhase === "night") {
-    return "밤";
+    return "night";
   }
   if (run?.timePhase === "dusk") {
-    return "황혼";
+    return "dusk";
   }
-  return "낮";
+  return "day";
 }
 
 function setDebugNightPhase(state, data) {
@@ -8035,7 +8515,7 @@ function setDebugNightPhase(state, data) {
   run.timePhase = "night";
   run.nightActive = true;
   run.nightTransitionTimer = NIGHT_TRANSITION_SECONDS;
-  setRunNotice(run, "테스트: 밤으로 전환", 2);
+  setRunNotice(run, "?뚯뒪?? 諛ㅼ쑝濡??꾪솚", 2);
   setStatus(state, run.message);
   saveCurrentGame(state, data);
   return true;
@@ -8240,9 +8720,9 @@ function beginShelterRest(state, data, returnLevelId, returnEntranceId) {
   }
   ensureCgArchive(state.meta || {});
   preloadShelterCgIllustration(data, run.day);
-  run.message = `DAY ${run.day} · 피난처 도착`;
+  run.message = `DAY ${run.day} 쨌 ?쇰궃泥??꾩갑`;
   run.noticeTimer = 2.6;
-  setStatus(state, "피난처 폐쇄 중.");
+  setStatus(state, "?쇰궃泥??먯뇙 以?");
   saveCurrentGame(state, data);
 }
 
@@ -8289,7 +8769,7 @@ function saveShelterPhoto(state, data) {
   }
   const image = rest.photo?.capturedImage || createShelterPhotoImage(run, data, rest);
   if (!image) {
-    run.message = "CG 저장 실패.";
+    run.message = "CG ????ㅽ뙣.";
     run.noticeTimer = 1.8;
     return false;
   }
@@ -8311,7 +8791,7 @@ function saveShelterPhoto(state, data) {
   archive.photos = archive.photos.slice(-CG_PHOTO_LIMIT);
   saveMetaState(state.meta);
   rest.recordsIndex = Math.max(0, archive.photos.length - 1);
-  run.message = "CG 일러스트 저장.";
+  run.message = "CG ?쇰윭?ㅽ듃 ???";
   run.noticeTimer = 2.2;
   return true;
 }
@@ -8345,7 +8825,7 @@ function transitionToLevel(state, data, targetLevelId, entranceId = "start", opt
   snapCameraToPlayer(run, data);
   updateMapExploration(run, data);
 
-  run.message = options.message || `${data.levelLabel || resolvedTargetLevelId} 진입.`;
+  run.message = options.message || `${data.levelLabel || resolvedTargetLevelId} 吏꾩엯.`;
   run.noticeTimer = 2.6;
   setStatus(state, run.message);
   if (options.persist !== false) {
@@ -8376,7 +8856,7 @@ function transitionToRouteExit(state, data, routeExit) {
   }
   const result = transitionToLevel(state, data, routeExit.toLevelId, routeExit.toEntranceId || "start", {
     persist: !shelterRoute,
-    message: shelterRoute ? "피난처 진입." : undefined,
+    message: shelterRoute ? "?쇰궃泥?吏꾩엯." : undefined,
   });
   if (shelterRoute && result) {
     beginShelterRest(state, data, fromLevelId, routeExit.returnEntranceId || "start");
@@ -8393,7 +8873,7 @@ function leaveShelterRest(state, data) {
   const entranceId = rest.returnEntranceId || "start";
   const result = transitionToLevel(state, data, targetLevelId, entranceId, {
     persist: false,
-    message: "피난처 출발.",
+    message: "?쇰궃泥?異쒕컻.",
   });
   if (!result) {
     return;
@@ -8417,7 +8897,7 @@ function leaveShelterRest(state, data) {
     backgroundIndex: 0,
   };
   run.shelterExitCooldown = SHELTER_EXIT_COOLDOWN_SECONDS;
-  run.message = `${data.levelLabel || targetLevelId} 복귀.`;
+  run.message = `${data.levelLabel || targetLevelId} 蹂듦?.`;
   run.noticeTimer = 2.6;
   setStatus(state, run.message);
   saveCurrentGame(state, data);
@@ -8634,7 +9114,7 @@ function updateInteractions(state, data, canInteract) {
     !isMoving &&
     !player.lightActive
   ) {
-    run.prompt = "정지 유지";
+    run.prompt = "?뺤? ?좎?";
     run.promptWorld = {
       x: guard.checkpointZone.x + guard.checkpointZone.width / 2,
       y: guard.checkpointZone.y - 10,
@@ -8650,7 +9130,7 @@ function updateInteractions(state, data, canInteract) {
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0
   ) {
-    run.prompt = "C: 벽 짚기";
+    run.prompt = "C: 踰?吏싰린";
     run.promptWorld = {
       x: braceWall.x + braceWall.width * 0.5,
       y: braceWall.y - 12,
@@ -8671,9 +9151,7 @@ function updateInteractions(state, data, canInteract) {
   }
 
   if (nearest.kind === "faceOff") {
-    const faceOffPressed = useLegacyControls(state)
-      ? consumeEitherPress(state, getFaceOffEntryKeys(state))
-      : consumeShortReleasedKey(state, getFaceOffEntryKeys(state));
+    const faceOffPressed = consumeEitherPress(state, getFaceOffEntryKeys(state));
     if (!faceOffPressed) {
       return;
     }
@@ -8681,14 +9159,24 @@ function updateInteractions(state, data, canInteract) {
     return;
   }
 
-  const interactPressed = useLegacyControls(state)
-    ? consumeEitherPress(state, getInteractKeys(state))
-    : consumeShortReleasedKey(state, getInteractKeys(state));
+  const interactPressed = consumeEitherPress(state, getInteractKeys(state));
   if (!interactPressed) {
     return;
   }
 
   if (nearest.kind === "extract") {
+    applyExtraction(state, data);
+    return;
+  }
+
+  if (nearest.kind === "escapeExit") {
+    if (run.vaultEscape) {
+      run.vaultEscape.active = false;
+      run.vaultEscape.completed = true;
+      run.vaultEscape.lockdownActive = false;
+      run.vaultEscape.lockdownTimer = 0;
+    }
+    pushNotice(run, "Escaped before lockdown.");
     applyExtraction(state, data);
     return;
   }
@@ -8719,6 +9207,16 @@ function updateInteractions(state, data, canInteract) {
     return;
   }
 
+  if (nearest.kind === "vaultDoor") {
+    beginVaultEscape(run, nearest.vaultDoor);
+    return;
+  }
+
+  if (nearest.kind === "vaultLoot") {
+    collectVaultLoot(run, nearest.vaultLoot);
+    return;
+  }
+
   const item = run.interactables.find((entry) => entry.id === nearest.id);
   if (!item) {
     return;
@@ -8728,7 +9226,7 @@ function updateInteractions(state, data, canInteract) {
   if (item.kind === "badge-locker") {
     run.inventory.badge = true;
     pushClue(run, "guard-badge", item.clue);
-    pushNotice(run, "통행 배지 확보.");
+    pushNotice(run, "?듯뻾 諛곗? ?뺣낫.");
     spawnParticles(run, item.x + item.width / 2, item.y + 12, 12, "#f4dda6");
     return;
   }
@@ -8736,7 +9234,7 @@ function updateInteractions(state, data, canInteract) {
   if (item.kind === "salvage") {
     run.materials += item.materials;
     pushClue(run, item.id, item.clue);
-    pushNotice(run, `${item.materials} 자재 확보.`);
+    pushNotice(run, `${item.materials} ?먯옱 ?뺣낫.`);
     spawnParticles(run, item.x + item.width / 2, item.y + 12, 10, "#8fe1ff");
   }
 }
@@ -8775,10 +9273,10 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
       rest.menuIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1);
-      setStatus(state, "피난처 대기.");
+      setStatus(state, "?쇰궃泥??湲?");
       saveCurrentGame(state, data);
     } else {
-      setStatus(state, "피난처 폐쇄 중.");
+      setStatus(state, "?쇰궃泥??먯뇙 以?");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8802,27 +9300,27 @@ function updateShelterRestMode(state, data, dt) {
         rest.timer = 0;
         resetShelterPhoto(rest);
         preloadShelterCgIllustration(data, run.day);
-        setStatus(state, "CG 촬영 모드.");
+        setStatus(state, "CG 珥ъ쁺 紐⑤뱶.");
       } else if (item === "records") {
         rest.phase = "records";
         rest.timer = 0;
         rest.recordsIndex = clamp(Math.floor(rest.recordsIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).photos.length - 1));
-        setStatus(state, "기록 보기.");
+        setStatus(state, "湲곕줉 蹂닿린.");
       } else if (item === "background") {
         rest.phase = "background";
         rest.timer = 0;
         rest.backgroundIndex = clamp(Math.floor(rest.backgroundIndex || 0), 0, Math.max(0, ensureCgArchive(state.meta || {}).unlockedBackgroundIds.length - 1));
-        setStatus(state, "배경 보기.");
+        setStatus(state, "諛곌꼍 蹂닿린.");
       } else if (item === "exit") {
         leaveShelterRest(state, data);
         return true;
       } else {
-        run.message = "피난처 휴식 완료.";
+        run.message = "?쇰궃泥??댁떇 ?꾨즺.";
         run.noticeTimer = 1.8;
         setStatus(state, run.message);
       }
     } else {
-      setStatus(state, "피난처 · Z 선택 · C 밖으로");
+      setStatus(state, "Shelter menu. Z select. C exit.");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8846,7 +9344,7 @@ function updateShelterRestMode(state, data, dt) {
     } else if (consumeEitherPress(state, INTERACT_KEYS)) {
       if (!isShelterCgIllustrationReady(data, getShelterConfig(data).backgroundId, run.day)) {
         preloadShelterCgIllustration(data, run.day);
-        setStatus(state, "CG 로딩 중.");
+        setStatus(state, "CG 濡쒕뵫 以?");
         updateAutoSave(state, data, dt);
         return true;
       }
@@ -8854,9 +9352,9 @@ function updateShelterRestMode(state, data, dt) {
       rest.photo.flashTimer = 0.22;
       rest.phase = "photoPreview";
       rest.timer = 0;
-      setStatus(state, "CG 확인 · C 저장 / R 재촬영");
+      setStatus(state, "Photo preview. C save / R retake.");
     } else {
-      setStatus(state, "CG 촬영 · 방향키/WASD 프레임 · Z 촬영");
+      setStatus(state, "CG 珥ъ쁺 쨌 諛⑺뼢??WASD ?꾨젅??쨌 Z 珥ъ쁺");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8878,7 +9376,7 @@ function updateShelterRestMode(state, data, dt) {
         saveCurrentGame(state, data);
       }
     } else {
-      setStatus(state, "CG 확인 · C 저장 / R 재촬영 / Esc 취소");
+      setStatus(state, "CG ?뺤씤 쨌 C ???/ R ?ъ눋??/ Esc 痍⑥냼");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8896,7 +9394,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
     } else {
-      setStatus(state, "기록 보기 · A/D 넘기기 · Esc 뒤로");
+      setStatus(state, "湲곕줉 蹂닿린 쨌 A/D ?섍린湲?쨌 Esc ?ㅻ줈");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8914,7 +9412,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
     } else {
-      setStatus(state, "배경 보기 · A/D 넘기기 · Esc 뒤로");
+      setStatus(state, "諛곌꼍 蹂닿린 쨌 A/D ?섍린湲?쨌 Esc ?ㅻ줈");
     }
     updateAutoSave(state, data, dt);
     return true;
@@ -8957,11 +9455,12 @@ function updateExpedition(state, data, dt) {
       state.liveEdit.saveFlashTimer = Math.max(0, state.liveEdit.saveFlashTimer - dt);
     }
     setStatus(state, state.liveEdit.saveFlashTimer > 0
-      ? "라이브 편집 · 저장됨 · F2/L 종료"
-      : "라이브 편집 · 블록 드래그 · F2/L 종료");
+      ? "?쇱씠釉??몄쭛 쨌 ??λ맖 쨌 F2/L 醫낅즺"
+      : "?쇱씠釉??몄쭛 쨌 釉붾줉 ?쒕옒洹?쨌 F2/L 醫낅즺");
     return;
   }
 
+  updateSearchMusic(run);
   updateMapExploration(run, data);
 
   if (updateMapOverlayInput(state, data)) {
@@ -9044,6 +9543,16 @@ function updateExpedition(state, data, dt) {
   );
   const actionTimeScale = dashActionActive ? 1 : focusTimeScale;
   const simDt = dt * actionTimeScale * dodgeTimeScale;
+  if (isVaultLockdownActive(run)) {
+    updateVaultEscapeTimer(state, data, simDt);
+    if (state.scene !== SCENES.EXPEDITION) {
+      return;
+    }
+    updateEffects(run, simDt, dt, data);
+    syncCamera(run, data, dt);
+    setStatus(state, "LOCKDOWN. All exits sealed.");
+    return;
+  }
   let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
   const recoilShotPressed = reserveRecoilShotForWeapon || keyboardRecoilShotPressed || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
   if (recoilShotPressed || queuedRecoilShotPressed) {
@@ -9081,6 +9590,9 @@ function updateExpedition(state, data, dt) {
   updateHostileDrones(run, data, simDt);
   updateEnemyShots(run, data, simDt);
   updateAttackHits(run);
+  if (updateVaultEscapeTimer(state, data, simDt)) {
+    return;
+  }
   if (lootActive) {
     run.prompt = "";
     run.promptWorld = null;
@@ -9108,22 +9620,25 @@ function updateExpedition(state, data, dt) {
 
   const timePhaseLabel = getRunTimePhaseLabel(run);
   const phaseLabel = isMovementLab(data)
-    ? `실험 중 · ${timePhaseLabel}.`
+    ? `?ㅽ뿕 以?쨌 ${timePhaseLabel}.`
     : run.timePhase === "day"
-      ? "낮 유지."
+      ? "???좎?."
       : run.timePhase === "dusk"
-        ? "황혼 압박."
-        : "야간 위협.";
+        ? "?⑺샎 ?뺣컯."
+        : "?쇨컙 ?꾪삊.";
   const notice = run.noticeTimer > 0 ? ` ${run.message}` : "";
-  setStatus(state, `${phaseLabel}${notice}`);
+  const vault = isVaultEscapeActive(run)
+    ? ` Vault ${Math.ceil(run.vaultEscape.timeLeft)}s ${run.vaultEscape.collected}/${run.vaultEscape.totalLoot}`
+    : "";
+  setStatus(state, `${phaseLabel}${notice}${vault}`);
   updateAutoSave(state, data, dt);
 }
 
 function updateShelter(state) {
-  setStatus(state, isMovementLab(state.data) ? "피난처 대기. C: 출격" : "피난처 대기. C: 출격");
+  setStatus(state, isMovementLab(state.data) ? "?쇰궃泥??湲? C: 異쒓꺽" : "?쇰궃泥??湲? C: 異쒓꺽");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     startNewSavedRun(state, state.data);
-    setStatus(state, "출격 중.");
+    setStatus(state, "異쒓꺽 以?");
   }
 }
 
@@ -9169,13 +9684,13 @@ function enterTitleNewRun(state, hasRun) {
   };
   state.scene = SCENES.SHELTER;
   state.sceneTimer = 0;
-  setStatus(state, "새 런 준비");
+  setStatus(state, "Ready.");
 }
 
 function updateTitle(state) {
   if (shouldStartFromUrlLevel()) {
     startNewSavedRun(state, state.data, { clearSaved: false, persist: false });
-    setStatus(state, "・懋ｲｩ ・・");
+    setStatus(state, "?삥뇣節뀐쉘 ?삠꺕");
     return;
   }
 
@@ -9187,30 +9702,30 @@ function updateTitle(state) {
   if (titleMenu.confirmingNewRun) {
     if (consumeEitherPress(state, TITLE_MENU_CANCEL_KEYS)) {
       titleMenu.confirmingNewRun = false;
-      setStatus(state, "새 런 취소");
+      setStatus(state, "????痍⑥냼");
       return;
     }
     if (consumeEitherPress(state, TITLE_MENU_UP_KEYS) || consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
       titleMenu.confirmingNewRun = false;
-      setStatus(state, "메인 메뉴");
+      setStatus(state, "硫붿씤 硫붾돱");
       return;
     }
     if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
       enterTitleNewRun(state, hasRun);
       return;
     }
-    setStatus(state, "기존 저장 삭제 확인: C/Z");
+    setStatus(state, "湲곗〈 ?????젣 ?뺤씤: C/Z");
     return;
   }
 
   if (consumeEitherPress(state, TITLE_MENU_UP_KEYS)) {
     moveTitleMenu(titleMenu, hasRun, -1);
-    setStatus(state, "메인 메뉴");
+    setStatus(state, "硫붿씤 硫붾돱");
     return;
   }
   if (consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
     moveTitleMenu(titleMenu, hasRun, 1);
-    setStatus(state, "메인 메뉴");
+    setStatus(state, "硫붿씤 硫붾돱");
     return;
   }
 
@@ -9218,7 +9733,7 @@ function updateTitle(state) {
     titleMenu.menuIndex = 0;
     if (hasRun) {
       titleMenu.confirmingNewRun = true;
-      setStatus(state, "기존 저장 삭제 확인");
+      setStatus(state, "湲곗〈 ?????젣 ?뺤씤");
     } else {
       enterTitleNewRun(state, false);
     }
@@ -9234,23 +9749,23 @@ function updateTitle(state) {
       state.save.hasRun = false;
       titleMenu.menuIndex = 0;
       titleMenu.lastHasRun = false;
-      setStatus(state, "저장된 런 없음");
+      setStatus(state, "??λ맂 ???놁쓬");
       return;
     }
     if (hasRun) {
       titleMenu.confirmingNewRun = true;
-      setStatus(state, "기존 저장 삭제 확인");
+      setStatus(state, "湲곗〈 ?????젣 ?뺤씤");
       return;
     }
     enterTitleNewRun(state, false);
     return;
   }
 
-  setStatus(state, hasRun ? "W/S 선택 · C/Z 실행" : "처음부터 · C/Z 실행");
+  setStatus(state, hasRun ? "W/S ?좏깮 쨌 C/Z ?ㅽ뻾" : "泥섏쓬遺??쨌 C/Z ?ㅽ뻾");
 }
 
 function updateResults(state) {
-  setStatus(state, isMovementLab(state.data) ? "결과 화면. C/Z" : "귀환 결과. C/Z");
+  setStatus(state, isMovementLab(state.data) ? "寃곌낵 ?붾㈃. C/Z" : "洹??寃곌낵. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
@@ -9258,7 +9773,7 @@ function updateResults(state) {
 }
 
 function updateGameOver(state) {
-  setStatus(state, isMovementLab(state.data) ? "실패 화면. C/Z" : "런 실패. C/Z");
+  setStatus(state, isMovementLab(state.data) ? "?ㅽ뙣 ?붾㈃. C/Z" : "???ㅽ뙣. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
@@ -9267,7 +9782,7 @@ function updateGameOver(state) {
 
 export function bindInput(state) {
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "Minus", "Equal", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "Minus", "Equal", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (typeof event.getModifierState === "function") {
@@ -9353,3 +9868,4 @@ export function updateGame(state, data, dt) {
 export function hasThreatSense(state) {
   return hasUnlocked(state.meta, "threatSense");
 }
+

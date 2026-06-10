@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260520-shelter-photo-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260611-vault-music-v2";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -8,6 +8,7 @@ import {
   extractEditableLevelData,
   getLevelRouteReferences,
   getLevelSummaries,
+  getUrlLevelId,
   getRunStartLevelId,
   isBuiltInLevel,
   isLocalOnlyLevel,
@@ -15,12 +16,19 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260507-slope-slide-physics-v1";
+  shouldUseLocalLevelOverrideFromUrl,
+} from "./level-store.js?v=20260610-vault-escape-v1";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
 const ZIP_LINE_CONNECT_RANGE = 640;
 const ZIP_LINE_MAX_CONNECTIONS = 2;
+
+function getEditorLevelSummaries() {
+  return getLevelSummaries(GAME_DATA, {
+    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+  });
+}
 
 const TOOL_IDS = {
   SELECT: "select",
@@ -39,6 +47,9 @@ const TOOL_IDS = {
   ROUTE_EXIT: "routeExit",
   GATE: "gate",
   CRATE: "crate",
+  VAULT_DOOR: "vaultDoor",
+  VAULT_LOOT: "vaultLoot",
+  ESCAPE_EXIT: "escapeExit",
   ENEMY: "enemy",
   ARTILLERY_ENEMY: "artilleryEnemy",
   DRONE: "drone",
@@ -119,6 +130,9 @@ TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
 TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
 
 TOOL_HINTS[TOOL_IDS.CRATE] = "Click to place a loot crate";
+TOOL_HINTS[TOOL_IDS.VAULT_DOOR] = "Click to place a hackable vault door";
+TOOL_HINTS[TOOL_IDS.VAULT_LOOT] = "Click to place timed escape supplies";
+TOOL_HINTS[TOOL_IDS.ESCAPE_EXIT] = "Click to place the timed escape exit";
 TOOL_HINTS[TOOL_IDS.ENEMY] = "Click to place a humanoid enemy";
 TOOL_HINTS[TOOL_IDS.ARTILLERY_ENEMY] = "Click to place an arcing humanoid enemy";
 TOOL_HINTS[TOOL_IDS.DRONE] = "Click to place a hostile drone";
@@ -561,6 +575,12 @@ const COLORS = {
   temporaryBlockFill: "rgba(147, 234, 255, 0.17)",
   crate: "rgba(147, 234, 255, 0.9)",
   crateFill: "rgba(147, 234, 255, 0.13)",
+  vaultDoor: "rgba(255, 122, 102, 0.92)",
+  vaultDoorFill: "rgba(255, 122, 102, 0.16)",
+  vaultLoot: "rgba(231, 244, 126, 0.92)",
+  vaultLootFill: "rgba(231, 244, 126, 0.16)",
+  escapeExit: "rgba(255, 190, 102, 0.92)",
+  escapeExitFill: "rgba(255, 190, 102, 0.13)",
   enemy: "rgba(255, 125, 147, 0.9)",
   enemyFill: "rgba(255, 125, 147, 0.13)",
   drone: "rgba(255, 190, 102, 0.9)",
@@ -927,6 +947,9 @@ function prepareEditorData(data) {
   data.entrances = data.entrances || [];
   data.routeExits = data.routeExits || [];
   data.lootCrates = data.lootCrates || [];
+  data.vaultDoors = data.vaultDoors || [];
+  data.vaultLoot = data.vaultLoot || [];
+  data.escapeExits = data.escapeExits || [];
   data.humanoidEnemies = data.humanoidEnemies || [];
   data.hostileDrones = data.hostileDrones || [];
   ensureEditorZipLineNodes(data);
@@ -940,13 +963,13 @@ function prepareEditorData(data) {
       facing: 1,
     });
   }
-  data.levelSummaries = getLevelSummaries(GAME_DATA);
+  data.levelSummaries = getEditorLevelSummaries();
   return data;
 }
 
 function createEditorState() {
-  const data = prepareEditorData(createRuntimeGameData(GAME_DATA, null, {
-    applyLevelOverride: true,
+  const data = prepareEditorData(createRuntimeGameData(GAME_DATA, getUrlLevelId(), {
+    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
   }));
   const scale = getScaleConfig(data);
 
@@ -1223,7 +1246,7 @@ function renderLevelControls(editor, dom) {
   if (!dom.levelSelect || !dom.levelNameInput) {
     return;
   }
-  const summaries = getLevelSummaries(GAME_DATA);
+  const summaries = getEditorLevelSummaries();
   editor.data.levelSummaries = summaries;
   dom.levelSelect.innerHTML = summaries
     .map((level) => {
@@ -1361,7 +1384,7 @@ function slugifyLevelId(value, fallback = "level") {
 }
 
 function createUniqueLevelId(editor, seed) {
-  const existing = new Set(getLevelSummaries(GAME_DATA).map((level) => level.id));
+  const existing = new Set(getEditorLevelSummaries().map((level) => level.id));
   const base = slugifyLevelId(seed, "level");
   let candidate = base;
   let suffix = 2;
@@ -1476,6 +1499,18 @@ function ensureFlyingRangedSpawn(entity) {
 
 function getLootCrateRect(crate) {
   return crate;
+}
+
+function getVaultDoorRect(door) {
+  return door;
+}
+
+function getVaultLootRect(loot) {
+  return loot;
+}
+
+function getEscapeExitRect(exit) {
+  return exit;
 }
 
 function getBraceWallRect(wall) {
@@ -1644,6 +1679,15 @@ function getSelectedEntity(editor) {
   if (editor.selected.kind === "crate") {
     return editor.data.lootCrates[editor.selected.index] || null;
   }
+  if (editor.selected.kind === "vaultDoor") {
+    return editor.data.vaultDoors[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "vaultLoot") {
+    return editor.data.vaultLoot[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "escapeExit") {
+    return editor.data.escapeExits[editor.selected.index] || null;
+  }
   if (editor.selected.kind === "spawn") {
     return editor.data.player.spawn;
   }
@@ -1687,6 +1731,15 @@ function getSelectionCollection(editor, kind) {
   }
   if (kind === "crate") {
     return editor.data.lootCrates;
+  }
+  if (kind === "vaultDoor") {
+    return editor.data.vaultDoors;
+  }
+  if (kind === "vaultLoot") {
+    return editor.data.vaultLoot;
+  }
+  if (kind === "escapeExit") {
+    return editor.data.escapeExits;
   }
   if (kind === "entrance") {
     return editor.data.entrances;
@@ -1819,6 +1872,18 @@ function getSelectionRect(editor, selection = editor.selected) {
     const crate = editor.data.lootCrates[selection.index];
     return crate ? getLootCrateRect(crate) : null;
   }
+  if (selection.kind === "vaultDoor") {
+    const door = editor.data.vaultDoors[selection.index];
+    return door ? getVaultDoorRect(door) : null;
+  }
+  if (selection.kind === "vaultLoot") {
+    const loot = editor.data.vaultLoot[selection.index];
+    return loot ? getVaultLootRect(loot) : null;
+  }
+  if (selection.kind === "escapeExit") {
+    const exit = editor.data.escapeExits[selection.index];
+    return exit ? getEscapeExitRect(exit) : null;
+  }
   if (selection.kind === "spawn") {
     return getSpawnRect(editor.data);
   }
@@ -1880,6 +1945,18 @@ function getSelectionOrigin(editor, selection = editor.selected) {
   }
   if (selection.kind === "crate") {
     const entity = editor.data.lootCrates[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "vaultDoor") {
+    const entity = editor.data.vaultDoors[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "vaultLoot") {
+    const entity = editor.data.vaultLoot[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "escapeExit") {
+    const entity = editor.data.escapeExits[selection.index];
     return entity ? { x: entity.x, y: entity.y } : null;
   }
   if (selection.kind === "spawn") {
@@ -1950,6 +2027,21 @@ function describeSelection(editor) {
     return crate ? `Crate ${editor.selected.index + 1} - ${crate.label || crate.id || "loot crate"}` : "No selection";
   }
 
+  if (editor.selected.kind === "vaultDoor") {
+    const door = editor.data.vaultDoors[editor.selected.index];
+    return door ? `Vault Door ${editor.selected.index + 1} - ${door.label || door.id || "vault"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "vaultLoot") {
+    const loot = editor.data.vaultLoot[editor.selected.index];
+    return loot ? `Vault Loot ${editor.selected.index + 1} - ${loot.label || loot.id || "supplies"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "escapeExit") {
+    const exit = editor.data.escapeExits[editor.selected.index];
+    return exit ? `Escape Exit ${editor.selected.index + 1} - ${exit.label || exit.id || "escape"}` : "No selection";
+  }
+
   if (isMultiSelection(editor.selected)) {
     const items = getSelectionItems(editor.selected);
     const platformCount = items.filter((item) => item.kind === "platform").length;
@@ -1957,6 +2049,7 @@ function describeSelection(editor) {
     const temporaryBlockCount = items.filter((item) => item.kind === "temporaryBlock").length;
     const propCount = items.filter((item) => item.kind === "prop").length;
     const crateCount = items.filter((item) => item.kind === "crate").length;
+    const vaultCount = items.filter((item) => item.kind === "vaultDoor" || item.kind === "vaultLoot" || item.kind === "escapeExit").length;
     const parts = [];
     if (braceWallCount > 0) {
       parts.push(`벽 짚기 ${braceWallCount}`);
@@ -1972,6 +2065,9 @@ function describeSelection(editor) {
     }
     if (crateCount > 0) {
       parts.push(`Crate ${crateCount}`);
+    }
+    if (vaultCount > 0) {
+      parts.push(`Vault ${vaultCount}`);
     }
     return `${items.length}개 선택${parts.length ? ` · ${parts.join(", ")}` : ""}`;
   }
@@ -2047,6 +2143,9 @@ function canDeleteSelection(selection) {
     || item.kind === "zipLineNode"
     || item.kind === "prop"
     || item.kind === "crate"
+    || item.kind === "vaultDoor"
+    || item.kind === "vaultLoot"
+    || item.kind === "escapeExit"
     || item.kind === "enemy"
     || item.kind === "drone"
     || item.kind === "routeExit"
@@ -2160,7 +2259,7 @@ function renderSelectionFields(editor, dom) {
       addNumber("Connect Range", "connectRange", entity.connectRange ?? ZIP_LINE_CONNECT_RANGE, { min: 1 });
     } else {
       addNumber("Speed", "speed", entity.speed ?? 1480, { min: 1 });
-      addText("Prompt", "prompt", entity.prompt || "E: Zipline");
+      addText("Prompt", "prompt", entity.prompt || "Up: Zipline");
     }
   } else if (editor.selected.kind === "prop") {
     addNumber("X", "x", entity.x);
@@ -2225,6 +2324,24 @@ function renderSelectionFields(editor, dom) {
     addText("Prompt", "prompt", entity.prompt || "");
     addText("Loot Table", "lootTable", entity.lootTable || "streetCache");
     addNumber("Search Time", "searchTime", entity.searchTime ?? 0.75, { min: 0, step: 0.05 });
+  } else if (editor.selected.kind === "vaultDoor") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addText("Prompt", "prompt", entity.prompt || "");
+    addNumber("Timer", "duration", entity.duration ?? 60, { min: 1, step: 1 });
+  } else if (editor.selected.kind === "vaultLoot") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 16 });
+    addNumber("Height", "height", entity.height, { min: 16 });
+    addText("Prompt", "prompt", entity.prompt || "");
+    addNumber("Value", "value", entity.value ?? 25, { min: 0, step: 1 });
   } else if (editor.selected.kind === "spawn") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2246,7 +2363,7 @@ function renderSelectionFields(editor, dom) {
     addNumber("Width", "width", entity.width, { min: 24 });
     addNumber("Height", "height", entity.height, { min: 24 });
     addText("Prompt", "prompt", entity.prompt || "");
-    const levelOptions = getLevelSummaries(GAME_DATA).map((level) => ({
+    const levelOptions = getEditorLevelSummaries().map((level) => ({
       value: level.id,
       label: level.label || level.id,
     }));
@@ -2258,6 +2375,14 @@ function renderSelectionFields(editor, dom) {
     addSelect("To Level", "toLevelId", targetLevelId, levelOptions);
     addSelect("To Entrance", "toEntranceId", entity.toEntranceId || entranceOptions[0]?.value || "start", entranceOptions);
     addText("Return Entrance", "returnEntranceId", entity.returnEntranceId || "start");
+  } else if (editor.selected.kind === "escapeExit") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addText("Prompt", "prompt", entity.prompt || "");
   } else if (editor.selected.kind === "gate") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2512,6 +2637,24 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.vaultDoors || []).forEach((door, index) => {
+    if (rectsIntersect(rect, getVaultDoorRect(door))) {
+      items.push({ kind: "vaultDoor", index });
+    }
+  });
+
+  (editor.data.vaultLoot || []).forEach((loot, index) => {
+    if (rectsIntersect(rect, getVaultLootRect(loot))) {
+      items.push({ kind: "vaultLoot", index });
+    }
+  });
+
+  (editor.data.escapeExits || []).forEach((exit, index) => {
+    if (rectsIntersect(rect, getEscapeExitRect(exit))) {
+      items.push({ kind: "escapeExit", index });
+    }
+  });
+
   editor.data.platforms.forEach((platform, index) => {
     if (rectsIntersect(rect, platform)) {
       items.push({ kind: "platform", index });
@@ -2562,6 +2705,24 @@ function hitTest(editor, point) {
   for (let index = (editor.data.lootCrates || []).length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, getLootCrateRect(editor.data.lootCrates[index]))) {
       return { kind: "crate", index };
+    }
+  }
+
+  for (let index = (editor.data.vaultDoors || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getVaultDoorRect(editor.data.vaultDoors[index]))) {
+      return { kind: "vaultDoor", index };
+    }
+  }
+
+  for (let index = (editor.data.vaultLoot || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getVaultLootRect(editor.data.vaultLoot[index]))) {
+      return { kind: "vaultLoot", index };
+    }
+  }
+
+  for (let index = (editor.data.escapeExits || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getEscapeExitRect(editor.data.escapeExits[index]))) {
+      return { kind: "escapeExit", index };
     }
   }
 
@@ -2810,6 +2971,15 @@ function deleteSelection(editor, dom) {
   const crateIndexes = new Set(
     items.filter((item) => item.kind === "crate").map((item) => item.index),
   );
+  const vaultDoorIndexes = new Set(
+    items.filter((item) => item.kind === "vaultDoor").map((item) => item.index),
+  );
+  const vaultLootIndexes = new Set(
+    items.filter((item) => item.kind === "vaultLoot").map((item) => item.index),
+  );
+  const escapeExitIndexes = new Set(
+    items.filter((item) => item.kind === "escapeExit").map((item) => item.index),
+  );
   const routeExitIndexes = new Set(
     items.filter((item) => item.kind === "routeExit").map((item) => item.index),
   );
@@ -2827,6 +2997,9 @@ function deleteSelection(editor, dom) {
     && enemyIndexes.size === 0
     && droneIndexes.size === 0
     && crateIndexes.size === 0
+    && vaultDoorIndexes.size === 0
+    && vaultLootIndexes.size === 0
+    && escapeExitIndexes.size === 0
     && routeExitIndexes.size === 0
     && entranceIndexes.size === 0
   ) {
@@ -2850,6 +3023,9 @@ function deleteSelection(editor, dom) {
   editor.data.humanoidEnemies = editor.data.humanoidEnemies.filter((_, index) => !enemyIndexes.has(index));
   editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !droneIndexes.has(index));
   editor.data.lootCrates = editor.data.lootCrates.filter((_, index) => !crateIndexes.has(index));
+  editor.data.vaultDoors = editor.data.vaultDoors.filter((_, index) => !vaultDoorIndexes.has(index));
+  editor.data.vaultLoot = editor.data.vaultLoot.filter((_, index) => !vaultLootIndexes.has(index));
+  editor.data.escapeExits = editor.data.escapeExits.filter((_, index) => !escapeExitIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
   editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
 
@@ -3217,6 +3393,27 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     }
     entity.x = snappedX;
     entity.y = snappedY;
+  } else if (selection.kind === "vaultDoor") {
+    const entity = editor.data.vaultDoors[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "vaultLoot") {
+    const entity = editor.data.vaultLoot[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "escapeExit") {
+    const entity = editor.data.escapeExits[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
   } else if (selection.kind === "spawn") {
     editor.data.player.spawn.x = snappedX;
     editor.data.player.spawn.y = snappedY;
@@ -3384,7 +3581,7 @@ function placeZipLineNodeAt(editor, dom, point) {
       start: { x: nearest.node.x, y: nearest.node.y },
       end: { x: node.x, y: node.y },
       speed: 1480,
-      prompt: "E: Zipline",
+    prompt: "Up: Zipline",
     });
   }
   setSelection(editor, dom, { kind: "zipLineNode", index: editor.data.zipLineNodes.length - 1 });
@@ -3458,7 +3655,7 @@ function placeEntranceAt(editor, dom, point) {
 
 function getDefaultRouteTarget(editor) {
   const currentId = editor.data.currentLevelId;
-  const target = getLevelSummaries(GAME_DATA).find((level) => level.id !== currentId);
+  const target = getEditorLevelSummaries().find((level) => level.id !== currentId);
   return target?.id || currentId || editor.data.defaultLevelId || "movement-lab-01";
 }
 
@@ -3500,7 +3697,7 @@ function placeRouteExitAt(editor, dom, point) {
     y: snapped.y,
     width,
     height,
-    prompt: "E: 다음 구역",
+    prompt: "Up: Next area",
     toLevelId: getDefaultRouteTarget(editor),
     toEntranceId: "start",
   };
@@ -3662,13 +3859,81 @@ function placeLootCrateAt(editor, dom, point) {
     width,
     height,
     label: "Supply cache",
-    prompt: "E: Open cache",
+    prompt: "Up: Open cache",
     lootTable: "streetCache",
     searchTime: 0.75,
     items: [createDefaultCrateItem(crateId)],
   };
   editor.data.lootCrates.push(crate);
   setSelection(editor, dom, { kind: "crate", index: editor.data.lootCrates.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeVaultDoorAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 112;
+  const height = 144;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const door = {
+    id: `vault-door-${Date.now()}`,
+    label: "Supply Vault",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    prompt: "Up: Hack vault",
+    duration: 60,
+  };
+  editor.data.vaultDoors.push(door);
+  setSelection(editor, dom, { kind: "vaultDoor", index: editor.data.vaultDoors.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeVaultLootAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 48;
+  const height = 48;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const loot = {
+    id: `vault-loot-${Date.now()}`,
+    label: "Supplies",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    value: 25,
+    prompt: "Up: Take supplies",
+  };
+  editor.data.vaultLoot.push(loot);
+  setSelection(editor, dom, { kind: "vaultLoot", index: editor.data.vaultLoot.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeEscapeExitAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 112;
+  const height = 192;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const exit = {
+    id: `escape-exit-${Date.now()}`,
+    label: "Emergency Exit",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    prompt: "Up: Escape",
+  };
+  editor.data.escapeExits.push(exit);
+  setSelection(editor, dom, { kind: "escapeExit", index: editor.data.escapeExits.length - 1 });
   markDirty(editor, dom);
 }
 
@@ -3679,7 +3944,7 @@ function placeGateAt(editor, dom, point) {
     y: 0,
     width: 96,
     height: 192,
-    prompt: "E: 추출",
+    prompt: "Up: Extract",
   };
   const snapped = snapPoint({
     x: point.x - gate.width / 2,
@@ -3872,6 +4137,24 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
+  if (editor.tool === TOOL_IDS.VAULT_DOOR) {
+    placeVaultDoorAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.VAULT_LOOT) {
+    placeVaultLootAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.ESCAPE_EXIT) {
+    placeEscapeExitAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.tool === TOOL_IDS.GATE) {
     placeGateAt(editor, dom, world);
     queueRender(editor, dom);
@@ -4056,7 +4339,7 @@ function loadEditorLevel(editor, dom, levelId, options = {}) {
     }
   }
   editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
-    applyLevelOverride: true,
+    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
   }));
   editor.snap = getScaleConfig(editor.data).subTileSize;
   editor.preview = null;
@@ -4145,7 +4428,7 @@ function deleteCurrentLocalLevel(editor, dom) {
     return;
   }
 
-  const fallbackLevelId = GAME_DATA.defaultLevelId || getLevelSummaries(GAME_DATA)[0]?.id || "movement-lab-01";
+  const fallbackLevelId = GAME_DATA.defaultLevelId || getEditorLevelSummaries()[0]?.id || "movement-lab-01";
   editor.dirty = false;
   loadEditorLevel(editor, dom, fallbackLevelId, { saveCurrent: false });
   setStatus(editor, dom, `Deleted local level ${levelId}.`, "", false);
@@ -4421,6 +4704,30 @@ function snapEntireLevelToScale(editor, dom) {
     y: snapValue(routeExit.y, step),
     width: Math.max(tile, snapValue(routeExit.width, step)),
     height: Math.max(tile, snapValue(routeExit.height, step)),
+  }));
+
+  editor.data.vaultDoors = (editor.data.vaultDoors || []).map((door) => ({
+    ...door,
+    x: snapValue(door.x, step),
+    y: snapValue(door.y, step),
+    width: Math.max(tile, snapValue(door.width, step)),
+    height: Math.max(tile, snapValue(door.height, step)),
+  }));
+
+  editor.data.vaultLoot = (editor.data.vaultLoot || []).map((loot) => ({
+    ...loot,
+    x: snapValue(loot.x, step),
+    y: snapValue(loot.y, step),
+    width: Math.max(step, snapValue(loot.width, step)),
+    height: Math.max(step, snapValue(loot.height, step)),
+  }));
+
+  editor.data.escapeExits = (editor.data.escapeExits || []).map((exit) => ({
+    ...exit,
+    x: snapValue(exit.x, step),
+    y: snapValue(exit.y, step),
+    width: Math.max(tile, snapValue(exit.width, step)),
+    height: Math.max(tile, snapValue(exit.height, step)),
   }));
 
   editor.data.platforms = editor.data.platforms.map((platform) => ({
@@ -5221,6 +5528,70 @@ function drawLootCrates(ctx, editor) {
   });
 }
 
+function drawVaultObjects(ctx, editor) {
+  (editor.data.vaultDoors || []).forEach((door, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "vaultDoor", index });
+    ctx.fillStyle = COLORS.vaultDoorFill;
+    ctx.fillRect(door.x, door.y, door.width, door.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.vaultDoor;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(door.x, door.y, door.width, door.height);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+    ctx.lineWidth = 1.5 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(door.x + 10 / editor.view.zoom, door.y + 18 / editor.view.zoom);
+    ctx.lineTo(door.x + door.width - 10 / editor.view.zoom, door.y + 18 / editor.view.zoom);
+    ctx.moveTo(door.x + door.width * 0.5, door.y + 8 / editor.view.zoom);
+    ctx.lineTo(door.x + door.width * 0.5, door.y + door.height - 8 / editor.view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.vaultDoor;
+    ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(door.label || door.id || "Vault", door.x + door.width / 2, door.y - 10 / editor.view.zoom);
+    ctx.fillText(`${Math.round(door.duration ?? 60)}s`, door.x + door.width / 2, door.y + door.height + 20 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+
+  (editor.data.vaultLoot || []).forEach((loot, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "vaultLoot", index });
+    ctx.fillStyle = COLORS.vaultLootFill;
+    ctx.fillRect(loot.x, loot.y, loot.width, loot.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.vaultLoot;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(loot.x, loot.y, loot.width, loot.height);
+    ctx.fillStyle = COLORS.vaultLoot;
+    ctx.fillRect(loot.x + 8 / editor.view.zoom, loot.y + 8 / editor.view.zoom, Math.max(4, loot.width - 16 / editor.view.zoom), 5 / editor.view.zoom);
+    ctx.font = `${14 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(loot.label || loot.id || "Loot", loot.x + loot.width / 2, loot.y - 10 / editor.view.zoom);
+    ctx.fillText(`${Math.round(loot.value ?? 25)}`, loot.x + loot.width / 2, loot.y + loot.height + 18 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+
+  (editor.data.escapeExits || []).forEach((exit, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "escapeExit", index });
+    ctx.fillStyle = COLORS.escapeExitFill;
+    ctx.fillRect(exit.x, exit.y, exit.width, exit.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.escapeExit;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(exit.x, exit.y, exit.width, exit.height);
+    ctx.strokeStyle = "rgba(255, 190, 102, 0.42)";
+    ctx.lineWidth = 1.5 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(exit.x + exit.width * 0.25, exit.y + exit.height * 0.5);
+    ctx.lineTo(exit.x + exit.width * 0.75, exit.y + exit.height * 0.5);
+    ctx.lineTo(exit.x + exit.width * 0.58, exit.y + exit.height * 0.38);
+    ctx.moveTo(exit.x + exit.width * 0.75, exit.y + exit.height * 0.5);
+    ctx.lineTo(exit.x + exit.width * 0.58, exit.y + exit.height * 0.62);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.escapeExit;
+    ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(exit.label || exit.id || "Escape", exit.x + exit.width / 2, exit.y - 10 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+}
+
 function getPlayerPreviewFrame(editor) {
   const pose = editor.previewPose;
   const poseConfig = getPlayerPoseConfig(editor.data, pose);
@@ -5586,6 +5957,7 @@ function renderEditor(editor, dom) {
   drawZipLines(ctx, editor);
   drawProps(ctx, editor);
   drawLootCrates(ctx, editor);
+  drawVaultObjects(ctx, editor);
   drawHumanoidEnemies(ctx, editor);
   drawHostileDrones(ctx, editor);
   drawRouteExits(ctx, editor);

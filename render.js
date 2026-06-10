@@ -1450,6 +1450,73 @@ function drawLootCrates(ctx, run, theme) {
   });
 }
 
+function drawVaultSecurityObjects(ctx, run, theme, pulse = 0) {
+  const alarmActive = Boolean(run.vaultEscape?.active);
+  (run.vaultDoors || []).forEach((door) => {
+    const hacked = Boolean(door.hacked);
+    const glow = alarmActive ? 0.38 + Math.sin(pulse * 9) * 0.16 : hacked ? 0.24 : 0.08;
+    ctx.save();
+    ctx.shadowColor = alarmActive ? "#ff7a66" : theme.accentSecondary;
+    ctx.shadowBlur = alarmActive ? 24 : 10;
+    drawBeveledPanel(ctx, theme, door.x, door.y, door.width, door.height, {
+      cut: 10,
+      fill: hacked ? "rgba(27, 39, 43, 0.72)" : "rgba(10, 16, 22, 0.92)",
+      stroke: alarmActive ? `rgba(255, 122, 102, ${0.62 + glow})` : "rgba(147,234,255,0.36)",
+      innerLines: false,
+    });
+    ctx.fillStyle = alarmActive ? `rgba(255, 122, 102, ${0.18 + glow})` : "rgba(147,234,255,0.11)";
+    ctx.fillRect(door.x + 8, door.y + 10, door.width - 16, 8);
+    ctx.fillStyle = hacked ? "rgba(231,244,126,0.78)" : "rgba(147,234,255,0.82)";
+    ctx.font = "800 12px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(door.label || "Vault", door.x + door.width / 2, door.y - 14);
+    ctx.restore();
+  });
+
+  (run.vaultLoot || []).forEach((loot) => {
+    if (loot.collected) {
+      return;
+    }
+    ctx.save();
+    ctx.shadowColor = alarmActive ? "#e7f47e" : theme.accent;
+    ctx.shadowBlur = alarmActive ? 18 : 8;
+    drawBeveledPanel(ctx, theme, loot.x, loot.y, loot.width, loot.height, {
+      cut: 7,
+      fill: "rgba(37, 44, 30, 0.88)",
+      stroke: "rgba(231,244,126,0.56)",
+      innerLines: false,
+    });
+    ctx.fillStyle = "rgba(231,244,126,0.72)";
+    ctx.fillRect(loot.x + 8, loot.y + 8, Math.max(4, loot.width - 16), 5);
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = "700 11px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(loot.label || "Supply", loot.x + loot.width / 2, loot.y - 10);
+    ctx.restore();
+  });
+
+  (run.escapeExits || []).forEach((exit) => {
+    const alpha = alarmActive ? 1 : 0.34;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = "#ff7a66";
+    ctx.shadowBlur = alarmActive ? 22 : 0;
+    drawBeveledPanel(ctx, theme, exit.x - 10, exit.y - 14, exit.width + 20, exit.height + 20, {
+      cut: 14,
+      fill: "rgba(31, 13, 15, 0.38)",
+      stroke: alarmActive ? "rgba(255,122,102,0.7)" : "rgba(255,255,255,0.18)",
+      innerLines: false,
+    });
+    ctx.fillStyle = alarmActive ? "rgba(255,122,102,0.16)" : "rgba(255,255,255,0.06)";
+    ctx.fillRect(exit.x, exit.y, exit.width, exit.height);
+    ctx.fillStyle = "rgba(255,255,255,0.84)";
+    ctx.font = "800 13px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(exit.label || "Escape", exit.x + exit.width / 2, exit.y - 24);
+    ctx.restore();
+  });
+}
+
 function drawLootLeftArt(ctx, state, data, theme, x, y, width, height) {
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 18,
@@ -6491,6 +6558,7 @@ function renderExpedition(ctx, state, data) {
   drawBackgroundTiles(ctx, data, run);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
+  drawVaultSecurityObjects(ctx, run, theme, state.pulse);
   drawRouteExits(ctx, data, theme, state.pulse, run);
   drawEntity(ctx, run.encounters.guard, {
     body: "#86a9c7",
@@ -6541,6 +6609,7 @@ function renderExpedition(ctx, state, data) {
   drawRecoilFocusOverlay(ctx, run, data);
   drawNightPostProcess(ctx, run, data, state.pulse);
   drawProjectileDodgeOverlay(ctx, run, data);
+  drawVaultLockdownOverlay(ctx, run, state.pulse);
   drawFaceOffEntryTransition(ctx, run, data);
   ctx.save();
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
@@ -9789,6 +9858,85 @@ function drawHudV4(ctx, state, data) {
   drawRunMapOverlay(ctx, state, data, theme);
 }
 
+function drawVaultEscapeHud(ctx, state, theme) {
+  const vault = state.run?.vaultEscape;
+  if (!vault?.active && !vault?.lockdownActive) {
+    return;
+  }
+  const timeLeft = vault.lockdownActive
+    ? Math.max(0, vault.lockdownTimer ?? 0)
+    : Math.max(0, vault.timeLeft ?? 0);
+  const ratio = vault.duration > 0 ? clamp(timeLeft / vault.duration, 0, 1) : 0;
+  const lootText = `${vault.collected ?? 0}/${vault.totalLoot ?? 0}`;
+  const x = 462;
+  const y = 28;
+  const width = 356;
+  drawBeveledPanel(ctx, theme, x, y, width, 70, {
+    cut: 12,
+    fill: "rgba(36, 12, 16, 0.72)",
+    stroke: "rgba(255,122,102,0.54)",
+    innerLines: false,
+  });
+  ctx.fillStyle = "rgba(255,122,102,0.92)";
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText(vault.lockdownActive ? "LOCKDOWN SEALING" : "VAULT LOCKDOWN", x + 18, y + 24);
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.font = "900 24px 'Segoe UI', sans-serif";
+  ctx.fillText(`${Math.ceil(timeLeft)}s`, x + 18, y + 54);
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.font = "800 13px 'Segoe UI', sans-serif";
+  ctx.fillText(`SUPPLIES ${lootText}`, x + 112, y + 53);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(x + 224, y + 43, 108, 7);
+  ctx.fillStyle = ratio < 0.25 ? "rgba(255,122,102,0.95)" : "rgba(231,244,126,0.9)";
+  ctx.fillRect(x + 224, y + 43, 108 * (vault.lockdownActive ? 1 - clamp(timeLeft / Math.max(0.1, vault.lockdownDuration ?? 1.6), 0, 1) : ratio), 7);
+}
+
+function drawVaultLockdownOverlay(ctx, run, pulse = 0) {
+  const vault = run?.vaultEscape;
+  if (!vault?.lockdownActive) {
+    return;
+  }
+  const duration = Math.max(0.1, vault.lockdownDuration ?? 1.6);
+  const progress = 1 - clamp((vault.lockdownTimer ?? 0) / duration, 0, 1);
+  const flash = 0.45 + Math.sin(pulse * 18) * 0.18;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(120, 12, 18, ${0.22 + progress * 0.28})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const vignette = ctx.createRadialGradient(
+    SCREEN_WIDTH * 0.5,
+    SCREEN_HEIGHT * 0.5,
+    80,
+    SCREEN_WIDTH * 0.5,
+    SCREEN_HEIGHT * 0.5,
+    SCREEN_WIDTH * 0.7,
+  );
+  vignette.addColorStop(0, "rgba(255, 122, 102, 0.04)");
+  vignette.addColorStop(1, `rgba(20, 0, 4, ${0.42 + progress * 0.2})`);
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.fillStyle = `rgba(255, 122, 102, ${flash})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, 8);
+  ctx.fillRect(0, SCREEN_HEIGHT - 8, SCREEN_WIDTH, 8);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(255, 245, 235, 0.96)";
+  ctx.font = "900 54px 'Segoe UI', sans-serif";
+  ctx.fillText("LOCKDOWN", SCREEN_WIDTH / 2, 292);
+  ctx.fillStyle = "rgba(255, 190, 180, 0.84)";
+  ctx.font = "800 17px 'Segoe UI', sans-serif";
+  ctx.fillText("All exits sealed. Containment sequence engaged.", SCREEN_WIDTH / 2, 328);
+
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fillRect(SCREEN_WIDTH / 2 - 160, 352, 320, 8);
+  ctx.fillStyle = "rgba(255,122,102,0.92)";
+  ctx.fillRect(SCREEN_WIDTH / 2 - 160, 352, 320 * progress, 8);
+  ctx.restore();
+}
+
 function drawHudV5(ctx, state, data) {
   if (state.scene !== SCENES.EXPEDITION || !state.run) {
     return;
@@ -9798,8 +9946,46 @@ function drawHudV5(ctx, state, data) {
   drawCompassHudV5(ctx, state, data, theme);
   drawOperatorHudV5(ctx, state, data, theme);
   drawWeaponHudV5(ctx, state.run, data, theme);
+  drawVaultEscapeHud(ctx, state, theme);
   drawPromptHudV5(ctx, state, theme);
   drawRunMapOverlay(ctx, state, data, theme);
+}
+
+function formatVaultRate(value) {
+  return `${Math.round(clamp(value ?? 0, 0, 1) * 100)}%`;
+}
+
+function getVaultResultLines(vault, isFailure = false) {
+  if (!vault?.attempted) {
+    return [];
+  }
+  const supplies = `${vault.collected ?? 0}/${vault.totalLoot ?? 0}`;
+  const value = `${Math.round(vault.valueCollected ?? 0)}/${Math.round(vault.totalValue ?? 0)}`;
+  const rate = formatVaultRate(vault.recoveryRate);
+  const status = vault.lockedDown || isFailure
+    ? "LOCKDOWN"
+    : vault.perfect
+      ? "FULL CLEAR"
+      : "ESCAPED";
+  const timeLeft = vault.completed && Number.isFinite(vault.timeLeft)
+    ? ` · ${Math.ceil(vault.timeLeft)}s left`
+    : "";
+  return [
+    `Vault ${status}: supplies ${supplies} · value ${value} · ${rate}${timeLeft}`,
+    vault.perfect
+      ? "Vault bonus: all supplies secured."
+      : "Vault bonus: partial haul secured.",
+  ];
+}
+
+function getFailureReasonLabel(reason) {
+  if (reason === "sanity") {
+    return "정신 붕괴";
+  }
+  if (reason === "vaultLockdown") {
+    return "Vault lockdown";
+  }
+  return "체력 소진";
 }
 
 function drawResultsSceneV3(ctx, state, data, isFailure = false) {
@@ -9855,7 +10041,7 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
     chips.push({ label: "상태", value: isFailure ? "다시 시작" : "검증 완료" });
   } else if (isFailure) {
     chips.push({ label: "손실", value: String(state.resultSummary?.lostMaterials || 0) });
-    chips.push({ label: "원인", value: state.resultSummary?.reason === "sanity" ? "정신 붕괴" : "체력 소진" });
+    chips.push({ label: "원인", value: getFailureReasonLabel(state.resultSummary?.reason) });
   } else {
     chips.push({ label: "자재", value: String(state.resultSummary?.materials || 0) });
     chips.push({ label: "신뢰", value: String(state.resultSummary?.trustDelta || 0) });
@@ -9878,6 +10064,7 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
     ctx.fillText(chip.value, x + 14, 326);
   });
 
+  const vaultLines = getVaultResultLines(state.resultSummary?.vault, isFailure);
   const detailLines = isMovementLab(data)
     ? [
       isFailure ? "이동 실험이 초기화되었다." : "이번 세션의 이동 감각을 정리한다.",
@@ -9890,9 +10077,13 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
         `의식형 ${formatOutcome(state.resultSummary?.outcomes?.ritualist)}`,
       ];
 
-  detailLines.forEach((line, index) => {
+  if (vaultLines.length > 0) {
+    detailLines.unshift(...vaultLines);
+  }
+
+  detailLines.slice(0, 5).forEach((line, index) => {
     ctx.fillStyle = index === 0 ? theme.textMain : theme.textDim;
-    ctx.font = "17px 'Segoe UI', sans-serif";
+    ctx.font = index < vaultLines.length ? "700 15px 'Segoe UI', sans-serif" : "17px 'Segoe UI', sans-serif";
     ctx.fillText(line, 192, 392 + index * 34);
   });
 

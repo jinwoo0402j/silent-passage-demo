@@ -339,6 +339,69 @@ function createTemporaryBlockState(definition, index) {
   };
 }
 
+function createVaultDoorState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `vault-door-${index + 1}`,
+    label: definition.label || `Vault ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(24, Number(definition.width ?? 96)),
+    height: Math.max(24, Number(definition.height ?? 144)),
+    prompt: definition.prompt || "E: Hack vault",
+    duration: Math.max(1, Number(definition.duration ?? 60)),
+    hacked: false,
+  };
+}
+
+function createVaultLootState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `vault-loot-${index + 1}`,
+    label: definition.label || `Supply ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(16, Number(definition.width ?? 48)),
+    height: Math.max(16, Number(definition.height ?? 48)),
+    value: Math.max(0, Number(definition.value ?? 25)),
+    prompt: definition.prompt || "E: Take supplies",
+    collected: false,
+  };
+}
+
+function createEscapeExitState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `escape-exit-${index + 1}`,
+    label: definition.label || `Escape ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(24, Number(definition.width ?? 96)),
+    height: Math.max(24, Number(definition.height ?? 192)),
+    prompt: definition.prompt || "E: Escape",
+  };
+}
+
+function createVaultEscapeState(data) {
+  const totalLoot = (data.vaultLoot || []).length;
+  const totalValue = (data.vaultLoot || []).reduce((sum, item) => sum + Math.max(0, Number(item.value ?? 25)), 0);
+  return {
+    active: false,
+    completed: false,
+    failed: false,
+    lockdownActive: false,
+    lockdownTimer: 0,
+    lockdownDuration: 1.6,
+    doorId: null,
+    duration: 0,
+    timeLeft: 0,
+    collected: 0,
+    totalLoot,
+    valueCollected: 0,
+    totalValue,
+  };
+}
+
 export function createLevelRuntimeState(data) {
   return {
     interactables: (data.interactables || []).map((item) => ({
@@ -347,6 +410,10 @@ export function createLevelRuntimeState(data) {
     })),
     lootCrates: (data.lootCrates || []).map((crate, index) => createLootCrateState(crate, data, index)),
     temporaryBlocks: (data.temporaryBlocks || []).map((block, index) => createTemporaryBlockState(block, index)),
+    vaultDoors: (data.vaultDoors || []).map((door, index) => createVaultDoorState(door, index)),
+    vaultLoot: (data.vaultLoot || []).map((loot, index) => createVaultLootState(loot, index)),
+    escapeExits: (data.escapeExits || []).map((exit, index) => createEscapeExitState(exit, index)),
+    vaultEscape: createVaultEscapeState(data),
     loot: {
       active: false,
       crateId: null,
@@ -898,6 +965,10 @@ export function createRunState(data, meta) {
       used: false,
     })),
     lootCrates: (data.lootCrates || []).map((crate, index) => createLootCrateState(crate, data, index)),
+    vaultDoors: (data.vaultDoors || []).map((door, index) => createVaultDoorState(door, index)),
+    vaultLoot: (data.vaultLoot || []).map((loot, index) => createVaultLootState(loot, index)),
+    escapeExits: (data.escapeExits || []).map((exit, index) => createEscapeExitState(exit, index)),
+    vaultEscape: createVaultEscapeState(data),
     loot: {
       active: false,
       crateId: null,

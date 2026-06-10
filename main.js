@@ -1,10 +1,11 @@
-import { GAME_DATA } from "./level-data.js?v=20260520-shelter-photo-v1";
+import { GAME_DATA } from "./level-data.js?v=20260611-vault-music-v2";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260520-night-pp-mask-v2";
+  shouldUseLocalLevelOverrideFromUrl,
+} from "./level-store.js?v=20260610-vault-escape-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,7 +14,7 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260531-realistic-speed-v1";
-import { renderGame } from "./render.js?v=20260520-shelter-photo-v1";
+import { renderGame } from "./render.js?v=20260610-vault-escape-v1";
 import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -25,8 +26,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260520-shelter-photo-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260520-shelter-photo-v1";
+} from "./state.js?v=20260610-vault-escape-v1";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260611-vault-music-v2";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -64,6 +65,7 @@ testDebugPanel.innerHTML = `
     <button class="test-debug-close" type="button" data-test-action="close">닫기</button>
   </div>
   <div class="test-debug-actions">
+    <button type="button" data-test-action="setupVaultEscape">Vault test setup</button>
     <button type="button" data-test-action="maxAmmo">탄환 최대로 수정</button>
     <button type="button" data-test-action="applyLevelZeroMovement">Lv.0</button>
     <button type="button" data-test-action="restartRun">다시 시작하기</button>
@@ -249,7 +251,7 @@ const dom = {
 
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
 const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
-  applyLevelOverride: true,
+  applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
 });
 const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
 applySprintTuning(
@@ -1084,6 +1086,73 @@ function equipDebugWeaponPreset(currentState, data, preset) {
   saveCurrentGame(currentState, data);
 }
 
+function resetVaultEscapeDebugState(run, data) {
+  const fresh = createLevelRuntimeState(data);
+  run.vaultDoors = fresh.vaultDoors;
+  run.vaultLoot = fresh.vaultLoot;
+  run.escapeExits = fresh.escapeExits;
+  run.vaultEscape = fresh.vaultEscape;
+  run.loot = fresh.loot;
+  run.enemyShots = [];
+  run.playerBullets = [];
+  run.damageNumbers = [];
+  run.dodgeFx = [];
+}
+
+function movePlayerBesideDebugTarget(player, target, side = "left") {
+  if (!player || !target) {
+    return;
+  }
+  const targetBottom = Number(target.y) + Number(target.height);
+  const targetCenterX = Number(target.x) + Number(target.width) * 0.5;
+  player.x = targetCenterX - Number(player.width) * 0.5;
+  player.y = targetBottom - Number(player.height);
+  player.vx = 0;
+  player.vy = 0;
+  player.facing = side === "right" ? -1 : 1;
+  player.onGround = true;
+  player.wasOnGround = true;
+  player.movementState = MOVEMENT_STATES.GROUNDED;
+  player.attackCooldown = 0;
+  player.attackWindow = 0;
+  player.attackHits = new Set();
+  player.dashTimer = 0;
+  player.dashWindupTimer = 0;
+  player.dashCooldownTimer = 0;
+  player.slideTimer = 0;
+  player.hoverActive = false;
+  player.lightActive = false;
+  player.invulnTimer = 0;
+}
+
+function setupVaultEscapeDebug(currentDom, currentState, data) {
+  const run = ensureExpeditionRun(currentState, data);
+  currentState.scene = SCENES.EXPEDITION;
+  currentState.sceneTimer = 0;
+  currentState.resultSummary = null;
+  currentState.liveEdit.active = false;
+
+  resetVaultEscapeDebugState(run, data);
+  run.humanoidEnemies = [];
+  run.hostileDrones = [];
+  run.threats = [];
+  run.faceOff = createLevelRuntimeState(data).faceOff;
+
+  const door = run.vaultDoors?.[0];
+  if (!door) {
+    setRunNotice(currentState, "TEST: no vault door in this level.");
+    return;
+  }
+
+  movePlayerBesideDebugTarget(run.player, door, "left");
+  beginVaultEscape(run, door);
+  fillDebugAmmo(currentState, data);
+  snapCameraToPlayer(currentDom, run, data);
+  setTestDebugPanelOpen(currentDom, currentState, false);
+  setRunNotice(currentState, "TEST: vault timer started.");
+  saveCurrentGame(currentState, data);
+}
+
 function runTestDebugAction(currentDom, currentState, data, action) {
   if (action === "close") {
     setTestDebugPanelOpen(currentDom, currentState, false);
@@ -1107,6 +1176,8 @@ function runTestDebugAction(currentDom, currentState, data, action) {
     equipDebugWeaponPreset(currentState, data, "arSniper");
   } else if (action === "equipShotgunMachinegun") {
     equipDebugWeaponPreset(currentState, data, "shotgunMachinegun");
+  } else if (action === "setupVaultEscape") {
+    setupVaultEscapeDebug(currentDom, currentState, data);
   }
 }
 
@@ -1857,7 +1928,7 @@ function bindUi(currentDom, currentState, data) {
       return;
     }
 
-    if (event.repeat && ["KeyP", "KeyL", "KeyB", "KeyM", "KeyT"].includes(code)) {
+    if (event.repeat && ["KeyP", "KeyL", "KeyB", "KeyM", "KeyT", "F5"].includes(code)) {
       event.preventDefault();
       return;
     }
@@ -1903,6 +1974,13 @@ function bindUi(currentDom, currentState, data) {
         setTestDebugPanelOpen(currentDom, currentState, false);
       }
       setMovementTuningPanelOpen(currentDom, nextOpen);
+      return;
+    }
+
+    if (code === "F5") {
+      event.preventDefault();
+      consumeShortcutState(currentState, code);
+      setupVaultEscapeDebug(currentDom, currentState, data);
     }
   });
 }
