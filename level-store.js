@@ -614,6 +614,61 @@ function sanitizeEscapeBarrier(barrier, index, fallback = null) {
   };
 }
 
+function extractCameraZone(zone = {}) {
+  return {
+    id: safeString(zone.id, "camera-zone"),
+    label: safeString(zone.label, zone.id || "Camera Zone"),
+    x: safeNumber(zone.x, 0),
+    y: safeNumber(zone.y, 0),
+    width: safeNumber(zone.width, 320, 24),
+    height: safeNumber(zone.height, 220, 24),
+    zoom: safeRange(zone.zoom, 1, 0.1, 5),
+    minZoom: safeRange(zone.minZoom, zone.zoom ?? 1, 0.1, 5),
+    focusX: safeRange(zone.focusX, 0.5, 0.24, 0.76),
+    focusY: safeRange(zone.focusY, 0.5, 0.28, 0.72),
+    zoomLerp: safeRange(zone.zoomLerp, 3.4, 0, 30),
+    focusLerp: safeRange(zone.focusLerp, 4.6, 0, 30),
+    priority: safeNumber(zone.priority, 0),
+    enabled: safeBoolean(zone.enabled, true),
+  };
+}
+
+function sanitizeCameraZone(zone, index, fallback = null) {
+  const base = fallback || {
+    id: `camera-zone-${index + 1}`,
+    label: `Camera Zone ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 320,
+    height: 220,
+    zoom: 1,
+    minZoom: 1,
+    focusX: 0.5,
+    focusY: 0.5,
+    zoomLerp: 3.4,
+    focusLerp: 4.6,
+    priority: 0,
+    enabled: true,
+  };
+  const source = zone && typeof zone === "object" ? zone : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    zoom: safeRange(source.zoom, base.zoom, 0.1, 5),
+    minZoom: safeRange(source.minZoom, source.zoom ?? base.minZoom, 0.1, 5),
+    focusX: safeRange(source.focusX, base.focusX, 0.24, 0.76),
+    focusY: safeRange(source.focusY, base.focusY, 0.28, 0.72),
+    zoomLerp: safeRange(source.zoomLerp, base.zoomLerp, 0, 30),
+    focusLerp: safeRange(source.focusLerp, base.focusLerp, 0, 30),
+    priority: safeNumber(source.priority, base.priority),
+    enabled: safeBoolean(source.enabled, base.enabled),
+  };
+}
+
 function extractCamera(camera = {}) {
   return {
     ...Object.fromEntries(
@@ -1048,6 +1103,7 @@ export function extractEditableLevelData(data) {
     vaultLoot: (data.vaultLoot || []).map((loot) => extractVaultLoot(loot)),
     escapeExits: (data.escapeExits || []).map((exit) => extractEscapeExit(exit)),
     escapeBarriers: (data.escapeBarriers || []).map((barrier) => extractEscapeBarrier(barrier)),
+    cameraZones: (data.cameraZones || []).map((zone) => extractCameraZone(zone)),
     extractionGate: extractExtractionGate(data.extractionGate),
     platforms: (data.platforms || []).map((platform) => ({
       kind: platform.kind,
@@ -1177,6 +1233,9 @@ export function normalizeEditableLevelData(raw, baseData) {
     escapeBarriers: Array.isArray(source.escapeBarriers)
       ? source.escapeBarriers.map((barrier, index) => sanitizeEscapeBarrier(barrier, index, fallback.escapeBarriers?.[index]))
       : (fallback.escapeBarriers || []).map((barrier, index) => sanitizeEscapeBarrier(barrier, index)),
+    cameraZones: Array.isArray(source.cameraZones)
+      ? source.cameraZones.map((zone, index) => sanitizeCameraZone(zone, index, fallback.cameraZones?.[index]))
+      : (fallback.cameraZones || []).map((zone, index) => sanitizeCameraZone(zone, index)),
     extractionGate: Object.prototype.hasOwnProperty.call(source, "extractionGate")
       ? sanitizeExtractionGate(source.extractionGate, fallback.extractionGate)
       : sanitizeExtractionGate(fallback.extractionGate),
@@ -1265,6 +1324,7 @@ export function mergeLevelData(baseData, override) {
   next.vaultLoot = normalized.vaultLoot;
   next.escapeExits = normalized.escapeExits;
   next.escapeBarriers = normalized.escapeBarriers;
+  next.cameraZones = normalized.cameraZones;
   next.extractionGate = normalized.extractionGate ? { ...normalized.extractionGate } : null;
   next.platforms = normalized.platforms;
   next.temporaryBlocks = normalized.temporaryBlocks;
@@ -1536,6 +1596,7 @@ export function getLevelSummaries(baseData, options = {}) {
         height: barrier.height,
         trigger: barrier.trigger,
       })),
+      cameraZones: (effective.cameraZones || []).map((zone) => extractCameraZone(zone)),
       braceWalls: (effective.braceWalls || []).map((wall) => ({
         id: wall.id,
         x: wall.x,

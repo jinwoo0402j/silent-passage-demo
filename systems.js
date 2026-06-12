@@ -7,7 +7,7 @@
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260520-shelter-photo-v1";
+} from "./state.js?v=20260613-camera-zone-v1";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
 import {
   clearSavedGame,
@@ -761,12 +761,83 @@ function getCameraConfig(data) {
   return data.world.camera || {};
 }
 
+function getActiveCameraZone(run, data) {
+  const player = run?.player;
+  if (!player || !Array.isArray(data.cameraZones)) {
+    return null;
+  }
+  const centerX = player.x + player.width * 0.5;
+  const centerY = player.y + player.height * 0.5;
+  let activeZone = null;
+  let activePriority = Number.NEGATIVE_INFINITY;
+  data.cameraZones.forEach((zone) => {
+    if (
+      !zone ||
+      zone.enabled === false ||
+      centerX < zone.x ||
+      centerX > zone.x + zone.width ||
+      centerY < zone.y ||
+      centerY > zone.y + zone.height
+    ) {
+      return;
+    }
+    const priority = Number(zone.priority ?? 0);
+    if (priority >= activePriority) {
+      activeZone = zone;
+      activePriority = priority;
+    }
+  });
+  return activeZone;
+}
+
+function getCameraZoneFrame(zone) {
+  if (!zone) {
+    return null;
+  }
+  const width = Math.max(24, Number(zone.width ?? CAMERA_SCREEN_WIDTH));
+  const height = Math.max(24, Number(zone.height ?? CAMERA_SCREEN_HEIGHT));
+  const fitZoom = Math.min(CAMERA_SCREEN_WIDTH / width, CAMERA_SCREEN_HEIGHT / height);
+  const zoomScale = Math.max(0.1, Number(zone.zoom ?? 1));
+  const minZoomScale = Math.max(0.1, Number(zone.minZoom ?? zoomScale));
+  const zoom = clamp(fitZoom * zoomScale, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  return {
+    x: Number(zone.x ?? 0),
+    y: Number(zone.y ?? 0),
+    width,
+    height,
+    zoom,
+    minZoom: clamp(fitZoom * minZoomScale, CAMERA_ABSOLUTE_ZOOM_MIN, zoom),
+  };
+}
+
 function getEffectiveCameraConfig(data, run) {
   const config = getCameraConfig(data);
-  const baseZoom = config.zoom ?? 1;
+  const activeZone = getActiveCameraZone(run, data);
+  const zoneFrame = getCameraZoneFrame(activeZone);
+  const zoneConfig = activeZone
+    ? {
+      zoom: zoneFrame.zoom,
+      minZoom: zoneFrame.minZoom,
+      neutralFocusX: activeZone.focusX,
+      neutralFocusY: activeZone.focusY,
+      zoomLerp: activeZone.zoomLerp,
+      focusLerp: activeZone.focusLerp,
+      cameraZoneFrame: zoneFrame,
+    }
+    : null;
+  const mergedConfig = zoneConfig
+    ? Object.fromEntries(
+      Object.entries({ ...config, ...zoneConfig }).filter(([, value]) => value !== undefined && value !== null),
+    )
+    : config;
+  const baseZoom = mergedConfig.zoom ?? 1;
   const userZoom = clamp(run?.cameraUserZoom ?? 1, CAMERA_USER_ZOOM_MIN, CAMERA_USER_ZOOM_MAX);
+  if (run) {
+    run.activeCameraZoneId = activeZone?.id || null;
+    run.activeCameraZoneLabel = activeZone?.label || null;
+  }
   return {
-    ...config,
+    ...mergedConfig,
     zoom: clamp(baseZoom * userZoom, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX),
   };
 }
@@ -1161,12 +1232,17 @@ function syncCamera(run, data, dt) {
     Math.max(0, dt),
     config.maxLerpStepSeconds ?? CAMERA_MAX_LERP_STEP_SECONDS,
   );
+  const zoneFrame = config.cameraZoneFrame || null;
   if (!config.lookAheadEnabled) {
     const zoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
     const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
     const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
-    const targetX = run.player.x - viewportWidth * CAMERA_FOCUS_X;
-    const targetY = run.player.y - viewportHeight * CAMERA_FOCUS_Y;
+    const targetX = zoneFrame
+      ? zoneFrame.x + zoneFrame.width * 0.5 - viewportWidth * 0.5
+      : run.player.x - viewportWidth * CAMERA_FOCUS_X;
+    const targetY = zoneFrame
+      ? zoneFrame.y + zoneFrame.height * 0.5 - viewportHeight * 0.5
+      : run.player.y - viewportHeight * CAMERA_FOCUS_Y;
     const maxX = Math.max(0, data.world.width - viewportWidth);
     const maxY = Math.max(0, data.world.height - viewportHeight);
     run.cameraZoom = zoom;
@@ -1177,15 +1253,19 @@ function syncCamera(run, data, dt) {
     run.cameraTargetZoom = zoom;
     run.cameraLookAhead = 0;
     run.cameraSpeedRatio = 0;
-    const camera = constrainCameraToPlayer(
-      clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX),
-      clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY),
-      run,
-      data,
-      viewportWidth,
-      viewportHeight,
-      config,
-    );
+    const nextX = clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX);
+    const nextY = clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY);
+    const camera = zoneFrame
+      ? { x: nextX, y: nextY }
+      : constrainCameraToPlayer(
+        nextX,
+        nextY,
+        run,
+        data,
+        viewportWidth,
+        viewportHeight,
+        config,
+      );
     run.cameraX = camera.x;
     run.cameraY = camera.y;
     return;
@@ -1216,14 +1296,18 @@ function syncCamera(run, data, dt) {
     : recoilCamera
       ? Math.abs(recoilCamera.directionX) * recoilCamera.horizontalLookAhead
       : getCameraLookAhead(player, config);
-  const targetFocusX = freezeActionCamera
+  const targetFocusX = zoneFrame
+    ? 0.5
+    : freezeActionCamera
     ? clamp(run.cameraFocusX ?? (config.neutralFocusX ?? 0.5), 0.24, 0.76)
     : clamp(
       (config.neutralFocusX ?? 0.5) - focusLookDirection * lookAhead,
       0.24,
       0.76,
     );
-  const targetFocusY = freezeActionCamera
+  const targetFocusY = zoneFrame
+    ? 0.5
+    : freezeActionCamera
     ? clamp(run.cameraFocusY ?? (config.neutralFocusY ?? 0.5), 0.28, 0.72)
     : recoilCamera
       ? clamp(
@@ -1259,10 +1343,16 @@ function syncCamera(run, data, dt) {
 
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
-  const aimPan = updateAimCameraPan(run, config, viewportWidth, viewportHeight, cameraDt, freezeActionCamera);
-  const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
+  const aimPan = zoneFrame
+    ? { x: 0, y: 0 }
+    : updateAimCameraPan(run, config, viewportWidth, viewportHeight, cameraDt, freezeActionCamera);
+  const targetX = zoneFrame
+    ? zoneFrame.x + zoneFrame.width * 0.5 - viewportWidth * 0.5
+    : player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
   const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
-  const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
+  const targetY = zoneFrame
+    ? zoneFrame.y + zoneFrame.height * 0.5 - viewportHeight * 0.5
+    : player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
   const maxX = Math.max(0, data.world.width - viewportWidth);
   const maxY = Math.max(0, data.world.height - viewportHeight);
   run.cameraTargetX = targetX;
@@ -1270,15 +1360,19 @@ function syncCamera(run, data, dt) {
   run.cameraTargetZoom = targetZoom;
   run.cameraLookAhead = lookAhead;
   run.cameraSpeedRatio = speedZoom.ratio;
-  const camera = constrainCameraToPlayer(
-    clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX),
-    clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY),
-    run,
-    data,
-    viewportWidth,
-    viewportHeight,
-    config,
-  );
+  const nextX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
+  const nextY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
+  const camera = zoneFrame
+    ? { x: nextX, y: nextY }
+    : constrainCameraToPlayer(
+      nextX,
+      nextY,
+      run,
+      data,
+      viewportWidth,
+      viewportHeight,
+      config,
+    );
   run.cameraX = camera.x;
   run.cameraY = camera.y;
 }
@@ -4686,11 +4780,12 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
     aim.shotDirX = Math.cos(shotAngle);
     aim.shotDirY = Math.sin(shotAngle);
   }
-  const force = context.stats.recoil ?? config.recoilShotForce ?? 840;
+  const firedAirborne = !player.onGround;
+  const force = (context.stats.recoil ?? config.recoilShotForce ?? 840)
+    * (1 + (firedAirborne ? getVerticalMomentumBoost(player, config, "verticalMomentumRecoilBoost", 0.14) : 0));
   const maxHorizontal = config.recoilShotMaxHorizontalSpeed ?? 1180;
   const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180);
   const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760);
-  const firedAirborne = !player.onGround;
   const verticalPoseThreshold = config.recoilAimVerticalPoseThreshold ?? 0.45;
   const shotFacing = Math.abs(aim.shotDirX) > 0.08
     ? Math.sign(aim.shotDirX)
@@ -4746,6 +4841,9 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.canInteract = false;
+  if (firedAirborne && Math.abs(recoilY) > 0.2) {
+    grantVerticalMomentum(player, run, config, 0.18, "recoil");
+  }
 
   run.recoilFx.push({
     x: aim.originX,
@@ -4824,7 +4922,7 @@ function getDashDurationSeconds(config) {
 function getDashSpeed(config, player) {
   const duration = getDashDurationSeconds(config);
   const distance = (config.dashDistance ?? 0) * (player.dashDistanceScale ?? 1);
-  return distance / duration;
+  return (distance / duration) * getMomentumSpeedMultiplier(player, config);
 }
 
 function startDash(player, run, config, direction, directionY = 0, distanceScale = 1, consumeDashCharge = true) {
@@ -4962,16 +5060,110 @@ function applySprintJumpCarry(player) {
   return true;
 }
 
-function performJump(player, run, velocity) {
+function getVerticalMomentumRatio(player) {
+  return clamp(Number(player.verticalMomentum ?? 0), 0, 1);
+}
+
+function getVerticalMomentumStage(value) {
+  if (value >= 0.7) {
+    return 3;
+  }
+  if (value >= 0.35) {
+    return 2;
+  }
+  if (value > 0.04) {
+    return 1;
+  }
+  return 0;
+}
+
+function getVerticalMomentumBoost(player, config, field, fallback = 0) {
+  return getVerticalMomentumRatio(player) * Math.max(0, Number(config[field] ?? fallback));
+}
+
+function getMomentumSpeedMultiplier(player, config) {
+  const speedBoost = Math.max(0, Number(config.verticalMomentumSpeedBoost ?? 0.22));
+  return 1 + getVerticalMomentumRatio(player) * speedBoost;
+}
+
+function getMomentumSpeedBuildRatio(player, config) {
+  const runSpeed = Math.max(1, Number(config.runSpeed ?? 300));
+  const sprintSpeed = Math.max(runSpeed + 1, Number(config.sprintSpeed ?? runSpeed * 1.7));
+  const speed = Math.hypot(player.vx ?? 0, player.vy ?? 0);
+  const startSpeed = runSpeed * 0.8;
+  const fullSpeed = Math.max(startSpeed + 1, sprintSpeed * 1.2);
+  return clamp((speed - startSpeed) / (fullSpeed - startSpeed), 0, 1);
+}
+
+function shouldBuildMomentumFromSpeed(player) {
+  return !player.onGround
+    || player.dashTimer > 0
+    || player.slideTimer > 0
+    || player.wallRunActive
+    || player.recoilShotActive
+    || player.sprintCharge > 0.15
+    || Math.abs(player.vx ?? 0) > 1;
+}
+
+function getBoostedUpVelocity(player, config, velocity, field, fallback = 0) {
+  const sign = Math.sign(velocity) || -1;
+  const magnitude = Math.abs(velocity) * (1 + getVerticalMomentumBoost(player, config, field, fallback));
+  return sign < 0 ? -magnitude : magnitude;
+}
+
+function grantVerticalMomentum(player, run, config, amount, action) {
+  const gain = Math.max(0, Number(amount) || 0);
+  if (gain <= 0) {
+    return;
+  }
+  const previousStage = getVerticalMomentumStage(player.verticalMomentum ?? 0);
+  player.verticalMomentum = clamp((player.verticalMomentum ?? 0) + gain, 0, 1);
+  player.verticalMomentumTimer = Math.max(
+    player.verticalMomentumTimer ?? 0,
+    Math.max(0.05, (config.verticalMomentumComboMs ?? 900) / 1000),
+  );
+  player.verticalMomentumStage = getVerticalMomentumStage(player.verticalMomentum);
+  player.verticalMomentumFlashTimer = 0.18;
+  player.verticalMomentumLastAction = action;
+  player.verticalMomentumBoostActive = true;
+  if (player.verticalMomentumStage > previousStage && player.verticalMomentumStage >= 2) {
+    spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 4 + player.verticalMomentumStage * 2, "#93eaff");
+  }
+}
+
+function updateVerticalMomentum(player, config, dt) {
+  player.verticalMomentumFlashTimer = Math.max(0, (player.verticalMomentumFlashTimer ?? 0) - dt);
+  player.verticalMomentumBoostActive = false;
+  player.verticalMomentumTimer = Math.max(0, (player.verticalMomentumTimer ?? 0) - dt);
+  const speedBuildRatio = shouldBuildMomentumFromSpeed(player)
+    ? getMomentumSpeedBuildRatio(player, config)
+    : 0;
+  if (speedBuildRatio > 0) {
+    const speedBuild = Math.max(0, Number(config.verticalMomentumSpeedBuild ?? 0.24));
+    player.verticalMomentum = clamp((player.verticalMomentum ?? 0) + speedBuildRatio * speedBuild * dt, 0, 1);
+    player.verticalMomentumTimer = Math.max(player.verticalMomentumTimer ?? 0, 0.18);
+  }
+  const decayMs = player.onGround
+    ? (config.verticalMomentumGroundDecayMs ?? Math.min(config.verticalMomentumDecayMs ?? 1150, 520))
+    : (config.verticalMomentumDecayMs ?? 1150);
+  if (player.verticalMomentumTimer <= 0) {
+    player.verticalMomentum = Math.max(0, (player.verticalMomentum ?? 0) - dt / Math.max(0.05, decayMs / 1000));
+  }
+  player.verticalMomentumStage = getVerticalMomentumStage(player.verticalMomentum ?? 0);
+}
+
+function performJump(player, run, velocity, config = null) {
   clearBraceHold(player);
   clearWallRun(player);
   clearSlide(player);
   clearHover(player);
   clearRecoilSpin(player);
-  player.vy = velocity;
+  const movementConfig = config || {};
+  player.vy = getBoostedUpVelocity(player, movementConfig, velocity, "verticalMomentumJumpBoost", 0.1);
   player.onGround = false;
   player.jumpBufferTimer = 0;
   player.coyoteTimer = 0;
+  grantVerticalMomentum(player, run, movementConfig, 0.12, "jump");
   spawnParticles(run, player.x + player.width / 2, player.y + player.height, 6, "#d8ebff");
 }
 
@@ -4984,13 +5176,15 @@ function performWallJump(player, run, config, wallDirection) {
   const direction = -wallDirection || -player.facing;
   player.wallJumpLockDirection = direction;
   player.wallJumpLockTimer = config.wallJumpLockMs / 1000;
-  player.vx = direction * config.wallJumpHorizontal;
-  player.vy = -config.wallJumpVertical;
+  const wallBoost = 1 + getVerticalMomentumBoost(player, config, "verticalMomentumWallBoost", 0.16);
+  player.vx = direction * config.wallJumpHorizontal * wallBoost;
+  player.vy = -config.wallJumpVertical * wallBoost;
   player.facing = direction;
   player.jumpBufferTimer = 0;
   player.onGround = false;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  grantVerticalMomentum(player, run, config, 0.22, "wallJump");
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#cde9ff");
 }
 
@@ -5079,20 +5273,22 @@ function enterWallRun(player, run, data, config, wallDirection) {
 }
 
 function updateWallRun(player, config, dt) {
+  const wallBoost = 1 + getVerticalMomentumBoost(player, config, "verticalMomentumWallBoost", 0.16);
   player.wallRunSpeed = Math.min(
-    (config.wallRunMaxSpeed ?? 0),
+    (config.wallRunMaxSpeed ?? 0) * wallBoost,
     player.wallRunSpeed + (config.wallRunAccel ?? 0) * dt
   );
   player.vy = -player.wallRunSpeed;
-  player.vx = player.wallRunDirection * Math.max((config.runSpeed ?? 0) * 0.22, 88);
+  player.vx = player.wallRunDirection * Math.max((config.runSpeed ?? 0) * 0.22 * wallBoost, 88);
   player.onGround = false;
 }
 
 function launchFromWallRun(player, run, config) {
   const direction = player.wallRunDirection || player.wallDirection || 0;
   const exitDirection = direction === 0 ? player.facing || 1 : -direction;
-  player.vx = exitDirection * Math.max(Math.abs(player.vx), config.wallRunExitHorizontal ?? 0);
-  player.vy = -Math.max(player.wallRunSpeed, config.wallRunExitMinBoost ?? 0);
+  const wallBoost = 1 + getVerticalMomentumBoost(player, config, "verticalMomentumWallBoost", 0.16);
+  player.vx = exitDirection * Math.max(Math.abs(player.vx), (config.wallRunExitHorizontal ?? 0) * wallBoost);
+  player.vy = -Math.max(player.wallRunSpeed, (config.wallRunExitMinBoost ?? 0) * wallBoost);
   player.facing = exitDirection;
   player.jumpBufferTimer = 0;
   player.wallGraceTimer = 0;
@@ -5100,6 +5296,7 @@ function launchFromWallRun(player, run, config) {
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.wallRunBoostActive = true;
+  grantVerticalMomentum(player, run, config, 0.2, "wallRun");
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#b8f0ff");
   pushNotice(run, "踰???諛쒖궗");
   clearWallRun(player);
@@ -5111,6 +5308,11 @@ function startHover(player, run, config) {
   player.hoverParticleTimer = 0;
   player.jumpBufferTimer = 0;
   player.coyoteTimer = 0;
+  const hoverLift = getVerticalMomentumRatio(player) * Math.max(0, config.verticalMomentumHoverLift ?? 0);
+  if (hoverLift > 0) {
+    player.vy = Math.min(player.vy, -hoverLift);
+  }
+  grantVerticalMomentum(player, run, config, 0.1, "hover");
   if (player.vy > (config.hoverStartMaxFallSpeed ?? config.hoverFallSpeed ?? 180)) {
     player.vy = config.hoverStartMaxFallSpeed ?? config.hoverFallSpeed ?? 180;
   }
@@ -5142,6 +5344,7 @@ function performBraceVault(player, run, config, wall, moveAxis) {
   player.wallSlideGraceDirection = 0;
   player.braceReleaseTimer = 0.16;
   player.braceActive = true;
+  grantVerticalMomentum(player, run, config, 0.18, "brace");
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 10, "#8fe1ff");
   pushNotice(run, "踰?諛섎룞");
 }
@@ -5270,6 +5473,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
   player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
+  updateVerticalMomentum(player, config, dt);
   decaySlideTimer(player, config, dt);
   player.slideGroundGraceTimer = Math.max(0, (player.slideGroundGraceTimer ?? 0) - dt);
   player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
@@ -5292,6 +5496,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.bufferedLandingJumpActive = false;
   player.wallSlideGraceActive = false;
   player.braceActive = false;
+  player.verticalMomentumBoostActive = player.verticalMomentumFlashTimer > 0;
   player.braceHoldActive = false;
   player.wallRunBoostActive = false;
   player.dashResetActive = false;
@@ -5679,7 +5884,7 @@ function updatePlayer(run, data, state, dt, input) {
       if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
         armSprintJumpCarry(player, config);
       }
-      performJump(player, run, config.jumpVelocity);
+      performJump(player, run, config.jumpVelocity, config);
       applySprintJumpCarry(player);
       applyDashJumpCarry(player, config);
       player.bufferedLandingJumpActive = true;
@@ -5823,7 +6028,7 @@ function updatePlayer(run, data, state, dt, input) {
     const jumpVelocity = slideJumping
       ? -Math.abs(config.jumpVelocity ?? data.player.jumpVelocity ?? -900) * (slideJumpBoostReady ? (config.slideJumpVerticalMultiplier ?? 1.18) : 1)
       : config.jumpVelocity;
-    performJump(player, run, jumpVelocity);
+    performJump(player, run, jumpVelocity, config);
     applySprintJumpCarry(player);
     applyDashJumpCarry(player, config);
   }
@@ -5868,6 +6073,7 @@ function updatePlayer(run, data, state, dt, input) {
     const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
       ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
       : baseTargetSpeed;
+    const momentumTargetSpeed = targetSpeed * getMomentumSpeedMultiplier(player, config);
 
     const airControl = (config.airControlMultiplier ?? 1)
       * (player.hoverActive ? (config.hoverAirControlMultiplier ?? 1) : 1);
@@ -5881,7 +6087,7 @@ function updatePlayer(run, data, state, dt, input) {
     const stopDecel = moveAxis === 0 && player.onGround
       ? getStopInertiaDecel(player, config, decel)
       : decel;
-    player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : stopDecel) * dt);
+    player.vx = approach(player.vx, momentumTargetSpeed, (moveAxis !== 0 ? accel : stopDecel) * dt);
 
     if (
       player.onGround &&
@@ -6102,7 +6308,7 @@ function updatePlayer(run, data, state, dt, input) {
       if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
         armSprintJumpCarry(player, config);
       }
-      performJump(player, run, config.jumpVelocity);
+      performJump(player, run, config.jumpVelocity, config);
       applySprintJumpCarry(player);
       applyDashJumpCarry(player, config);
       player.bufferedLandingJumpActive = true;
@@ -8404,6 +8610,12 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.dashVectorY = 0;
   player.dashDistanceScale = 1;
   player.dashStartedAirborne = false;
+  player.verticalMomentum = 0;
+  player.verticalMomentumTimer = 0;
+  player.verticalMomentumStage = 0;
+  player.verticalMomentumFlashTimer = 0;
+  player.verticalMomentumLastAction = null;
+  player.verticalMomentumBoostActive = false;
   player.slideTimer = 0;
   clearAirDashHover(player);
   player.airDashHoverConsumed = false;
@@ -9904,4 +10116,3 @@ export function updateGame(state, data, dt) {
 export function hasThreatSense(state) {
   return hasUnlocked(state.meta, "threatSense");
 }
-

@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260613-escape-barrier-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260613-camera-zone-v1";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -17,7 +17,7 @@ import {
   saveRunStartLevelId,
   saveLevelOverride,
   shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260613-escape-barrier-v1";
+} from "./level-store.js?v=20260613-camera-zone-v1";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -51,6 +51,7 @@ const TOOL_IDS = {
   VAULT_LOOT: "vaultLoot",
   ESCAPE_EXIT: "escapeExit",
   ESCAPE_BARRIER: "escapeBarrier",
+  CAMERA_ZONE: "cameraZone",
   ENEMY: "enemy",
   ARTILLERY_ENEMY: "artilleryEnemy",
   DRONE: "drone",
@@ -86,6 +87,7 @@ const TOOL_SHORTCUTS = {
   KeyJ: TOOL_IDS.ARTILLERY_ENEMY,
   KeyO: TOOL_IDS.DRONE,
   KeyF: TOOL_IDS.FLYING_ENEMY,
+  KeyY: TOOL_IDS.CAMERA_ZONE,
 };
 
 const TOOL_SHORTCUT_LABELS = {
@@ -108,6 +110,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.ARTILLERY_ENEMY]: "J",
   [TOOL_IDS.DRONE]: "O",
   [TOOL_IDS.FLYING_ENEMY]: "F",
+  [TOOL_IDS.CAMERA_ZONE]: "Y",
 };
 
 const TOOL_HINTS = {
@@ -135,6 +138,7 @@ TOOL_HINTS[TOOL_IDS.VAULT_DOOR] = "Click to place a hackable vault door";
 TOOL_HINTS[TOOL_IDS.VAULT_LOOT] = "Click to place timed escape supplies";
 TOOL_HINTS[TOOL_IDS.ESCAPE_EXIT] = "Click to place the timed escape exit";
 TOOL_HINTS[TOOL_IDS.ESCAPE_BARRIER] = "Drag to place a wall that appears during vault escape";
+TOOL_HINTS[TOOL_IDS.CAMERA_ZONE] = "Drag to place a camera zoom zone";
 TOOL_HINTS[TOOL_IDS.ENEMY] = "Click to place a humanoid enemy";
 TOOL_HINTS[TOOL_IDS.ARTILLERY_ENEMY] = "Click to place an arcing humanoid enemy";
 TOOL_HINTS[TOOL_IDS.DRONE] = "Click to place a hostile drone";
@@ -585,6 +589,8 @@ const COLORS = {
   escapeExitFill: "rgba(255, 190, 102, 0.13)",
   escapeBarrier: "rgba(255, 122, 102, 0.92)",
   escapeBarrierFill: "rgba(255, 122, 102, 0.16)",
+  cameraZone: "rgba(147, 234, 255, 0.92)",
+  cameraZoneFill: "rgba(147, 234, 255, 0.12)",
   enemy: "rgba(255, 125, 147, 0.9)",
   enemyFill: "rgba(255, 125, 147, 0.13)",
   drone: "rgba(255, 190, 102, 0.9)",
@@ -955,6 +961,7 @@ function prepareEditorData(data) {
   data.vaultLoot = data.vaultLoot || [];
   data.escapeExits = data.escapeExits || [];
   data.escapeBarriers = data.escapeBarriers || [];
+  data.cameraZones = data.cameraZones || [];
   data.humanoidEnemies = data.humanoidEnemies || [];
   data.hostileDrones = data.hostileDrones || [];
   ensureEditorZipLineNodes(data);
@@ -1700,6 +1707,9 @@ function getSelectedEntity(editor) {
   if (editor.selected.kind === "escapeBarrier") {
     return editor.data.escapeBarriers[editor.selected.index] || null;
   }
+  if (editor.selected.kind === "cameraZone") {
+    return editor.data.cameraZones[editor.selected.index] || null;
+  }
   if (editor.selected.kind === "spawn") {
     return editor.data.player.spawn;
   }
@@ -1755,6 +1765,9 @@ function getSelectionCollection(editor, kind) {
   }
   if (kind === "escapeBarrier") {
     return editor.data.escapeBarriers;
+  }
+  if (kind === "cameraZone") {
+    return editor.data.cameraZones;
   }
   if (kind === "entrance") {
     return editor.data.entrances;
@@ -1903,6 +1916,9 @@ function getSelectionRect(editor, selection = editor.selected) {
     const barrier = editor.data.escapeBarriers[selection.index];
     return barrier ? getEscapeBarrierRect(barrier) : null;
   }
+  if (selection.kind === "cameraZone") {
+    return editor.data.cameraZones[selection.index] || null;
+  }
   if (selection.kind === "spawn") {
     return getSpawnRect(editor.data);
   }
@@ -1980,6 +1996,10 @@ function getSelectionOrigin(editor, selection = editor.selected) {
   }
   if (selection.kind === "escapeBarrier") {
     const entity = editor.data.escapeBarriers[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "cameraZone") {
+    const entity = editor.data.cameraZones[selection.index];
     return entity ? { x: entity.x, y: entity.y } : null;
   }
   if (selection.kind === "spawn") {
@@ -2068,6 +2088,11 @@ function describeSelection(editor) {
   if (editor.selected.kind === "escapeBarrier") {
     const barrier = editor.data.escapeBarriers[editor.selected.index];
     return barrier ? `Escape Barrier ${editor.selected.index + 1} - ${barrier.label || barrier.id || "barrier"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "cameraZone") {
+    const zone = editor.data.cameraZones[editor.selected.index];
+    return zone ? `Camera Zone ${editor.selected.index + 1} - ${zone.label || zone.id || "zone"}` : "No selection";
   }
 
   if (isMultiSelection(editor.selected)) {
@@ -2387,6 +2412,24 @@ function renderSelectionFields(editor, dom) {
       { value: "lockdown", label: "Lockdown only" },
     ]);
     addColor("Color", "color", entity.color || "#ff7a66");
+  } else if (editor.selected.kind === "cameraZone") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addNumber("Fit Scale", "zoom", entity.zoom ?? 1, { min: 0.1, max: 5, step: 0.01 });
+    addNumber("Min Scale", "minZoom", entity.minZoom ?? entity.zoom ?? 1, { min: 0.1, max: 5, step: 0.01 });
+    addNumber("Focus X", "focusX", entity.focusX ?? 0.5, { min: 0.24, max: 0.76, step: 0.01 });
+    addNumber("Focus Y", "focusY", entity.focusY ?? 0.5, { min: 0.28, max: 0.72, step: 0.01 });
+    addNumber("Zoom Lerp", "zoomLerp", entity.zoomLerp ?? 3.4, { min: 0, max: 30, step: 0.1 });
+    addNumber("Focus Lerp", "focusLerp", entity.focusLerp ?? 4.6, { min: 0, max: 30, step: 0.1 });
+    addNumber("Priority", "priority", entity.priority ?? 0, { step: 1 });
+    addSelect("Enabled", "enabled", entity.enabled === false ? "false" : "true", [
+      { value: "true", label: "Enabled" },
+      { value: "false", label: "Disabled" },
+    ]);
   } else if (editor.selected.kind === "spawn") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2706,6 +2749,12 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.cameraZones || []).forEach((zone, index) => {
+    if (rectsIntersect(rect, zone)) {
+      items.push({ kind: "cameraZone", index });
+    }
+  });
+
   editor.data.platforms.forEach((platform, index) => {
     if (rectsIntersect(rect, platform)) {
       items.push({ kind: "platform", index });
@@ -2780,6 +2829,12 @@ function hitTest(editor, point) {
   for (let index = (editor.data.escapeBarriers || []).length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, getEscapeBarrierRect(editor.data.escapeBarriers[index]))) {
       return { kind: "escapeBarrier", index };
+    }
+  }
+
+  for (let index = (editor.data.cameraZones || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, editor.data.cameraZones[index])) {
+      return { kind: "cameraZone", index };
     }
   }
 
@@ -3040,6 +3095,9 @@ function deleteSelection(editor, dom) {
   const escapeBarrierIndexes = new Set(
     items.filter((item) => item.kind === "escapeBarrier").map((item) => item.index),
   );
+  const cameraZoneIndexes = new Set(
+    items.filter((item) => item.kind === "cameraZone").map((item) => item.index),
+  );
   const routeExitIndexes = new Set(
     items.filter((item) => item.kind === "routeExit").map((item) => item.index),
   );
@@ -3061,6 +3119,7 @@ function deleteSelection(editor, dom) {
     && vaultLootIndexes.size === 0
     && escapeExitIndexes.size === 0
     && escapeBarrierIndexes.size === 0
+    && cameraZoneIndexes.size === 0
     && routeExitIndexes.size === 0
     && entranceIndexes.size === 0
   ) {
@@ -3088,6 +3147,7 @@ function deleteSelection(editor, dom) {
   editor.data.vaultLoot = editor.data.vaultLoot.filter((_, index) => !vaultLootIndexes.has(index));
   editor.data.escapeExits = editor.data.escapeExits.filter((_, index) => !escapeExitIndexes.has(index));
   editor.data.escapeBarriers = editor.data.escapeBarriers.filter((_, index) => !escapeBarrierIndexes.has(index));
+  editor.data.cameraZones = editor.data.cameraZones.filter((_, index) => !cameraZoneIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
   editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
 
@@ -3231,6 +3291,19 @@ function applySelectionField(editor, dom, field, value) {
         entity.toEntranceId = entrances[0]?.id || "start";
       }
     }
+    renderSelectionFields(editor, dom);
+    markDirty(editor, dom);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (field === "enabled") {
+    const nextValue = value !== "false";
+    if (entity.enabled === nextValue) {
+      return;
+    }
+    pushUndo(editor);
+    entity.enabled = nextValue;
     renderSelectionFields(editor, dom);
     markDirty(editor, dom);
     queueRender(editor, dom);
@@ -3483,6 +3556,13 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     }
     entity.x = snappedX;
     entity.y = snappedY;
+  } else if (selection.kind === "cameraZone") {
+    const entity = editor.data.cameraZones[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
   } else if (selection.kind === "spawn") {
     editor.data.player.spawn.x = snappedX;
     editor.data.player.spawn.y = snappedY;
@@ -3677,6 +3757,35 @@ function placeZipLineNodeAt(editor, dom, point) {
     });
   }
   setSelection(editor, dom, { kind: "zipLineNode", index: editor.data.zipLineNodes.length - 1 });
+  markDirty(editor, dom);
+}
+
+function createCameraZoneFromPreview(editor, dom) {
+  if (!editor.preview || editor.preview.kind !== "cameraZone") {
+    return;
+  }
+
+  pushUndo(editor);
+
+  const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+  const zone = {
+    id: `camera-zone-${Date.now()}`,
+    label: "Camera Zone",
+    x: rect.x,
+    y: rect.y,
+    width: Math.max(96, rect.width || 320),
+    height: Math.max(96, rect.height || 220),
+    zoom: 1,
+    minZoom: 1,
+    focusX: 0.5,
+    focusY: 0.5,
+    zoomLerp: 3.4,
+    focusLerp: 4.6,
+    priority: 0,
+    enabled: true,
+  };
+  editor.data.cameraZones.push(zone);
+  setSelection(editor, dom, { kind: "cameraZone", index: editor.data.cameraZones.length - 1 });
   markDirty(editor, dom);
 }
 
@@ -4163,6 +4272,19 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
+  if (editor.tool === TOOL_IDS.CAMERA_ZONE) {
+    editor.preview = {
+      kind: "cameraZone",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewCameraZone",
+    };
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.tool === TOOL_IDS.ZIP_LINE) {
     placeZipLineNodeAt(editor, dom, world);
     queueRender(editor, dom);
@@ -4366,6 +4488,12 @@ function handlePointerMove(editor, dom, event) {
     return;
   }
 
+  if (editor.drag.kind === "previewCameraZone" && editor.preview) {
+    editor.preview.end = snapPoint(world, editor.snap);
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.drag.kind === "previewBackgroundTile" && editor.preview) {
     editor.preview.end = snapPoint(world, editor.snap);
     queueRender(editor, dom);
@@ -4404,6 +4532,11 @@ function handlePointerUp(editor, dom) {
 
   if (editor.drag?.kind === "previewEscapeBarrier") {
     createEscapeBarrierFromPreview(editor, dom);
+    editor.preview = null;
+  }
+
+  if (editor.drag?.kind === "previewCameraZone") {
+    createCameraZoneFromPreview(editor, dom);
     editor.preview = null;
   }
 
@@ -4852,6 +4985,14 @@ function snapEntireLevelToScale(editor, dom) {
     y: snapValue(barrier.y, step),
     width: Math.max(step, snapValue(barrier.width, step)),
     height: Math.max(step, snapValue(barrier.height, step)),
+  }));
+
+  editor.data.cameraZones = (editor.data.cameraZones || []).map((zone) => ({
+    ...zone,
+    x: snapValue(zone.x, step),
+    y: snapValue(zone.y, step),
+    width: Math.max(tile, snapValue(zone.width, step)),
+    height: Math.max(tile, snapValue(zone.height, step)),
   }));
 
   editor.data.platforms = editor.data.platforms.map((platform) => ({
@@ -5442,6 +5583,34 @@ function drawEscapeBarriers(ctx, editor) {
   });
 }
 
+function drawCameraZones(ctx, editor) {
+  (editor.data.cameraZones || []).forEach((zone, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "cameraZone", index });
+    const focusX = zone.x + zone.width * clamp(Number(zone.focusX ?? 0.5), 0.24, 0.76);
+    const focusY = zone.y + zone.height * clamp(Number(zone.focusY ?? 0.5), 0.28, 0.72);
+    ctx.save();
+    ctx.fillStyle = COLORS.cameraZoneFill;
+    ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.cameraZone;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.setLineDash([12 / editor.view.zoom, 8 / editor.view.zoom]);
+    ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "rgba(231, 244, 126, 0.68)";
+    ctx.lineWidth = 1.4 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(focusX - 16 / editor.view.zoom, focusY);
+    ctx.lineTo(focusX + 16 / editor.view.zoom, focusY);
+    ctx.moveTo(focusX, focusY - 16 / editor.view.zoom);
+    ctx.lineTo(focusX, focusY + 16 / editor.view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = selected ? COLORS.accent : COLORS.cameraZone;
+    ctx.font = `${12 / editor.view.zoom}px Segoe UI`;
+    ctx.fillText(`${zone.label || zone.id || "Camera"} fit x${Number(zone.zoom ?? 1).toFixed(2)}`, zone.x + 6 / editor.view.zoom, zone.y - 6 / editor.view.zoom);
+    ctx.restore();
+  });
+}
+
 function drawZipLines(ctx, editor) {
   (editor.data.zipLines || []).forEach((zipLine, index) => {
     const selected = isSelectionItemSelected(editor.selected, { kind: "zipLine", index });
@@ -5949,6 +6118,19 @@ function drawPreview(ctx, editor) {
     ctx.strokeRect(rect.x, rect.y, width, height);
   }
 
+  if (editor.preview?.kind === "cameraZone") {
+    const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+    const width = Math.max(96, rect.width || 320);
+    const height = Math.max(96, rect.height || 220);
+    ctx.fillStyle = COLORS.cameraZoneFill;
+    ctx.fillRect(rect.x, rect.y, width, height);
+    ctx.strokeStyle = COLORS.cameraZone;
+    ctx.lineWidth = 2 / editor.view.zoom;
+    ctx.setLineDash([12 / editor.view.zoom, 8 / editor.view.zoom]);
+    ctx.strokeRect(rect.x, rect.y, width, height);
+    ctx.setLineDash([]);
+  }
+
   if (editor.preview?.kind === "zipLine") {
     ctx.strokeStyle = COLORS.accent;
     ctx.lineWidth = 3 / editor.view.zoom;
@@ -6115,6 +6297,7 @@ function renderEditor(editor, dom) {
   drawBraceWalls(ctx, editor);
   drawTemporaryBlocks(ctx, editor);
   drawEscapeBarriers(ctx, editor);
+  drawCameraZones(ctx, editor);
   drawBackgroundTiles(ctx, editor);
   drawZipLines(ctx, editor);
   drawProps(ctx, editor);

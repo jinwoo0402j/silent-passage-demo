@@ -1,11 +1,11 @@
-import { GAME_DATA } from "./level-data.js?v=20260613-escape-barrier-v1";
+import { GAME_DATA } from "./level-data.js?v=20260613-camera-zone-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
   shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260613-escape-barrier-v1";
+} from "./level-store.js?v=20260613-camera-zone-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -13,7 +13,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260531-realistic-speed-v1";
+} from "./movement-tuning.js?v=20260613-camera-zone-v1";
 import {
   AUDIO_OPTION_CHANNELS,
   applyAudioOptions,
@@ -21,7 +21,7 @@ import {
   resetAudioOptions,
   saveAudioOptions,
 } from "./audio-options.js?v=20260613-sound-options-v1";
-import { renderGame } from "./render.js?v=20260613-escape-barrier-v1";
+import { renderGame } from "./render.js?v=20260613-camera-zone-v1";
 import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -33,8 +33,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260613-escape-barrier-v1";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260613-sound-options-v1";
+} from "./state.js?v=20260613-camera-zone-v1";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260613-camera-zone-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

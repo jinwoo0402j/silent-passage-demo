@@ -4,7 +4,7 @@ import {
   computeArmWeaponStats,
   ensureWeaponLoadoutState,
   hasUnlocked,
-} from "./state.js?v=20260520-shelter-photo-v1";
+} from "./state.js?v=20260613-camera-zone-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
@@ -4693,10 +4693,11 @@ function drawDebugWorldOverlay(ctx, state, data) {
     player.dashResetActive ? "DashReset" : null,
     player.braceHoldActive ? "BraceHold" : null,
     player.braceActive ? "Brace" : null,
+    player.verticalMomentumStage > 0 ? `M${player.verticalMomentumStage}` : null,
   ].filter(Boolean).join(" · ");
   ctx.fillStyle = "rgba(210, 248, 255, 0.92)";
   ctx.fillText(
-    `Coy ${player.coyoteTimer.toFixed(2)}  Buf ${player.jumpBufferTimer.toFixed(2)}  Wall ${player.wallGraceTimer.toFixed(2)}  Slide ${player.wallSlideGraceTimer.toFixed(2)}  Dash ${player.dashCarryTimer.toFixed(2)}  Sprint ${player.sprintCharge.toFixed(2)}  Brace ${player.braceCooldownTimer.toFixed(2)}  Ret ${player.speedRetentionTimer.toFixed(2)}${debugFlags ? `  ${debugFlags}` : ""}`,
+    `Coy ${player.coyoteTimer.toFixed(2)}  Buf ${player.jumpBufferTimer.toFixed(2)}  Wall ${player.wallGraceTimer.toFixed(2)}  Slide ${player.wallSlideGraceTimer.toFixed(2)}  Dash ${player.dashCarryTimer.toFixed(2)}  Sprint ${player.sprintCharge.toFixed(2)}  MOM ${(player.verticalMomentum ?? 0).toFixed(2)}  Brace ${player.braceCooldownTimer.toFixed(2)}  Ret ${player.speedRetentionTimer.toFixed(2)}${debugFlags ? `  ${debugFlags}` : ""}`,
     player.x + 4,
     player.y - 18
   );
@@ -4714,10 +4715,10 @@ function drawDebugCameraOverlay(ctx, state, data) {
   const baseZoom = getCameraZoom(data);
   ctx.save();
   ctx.fillStyle = "rgba(6, 10, 16, 0.76)";
-  ctx.fillRect(18, SCREEN_HEIGHT - 82, 440, 58);
+  ctx.fillRect(18, SCREEN_HEIGHT - 104, 440, 80);
   ctx.strokeStyle = "rgba(231, 244, 126, 0.42)";
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(18, SCREEN_HEIGHT - 82, 440, 58);
+  ctx.strokeRect(18, SCREEN_HEIGHT - 104, 440, 80);
   ctx.fillStyle = "rgba(236, 249, 255, 0.94)";
   ctx.font = "12px 'Segoe UI', sans-serif";
   ctx.fillText(
@@ -4729,6 +4730,11 @@ function drawDebugCameraOverlay(ctx, state, data) {
     `focus ${Number(run.cameraFocusX ?? 0.5).toFixed(2)}, ${Number(run.cameraFocusY ?? 0.5).toFixed(2)}   look ${Number(run.cameraLookDirection ?? 0).toFixed(2)}   ahead ${Number(run.cameraLookAhead ?? 0).toFixed(2)}   speed ${Number(run.cameraSpeedRatio ?? 0).toFixed(2)}`,
     34,
     SCREEN_HEIGHT - 34,
+  );
+  ctx.fillText(
+    `zone ${run.activeCameraZoneLabel || run.activeCameraZoneId || "-"}`,
+    34,
+    SCREEN_HEIGHT - 78,
   );
   ctx.restore();
 }
@@ -8692,6 +8698,8 @@ function drawOperatorHudV5(ctx, state, data, theme) {
   const focusMax = Math.max(1, run.focusMax ?? 100);
   const focusValue = clamp((run.focus ?? focusMax) / focusMax, 0, 1);
   const batteryRatio = clamp(run.battery / data.player.maxBattery, 0, 1);
+  const momentum = clamp(run.player?.verticalMomentum ?? 0, 0, 1);
+  const momentumStage = Math.max(0, Math.floor(run.player?.verticalMomentumStage ?? 0));
 
   drawBeveledPanel(ctx, theme, x, y, 376, 78, {
     cut: 14,
@@ -8718,8 +8726,19 @@ function drawOperatorHudV5(ctx, state, data, theme) {
   drawMeterBarV5(ctx, theme, x + 76, y + 72, 92, "BAT", batteryRatio, theme.accentSecondary, {
     valueText: `${Math.round(run.battery)}/${data.player.maxBattery}`,
   });
+  if (momentum > 0.01) {
+    const momentumColor = momentumStage >= 3
+      ? "#f6e98a"
+      : momentumStage >= 2
+        ? "#93eaff"
+        : "#8fe1ff";
+    drawMeterBarV5(ctx, theme, x + 184, y + 72, 58, "MOM", momentum, momentumColor, {
+      active: (run.player?.verticalMomentumFlashTimer ?? 0) > 0,
+      valueText: `M${momentumStage}`,
+    });
+  }
 
-  drawQuickSlotsHudV5(ctx, run, theme, x + 224, y + 34);
+  drawQuickSlotsHudV5(ctx, run, theme, x + 258, y + 34);
 }
 
 function drawWeaponSilhouetteV5(ctx, x, y, scale, color) {
