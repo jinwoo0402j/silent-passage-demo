@@ -19,6 +19,10 @@ import {
   updateAutoSave,
 } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
+  getAudioChannelVolume,
+  registerAudioElement,
+} from "./audio-options.js?v=20260613-sound-options-v1";
+import {
   approach,
   clamp,
   createRect,
@@ -1411,6 +1415,32 @@ function getTemporaryBlockSolidRect(block) {
   };
 }
 
+function isEscapeBarrierActive(run, barrier) {
+  const vault = run?.vaultEscape;
+  const trigger = barrier?.trigger || "vaultEscape";
+  if (trigger === "lockdown") {
+    return Boolean(vault?.lockdownActive);
+  }
+  return Boolean(vault?.active || vault?.lockdownActive);
+}
+
+function getEscapeBarrierSolidRect(run, barrier) {
+  if (!barrier || !isEscapeBarrierActive(run, barrier)) {
+    return null;
+  }
+  return {
+    id: barrier.id,
+    type: "escapeBarrier",
+    x: barrier.x,
+    y: barrier.y,
+    width: barrier.width,
+    height: barrier.height,
+    dynamicEntityId: barrier.id,
+    dynamicEntity: barrier,
+    dynamicBraceTarget: false,
+  };
+}
+
 function getDynamicCollisionSolids(run) {
   const droneSolids = (run?.hostileDrones || [])
     .map((entity) => getHostileAirborneSolidRect(entity))
@@ -1418,7 +1448,10 @@ function getDynamicCollisionSolids(run) {
   const temporaryBlockSolids = (run?.temporaryBlocks || [])
     .map((block) => getTemporaryBlockSolidRect(block))
     .filter(Boolean);
-  return [...droneSolids, ...temporaryBlockSolids];
+  const escapeBarrierSolids = (run?.escapeBarriers || [])
+    .map((barrier) => getEscapeBarrierSolidRect(run, barrier))
+    .filter(Boolean);
+  return [...droneSolids, ...temporaryBlockSolids, ...escapeBarrierSolids];
 }
 
 function isSlopePlatform(platform) {
@@ -2434,8 +2467,9 @@ function playFaceOffBeep(faceOff) {
     const pitchSeed = (faceOff.enemyLineIndex ?? 0) % 5;
     oscillator.type = "square";
     oscillator.frequency.setValueAtTime(330 + pitchSeed * 18, now);
+    const volume = getAudioChannelVolume("sfx", 0.035);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.035, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + 0.006);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
     oscillator.connect(gain);
     gain.connect(context.destination);
@@ -2478,8 +2512,9 @@ function playFaceOffShotSound() {
     noiseFilter.frequency.setValueAtTime(1200, now);
     noiseFilter.frequency.exponentialRampToValueAtTime(180, now + duration);
     const noiseGain = context.createGain();
+    const sfxVolume = getAudioChannelVolume("sfx", 1);
     noiseGain.gain.setValueAtTime(0.0001, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.16, now + 0.006);
+    noiseGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.16 * sfxVolume), now + 0.006);
     noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     noise.connect(noiseFilter);
     noiseFilter.connect(noiseGain);
@@ -2493,7 +2528,7 @@ function playFaceOffShotSound() {
     thump.frequency.setValueAtTime(92, now);
     thump.frequency.exponentialRampToValueAtTime(42, now + 0.12);
     thumpGain.gain.setValueAtTime(0.0001, now);
-    thumpGain.gain.exponentialRampToValueAtTime(0.18, now + 0.004);
+    thumpGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.18 * sfxVolume), now + 0.004);
     thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
     thump.connect(thumpGain);
     thumpGain.connect(context.destination);
@@ -2531,7 +2566,7 @@ function getLoopingAudioTrack(slotName, src, volume = 0.45) {
   const element = new window.Audio(src);
   element.loop = true;
   element.preload = "auto";
-  element.volume = volume;
+  registerAudioElement(element, "bgm", volume);
   const track = {
     kind: "file",
     src,
@@ -2550,7 +2585,7 @@ function playLoopingAudioTrack(slotName, src, volume = 0.45, playbackRate = 1) {
   if (!element) {
     return null;
   }
-  element.volume = volume;
+  registerAudioElement(element, "bgm", volume);
   element.playbackRate = playbackRate;
   if (!element.paused || track.pending) {
     return track;
@@ -2656,7 +2691,7 @@ function startVaultEscapeMusic(run) {
     const bassGain = context.createGain();
     const now = context.currentTime;
     master.gain.setValueAtTime(0.0001, now);
-    master.gain.exponentialRampToValueAtTime(0.055, now + 0.08);
+    master.gain.exponentialRampToValueAtTime(getAudioChannelVolume("bgm", 0.055), now + 0.08);
     bass.type = "sawtooth";
     bass.frequency.setValueAtTime(55, now);
     bassFilter.type = "lowpass";
@@ -2743,7 +2778,7 @@ function updateVaultEscapeMusic(run) {
     const urgency = vault.lockdownActive ? 1 : clamp(1 - timeLeft / duration, 0, 1);
     const interval = vault.lockdownActive ? 0.115 : lerp(0.34, 0.15, urgency);
     const bassFrequency = vault.lockdownActive ? 42 : lerp(52, 76, urgency);
-    audio.master.gain.setTargetAtTime(vault.lockdownActive ? 0.075 : 0.055, now, 0.04);
+    audio.master.gain.setTargetAtTime(getAudioChannelVolume("bgm", vault.lockdownActive ? 0.075 : 0.055), now, 0.04);
     audio.bass.frequency.setTargetAtTime(bassFrequency, now, 0.05);
     audio.bassFilter.frequency.setTargetAtTime(vault.lockdownActive ? 440 : lerp(190, 340, urgency), now, 0.05);
     if (now < audio.nextBeatAt) {
@@ -8312,6 +8347,7 @@ const LEVEL_STATE_KEYS = [
   "vaultDoors",
   "vaultLoot",
   "escapeExits",
+  "escapeBarriers",
   "vaultEscape",
   "encounters",
   "threats",

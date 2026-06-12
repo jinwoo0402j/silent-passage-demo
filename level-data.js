@@ -1518,6 +1518,18 @@ GAME_DATA.levels = {
         "prompt": "Up: Escape"
       }
     ],
+    "escapeBarriers": [
+      {
+        "id": "escape-barrier-test-01",
+        "label": "Emergency Shutter",
+        "x": 1784,
+        "y": 1680,
+        "width": 40,
+        "height": 160,
+        "trigger": "vaultEscape",
+        "color": "#ff7a66"
+      }
+    ],
     "map": {
       "rooms": [
         {

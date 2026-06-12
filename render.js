@@ -1149,6 +1149,49 @@ function drawTemporaryBlocks(ctx, run, theme) {
   });
 }
 
+function isEscapeBarrierActive(run, barrier) {
+  const vault = run?.vaultEscape;
+  if ((barrier?.trigger || "vaultEscape") === "lockdown") {
+    return Boolean(vault?.lockdownActive);
+  }
+  return Boolean(vault?.active || vault?.lockdownActive);
+}
+
+function drawEscapeBarriers(ctx, run) {
+  (run.escapeBarriers || []).forEach((barrier) => {
+    const active = isEscapeBarrierActive(run, barrier);
+    const pulse = 0.45 + Math.sin((run.time ?? 0) * 8 + barrier.x * 0.01) * 0.18;
+    ctx.save();
+    ctx.globalAlpha = active ? 1 : 0.34;
+    if (active) {
+      ctx.shadowColor = barrier.color || "#ff7a66";
+      ctx.shadowBlur = 20 + pulse * 14;
+    }
+    const gradient = ctx.createLinearGradient(barrier.x, barrier.y, barrier.x, barrier.y + barrier.height);
+    gradient.addColorStop(0, active ? "rgba(255, 190, 102, 0.62)" : "rgba(255, 190, 102, 0.12)");
+    gradient.addColorStop(0.48, active ? "rgba(255, 122, 102, 0.72)" : "rgba(255, 122, 102, 0.16)");
+    gradient.addColorStop(1, active ? "rgba(28, 12, 16, 0.9)" : "rgba(28, 12, 16, 0.18)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(barrier.x, barrier.y, barrier.width, barrier.height);
+    ctx.strokeStyle = active
+      ? `rgba(255, 226, 126, ${0.5 + pulse * 0.32})`
+      : "rgba(255, 190, 102, 0.42)";
+    ctx.lineWidth = active ? 2.4 : 1.4;
+    ctx.strokeRect(barrier.x, barrier.y, barrier.width, barrier.height);
+    ctx.strokeStyle = active ? "rgba(255,255,255,0.32)" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1.2;
+    const slits = Math.max(2, Math.floor(barrier.width / 28));
+    for (let index = 0; index < slits; index += 1) {
+      const x = barrier.x + 8 + index * Math.max(1, (barrier.width - 16) / Math.max(1, slits - 1));
+      ctx.beginPath();
+      ctx.moveTo(x, barrier.y + 8);
+      ctx.lineTo(x, barrier.y + barrier.height - 8);
+      ctx.stroke();
+    }
+    ctx.restore();
+  });
+}
+
 function drawZipLines(ctx, data, theme) {
   (data.zipLines || []).forEach((zipLine) => {
     ctx.save();
@@ -6552,6 +6595,7 @@ function renderExpedition(ctx, state, data) {
   drawGroundShine(ctx);
   drawTerrain(ctx, data);
   drawTemporaryBlocks(ctx, run, theme);
+  drawEscapeBarriers(ctx, run);
   drawZipLines(ctx, data, theme);
   drawGate(ctx, data, theme);
   drawBraceWalls(ctx, data, theme);

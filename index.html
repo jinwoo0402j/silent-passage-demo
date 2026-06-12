@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>윤회무명2</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css?v=20260514-camera-center-v3">
+  <link rel="stylesheet" href="./styles.css?v=20260613-sound-options-v1">
 </head>
 <body>
   <main class="app-shell">
@@ -18,6 +18,24 @@
       <button id="liveEditButton" class="live-edit-button" type="button">라이브 편집</button>
       <button id="debugButton" class="debug-button" type="button">디버그</button>
       <button id="movementTuningButton" class="movement-tuning-button" type="button">이동 튜닝</button>
+      <button id="soundOptionsButton" class="sound-options-button" type="button">Sound</button>
+
+      <section id="soundOptionsPanel" class="sound-options-panel" hidden>
+        <div class="sound-options-header">
+          <div>
+            <p class="sound-options-eyebrow">Audio</p>
+            <h2>Sound Options</h2>
+          </div>
+          <button id="soundOptionsCloseButton" class="sound-options-close" type="button">닫기</button>
+        </div>
+        <div class="sound-options-tabs" role="tablist" aria-label="Sound option tabs">
+          <button class="sound-options-tab is-active" type="button" role="tab" aria-selected="true">Audio</button>
+        </div>
+        <div id="soundOptionsFields" class="sound-options-fields"></div>
+        <div class="sound-options-actions">
+          <button id="soundOptionsResetButton" class="sound-options-action" type="button">기본값</button>
+        </div>
+      </section>
 
       <section id="movementTuningPanel" class="movement-tuning-panel" hidden>
         <div class="movement-tuning-header">
@@ -56,6 +74,6 @@
     </div>
   </main>
 
-  <script type="module" src="./main.js?v=20260611-vault-music-v2"></script>
+  <script type="module" src="./main.js?v=20260613-sound-options-v1"></script>
 </body>
 </html>

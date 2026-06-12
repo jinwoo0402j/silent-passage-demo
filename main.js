@@ -1,11 +1,11 @@
-import { GAME_DATA } from "./level-data.js?v=20260611-vault-music-v2";
+import { GAME_DATA } from "./level-data.js?v=20260613-escape-barrier-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
   shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260610-vault-escape-v1";
+} from "./level-store.js?v=20260613-escape-barrier-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -14,7 +14,14 @@ import {
   loadSprintTuning,
   saveSprintTuning,
 } from "./movement-tuning.js?v=20260531-realistic-speed-v1";
-import { renderGame } from "./render.js?v=20260610-vault-escape-v1";
+import {
+  AUDIO_OPTION_CHANNELS,
+  applyAudioOptions,
+  loadAudioOptions,
+  resetAudioOptions,
+  saveAudioOptions,
+} from "./audio-options.js?v=20260613-sound-options-v1";
+import { renderGame } from "./render.js?v=20260613-escape-barrier-v1";
 import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -26,14 +33,19 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260610-vault-escape-v1";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260611-vault-music-v2";
+} from "./state.js?v=20260613-escape-barrier-v1";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260613-sound-options-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const liveEditButton = document.getElementById("liveEditButton");
 const debugButton = document.getElementById("debugButton");
 const movementTuningButton = document.getElementById("movementTuningButton");
+const soundOptionsButton = document.getElementById("soundOptionsButton");
+const soundOptionsPanel = document.getElementById("soundOptionsPanel");
+const soundOptionsFields = document.getElementById("soundOptionsFields");
+const soundOptionsCloseButton = document.getElementById("soundOptionsCloseButton");
+const soundOptionsResetButton = document.getElementById("soundOptionsResetButton");
 const movementTuningPanel = document.getElementById("movementTuningPanel");
 const movementTuningFields = document.getElementById("movementTuningFields");
 const movementTuningCloseButton = document.getElementById("movementTuningCloseButton");
@@ -237,6 +249,11 @@ const dom = {
   testDebugButton,
   testDebugPanel,
   movementTuningButton,
+  soundOptionsButton,
+  soundOptionsPanel,
+  soundOptionsFields,
+  soundOptionsCloseButton,
+  soundOptionsResetButton,
   movementTuningPanel,
   movementTuningFields,
   movementTuningCloseButton,
@@ -250,6 +267,7 @@ const dom = {
 };
 
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
+applyAudioOptions(loadAudioOptions());
 const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
   applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
 });
@@ -527,6 +545,47 @@ function getSceneActionLabel(currentState) {
     return "재시도";
   }
   return "";
+}
+
+function formatVolumePercent(value) {
+  return `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`;
+}
+
+function renderSoundOptionsFields() {
+  if (!soundOptionsFields) {
+    return;
+  }
+  const options = loadAudioOptions();
+  soundOptionsFields.innerHTML = AUDIO_OPTION_CHANNELS.map((channel) => {
+    const value = options[channel.id] ?? 1;
+    return `
+      <div class="sound-options-field">
+        <label for="sound-${channel.id}">${channel.label}</label>
+        <output for="sound-${channel.id}" data-audio-output="${channel.id}">${formatVolumePercent(value)}</output>
+        <input
+          id="sound-${channel.id}"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="${Math.round(value * 100)}"
+          data-audio-channel="${channel.id}"
+        >
+        <small>${channel.description}</small>
+      </div>
+    `;
+  }).join("");
+}
+
+function setSoundOptionsPanelOpen(open) {
+  if (!soundOptionsPanel || !soundOptionsButton) {
+    return;
+  }
+  soundOptionsPanel.hidden = !open;
+  soundOptionsButton.classList.toggle("is-active", open);
+  if (open) {
+    renderSoundOptionsFields();
+  }
 }
 
 function syncLiveEditButton(currentDom, currentState, data) {
@@ -1522,6 +1581,8 @@ function bindUi(currentDom, currentState, data) {
 
   renderMovementTuningFields(currentDom, data.player.movement);
   setMovementTuningPanelOpen(currentDom, false);
+  renderSoundOptionsFields();
+  setSoundOptionsPanelOpen(false);
 
   currentDom.sceneActionButton?.addEventListener("click", () => {
     pressVirtualKey(currentState, "KeyC");
@@ -1534,6 +1595,7 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.testDebugButton?.addEventListener("click", () => {
+    setSoundOptionsPanelOpen(false);
     setTestDebugPanelOpen(currentDom, currentState, !currentState.testDebug?.active);
   });
 
@@ -1567,12 +1629,46 @@ function bindUi(currentDom, currentState, data) {
     const nextOpen = currentDom.movementTuningPanel.hidden;
     if (nextOpen) {
       setTestDebugPanelOpen(currentDom, currentState, false);
+      setSoundOptionsPanelOpen(false);
     }
     setMovementTuningPanelOpen(currentDom, nextOpen);
   });
 
   currentDom.movementTuningCloseButton?.addEventListener("click", () => {
     setMovementTuningPanelOpen(currentDom, false);
+  });
+
+  currentDom.soundOptionsButton?.addEventListener("click", () => {
+    const nextOpen = currentDom.soundOptionsPanel?.hidden ?? true;
+    if (nextOpen) {
+      setTestDebugPanelOpen(currentDom, currentState, false);
+      setMovementTuningPanelOpen(currentDom, false);
+    }
+    setSoundOptionsPanelOpen(nextOpen);
+  });
+
+  currentDom.soundOptionsCloseButton?.addEventListener("click", () => {
+    setSoundOptionsPanelOpen(false);
+  });
+
+  currentDom.soundOptionsResetButton?.addEventListener("click", () => {
+    resetAudioOptions();
+    renderSoundOptionsFields();
+  });
+
+  currentDom.soundOptionsFields?.addEventListener("input", (event) => {
+    const input = event.target;
+    const channel = input?.dataset?.audioChannel;
+    if (!channel) {
+      return;
+    }
+    const options = loadAudioOptions();
+    options[channel] = Math.max(0, Math.min(1, Number(input.value) / 100));
+    saveAudioOptions(options);
+    const output = currentDom.soundOptionsFields.querySelector(`[data-audio-output="${channel}"]`);
+    if (output) {
+      output.textContent = formatVolumePercent(options[channel]);
+    }
   });
 
   currentDom.movementTuningSaveButton?.addEventListener("click", () => {

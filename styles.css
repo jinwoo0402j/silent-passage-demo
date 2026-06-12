@@ -172,7 +172,7 @@ canvas {
 
 .test-debug-button {
   position: absolute;
-  top: 206px;
+  top: 252px;
   right: 18px;
   z-index: 4;
   min-width: 108px;
@@ -196,7 +196,7 @@ canvas {
 
 .test-debug-panel {
   position: absolute;
-  top: 252px;
+  top: 298px;
   right: 18px;
   z-index: 6;
   width: 286px;
@@ -289,12 +289,38 @@ canvas {
   border-color: rgba(231, 244, 126, 0.54);
 }
 
+.sound-options-button {
+  position: absolute;
+  top: 206px;
+  right: 18px;
+  z-index: 4;
+  min-width: 108px;
+  padding: 10px 14px;
+  border: 1px solid rgba(147, 234, 255, 0.26);
+  border-radius: 14px;
+  background: rgba(10, 24, 34, 0.66);
+  color: rgba(225, 248, 255, 0.96);
+  font: 700 12px "Segoe UI", sans-serif;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.sound-options-button:hover,
+.sound-options-button.is-active {
+  background: rgba(16, 43, 60, 0.92);
+  border-color: rgba(147, 234, 255, 0.56);
+}
+
 body.is-map-overlay-active .app-links,
 body.is-map-overlay-active .live-edit-button,
 body.is-map-overlay-active .debug-button,
 body.is-map-overlay-active .test-debug-button,
 body.is-map-overlay-active .test-debug-panel,
 body.is-map-overlay-active .movement-tuning-button,
+body.is-map-overlay-active .sound-options-button,
+body.is-map-overlay-active .sound-options-panel,
 body.is-map-overlay-active .touch-controls,
 body.is-inventory-overlay-active .app-links,
 body.is-inventory-overlay-active .live-edit-button,
@@ -302,9 +328,118 @@ body.is-inventory-overlay-active .debug-button,
 body.is-inventory-overlay-active .test-debug-button,
 body.is-inventory-overlay-active .test-debug-panel,
 body.is-inventory-overlay-active .movement-tuning-button,
+body.is-inventory-overlay-active .sound-options-button,
+body.is-inventory-overlay-active .sound-options-panel,
 body.is-inventory-overlay-active .touch-controls {
   opacity: 0;
   pointer-events: none;
+}
+
+.sound-options-panel {
+  position: absolute;
+  top: 252px;
+  right: 18px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  padding: 16px;
+  border: 1px solid rgba(147, 234, 255, 0.24);
+  border-radius: 18px;
+  background: rgba(7, 14, 20, 0.9);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.26);
+}
+
+.sound-options-panel[hidden] {
+  display: none;
+}
+
+.sound-options-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sound-options-eyebrow {
+  margin: 0 0 6px;
+  color: rgba(147, 234, 255, 0.92);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sound-options-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.sound-options-close,
+.sound-options-action,
+.sound-options-tab {
+  appearance: none;
+  border: 1px solid rgba(147, 234, 255, 0.24);
+  border-radius: 12px;
+  background: rgba(13, 24, 35, 0.86);
+  color: #eef7fb;
+  font: 600 12px "Segoe UI", sans-serif;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.sound-options-close:hover,
+.sound-options-action:hover,
+.sound-options-tab:hover,
+.sound-options-tab.is-active {
+  background: rgba(20, 44, 58, 0.96);
+  border-color: rgba(147, 234, 255, 0.48);
+}
+
+.sound-options-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.sound-options-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.sound-options-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px 12px;
+  align-items: center;
+}
+
+.sound-options-field label {
+  color: rgba(238, 247, 251, 0.84);
+  font: 700 13px "Segoe UI", sans-serif;
+}
+
+.sound-options-field output {
+  color: rgba(147, 234, 255, 0.94);
+  font: 800 12px "Segoe UI", sans-serif;
+}
+
+.sound-options-field small {
+  grid-column: 1 / -1;
+  color: rgba(238, 247, 251, 0.52);
+  font: 600 11px "Segoe UI", sans-serif;
+}
+
+.sound-options-field input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #93eaff;
+}
+
+.sound-options-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .movement-tuning-panel {
@@ -578,7 +713,7 @@ body.is-inventory-overlay-active .touch-controls {
     font-size: 11px;
   }
 
-  .test-debug-button {
+  .sound-options-button {
     top: 176px;
     right: 10px;
     min-width: 96px;
@@ -586,18 +721,33 @@ body.is-inventory-overlay-active .touch-controls {
     font-size: 11px;
   }
 
-  .test-debug-panel {
+  .test-debug-button {
     top: 216px;
+    right: 10px;
+    min-width: 96px;
+    padding: 9px 12px;
+    font-size: 11px;
+  }
+
+  .test-debug-panel {
+    top: 256px;
     right: 10px;
     width: min(286px, calc(100vw - 20px));
     padding: 12px;
   }
 
-  .movement-tuning-panel {
-    top: 258px;
+  .sound-options-panel {
+    top: 256px;
     right: 10px;
     width: min(300px, calc(100vw - 20px));
-    max-height: calc(100% - 272px);
+    padding: 14px;
+  }
+
+  .movement-tuning-panel {
+    top: 298px;
+    right: 10px;
+    width: min(300px, calc(100vw - 20px));
+    max-height: calc(100% - 312px);
     padding: 14px;
   }
 

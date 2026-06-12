@@ -472,7 +472,7 @@ function extractVaultDoor(door = {}) {
     y: safeNumber(door.y, 0),
     width: safeNumber(door.width, 96, 24),
     height: safeNumber(door.height, 144, 24),
-    prompt: safeString(door.prompt, "E: Hack vault"),
+    prompt: safeString(door.prompt, "Up: Hack vault"),
     duration: safeNumber(door.duration, 60, 1),
   };
 }
@@ -485,7 +485,7 @@ function sanitizeVaultDoor(door, index, fallback = null) {
     y: 0,
     width: 96,
     height: 144,
-    prompt: "E: Hack vault",
+    prompt: "Up: Hack vault",
     duration: 60,
   };
   const source = door && typeof door === "object" ? door : {};
@@ -510,7 +510,7 @@ function extractVaultLoot(loot = {}) {
     width: safeNumber(loot.width, 48, 16),
     height: safeNumber(loot.height, 48, 16),
     value: safeNumber(loot.value, 25, 0),
-    prompt: safeString(loot.prompt, "E: Take supplies"),
+    prompt: safeString(loot.prompt, "Up: Take supplies"),
   };
 }
 
@@ -523,7 +523,7 @@ function sanitizeVaultLoot(loot, index, fallback = null) {
     width: 48,
     height: 48,
     value: 25,
-    prompt: "E: Take supplies",
+    prompt: "Up: Take supplies",
   };
   const source = loot && typeof loot === "object" ? loot : {};
   return {
@@ -546,7 +546,7 @@ function extractEscapeExit(exit = {}) {
     y: safeNumber(exit.y, 0),
     width: safeNumber(exit.width, 96, 24),
     height: safeNumber(exit.height, 192, 24),
-    prompt: safeString(exit.prompt, "E: Escape"),
+    prompt: safeString(exit.prompt, "Up: Escape"),
   };
 }
 
@@ -558,7 +558,7 @@ function sanitizeEscapeExit(exit, index, fallback = null) {
     y: 0,
     width: 96,
     height: 192,
-    prompt: "E: Escape",
+    prompt: "Up: Escape",
   };
   const source = exit && typeof exit === "object" ? exit : {};
   return {
@@ -569,6 +569,48 @@ function sanitizeEscapeExit(exit, index, fallback = null) {
     width: safeNumber(source.width, base.width, 24),
     height: safeNumber(source.height, base.height, 24),
     prompt: safeString(source.prompt, base.prompt),
+  };
+}
+
+function extractEscapeBarrier(barrier = {}) {
+  return {
+    id: safeString(barrier.id, "escape-barrier"),
+    label: safeString(barrier.label, barrier.id || "Escape Barrier"),
+    x: safeNumber(barrier.x, 0),
+    y: safeNumber(barrier.y, 0),
+    width: safeNumber(barrier.width, 96, 12),
+    height: safeNumber(barrier.height, 128, 12),
+    trigger: safeString(barrier.trigger, "vaultEscape"),
+    color: safeString(barrier.color, "#ff7a66"),
+  };
+}
+
+function sanitizeEscapeBarrier(barrier, index, fallback = null) {
+  const base = fallback || {
+    id: `escape-barrier-${index + 1}`,
+    label: `Barrier ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 128,
+    trigger: "vaultEscape",
+    color: "#ff7a66",
+  };
+  const source = barrier && typeof barrier === "object" ? barrier : {};
+  const trigger = ["vaultEscape", "lockdown"].includes(source.trigger)
+    ? source.trigger
+    : ["vaultEscape", "lockdown"].includes(base.trigger)
+      ? base.trigger
+      : "vaultEscape";
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 12),
+    height: safeNumber(source.height, base.height, 12),
+    trigger,
+    color: safeString(source.color, base.color || "#ff7a66"),
   };
 }
 
@@ -1005,6 +1047,7 @@ export function extractEditableLevelData(data) {
     vaultDoors: (data.vaultDoors || []).map((door) => extractVaultDoor(door)),
     vaultLoot: (data.vaultLoot || []).map((loot) => extractVaultLoot(loot)),
     escapeExits: (data.escapeExits || []).map((exit) => extractEscapeExit(exit)),
+    escapeBarriers: (data.escapeBarriers || []).map((barrier) => extractEscapeBarrier(barrier)),
     extractionGate: extractExtractionGate(data.extractionGate),
     platforms: (data.platforms || []).map((platform) => ({
       kind: platform.kind,
@@ -1131,6 +1174,9 @@ export function normalizeEditableLevelData(raw, baseData) {
     escapeExits: Array.isArray(source.escapeExits)
       ? source.escapeExits.map((exit, index) => sanitizeEscapeExit(exit, index, fallback.escapeExits?.[index]))
       : (fallback.escapeExits || []).map((exit, index) => sanitizeEscapeExit(exit, index)),
+    escapeBarriers: Array.isArray(source.escapeBarriers)
+      ? source.escapeBarriers.map((barrier, index) => sanitizeEscapeBarrier(barrier, index, fallback.escapeBarriers?.[index]))
+      : (fallback.escapeBarriers || []).map((barrier, index) => sanitizeEscapeBarrier(barrier, index)),
     extractionGate: Object.prototype.hasOwnProperty.call(source, "extractionGate")
       ? sanitizeExtractionGate(source.extractionGate, fallback.extractionGate)
       : sanitizeExtractionGate(fallback.extractionGate),
@@ -1218,6 +1264,7 @@ export function mergeLevelData(baseData, override) {
   next.vaultDoors = normalized.vaultDoors;
   next.vaultLoot = normalized.vaultLoot;
   next.escapeExits = normalized.escapeExits;
+  next.escapeBarriers = normalized.escapeBarriers;
   next.extractionGate = normalized.extractionGate ? { ...normalized.extractionGate } : null;
   next.platforms = normalized.platforms;
   next.temporaryBlocks = normalized.temporaryBlocks;
@@ -1480,6 +1527,14 @@ export function getLevelSummaries(baseData, options = {}) {
         y: block.y,
         width: block.width,
         height: block.height,
+      })),
+      escapeBarriers: (effective.escapeBarriers || []).map((barrier) => ({
+        id: barrier.id,
+        x: barrier.x,
+        y: barrier.y,
+        width: barrier.width,
+        height: barrier.height,
+        trigger: barrier.trigger,
       })),
       braceWalls: (effective.braceWalls || []).map((wall) => ({
         id: wall.id,

@@ -348,7 +348,7 @@ function createVaultDoorState(definition, index) {
     y: Number(definition.y ?? 0),
     width: Math.max(24, Number(definition.width ?? 96)),
     height: Math.max(24, Number(definition.height ?? 144)),
-    prompt: definition.prompt || "E: Hack vault",
+    prompt: definition.prompt || "Up: Hack vault",
     duration: Math.max(1, Number(definition.duration ?? 60)),
     hacked: false,
   };
@@ -364,7 +364,7 @@ function createVaultLootState(definition, index) {
     width: Math.max(16, Number(definition.width ?? 48)),
     height: Math.max(16, Number(definition.height ?? 48)),
     value: Math.max(0, Number(definition.value ?? 25)),
-    prompt: definition.prompt || "E: Take supplies",
+    prompt: definition.prompt || "Up: Take supplies",
     collected: false,
   };
 }
@@ -378,7 +378,21 @@ function createEscapeExitState(definition, index) {
     y: Number(definition.y ?? 0),
     width: Math.max(24, Number(definition.width ?? 96)),
     height: Math.max(24, Number(definition.height ?? 192)),
-    prompt: definition.prompt || "E: Escape",
+    prompt: definition.prompt || "Up: Escape",
+  };
+}
+
+function createEscapeBarrierState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `escape-barrier-${index + 1}`,
+    label: definition.label || `Barrier ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(12, Number(definition.width ?? 96)),
+    height: Math.max(12, Number(definition.height ?? 128)),
+    trigger: definition.trigger || "vaultEscape",
+    color: definition.color || "#ff7a66",
   };
 }
 
@@ -413,6 +427,7 @@ export function createLevelRuntimeState(data) {
     vaultDoors: (data.vaultDoors || []).map((door, index) => createVaultDoorState(door, index)),
     vaultLoot: (data.vaultLoot || []).map((loot, index) => createVaultLootState(loot, index)),
     escapeExits: (data.escapeExits || []).map((exit, index) => createEscapeExitState(exit, index)),
+    escapeBarriers: (data.escapeBarriers || []).map((barrier, index) => createEscapeBarrierState(barrier, index)),
     vaultEscape: createVaultEscapeState(data),
     loot: {
       active: false,
@@ -968,6 +983,7 @@ export function createRunState(data, meta) {
     vaultDoors: (data.vaultDoors || []).map((door, index) => createVaultDoorState(door, index)),
     vaultLoot: (data.vaultLoot || []).map((loot, index) => createVaultLootState(loot, index)),
     escapeExits: (data.escapeExits || []).map((exit, index) => createEscapeExitState(exit, index)),
+    escapeBarriers: (data.escapeBarriers || []).map((barrier, index) => createEscapeBarrierState(barrier, index)),
     vaultEscape: createVaultEscapeState(data),
     loot: {
       active: false,
