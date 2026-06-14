@@ -4015,6 +4015,40 @@ function drawAttackFx(ctx, run) {
 function drawRecoilFx(ctx, run) {
   run.recoilFx.forEach((effect) => {
     const alpha = Math.max(0, effect.life / effect.duration);
+    if (effect.weaponType === "recoil-charge") {
+      const progress = clamp(effect.progress ?? 0, 0, 1);
+      const pulse = 1 - alpha;
+      const radius = (effect.radius ?? 52) * (effect.scale ?? 1) * (1 + pulse * 0.2);
+      const color = effect.color || "#93eaff";
+
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 14 + progress * 16;
+      ctx.strokeStyle = `rgba(245, 251, 255, ${0.68 * alpha})`;
+      ctx.lineWidth = 3.5 + progress * 2.5;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 22 + progress * 20;
+      ctx.strokeStyle = `rgba(98, 214, 255, ${0.42 * alpha})`;
+      ctx.lineWidth = 9 + progress * 7;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, radius * 0.94, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = `rgba(245, 251, 255, ${0.3 * alpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, radius * 1.16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
     const normalX = -effect.dirY;
     const normalY = effect.dirX;
 

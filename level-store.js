@@ -1239,7 +1239,7 @@ export function normalizeEditableLevelData(raw, baseData) {
     extractionGate: Object.prototype.hasOwnProperty.call(source, "extractionGate")
       ? sanitizeExtractionGate(source.extractionGate, fallback.extractionGate)
       : sanitizeExtractionGate(fallback.extractionGate),
-    platforms: Array.isArray(source.platforms) && source.platforms.length
+    platforms: Array.isArray(source.platforms)
       ? source.platforms.map((platform, index) => sanitizePlatform(platform, index, fallback.platforms[index]))
       : fallback.platforms.map((platform, index) => sanitizePlatform(platform, index)),
     temporaryBlocks: Array.isArray(source.temporaryBlocks)

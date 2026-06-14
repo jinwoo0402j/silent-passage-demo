@@ -69,7 +69,8 @@ const BULLET_TIME_KEYS = [];
 const FOCUS_KEYS = ["KeyC"];
 const INTERACTION_HOLD_SECONDS = 0.25;
 const FIRE_KEYS = ["KeyX"];
-const FIRE_RELOAD_HOLD_SECONDS = 0.35;
+const ARM_SWITCH_RELOAD_KEY = "KeyS";
+const ARM_SWITCH_RELOAD_HOLD_SECONDS = 0.35;
 const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
 const FOCUS_DRAIN_PER_SECOND = 18;
@@ -77,6 +78,11 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
+const RECOIL_JUMP_CHARGE_HOLD_SECONDS = 0.12;
+const RECOIL_JUMP_CHARGE_STEPS = 5;
+const RECOIL_JUMP_CHARGE_MAX_MULTIPLIER = 2;
+const RECOIL_JUMP_FOCUS_COST_SCALE = 0.55;
+const RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER = 1.2;
 const INTERACT_KEYS = ["KeyE"];
 const WORLD_INTERACT_KEYS = ["ArrowUp"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
@@ -97,7 +103,7 @@ const NIGHT_TRANSITION_SECONDS = 1.4;
 const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
-const ARM_SWITCH_KEYS = ["KeyA", "MouseMiddle"];
+const ARM_SWITCH_KEYS = ["MouseMiddle"];
 const RELOAD_KEYS = [];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
@@ -136,7 +142,8 @@ const AIR_DASH_HOVER_BRAKE = 420;
 const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
 const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
 const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
-const AIR_DASH_DISTANCE_MULTIPLIER = 1.25;
+const AIR_DASH_INERTIA_DURATION_SECONDS = 0.18;
+const AIR_DASH_INERTIA_DISTANCE_RATIO = 0.22;
 const AIR_DASH_INERTIA_RETAIN_RATIO = 0.25;
 const CELESTE_END_DASH_SPEED_RATIO = 2 / 3;
 const LOOT_RARITY_RANKS = {
@@ -3676,7 +3683,114 @@ function updateWeaponRuntime(run, data, state, dt) {
   if (consumeEitherPress(state, getReloadKeys(state))) {
     startReloadSelectedArm(run, data);
   }
+  if (!useLegacyControls(state)) {
+    updateArmSwitchReloadInput(run, data, state);
+  }
   updateWeaponTimers(run, data, dt);
+}
+
+function updateArmSwitchReloadInput(run, data, state) {
+  const player = run.player;
+  const switchHeld = isPressed(state, ARM_SWITCH_RELOAD_KEY);
+  const holdSeconds = getKeyHoldSeconds(state, ARM_SWITCH_RELOAD_KEY);
+  if (
+    switchHeld &&
+    holdSeconds >= ARM_SWITCH_RELOAD_HOLD_SECONDS &&
+    !player.armSwitchReloadHoldConsumed
+  ) {
+    player.armSwitchReloadHoldConsumed = true;
+    startReloadSelectedArm(run, data);
+    return;
+  }
+
+  if (!state.justReleased?.has(ARM_SWITCH_RELOAD_KEY)) {
+    return;
+  }
+
+  consumeRelease(state, ARM_SWITCH_RELOAD_KEY);
+  const releasedHoldSeconds = consumeReleasedKeyHoldSeconds(state, ARM_SWITCH_RELOAD_KEY);
+  if (releasedHoldSeconds < ARM_SWITCH_RELOAD_HOLD_SECONDS && !player.armSwitchReloadHoldConsumed) {
+    switchSelectedArm(run, data);
+  }
+  player.armSwitchReloadHoldConsumed = false;
+}
+
+function shouldChargeRecoilJump(run, data, state) {
+  if (useLegacyControls(state)) {
+    return false;
+  }
+  const player = run.player;
+  if (!player) {
+    return false;
+  }
+  if (!FIRE_KEYS.some((code) => isPressed(state, code))) {
+    return false;
+  }
+  const fireHoldSeconds = Math.max(...FIRE_KEYS.map((code) => getKeyHoldSeconds(state, code)), 0);
+  if (fireHoldSeconds < RECOIL_JUMP_CHARGE_HOLD_SECONDS) {
+    return false;
+  }
+  const context = getSelectedArmContext(run, data);
+  return Boolean(
+    context.stats.type === "shotgun" &&
+    canAimWeapon(player) &&
+    canFireSelectedWeapon(run, data, player)
+  );
+}
+
+function getRecoilJumpChargeMultiplier(run, player) {
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const effectiveFocusMax = focusMax * RECOIL_JUMP_FOCUS_COST_SCALE;
+  const stepSize = effectiveFocusMax / RECOIL_JUMP_CHARGE_STEPS;
+  const spent = clamp(Number(player.recoilJumpChargeFocusSpent ?? 0), 0, effectiveFocusMax);
+  if (spent <= 0) {
+    return 1;
+  }
+  const spentSteps = clamp(Math.ceil(spent / stepSize), 1, RECOIL_JUMP_CHARGE_STEPS);
+  const progress = spentSteps / RECOIL_JUMP_CHARGE_STEPS;
+  return lerp(1, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER, progress);
+}
+
+function getRecoilJumpChargeStep(run, player) {
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const effectiveFocusMax = focusMax * RECOIL_JUMP_FOCUS_COST_SCALE;
+  const stepSize = effectiveFocusMax / RECOIL_JUMP_CHARGE_STEPS;
+  const spent = clamp(Number(player.recoilJumpChargeFocusSpent ?? 0), 0, effectiveFocusMax);
+  return spent > 0 ? clamp(Math.ceil(spent / stepSize), 1, RECOIL_JUMP_CHARGE_STEPS) : 0;
+}
+
+function updateRecoilJumpLastDirection(player, state, forceFallback = false) {
+  const pressedDirection = getKeyboardDirectionPressedVector(state);
+  if (pressedDirection) {
+    player.recoilJumpLastDirX = pressedDirection.x;
+    player.recoilJumpLastDirY = pressedDirection.y;
+    return;
+  }
+  if (forceFallback || !Number.isFinite(player.recoilJumpLastDirX) || !Number.isFinite(player.recoilJumpLastDirY)) {
+    player.recoilJumpLastDirX = Math.sign(player.facing || 1) || 1;
+    player.recoilJumpLastDirY = 0;
+  }
+}
+
+function spawnRecoilJumpChargeEffect(run, player, step) {
+  const progress = clamp(step / RECOIL_JUMP_CHARGE_STEPS, 0, 1);
+  const color = progress >= 0.8 ? "#f5fbff" : progress >= 0.45 ? "#93eaff" : "#62d6ff";
+  const centerX = player.x + player.width * 0.5;
+  const centerY = player.y + player.height * 0.5;
+  const radius = Math.max(player.width, player.height) * (0.58 + progress * 0.18);
+  run.recoilFx.push({
+    x: centerX,
+    y: centerY,
+    dirX: 0,
+    dirY: -1,
+    color,
+    radius,
+    life: 0.22 + progress * 0.16,
+    duration: 0.22 + progress * 0.16,
+    weaponType: "recoil-charge",
+    scale: 0.85 + progress * 0.7,
+    progress,
+  });
 }
 
 function updateWeaponFireReloadInput(run, data, state) {
@@ -3684,24 +3798,23 @@ function updateWeaponFireReloadInput(run, data, state) {
     return false;
   }
   const player = run.player;
-  const fireHeld = FIRE_KEYS.some((code) => isPressed(state, code));
-  const fireHoldSeconds = Math.max(...FIRE_KEYS.map((code) => getKeyHoldSeconds(state, code)), 0);
-  const reloadHoldReached = fireHeld && fireHoldSeconds >= FIRE_RELOAD_HOLD_SECONDS;
-
-  if (reloadHoldReached && !player.weaponReloadHoldConsumed) {
-    player.weaponReloadHoldConsumed = true;
-    startReloadSelectedArm(run, data);
-    return false;
-  }
-
   const fireReleasedCode = FIRE_KEYS.find((code) => state.justReleased?.has(code));
   if (!fireReleasedCode) {
     return false;
   }
 
   consumeRelease(state, fireReleasedCode);
-  const heldSeconds = consumeReleasedKeyHoldSeconds(state, fireReleasedCode);
-  const shouldFire = heldSeconds < FIRE_RELOAD_HOLD_SECONDS && !player.weaponReloadHoldConsumed;
+  consumeReleasedKeyHoldSeconds(state, fireReleasedCode);
+  const releasedRecoilCharge = Boolean(player.recoilJumpChargeActive || player.recoilJumpChargeFocusSpent > 0);
+  player.recoilJumpChargePendingMultiplier = releasedRecoilCharge
+    ? getRecoilJumpChargeMultiplier(run, player)
+    : 1;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargeEffectStep = 0;
+  player.recoilJumpChargePendingShot = releasedRecoilCharge;
+  const shouldFire = releasedRecoilCharge || !player.weaponReloadHoldConsumed;
   player.weaponReloadHoldConsumed = false;
   return shouldFire;
 }
@@ -3819,6 +3932,24 @@ function getRecoilAimFromShotDirection(player, shotDirX, shotDirY, options = {})
     recoilDirX: recoilX,
     recoilDirY: recoilY,
   };
+}
+
+function getRecoilJumpShotAim(player, run, state) {
+  let selectedDirection = {
+    x: Number(player.recoilJumpLastDirX),
+    y: Number(player.recoilJumpLastDirY),
+  };
+  if (!Number.isFinite(selectedDirection.x) || !Number.isFinite(selectedDirection.y) || Math.hypot(selectedDirection.x, selectedDirection.y) < 0.001) {
+    selectedDirection = getKeyboardDirectionVector(state, player, player.facing || 1);
+  } else {
+    const length = Math.max(0.001, Math.hypot(selectedDirection.x, selectedDirection.y));
+    selectedDirection.x /= length;
+    selectedDirection.y /= length;
+  }
+  return getRecoilAimFromShotDirection(player, -selectedDirection.x, -selectedDirection.y, {
+    active: Boolean(run.focusActive),
+    aiming: true,
+  });
 }
 
 function getRecoilShotOrigin(player) {
@@ -4342,7 +4473,7 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
   }
 }
 
-function updateFocusState(run, state, dt) {
+function updateFocusState(run, data, state, dt) {
   const player = run.player;
   run.focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
   run.focus = clamp(Number(run.focus ?? run.focusMax), 0, run.focusMax);
@@ -4351,8 +4482,10 @@ function updateFocusState(run, state, dt) {
     run.focusDepleted = false;
   }
 
+  const recoilJumpChargeRequested = shouldChargeRecoilJump(run, data, state);
   const requested =
     BULLET_TIME_KEYS.some((key) => isPressed(state, key)) ||
+    recoilJumpChargeRequested ||
     (!useLegacyControls(state) && FOCUS_KEYS.some((key) => isPressed(state, key))) ||
     Boolean(useLegacyControls(state) && state.mouse?.secondaryDown && canAimWeapon(player));
   const wasActive = Boolean(run.focusActive);
@@ -4363,13 +4496,42 @@ function updateFocusState(run, state, dt) {
   const active = Boolean(requested && canStart);
 
   if (active) {
+    const focusBefore = run.focus;
     run.focus = Math.max(0, run.focus - FOCUS_DRAIN_PER_SECOND * dt);
+    if (recoilJumpChargeRequested) {
+      if (!player.recoilJumpChargeActive) {
+        player.recoilJumpChargeFocusSpent = 0;
+        updateRecoilJumpLastDirection(player, state, true);
+      }
+      player.recoilJumpChargeActive = true;
+      updateRecoilJumpLastDirection(player, state);
+      player.recoilJumpChargeFocusSpent = clamp(
+        (player.recoilJumpChargeFocusSpent ?? 0) + Math.max(0, focusBefore - run.focus),
+        0,
+        run.focusMax
+      );
+      player.recoilJumpChargeMultiplier = getRecoilJumpChargeMultiplier(run, player);
+      const chargeStep = getRecoilJumpChargeStep(run, player);
+      if (
+        chargeStep > (player.recoilJumpChargeEffectStep ?? 0) &&
+        player.recoilJumpChargeMultiplier >= RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER
+      ) {
+        spawnRecoilJumpChargeEffect(run, player, chargeStep);
+      }
+      player.recoilJumpChargeEffectStep = Math.max(player.recoilJumpChargeEffectStep ?? 0, chargeStep);
+    }
     if (run.focus <= 0) {
       run.focus = 0;
       run.focusDepleted = true;
     }
   } else {
     run.focus = Math.min(run.focusMax, run.focus + FOCUS_RECOVER_PER_SECOND * dt);
+    if (!FIRE_KEYS.some((code) => isPressed(state, code))) {
+      player.recoilJumpChargeActive = false;
+      player.recoilJumpChargeFocusSpent = 0;
+      player.recoilJumpChargeMultiplier = 1;
+      player.recoilJumpChargeEffectStep = 0;
+    }
   }
 
   run.focusActive = Boolean(active && run.focus > 0);
@@ -4781,11 +4943,15 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
     aim.shotDirY = Math.sin(shotAngle);
   }
   const firedAirborne = !player.onGround;
+  const pendingChargeMultiplier = Math.max(1, Number(player.recoilJumpChargePendingMultiplier ?? 1));
+  player.recoilJumpChargePendingMultiplier = 1;
+  const recoilChargeMultiplier = pendingChargeMultiplier;
   const force = (context.stats.recoil ?? config.recoilShotForce ?? 840)
+    * recoilChargeMultiplier
     * (1 + (firedAirborne ? getVerticalMomentumBoost(player, config, "verticalMomentumRecoilBoost", 0.14) : 0));
-  const maxHorizontal = config.recoilShotMaxHorizontalSpeed ?? 1180;
-  const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180);
-  const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760);
+  const maxHorizontal = (config.recoilShotMaxHorizontalSpeed ?? 1180) * recoilChargeMultiplier;
+  const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180) * recoilChargeMultiplier;
+  const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760) * recoilChargeMultiplier;
   const verticalPoseThreshold = config.recoilAimVerticalPoseThreshold ?? 0.45;
   const shotFacing = Math.abs(aim.shotDirX) > 0.08
     ? Math.sign(aim.shotDirX)
@@ -4811,6 +4977,11 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   player.recoilShotAirborne = firedAirborne;
   player.recoilShotFacing = shotFacing;
   player.recoilShotPitch = shotPitch;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargeEffectStep = 0;
+  player.recoilJumpChargePendingShot = false;
   if (firedAirborne) {
     const spinLoopCount = Math.max(1, Math.floor(config.recoilSpinLoopCount ?? 1));
     player.recoilSpinDuration = ((config.recoilSpinDurationMs ?? 220) / 1000) * spinLoopCount;
@@ -4867,6 +5038,15 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   }
   spawnDirectedParticles(run, aim.originX, aim.originY, 12, "#e9f7ff", aim.shotDirX, aim.shotDirY, 520, 0.68);
   spawnDirectedParticles(run, aim.originX, aim.originY, 7, "#93eaff", recoilX, recoilY, 260, 0.9);
+  if (recoilChargeMultiplier >= RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER) {
+    const chargeProgress = clamp(
+      (recoilChargeMultiplier - 1) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - 1),
+      0,
+      1
+    );
+    spawnDirectedParticles(run, aim.originX, aim.originY, 8 + Math.round(chargeProgress * 14), "#f5fbff", recoilX, recoilY, 520 + chargeProgress * 420, 1.05);
+    spawnDirectedParticles(run, aim.originX, aim.originY, 5 + Math.round(chargeProgress * 8), "#62d6ff", aim.shotDirX, aim.shotDirY, 640 + chargeProgress * 360, 0.72);
+  }
   pushNotice(run, `${context.stats.label} fired`, 1.15);
   if (options.aimOverride) {
     run.recoilAim = {
@@ -4925,12 +5105,72 @@ function getDashSpeed(config, player) {
   return (distance / duration) * getMomentumSpeedMultiplier(player, config);
 }
 
+function getConfiguredDashDistance(config) {
+  return Math.max(0, Number(config.dashDistance ?? 0));
+}
+
+function getAirDashInertiaDuration() {
+  return AIR_DASH_INERTIA_DURATION_SECONDS;
+}
+
+function getAirDashInertiaDistance(config, player = null) {
+  const momentumMultiplier = player ? getMomentumSpeedMultiplier(player, config) : 1;
+  return getConfiguredDashDistance(config) * AIR_DASH_INERTIA_DISTANCE_RATIO * momentumMultiplier;
+}
+
+function getAirDashDistanceScale(config) {
+  const dashDistance = Math.max(1, getConfiguredDashDistance(config));
+  const inertiaDistance = getAirDashInertiaDistance(config);
+  return clamp((dashDistance - inertiaDistance) / dashDistance, 0.1, 1);
+}
+
+function getDashSpeedCurveMultiplier(duration, remainingBefore, remainingAfter) {
+  const startProgress = clamp(1 - (remainingBefore / duration), 0, 1);
+  const endProgress = clamp(1 - (remainingAfter / duration), 0, 1);
+  const delta = Math.max(0.0001, endProgress - startProgress);
+  const curveIntegral = (progress) => (
+    10 * progress ** 3
+    - 15 * progress ** 4
+    + 6 * progress ** 5
+  );
+  return (curveIntegral(endProgress) - curveIntegral(startProgress)) / delta;
+}
+
+function getAirDashSpeedCurveMultiplier(duration, remainingBefore, remainingAfter) {
+  const startProgress = clamp(1 - (remainingBefore / duration), 0, 1);
+  const endProgress = clamp(1 - (remainingAfter / duration), 0, 1);
+  const delta = Math.max(0.0001, endProgress - startProgress);
+  const accelProgress = clamp(AIR_DASH_INERTIA_DISTANCE_RATIO * 2, 0.05, 0.9);
+  const peakMultiplier = 1 / Math.max(0.001, 1 - accelProgress * 0.5);
+  const curveIntegral = (progress) => {
+    if (progress <= 0) {
+      return 0;
+    }
+    if (progress < accelProgress) {
+      const t = progress / accelProgress;
+      return peakMultiplier * accelProgress * (t ** 3 - 0.5 * t ** 4);
+    }
+    return peakMultiplier * ((accelProgress * 0.5) + progress - accelProgress);
+  };
+  return (curveIntegral(endProgress) - curveIntegral(startProgress)) / delta;
+}
+
+function getDashFrameSpeed(config, player, remainingBefore, remainingAfter) {
+  const baseSpeed = getDashSpeed(config, player);
+  const duration = getDashDurationSeconds(config);
+  if (player.dashStartedAirborne) {
+    return baseSpeed * getAirDashSpeedCurveMultiplier(duration, remainingBefore, remainingAfter);
+  }
+  return baseSpeed * getDashSpeedCurveMultiplier(duration, remainingBefore, remainingAfter);
+}
+
 function startDash(player, run, config, direction, directionY = 0, distanceScale = 1, consumeDashCharge = true) {
   clearBraceHold(player);
   clearWallRun(player);
   clearSlide(player);
   clearHover(player);
   clearAirDashHover(player);
+  clearAirDashInertia(player);
   clearRecoilSpin(player);
   const length = Math.max(0.001, Math.hypot(direction, directionY));
   const dashX = direction / length;
@@ -4972,11 +5212,52 @@ function startDashBurst(player, config) {
   player.vy = speed * (player.dashVectorY ?? 0);
 }
 
+function clearAirDashInertia(player) {
+  player.airDashInertiaTimer = 0;
+  player.airDashInertiaDuration = 0;
+  player.airDashInertiaSpeed = 0;
+  player.airDashInertiaVectorX = 0;
+  player.airDashInertiaVectorY = 0;
+}
+
+function armAirDashInertia(player, config) {
+  const vectorX = Number(player.dashVectorX ?? player.dashDirection ?? 0);
+  const vectorY = Number(player.dashVectorY ?? 0);
+  const length = Math.hypot(vectorX, vectorY);
+  const duration = getAirDashInertiaDuration();
+  const distance = getAirDashInertiaDistance(config, player);
+  if (length < 0.001 || duration <= 0 || distance <= 0) {
+    clearAirDashInertia(player);
+    return;
+  }
+  player.airDashInertiaTimer = duration;
+  player.airDashInertiaDuration = duration;
+  player.airDashInertiaSpeed = (distance / duration) * 2;
+  player.airDashInertiaVectorX = vectorX / length;
+  player.airDashInertiaVectorY = vectorY / length;
+}
+
+function getAirDashInertiaFrameSpeed(player, remainingBefore, remainingAfter) {
+  const duration = Math.max(0.001, Number(player.airDashInertiaDuration ?? 0));
+  const startProgress = clamp(1 - (remainingBefore / duration), 0, 1);
+  const endProgress = clamp(1 - (remainingAfter / duration), 0, 1);
+  const delta = Math.max(0.0001, endProgress - startProgress);
+  const smoothIntegral = (progress) => (
+    2.5 * progress ** 4
+    - 3 * progress ** 5
+    + progress ** 6
+  );
+  const decelIntegral = (progress) => progress - smoothIntegral(progress);
+  return (player.airDashInertiaSpeed ?? 0)
+    * ((decelIntegral(endProgress) - decelIntegral(startProgress)) / delta);
+}
+
 function retainAirDashInertia(value) {
   return Number.isFinite(value) ? value * AIR_DASH_INERTIA_RETAIN_RATIO : 0;
 }
 
 function stopAirDashOnTerrainCollision(player) {
+  clearAirDashInertia(player);
   player.dashTimer = 0;
   player.dashWindupTimer = 0;
   player.vx = retainAirDashInertia(player.vx);
@@ -5009,6 +5290,23 @@ function armDashCarry(player, config, speed, dashDirection) {
   }
   player.dashCarryTimer = (config.dashCarryWindowMs ?? 0) / 1000;
   player.dashCarrySpeed = speed;
+}
+
+function enterSprintAfterDash(player, config, directionX = 0, maintainedDirectionX = 0) {
+  const dashDirection = Math.sign(directionX) || Math.sign(player.dashVectorX ?? player.dashDirection ?? 0) || player.facing || 1;
+  const maintainedDirection = Math.sign(maintainedDirectionX);
+  const direction = maintainedDirection !== 0 && maintainedDirection === dashDirection
+    ? maintainedDirection
+    : dashDirection;
+  const sprintSpeed = Math.max(config.runSpeed ?? 0, config.sprintSpeed ?? config.runSpeed ?? 0);
+  player.sprintPrimed = true;
+  player.sprintDirection = direction;
+  player.sprintCharge = 1;
+  player.sprintActive = true;
+  player.facing = direction;
+  if (sprintSpeed > 0 && Math.abs(player.vx) < sprintSpeed) {
+    player.vx = sprintSpeed * direction;
+  }
 }
 
 function armSpeedRetention(player, config, speed) {
@@ -5492,6 +5790,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.sprintJumpBoostActive = false;
   player.slideJumpBoostActive = false;
   player.dashJumpBoostActive = false;
+  player.airDashInertiaActive = false;
   player.speedRetentionActive = false;
   player.bufferedLandingJumpActive = false;
   player.wallSlideGraceActive = false;
@@ -5516,6 +5815,9 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.dashCarryTimer === 0) {
     player.dashCarrySpeed = 0;
+  }
+  if (player.onGround && (player.airDashInertiaTimer ?? 0) > 0) {
+    clearAirDashInertia(player);
   }
   if (player.sprintJumpCarryTimer === 0) {
     player.sprintJumpCarrySpeed = 0;
@@ -5619,9 +5921,19 @@ function updatePlayer(run, data, state, dt, input) {
       moveAxis === 0 ||
       Math.sign(moveAxis) === Math.sign(player.sprintJumpCarrySpeed)
     );
+  const airDashSprintCompatible =
+    player.sprintPrimed &&
+    !player.onGround &&
+    player.height === player.standHeight &&
+    player.sprintCharge > 0 &&
+    moveAxis !== 0 &&
+    (
+      player.sprintDirection === 0 ||
+      player.sprintDirection === moveAxis
+    );
   const preserveAirSprint =
-    (sprintInputHeld || sprintJumpCarryCompatible) &&
-    (player.sprintPrimed || sprintJumpCarryCompatible) &&
+    (sprintInputHeld || sprintJumpCarryCompatible || airDashSprintCompatible) &&
+    (player.sprintPrimed || sprintJumpCarryCompatible || airDashSprintCompatible) &&
     !player.onGround &&
     player.height === player.standHeight &&
     player.sprintCharge > 0 &&
@@ -5687,7 +5999,16 @@ function updatePlayer(run, data, state, dt, input) {
       face: Number(Boolean(run.faceOff?.active)),
     });
     const keepPrimaryHeld = isSelectedWeaponAutomatic(run, data);
-    const firedRecoilShot = performRecoilShot(player, run, data, config, state);
+    const recoilJumpAimOverride = player.recoilJumpChargePendingShot
+      ? getRecoilJumpShotAim(player, run, state)
+      : null;
+    const firedRecoilShot = performRecoilShot(player, run, data, config, state, {
+      aimOverride: recoilJumpAimOverride,
+    });
+    if (!firedRecoilShot) {
+      player.recoilJumpChargePendingMultiplier = 1;
+      player.recoilJumpChargePendingShot = false;
+    }
     if (firedRecoilShot && state.mouse && !keepPrimaryHeld) {
       state.mouse.primaryDown = false;
       state.mouse.primaryJustPressed = false;
@@ -5740,7 +6061,7 @@ function updatePlayer(run, data, state, dt, input) {
       (player.airDashDirectionPending && (player.airDashDirectionGraceTimer ?? 0) === 0) ||
       (player.airDashHoverTimer ?? 0) <= dt
     ) {
-      const airDashDistanceScale = (getJumpMaxHeight(data, config) * AIR_DASH_DISTANCE_MULTIPLIER) / Math.max(1, Number(config.dashDistance ?? 1));
+      const airDashDistanceScale = getAirDashDistanceScale(config);
       startDash(player, run, config, airDashDirection.x, airDashDirection.y, airDashDistanceScale, false);
     }
   }
@@ -5789,8 +6110,9 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   if (player.dashTimer > 0) {
+    const dashRemainingBefore = player.dashTimer;
     player.dashTimer = Math.max(0, player.dashTimer - dt);
-    const dashSpeed = getDashSpeed(config, player);
+    const dashSpeed = getDashFrameSpeed(config, player, dashRemainingBefore, player.dashTimer);
     player.vx = dashSpeed * (player.dashVectorX ?? player.dashDirection ?? 1);
     player.vy = dashSpeed * (player.dashVectorY ?? 0);
     player.facing = Math.sign(player.dashVectorX || player.dashDirection || 0) || player.facing;
@@ -5811,6 +6133,7 @@ function updatePlayer(run, data, state, dt, input) {
       player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
       player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
       player.wallSliding = false;
+      enterSprintAfterDash(player, config, player.dashVectorX ?? player.dashDirection ?? player.facing, moveAxis);
       updateMovementVfx(run, data, dt);
       player.jumpHeldLastFrame = jumpHeld;
       setMovementState(player);
@@ -5860,20 +6183,26 @@ function updatePlayer(run, data, state, dt, input) {
 
     const dashCarryDirection = player.dashVectorX ?? player.dashDirection ?? 0;
     if ((landed || player.dashTimer === 0) && dashStartedAirborne) {
-      player.vx = retainAirDashInertia(player.vx);
-      player.vy = retainAirDashInertia(player.vy);
-      player.dashCarrySpeed = retainAirDashInertia(player.dashCarrySpeed);
-      player.retainedSpeed = retainAirDashInertia(player.retainedSpeed);
-      player.sprintJumpCarrySpeed = retainAirDashInertia(player.sprintJumpCarrySpeed);
+      if (!player.onGround && player.dashTimer === 0) {
+        armAirDashInertia(player, config);
+      } else {
+        clearAirDashInertia(player);
+      }
+      player.dashCarrySpeed = 0;
+      player.retainedSpeed = 0;
+      player.sprintJumpCarrySpeed = 0;
+      enterSprintAfterDash(player, config, dashCarryDirection, moveAxis);
     } else if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && !airDashHitTerrain && dashCarryDirection !== 0) {
       const resolvedVelocityDirection = Math.sign(player.vx);
       const expectedCarryDirection = Math.sign(dashCarryDirection);
       if (resolvedVelocityDirection === 0 || resolvedVelocityDirection !== expectedCarryDirection) {
         player.dashCarryTimer = 0;
         player.dashCarrySpeed = 0;
+        enterSprintAfterDash(player, config, dashCarryDirection, moveAxis);
       } else {
         const dashCarrySpeed = player.vx * CELESTE_END_DASH_SPEED_RATIO;
         armDashCarry(player, config, dashCarrySpeed, dashCarryDirection);
+        enterSprintAfterDash(player, config, dashCarryDirection, moveAxis);
       }
     }
     if (player.dashTimer === 0) {
@@ -6061,6 +6390,21 @@ function updatePlayer(run, data, state, dt, input) {
     player.crouchBlocked = false;
   } else if (recoilMovementLocked) {
     // Preserve weapon recoil velocity while its inertia window is active.
+  } else if ((player.airDashInertiaTimer ?? 0) > 0 && !player.onGround) {
+    const inertiaRemainingBefore = player.airDashInertiaTimer;
+    player.airDashInertiaTimer = Math.max(0, player.airDashInertiaTimer - dt);
+    const inertiaSpeed = getAirDashInertiaFrameSpeed(player, inertiaRemainingBefore, player.airDashInertiaTimer);
+    const airControl = config.airControlMultiplier ?? 1;
+    const inputSpeed = moveAxis !== 0
+      ? moveAxis * getSprintTargetSpeed(player, config, moveAxis, sprintInputHeld && player.sprintPrimed) * airControl
+      : 0;
+    player.vx = inertiaSpeed * (player.airDashInertiaVectorX || 0) + inputSpeed;
+    player.vy = inertiaSpeed * (player.airDashInertiaVectorY || 0);
+    player.airDashInertiaActive = true;
+    if (player.airDashInertiaTimer === 0) {
+      enterSprintAfterDash(player, config, player.airDashInertiaVectorX || player.dashVectorX || player.dashDirection, moveAxis);
+      clearAirDashInertia(player);
+    }
   } else {
     const downhillSprintActive = isMovingDownhillOnSlope(player, moveAxis);
     const baseTargetSpeed = player.height === player.crouchHeight && player.onGround
@@ -6132,7 +6476,7 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (
     player.sprintCharge > 0.12 &&
-    (canBuildSprint || (!player.onGround && sprintJumpCarryCompatible))
+    (canBuildSprint || (!player.onGround && (sprintJumpCarryCompatible || airDashSprintCompatible)))
   ) {
     player.sprintActive = true;
   }
@@ -6206,7 +6550,9 @@ function updatePlayer(run, data, state, dt, input) {
     player.vy = approach(player.vy, 0, AIR_DASH_HOVER_BRAKE * dt);
   }
 
-  const gravityMultiplier = (player.airDashHoverTimer ?? 0) > 0
+  const gravityMultiplier = player.airDashInertiaActive
+    ? 0
+    : (player.airDashHoverTimer ?? 0) > 0
     ? 0
     : player.hoverActive
     ? (config.hoverGravityMultiplier ?? 0.18)
@@ -6245,6 +6591,14 @@ function updatePlayer(run, data, state, dt, input) {
     ((player.wallDirection === -1 && moveAxis < 0) || (player.wallDirection === 1 && moveAxis > 0)) &&
     player.vy > 0 &&
     player.wallJumpLockTimer === 0;
+
+  if (
+    (player.airDashInertiaTimer ?? 0) > 0 &&
+    (player.onGround || contacts.hitHead || contacts.wallLeft || contacts.wallRight || contacts.dashBlocked)
+  ) {
+    enterSprintAfterDash(player, config, player.airDashInertiaVectorX || player.dashVectorX || player.dashDirection, moveAxis);
+    clearAirDashInertia(player);
+  }
 
   if (player.wallRunActive) {
     if (player.wallDirection === 0 || player.onGround || contacts.hitHead) {
@@ -8610,6 +8964,7 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.dashVectorY = 0;
   player.dashDistanceScale = 1;
   player.dashStartedAirborne = false;
+  clearAirDashInertia(player);
   player.verticalMomentum = 0;
   player.verticalMomentumTimer = 0;
   player.verticalMomentumStage = 0;
@@ -8639,6 +8994,15 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.recoilShotPitch = 0;
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
+  player.armSwitchReloadHoldConsumed = false;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargePendingMultiplier = 1;
+  player.recoilJumpChargePendingShot = false;
+  player.recoilJumpLastDirX = player.facing || 1;
+  player.recoilJumpLastDirY = 0;
+  player.recoilJumpChargeEffectStep = 0;
   clearZipLine(player);
 }
 
@@ -9779,7 +10143,7 @@ function updateExpedition(state, data, dt) {
     setStatus(state, run.faceOff?.message ? `Face-off: ${run.faceOff.message}` : "Face-off");
     return;
   }
-  const focusActive = updateFocusState(run, state, dt);
+  const focusActive = updateFocusState(run, data, state, dt);
   const focusTimeScale = focusActive
     ? clamp(data.player.movement.focusTimeScale ?? FOCUS_TIME_SCALE, 0.05, 1)
     : 1;

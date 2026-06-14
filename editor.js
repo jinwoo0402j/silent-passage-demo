@@ -16,7 +16,6 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-  shouldUseLocalLevelOverrideFromUrl,
 } from "./level-store.js?v=20260613-camera-zone-v1";
 import { clamp, deepClone } from "./utils.js";
 
@@ -26,7 +25,7 @@ const ZIP_LINE_MAX_CONNECTIONS = 2;
 
 function getEditorLevelSummaries() {
   return getLevelSummaries(GAME_DATA, {
-    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+    applyLevelOverride: true,
   });
 }
 
@@ -981,7 +980,7 @@ function prepareEditorData(data) {
 
 function createEditorState() {
   const data = prepareEditorData(createRuntimeGameData(GAME_DATA, getUrlLevelId(), {
-    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+    applyLevelOverride: true,
   }));
   const scale = getScaleConfig(data);
 
@@ -2204,6 +2203,7 @@ function canDeleteSelection(selection) {
     || item.kind === "vaultDoor"
     || item.kind === "vaultLoot"
     || item.kind === "escapeExit"
+    || item.kind === "gate"
     || item.kind === "enemy"
     || item.kind === "drone"
     || item.kind === "routeExit"
@@ -3095,6 +3095,7 @@ function deleteSelection(editor, dom) {
   const escapeBarrierIndexes = new Set(
     items.filter((item) => item.kind === "escapeBarrier").map((item) => item.index),
   );
+  const deleteGate = items.some((item) => item.kind === "gate");
   const cameraZoneIndexes = new Set(
     items.filter((item) => item.kind === "cameraZone").map((item) => item.index),
   );
@@ -3119,6 +3120,7 @@ function deleteSelection(editor, dom) {
     && vaultLootIndexes.size === 0
     && escapeExitIndexes.size === 0
     && escapeBarrierIndexes.size === 0
+    && !deleteGate
     && cameraZoneIndexes.size === 0
     && routeExitIndexes.size === 0
     && entranceIndexes.size === 0
@@ -3147,6 +3149,9 @@ function deleteSelection(editor, dom) {
   editor.data.vaultLoot = editor.data.vaultLoot.filter((_, index) => !vaultLootIndexes.has(index));
   editor.data.escapeExits = editor.data.escapeExits.filter((_, index) => !escapeExitIndexes.has(index));
   editor.data.escapeBarriers = editor.data.escapeBarriers.filter((_, index) => !escapeBarrierIndexes.has(index));
+  if (deleteGate) {
+    editor.data.extractionGate = null;
+  }
   editor.data.cameraZones = editor.data.cameraZones.filter((_, index) => !cameraZoneIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
   editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
@@ -4588,7 +4593,7 @@ function loadEditorLevel(editor, dom, levelId, options = {}) {
     }
   }
   editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
-    applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+    applyLevelOverride: true,
   }));
   editor.snap = getScaleConfig(editor.data).subTileSize;
   editor.preview = null;
@@ -4716,7 +4721,9 @@ function saveLevelDocument(editor, dom, document, levelId) {
 
 function saveCurrentLevelOverride(editor, dom, options = {}) {
   const editable = extractEditableLevelData(editor.data);
-  const saved = saveLevelDocument(editor, dom, editable, editor.data.currentLevelId);
+  const levelId = editable.levelId || editor.data.currentLevelId || editor.data.levelId;
+  editable.levelId = levelId;
+  const saved = saveLevelDocument(editor, dom, editable, levelId);
   if (!saved) {
     return null;
   }

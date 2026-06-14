@@ -211,7 +211,7 @@ const LEVEL_ZERO_MOVEMENT_TUNING = {
   jumpVelocity: -920,
   dashDurationMs: 95,
   dashWindupMs: 35,
-  dashDistance: 124,
+  dashDistance: 155,
   dashCarryWindowMs: 130,
   dashCarrySpeedMultiplier: 0.58,
   dashJumpMinSpeed: 520,
@@ -975,6 +975,11 @@ function resetPlayerToLevelStart(run, data) {
   player.dashTimer = 0;
   player.dashCooldownTimer = 0;
   player.dashDirection = 0;
+  player.airDashInertiaTimer = 0;
+  player.airDashInertiaDuration = 0;
+  player.airDashInertiaSpeed = 0;
+  player.airDashInertiaVectorX = 0;
+  player.airDashInertiaVectorY = 0;
   player.slideTimer = 0;
   player.hoverActive = false;
   player.hoverBoostActive = false;
@@ -991,6 +996,15 @@ function resetPlayerToLevelStart(run, data) {
   player.recoilSpinTimer = 0;
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
+  player.armSwitchReloadHoldConsumed = false;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargePendingMultiplier = 1;
+  player.recoilJumpChargePendingShot = false;
+  player.recoilJumpLastDirX = player.facing || 1;
+  player.recoilJumpLastDirY = 0;
+  player.recoilJumpChargeEffectStep = 0;
 }
 
 function snapCameraToPlayer(currentDom, run, data) {
@@ -1178,6 +1192,11 @@ function movePlayerBesideDebugTarget(player, target, side = "left") {
   player.dashTimer = 0;
   player.dashWindupTimer = 0;
   player.dashCooldownTimer = 0;
+  player.airDashInertiaTimer = 0;
+  player.airDashInertiaDuration = 0;
+  player.airDashInertiaSpeed = 0;
+  player.airDashInertiaVectorX = 0;
+  player.airDashInertiaVectorY = 0;
   player.slideTimer = 0;
   player.hoverActive = false;
   player.lightActive = false;

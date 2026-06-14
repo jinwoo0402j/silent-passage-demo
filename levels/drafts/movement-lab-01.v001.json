@@ -127,7 +127,7 @@
       "apexGravityThreshold": 180,
       "jumpCornerCorrectionPx": 12,
       "dashDurationMs": 110,
-      "dashDistance": 96,
+      "dashDistance": 120,
       "maxDashCount": 2,
       "dashCooldownMs": 450,
       "dashCornerCorrectionPx": 12,
