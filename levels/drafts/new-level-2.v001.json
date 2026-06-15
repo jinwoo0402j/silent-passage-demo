@@ -128,7 +128,7 @@
       "jumpCornerCorrectionPx": 12,
       "dashDurationMs": 120,
       "dashWindupMs": 55,
-      "dashDistance": 203,
+      "dashDistance": 162,
       "maxDashCount": 2,
       "dashCooldownMs": 450,
       "dashCornerCorrectionPx": 12,

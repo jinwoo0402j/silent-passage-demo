@@ -128,7 +128,7 @@
       "jumpCornerCorrectionPx": 12,
       "dashDurationMs": 110,
       "dashWindupMs": 65,
-      "dashDistance": 120,
+      "dashDistance": 96,
       "maxDashCount": 2,
       "dashCooldownMs": 450,
       "dashCornerCorrectionPx": 12,
@@ -317,8 +317,8 @@
   "routeExits": [
     {
       "id": "route-exit-1777804540897",
-      "kind": "shelter",
-      "type": "shelter",
+      "kind": "route",
+      "type": "route",
       "label": "Route Exit",
       "x": 7840,
       "y": 1824,
@@ -327,7 +327,7 @@
       "prompt": "E: 다음 구역",
       "toLevelId": "new-level",
       "toEntranceId": "start",
-      "returnEntranceId": "from-shelter"
+      "returnEntranceId": "start"
     }
   ],
   "extractionGate": null,

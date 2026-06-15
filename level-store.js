@@ -1677,6 +1677,7 @@ export function deleteLocalLevel(baseData, targetLevelId) {
 function normalizeRuntimeLevelOptions(options = {}) {
   return {
     applyLevelOverride: options.applyLevelOverride !== false,
+    useUrlLevel: options.useUrlLevel !== false,
   };
 }
 
@@ -1927,7 +1928,7 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
 
 export function createRuntimeGameData(baseData, requestedLevelId = null, options = {}) {
   const runtimeLevelOptions = normalizeRuntimeLevelOptions(options);
-  const explicitLevelId = requestedLevelId || getUrlLevelId();
+  const explicitLevelId = requestedLevelId || (runtimeLevelOptions.useUrlLevel ? getUrlLevelId() : null);
   const levelId = getRequestedLevelId(baseData, explicitLevelId || getRunStartLevelId(baseData));
   const baseLevel = createBaseLevelData(baseData, levelId);
   const override = runtimeLevelOptions.applyLevelOverride ? loadLevelOverride(baseData, levelId) : null;

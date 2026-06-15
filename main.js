@@ -22,7 +22,7 @@ import {
   saveAudioOptions,
 } from "./audio-options.js?v=20260613-sound-options-v1";
 import { renderGame } from "./render.js?v=20260613-camera-zone-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260520-shelter-photo-v1";
+import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -211,7 +211,7 @@ const LEVEL_ZERO_MOVEMENT_TUNING = {
   jumpVelocity: -920,
   dashDurationMs: 95,
   dashWindupMs: 35,
-  dashDistance: 155,
+  dashDistance: 124,
   dashCarryWindowMs: 130,
   dashCarrySpeedMultiplier: 0.58,
   dashJumpMinSpeed: 520,
@@ -270,6 +270,7 @@ const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
 applyAudioOptions(loadAudioOptions());
 const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
   applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+  useUrlLevel: shouldStartFromUrlLevel(),
 });
 const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
 applySprintTuning(
@@ -975,11 +976,6 @@ function resetPlayerToLevelStart(run, data) {
   player.dashTimer = 0;
   player.dashCooldownTimer = 0;
   player.dashDirection = 0;
-  player.airDashInertiaTimer = 0;
-  player.airDashInertiaDuration = 0;
-  player.airDashInertiaSpeed = 0;
-  player.airDashInertiaVectorX = 0;
-  player.airDashInertiaVectorY = 0;
   player.slideTimer = 0;
   player.hoverActive = false;
   player.hoverBoostActive = false;
@@ -1192,11 +1188,6 @@ function movePlayerBesideDebugTarget(player, target, side = "left") {
   player.dashTimer = 0;
   player.dashWindupTimer = 0;
   player.dashCooldownTimer = 0;
-  player.airDashInertiaTimer = 0;
-  player.airDashInertiaDuration = 0;
-  player.airDashInertiaSpeed = 0;
-  player.airDashInertiaVectorX = 0;
-  player.airDashInertiaVectorY = 0;
   player.slideTimer = 0;
   player.hoverActive = false;
   player.lightActive = false;

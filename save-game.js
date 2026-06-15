@@ -361,7 +361,7 @@ export function startNewSavedRun(state, data, options = {}) {
     clearSavedGame();
   }
   const baseData = data.__baseData || data;
-  const startLevelId = shouldStartFromUrlLevel()
+  const startLevelId = options.useUrlLevel && shouldStartFromUrlLevel()
     ? data.currentLevelId || getRunStartLevelId(baseData)
     : getRunStartLevelId(baseData);
   loadRuntimeLevelData(data, startLevelId);
