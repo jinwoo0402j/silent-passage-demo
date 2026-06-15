@@ -4,7 +4,7 @@ import {
   computeArmWeaponStats,
   ensureWeaponLoadoutState,
   hasUnlocked,
-} from "./state.js?v=20260613-camera-zone-v1";
+} from "./state.js?v=20260615-heat-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
@@ -5022,10 +5022,10 @@ function drawActionNode(ctx, theme, x, y, type, label, keyLabel, prominent = fal
 
 function drawActionCluster(ctx, theme) {
   drawActionNode(ctx, theme, 118, 610, "move", "이동", "A D", true);
-  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "W / Space");
-  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "X");
+  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "Space / W");
+  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "Shift");
   drawActionNode(ctx, theme, 56, 676, "crouch", "숙이기", "S");
-  drawActionNode(ctx, theme, 184, 684, "use", "사용", "Z");
+  drawActionNode(ctx, theme, 184, 684, "use", "사용", "↑ / E");
 }
 
 function getDashUiState(run, data) {
@@ -7989,7 +7989,7 @@ function drawStatusBarsV3(ctx, run, data, theme, layout) {
   const bars = [
     { label: "HP", value: run.hp / data.player.maxHp, color: "#fbfefe" },
     { label: "BAT", value: run.battery / data.player.maxBattery, color: theme.accentSecondary },
-    { label: "FOCUS", value: focusValue, color: run.focusActive ? "#87e1ff" : "#729cff" },
+    { label: "HEAT", value: focusValue, color: run.focusActive ? "#87e1ff" : "#729cff" },
     { label: "SHOT", value: shotValue, color: run.player.recoilFocusActive ? "#e7f47e" : theme.accent },
   ];
 
@@ -8043,7 +8043,7 @@ function getCharacterHudStatus(run) {
     return { label: "RECOIL", color: "#87e1ff" };
   }
   if (player.recoilFocusActive || (player.recoilFocusBlend ?? 0) > 0.18) {
-    return { label: "FOCUS", color: "#87e1ff" };
+    return { label: "HEAT", color: "#87e1ff" };
   }
   if (player.hoverActive && !player.onGround) {
     return { label: "HOVER", color: "#93eaff" };
@@ -8312,10 +8312,10 @@ function drawCharacterStatusHudV3(ctx, state, data) {
 function drawActionClusterV3(ctx, theme, layout) {
   const labels = [
     { x: layout.actions.moveX, y: layout.actions.moveY, text: "A D" },
-    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Space" },
-    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "W" },
-    { x: layout.actions.crouchX, y: layout.actions.crouchY, text: "↓" },
-    { x: layout.actions.useX, y: layout.actions.useY, text: "Z" },
+    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Shift" },
+    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "Space" },
+    { x: layout.actions.crouchX, y: layout.actions.crouchY, text: "S / ↓" },
+    { x: layout.actions.useX, y: layout.actions.useY, text: "↑ / E" },
   ];
 
   labels.forEach((label) => {
@@ -8515,7 +8515,7 @@ function drawOperatorHudV4(ctx, state, data, theme) {
   drawMeterBarV4(ctx, theme, x + 124, y + 76, 224, "HP", run.hp / data.player.maxHp, "#fbfefe", {
     active: run.hp / data.player.maxHp <= 0.3,
   });
-  drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#729cff", {
+  drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "HEAT", focusValue, run.focusActive ? "#87e1ff" : "#729cff", {
     active: run.focusActive,
   });
   drawMeterBarV4(ctx, theme, x + 124, y + 132, 152, "BAT", run.battery / data.player.maxBattery, theme.accentSecondary);
@@ -8527,9 +8527,6 @@ function drawWeaponHudV4(ctx, run, data, theme) {
   const y = 556;
   const width = 330;
   const height = 138;
-  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
-    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
-    : 1;
 
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 14,
@@ -8543,19 +8540,19 @@ function drawWeaponHudV4(ctx, run, data, theme) {
   ctx.font = "900 18px 'Segoe UI', sans-serif";
   ctx.fillText(hud.stats.label, x + 20, y + 50);
 
-  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.fillStyle = "#f5f8fb";
   ctx.font = "900 34px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.magazine}/${hud.stats.magazineSize}`, x + 20, y + 92);
+  ctx.fillText("∞", x + 20, y + 92);
 
   ctx.fillStyle = theme.textDim;
   ctx.font = "800 12px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} RES ${hud.reserve}`, x + 122, y + 78);
-  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOADING" : "R RELOAD", x + 122, y + 96);
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} HEAT`, x + 122, y + 78);
+  ctx.fillText("NO MAG", x + 122, y + 96);
 
   ctx.fillStyle = "rgba(255,255,255,0.1)";
   ctx.fillRect(x + 122, y + 104, 176, 8);
-  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
-  ctx.fillRect(x + 122, y + 104, 176 * reloadRatio, 8);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.fillRect(x + 122, y + 104, 176, 8);
 
   drawArmSlotChip(ctx, theme, "1 LEFT", hud.side === "left", x + 194, y + 20);
   drawArmSlotChip(ctx, theme, "2 RIGHT", hud.side === "right", x + 262, y + 20);
@@ -8753,7 +8750,7 @@ function drawOperatorHudV5(ctx, state, data, theme) {
     active: hpRatio <= 0.3,
     valueText: `${Math.max(0, Math.round(run.hp))}/${data.player.maxHp || 100}`,
   });
-  drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#68d8ec", {
+  drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "HEAT", focusValue, run.focusActive ? "#87e1ff" : "#68d8ec", {
     active: run.focusActive,
     valueText: `${Math.round(run.focus ?? focusMax)}/${focusMax}`,
   });
@@ -8818,9 +8815,8 @@ function drawWeaponHudV5(ctx, run, data, theme) {
   const y = 626;
   const width = 216;
   const height = 70;
-  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
-    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
-    : 1;
+  const heatMax = Math.max(1, run.focusMax ?? 100);
+  const heatRatio = clamp((run.focus ?? heatMax) / heatMax, 0, 1);
 
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 12,
@@ -8841,25 +8837,25 @@ function drawWeaponHudV5(ctx, run, data, theme) {
   const weaponLabel = String(hud.stats.label || "WEAPON").toUpperCase();
   ctx.fillText(weaponLabel.length > 13 ? `${weaponLabel.slice(0, 12)}.` : weaponLabel, x + 88, y + 32);
 
-  drawWeaponSilhouetteV5(ctx, x + 156, y + 22, 0.5, hud.magazine > 0 ? "rgba(245,248,251,0.8)" : "rgba(255,159,180,0.82)");
+  drawWeaponSilhouetteV5(ctx, x + 156, y + 22, 0.5, heatRatio > 0.08 ? "rgba(245,248,251,0.8)" : "rgba(255,159,180,0.82)");
 
-  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.fillStyle = "#f5f8fb";
   ctx.font = "900 22px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.magazine}`, x + 14, y + 62);
+  ctx.fillText("∞", x + 14, y + 62);
   ctx.fillStyle = theme.textMute;
   ctx.font = "900 11px 'Segoe UI', sans-serif";
-  ctx.fillText(`/${hud.stats.magazineSize}`, x + 42, y + 61);
+  ctx.fillText("HEAT", x + 42, y + 61);
 
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "800 8px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} ${hud.reserve}`, x + 88, y + 50);
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} NO MAG`, x + 88, y + 50);
   ctx.fillStyle = theme.textDim;
-  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOADING" : "R RELOAD", x + 88, y + 63);
+  ctx.fillText(`HEAT ${Math.round(run.focus ?? heatMax)}/${heatMax}`, x + 88, y + 63);
 
   ctx.fillStyle = "rgba(255,255,255,0.08)";
   ctx.fillRect(x + 154, y + 58, 42, 4);
-  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
-  ctx.fillRect(x + 154, y + 58, 42 * reloadRatio, 4);
+  ctx.fillStyle = heatRatio > 0.08 ? theme.accentSecondary : "#ff9fb4";
+  ctx.fillRect(x + 154, y + 58, 42 * heatRatio, 4);
 }
 
 function drawCompassHudV5(ctx, state, data, theme) {
@@ -8905,7 +8901,7 @@ function drawPromptHudV5(ctx, state, theme) {
   if (!text && !run.focusActive && !run.focusDepleted) {
     return;
   }
-  const label = text || (run.focusDepleted ? "FOCUS RECOVERING" : "RMB FOCUS");
+  const label = text || (run.focusDepleted ? "HEAT RECOVERING" : "RMB HEAT");
   const x = 544;
   const y = 662;
   drawBeveledPanel(ctx, theme, x, y, 192, 28, {

@@ -7,7 +7,7 @@
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260613-camera-zone-v1";
+} from "./state.js?v=20260615-heat-v1";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
 import {
   clearSavedGame,
@@ -48,20 +48,20 @@ const CAMERA_ABSOLUTE_ZOOM_MIN = 0.5;
 const CAMERA_ABSOLUTE_ZOOM_MAX = 5;
 const CAMERA_MAX_LERP_STEP_SECONDS = 1 / 30;
 const CAMERA_ACTION_ZOOM_OUT_SCALE = 0.5;
-const MOVE_LEFT_KEYS = ["ArrowLeft"];
-const MOVE_RIGHT_KEYS = ["ArrowRight"];
-const CROUCH_KEYS = ["ArrowDown"];
-const JUMP_KEYS = ["KeyZ"];
+const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
+const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
+const CROUCH_KEYS = ["ArrowDown", "KeyS"];
+const JUMP_KEYS = ["Space", "KeyW", "KeyZ"];
 const ZIPLINE_MOUNT_KEYS = ["ArrowUp"];
 const DASH_KEYS = ["ShiftLeft", "ShiftRight"];
 const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
-const LEGACY_MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
-const LEGACY_MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
-const LEGACY_CROUCH_KEYS = ["ArrowDown", "KeyS"];
-const LEGACY_JUMP_KEYS = ["Space", "KeyW"];
-const LEGACY_ZIPLINE_MOUNT_KEYS = ["Space"];
-const LEGACY_DASH_KEYS = ["ShiftLeft", "ShiftRight", "KeyX"];
-const LEGACY_INTERACT_KEYS = ["KeyZ"];
+const LEGACY_MOVE_LEFT_KEYS = MOVE_LEFT_KEYS;
+const LEGACY_MOVE_RIGHT_KEYS = MOVE_RIGHT_KEYS;
+const LEGACY_CROUCH_KEYS = CROUCH_KEYS;
+const LEGACY_JUMP_KEYS = JUMP_KEYS;
+const LEGACY_ZIPLINE_MOUNT_KEYS = ZIPLINE_MOUNT_KEYS;
+const LEGACY_DASH_KEYS = DASH_KEYS;
+const LEGACY_INTERACT_KEYS = ["ArrowUp", "KeyE"];
 const LEGACY_ARM_SWITCH_KEYS = ["MouseMiddle"];
 const LEGACY_RELOAD_KEYS = ["KeyR"];
 const CAPSLOCK_DASH_TAP_SECONDS = 0.28;
@@ -78,6 +78,9 @@ const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
 const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
+const WEAPON_HEAT_EMPTY_RATIO = 0.08;
+const RECOIL_CHARGE_GRAVITY_MULTIPLIER = 0.32;
+const RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND = 3.4;
 const RECOIL_JUMP_CHARGE_HOLD_SECONDS = 0;
 const RECOIL_JUMP_CHARGE_STEPS = 5;
 const RECOIL_JUMP_CHARGE_MAX_MULTIPLIER = 2;
@@ -88,7 +91,7 @@ const RECOIL_JUMP_FORCE_MULTIPLIER = 0.75;
 const RECOIL_JUMP_MIN_STAGE_FORCE_RATIO = 0.5;
 const RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER = 1.2;
 const INTERACT_KEYS = ["KeyE"];
-const WORLD_INTERACT_KEYS = ["ArrowUp"];
+const WORLD_INTERACT_KEYS = ["ArrowUp", "KeyE"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter"];
 const NEW_RUN_KEYS = ["KeyN"];
@@ -108,7 +111,7 @@ const RESTART_KEYS = ["F5"];
 const ARM_LEFT_KEYS = ["Digit1"];
 const ARM_RIGHT_KEYS = ["Digit2"];
 const ARM_SWITCH_KEYS = ["MouseMiddle"];
-const RELOAD_KEYS = [];
+const RELOAD_KEYS = ["KeyR"];
 const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
 const MAP_EXPLORE_CELL_SIZE = 320;
@@ -3152,12 +3155,12 @@ function getDialogueChance(enemy, option) {
 function applyFaceOffAttack(run, data, enemy) {
   const faceOff = run.faceOff;
   const weaponContext = getSelectedArmContext(run, data);
-  if ((weaponContext.arm.reloadTimer ?? 0) > 0) {
-    faceOff.message = `${weaponContext.stats.label}: reloading`;
+  if ((weaponContext.arm.fireCooldownTimer ?? 0) > 0) {
+    faceOff.message = `${weaponContext.stats.label}: cooling`;
     return;
   }
-  if ((weaponContext.arm.magazine ?? 0) <= 0) {
-    faceOff.message = `${weaponContext.stats.label}: empty`;
+  if (!hasWeaponHeat(run, weaponContext)) {
+    faceOff.message = `${weaponContext.stats.label}: heat low`;
     setFaceOffEnemyLine(run, data, "knockdown", "failed", "珥앸룄 鍮꾩뿀??");
     return;
   }
@@ -3168,7 +3171,8 @@ function applyFaceOffAttack(run, data, enemy) {
     return;
   }
 
-  weaponContext.arm.magazine = Math.max(0, Math.floor(weaponContext.arm.magazine ?? 0) - 1);
+  spendWeaponHeat(run, weaponContext);
+  weaponContext.arm.magazine = weaponContext.stats.magazineSize;
   weaponContext.arm.fireCooldownTimer = weaponContext.stats.fireCooldown;
   run.player.recoilShotCooldownTimer = weaponContext.arm.fireCooldownTimer;
 
@@ -3551,7 +3555,7 @@ function resetShotgunFireCooldown(run, data) {
   const selected = getSelectedArmContext(run, data);
   run.player.recoilShotCooldownTimer = Math.max(
     selected.arm.fireCooldownTimer ?? 0,
-    selected.arm.reloadTimer ?? 0,
+    0,
   );
 }
 
@@ -3569,10 +3573,6 @@ function setSelectedArm(run, data, side) {
 function switchSelectedArm(run, data) {
   const weapons = ensureWeaponLoadoutState(run, data);
   setSelectedArm(run, data, weapons.selectedSide === "right" ? "left" : "right");
-}
-
-function getReserveAmmo(context) {
-  return Math.max(0, Math.floor(Number(context.weapons.reserveAmmo?.[context.stats.ammoType] ?? 0)));
 }
 
 function isAutomaticWeaponContext(context) {
@@ -3602,19 +3602,49 @@ function canFireWeaponPose(player) {
   );
 }
 
+function getWeaponHeatCost(context) {
+  if (!context?.stats) {
+    return 6;
+  }
+  if (Number.isFinite(context.stats.heatCost)) {
+    return Math.max(0, Number(context.stats.heatCost));
+  }
+  if (context.stats.type === "shotgun") {
+    return 10;
+  }
+  if (context.stats.type === "machinegun") {
+    return 1.6;
+  }
+  return 6;
+}
+
+function hasWeaponHeat(run, context, multiplier = 1) {
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const available = clamp(Number(run.focus ?? focusMax), 0, focusMax);
+  const minimum = Math.max(focusMax * WEAPON_HEAT_EMPTY_RATIO, getWeaponHeatCost(context) * multiplier);
+  return !run.focusDepleted && available >= minimum;
+}
+
+function spendWeaponHeat(run, context, multiplier = 1) {
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const cost = getWeaponHeatCost(context) * multiplier;
+  run.focusMax = focusMax;
+  run.focus = Math.max(0, clamp(Number(run.focus ?? focusMax), 0, focusMax) - cost);
+  if (run.focus <= 0) {
+    run.focus = 0;
+    run.focusDepleted = true;
+  }
+}
+
 function canFireSelectedWeapon(run, data, player) {
   if (!canFireWeaponPose(player)) {
     return false;
   }
   const context = getSelectedArmContext(run, data);
-  if ((context.arm.reloadTimer ?? 0) > 0 || (context.arm.fireCooldownTimer ?? 0) > 0) {
+  if ((context.arm.fireCooldownTimer ?? 0) > 0) {
     return false;
   }
-  if ((context.arm.magazine ?? 0) <= 0) {
-    return false;
-  }
-  const airActionCost = player.onGround ? 0 : context.stats.airActionCost;
-  return (player.recoilShotCharges ?? 0) >= airActionCost;
+  return hasWeaponHeat(run, context);
 }
 
 function canChargeRecoilJumpWeapon(run, data, player) {
@@ -3630,9 +3660,8 @@ function canChargeRecoilJumpWeapon(run, data, player) {
   );
   return Boolean(
     context.stats.type === "shotgun" &&
-    (context.arm.reloadTimer ?? 0) === 0 &&
     (recoilJumpInProgress || (context.arm.fireCooldownTimer ?? 0) === 0) &&
-    (context.arm.magazine ?? 0) > 0
+    hasWeaponHeat(run, context)
   );
 }
 
@@ -3662,24 +3691,10 @@ function clearRecoilJumpForce(player) {
 }
 
 function startReloadArmContext(run, context) {
-  const reserve = getReserveAmmo(context);
-  const currentMagazine = Math.max(0, Math.floor(context.arm.magazine ?? 0));
-  if ((context.arm.reloadTimer ?? 0) > 0) {
-    pushNotice(run, `${context.stats.label} reloading`, 1.2);
-    return false;
-  }
-  if (currentMagazine >= context.stats.magazineSize) {
-    pushNotice(run, `${context.stats.label} magazine full`, 1.2);
-    return false;
-  }
-  if (reserve <= 0) {
-    pushNotice(run, `No ${context.stats.ammoType} reserve`, 1.2);
-    return false;
-  }
-
-  context.arm.reloadTimer = context.stats.reloadDuration;
-  context.arm.reloadDuration = context.stats.reloadDuration;
-  pushNotice(run, `Reloading ${context.stats.label}`, 1.2);
+  context.arm.magazine = context.stats.magazineSize;
+  context.arm.reloadTimer = 0;
+  context.arm.reloadDuration = 0;
+  pushNotice(run, `${context.stats.label} uses heat`, 1.2);
   return true;
 }
 
@@ -3687,33 +3702,20 @@ function startReloadSelectedArm(run, data) {
   return startReloadArmContext(run, getSelectedArmContext(run, data));
 }
 
-function completeArmReload(weapons, arm, stats) {
-  const reserve = Math.max(0, Math.floor(Number(weapons.reserveAmmo?.[stats.ammoType] ?? 0)));
-  const currentMagazine = Math.max(0, Math.floor(arm.magazine ?? 0));
-  const needed = Math.max(0, stats.magazineSize - currentMagazine);
-  const loaded = Math.min(needed, reserve);
-  arm.magazine = currentMagazine + loaded;
-  weapons.reserveAmmo[stats.ammoType] = reserve - loaded;
-}
-
 function updateWeaponTimers(run, data, dt) {
   const weapons = ensureWeaponLoadoutState(run, data);
   Object.values(weapons.arms || {}).forEach((arm) => {
     const stats = computeArmWeaponStats(data, arm);
     arm.fireCooldownTimer = Math.max(0, (arm.fireCooldownTimer ?? 0) - dt);
-    if ((arm.reloadTimer ?? 0) > 0) {
-      arm.reloadTimer = Math.max(0, arm.reloadTimer - dt);
-      if (arm.reloadTimer === 0) {
-        completeArmReload(weapons, arm, stats);
-      }
-    }
-    arm.magazine = clamp(Math.floor(arm.magazine ?? stats.magazineSize), 0, stats.magazineSize);
+    arm.reloadTimer = 0;
+    arm.reloadDuration = 0;
+    arm.magazine = stats.magazineSize;
   });
 
   const selected = getSelectedArmContext(run, data);
   run.player.recoilShotCooldownTimer = Math.max(
     selected.arm.fireCooldownTimer ?? 0,
-    selected.arm.reloadTimer ?? 0,
+    0,
   );
 }
 
@@ -4012,7 +4014,6 @@ function canUseRecoilShot(player) {
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0 &&
-    player.recoilShotCharges > 0 &&
     player.recoilShotCooldownTimer === 0
   );
 }
@@ -4950,23 +4951,7 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   if (options.requireWeaponType && context.stats.type !== options.requireWeaponType) {
     return false;
   }
-  if ((context.arm.magazine ?? 0) <= 0) {
-    if (state) {
-      pushInputTrace(state, "shotBlock:mag", { mag: context.arm.magazine ?? 0 });
-    }
-    startReloadArmContext(run, context);
-    spawnParticles(run, aim.originX, aim.originY, 3, "#d5e7ef");
-    return false;
-  }
-  if ((context.arm.reloadTimer ?? 0) > 0) {
-    if (state) {
-      pushInputTrace(state, "shotBlock:reload", { reload: (context.arm.reloadTimer ?? 0).toFixed(2) });
-    }
-    pushNotice(run, `${context.stats.label} reloading`, 1.1);
-    return false;
-  }
   const recoilJumpShot = Boolean(player.recoilJumpChargePendingShot);
-  const airActionCost = player.onGround || recoilJumpShot ? 0 : context.stats.airActionCost;
   if (!canFireWeaponPose(player) || (context.arm.fireCooldownTimer ?? 0) > 0) {
     if (state) {
       pushInputTrace(state, "shotBlock:cool", {
@@ -4976,14 +4961,14 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
     }
     return false;
   }
-  if ((player.recoilShotCharges ?? 0) < airActionCost) {
+  if (!recoilJumpShot && !hasWeaponHeat(run, context)) {
     if (state) {
-      pushInputTrace(state, "shotBlock:charge", {
-        charges: player.recoilShotCharges ?? 0,
-        cost: airActionCost,
+      pushInputTrace(state, "shotBlock:heat", {
+        heat: Math.round(run.focus ?? run.focusMax ?? FOCUS_MAX),
+        cost: getWeaponHeatCost(context),
       });
     }
-    pushNotice(run, "No air action charge.", 1.1);
+    pushNotice(run, "Heat too low.", 1.1);
     return false;
   }
 
@@ -4991,7 +4976,7 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
     pushInputTrace(state, "shotGo", {
       aim: Number(Boolean(aim.aiming)),
       focus: Number(Boolean(run.focusActive)),
-      mag: context.arm.magazine ?? 0,
+      heat: Math.round(run.focus ?? run.focusMax ?? FOCUS_MAX),
       cd: (context.arm.fireCooldownTimer ?? 0).toFixed(2),
     });
   }
@@ -5040,13 +5025,14 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   clearBraceHold(player);
   clearWallRun(player);
   clearHover(player);
-  context.arm.magazine = Math.max(0, Math.floor(context.arm.magazine ?? 0) - 1);
-  context.arm.fireCooldownTimer = context.stats.fireCooldown;
-  if (context.arm.magazine <= 0) {
-    startReloadSelectedArm(run, data);
+  if (!recoilJumpShot) {
+    spendWeaponHeat(run, context, firedAirborne ? 1.12 : 1);
   }
-  player.recoilShotCharges = Math.max(0, player.recoilShotCharges - (firedAirborne ? airActionCost : 0));
-  player.recoilShotCooldownTimer = Math.max(context.arm.fireCooldownTimer ?? 0, context.arm.reloadTimer ?? 0);
+  context.arm.magazine = context.stats.magazineSize;
+  context.arm.reloadTimer = 0;
+  context.arm.reloadDuration = 0;
+  context.arm.fireCooldownTimer = context.stats.fireCooldown;
+  player.recoilShotCooldownTimer = Math.max(context.arm.fireCooldownTimer ?? 0, 0);
   player.recoilShotTimer = Math.max(0.04, (config.recoilAirShotPoseMs ?? 160) / 1000);
   player.recoilShotActive = true;
   player.recoilShotAirborne = firedAirborne;
@@ -6050,8 +6036,11 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallJumpLockTimer === 0 &&
     player.height === player.standHeight
   ) {
-    if (!player.onGround && !useLegacyControls(state)) {
-      startAirDashHover(player, run, config);
+    if (!player.onGround) {
+      const dashX = airDashDirection?.x ?? moveAxis ?? player.facing;
+      const dashY = airDashDirection?.y ?? 0;
+      const airDashDistanceScale = (getJumpMaxHeight(data, config) * AIR_DASH_DISTANCE_MULTIPLIER) / Math.max(1, Number(config.dashDistance ?? 1));
+      startDash(player, run, config, dashX || player.facing || 1, dashY, airDashDistanceScale, false);
     } else {
       const direction = moveAxis || player.facing;
       if (direction !== 0) {
@@ -6329,20 +6318,7 @@ function updatePlayer(run, data, state, dt, input) {
     applyDashJumpCarry(player, config);
   }
 
-  const canStartHover =
-    jumpPressed &&
-    !player.onGround &&
-    player.height === player.standHeight &&
-    player.dashTimer === 0 &&
-    player.wallJumpLockTimer === 0 &&
-    !player.wallRunActive &&
-    !player.braceHolding &&
-    !player.wallSliding &&
-    (player.airDashHoverTimer ?? 0) === 0 &&
-    !canWallJump &&
-    !canBrace &&
-    !canGroundJump &&
-    player.vy >= (config.hoverStartMinVy ?? -40);
+  const canStartHover = false;
 
   if (canStartHover) {
     startHover(player, run, config);
@@ -6371,8 +6347,7 @@ function updatePlayer(run, data, state, dt, input) {
       : baseTargetSpeed;
     const momentumTargetSpeed = targetSpeed * getMomentumSpeedMultiplier(player, config);
 
-    const airControl = (config.airControlMultiplier ?? 1)
-      * (player.hoverActive ? (config.hoverAirControlMultiplier ?? 1) : 1);
+    const airControl = config.airControlMultiplier ?? 1;
     const accel = player.onGround
       ? config.groundAccel
       : config.groundAccel * airControl;
@@ -6503,7 +6478,7 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   const gravityMultiplier = player.recoilJumpChargeActive
-    ? 0
+    ? RECOIL_CHARGE_GRAVITY_MULTIPLIER
     : (player.airDashHoverTimer ?? 0) > 0
     ? 0
     : player.hoverActive
@@ -10088,8 +10063,9 @@ function updateExpedition(state, data, dt) {
   }
   const focusActive = updateFocusState(run, data, state, dt);
   if (run.player.recoilJumpChargeActive) {
-    run.player.vx = 0;
-    run.player.vy = 0;
+    const chargeDrag = Math.min(1, RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND * dt);
+    run.player.vx = approach(run.player.vx, 0, Math.abs(run.player.vx) * chargeDrag);
+    run.player.vy = approach(run.player.vy, 0, Math.abs(run.player.vy) * chargeDrag * 0.45);
     run.player.dashCarryTimer = 0;
     run.player.dashCarrySpeed = 0;
     run.player.sprintJumpCarryTimer = 0;
