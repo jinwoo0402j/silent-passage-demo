@@ -7,7 +7,7 @@
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260615-heat-v1";
+} from "./state.js?v=20260615-blast-v5";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
 import {
   clearSavedGame,
@@ -756,6 +756,13 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
     particle.vy += 360 * dt;
     return particle.life > 0;
   });
+
+  if ((run.screenShakeTimer ?? 0) > 0) {
+    run.screenShakeTimer = Math.max(0, run.screenShakeTimer - visualDt);
+    if (run.screenShakeTimer === 0) {
+      run.screenShakeIntensity = 0;
+    }
+  }
 
   if (run.noticeTimer > 0) {
     run.noticeTimer = Math.max(0, run.noticeTimer - dt);
@@ -4355,6 +4362,163 @@ function getHumanoidBulletDamage(run, bullet, enemy) {
     : baseDamage;
 }
 
+function getBlastRectHit(blastX, blastY, radius, rect) {
+  const nearestX = clamp(blastX, rect.x, rect.x + rect.width);
+  const nearestY = clamp(blastY, rect.y, rect.y + rect.height);
+  const distance = Math.hypot(nearestX - blastX, nearestY - blastY);
+  if (distance > radius) {
+    return null;
+  }
+  return {
+    nearestX,
+    nearestY,
+    distance,
+    falloff: clamp(1 - distance / Math.max(1, radius), 0, 1),
+  };
+}
+
+function pushBlastKnockback(entity, blastX, blastY, force, lift = 0) {
+  const centerX = entity.x + entity.width * 0.5;
+  const centerY = entity.y + entity.height * 0.5;
+  const dx = centerX - blastX;
+  const dy = centerY - blastY;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  entity.vx = (entity.vx ?? 0) + (dx / length) * force;
+  entity.vy = (entity.vy ?? 0) + (dy / length) * force - lift;
+}
+
+function pushScreenShake(run, duration, intensity, dirX = 0, dirY = 0) {
+  const nextIntensity = Math.max(0, Number(intensity ?? 0));
+  const currentIntensity = Math.max(0, Number(run.screenShakeIntensity ?? 0));
+  if (nextIntensity < currentIntensity && (run.screenShakeTimer ?? 0) > 0) {
+    return;
+  }
+  run.screenShakeDuration = Math.max(0.001, Number(duration ?? 0.16));
+  run.screenShakeTimer = run.screenShakeDuration;
+  run.screenShakeIntensity = nextIntensity;
+  run.screenShakeDirX = Number.isFinite(dirX) ? dirX : 0;
+  run.screenShakeDirY = Number.isFinite(dirY) ? dirY : 0;
+}
+
+function spawnRecoilBlast(run, data, weaponStats, aim, recoilChargeMultiplier = 1, visualChargeLevel = null) {
+  const chargeLevel = Number.isFinite(visualChargeLevel)
+    ? clamp(visualChargeLevel, 0, 1)
+    : clamp((recoilChargeMultiplier - 1) / 0.5, 0, 1);
+  const baseRadius = weaponStats.explosionRadius
+    ?? weaponStats.blastRadius
+    ?? (weaponStats.type === "shotgun" ? 112 : 82);
+  const radius = Math.max(36, baseRadius * clamp(0.92 + chargeLevel * 0.9, 0.85, 1.85));
+  const blastOffset = Math.max(34, weaponStats.explosionOffset ?? weaponStats.blastOffset ?? (weaponStats.type === "shotgun" ? 72 : 58));
+  const blastX = aim.originX + aim.shotDirX * blastOffset;
+  const blastY = aim.originY + aim.shotDirY * blastOffset;
+  const aimContext = {
+    shotDirX: aim.shotDirX,
+    shotDirY: aim.shotDirY,
+  };
+
+  run.recoilFx.push({
+    type: "weapon-blast",
+    x: blastX,
+    y: blastY,
+    originX: aim.originX,
+    originY: aim.originY,
+    dirX: aim.shotDirX,
+    dirY: aim.shotDirY,
+    radius,
+    life: 0.34,
+    duration: 0.34,
+    weaponType: weaponStats.type,
+    charge: recoilChargeMultiplier,
+    chargeLevel,
+  });
+
+  if (chargeLevel > 0.01) {
+    const shakeStep = Math.ceil(chargeLevel * RECOIL_JUMP_CHARGE_STEPS);
+    const earlyShake = 2 + chargeLevel * 4;
+    const lateShake = 10 + chargeLevel * 18;
+    const shakeIntensity = shakeStep <= 3 ? earlyShake : lateShake;
+    const shakeDuration = shakeStep <= 3
+      ? 0.08 + chargeLevel * 0.08
+      : 0.14 + chargeLevel * 0.22;
+    pushScreenShake(run, shakeDuration, shakeIntensity, aim.shotDirX, aim.shotDirY);
+  }
+
+  for (const block of run.temporaryBlocks || []) {
+    if (isTemporaryBlockHidden(block)) {
+      continue;
+    }
+    const hit = getBlastRectHit(blastX, blastY, radius * 0.92, block);
+    if (!hit) {
+      continue;
+    }
+    const damage = Math.max(1, Number(weaponStats.damage ?? 1)) * lerp(0.65, 1.25, hit.falloff);
+    block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
+    block.hp = Math.max(0, Number(block.hp ?? block.maxHp) - damage);
+    block.hitFlash = 0.2;
+    spawnDamageNumber(run, hit.nearestX, hit.nearestY - 12, damage, "#93eaff", block.hp <= 0 ? "OPEN" : "BLAST");
+    spawnDirectedParticles(run, hit.nearestX, hit.nearestY, block.hp <= 0 ? 18 : 10, "#93eaff", aim.shotDirX, aim.shotDirY, 500, 0.95);
+    if (block.hp <= 0) {
+      block.destroyed = true;
+      block.hiddenTimer = 0;
+    }
+  }
+
+  for (const drone of run.hostileDrones || []) {
+    if (isEntityDisabled(drone) || drone.dead) {
+      continue;
+    }
+    const hit = getBlastRectHit(blastX, blastY, radius, drone);
+    if (!hit) {
+      continue;
+    }
+    const damage = Math.max(1, Number(weaponStats.droneDamage ?? weaponStats.damage ?? 2)) * lerp(0.48, 1.1, hit.falloff);
+    const centerX = drone.x + drone.width * 0.5;
+    const centerY = drone.y + drone.height * 0.5;
+    drone.active = true;
+    drone.hp = Math.max(0, drone.hp - damage);
+    drone.hitFlash = 0.2;
+    pushBlastKnockback(drone, blastX, blastY, 120 + hit.falloff * 260, 60);
+    spawnDamageNumber(run, centerX, centerY - 10, damage, "#87e1ff", "BLAST");
+    spawnDirectedParticles(run, centerX, centerY, 13, "#87e1ff", centerX - blastX, centerY - blastY, 460, 0.85);
+    if (drone.hp === 0) {
+      spawnDamageNumber(run, centerX, centerY - 28, 0, "#f5f8fb", "DOWN");
+      destroyHostileDrone(run, drone);
+    }
+  }
+
+  for (const enemy of run.humanoidEnemies || []) {
+    if (!isHumanoidFaceOffAvailable(enemy) || !isHumanoidInFaceOffScope(enemy)) {
+      continue;
+    }
+    const hit = getBlastRectHit(blastX, blastY, radius, enemy);
+    if (!hit) {
+      continue;
+    }
+    const centerX = enemy.x + enemy.width * 0.5;
+    const centerY = enemy.y + enemy.height * 0.5;
+    if (enemy.state === "knockedDown") {
+      applyKnockedDownRecoilHit(run, enemy, aimContext);
+      spawnDamageNumber(run, centerX, centerY - 16, weaponStats.humanoidDamage ?? 0, "#ffd6ba", "BLAST");
+      continue;
+    }
+
+    const damage = Math.max(1, Number(weaponStats.humanoidDamage ?? 50)) * lerp(0.48, 1.05, hit.falloff);
+    enemy.active = true;
+    enemy.state = enemy.state === "patrol" ? "combat" : enemy.state;
+    enemy.hp = Math.max(0, (enemy.hp ?? enemy.maxHp ?? 100) - damage);
+    enemy.hitFlash = 0.24;
+    enemy.trigger = 0;
+    pushBlastKnockback(enemy, blastX, blastY, 90 + hit.falloff * 210, 72);
+    spawnDamageNumber(run, centerX, centerY - 8, damage, "#ffd6ba", "BLAST");
+    spawnDirectedParticles(run, centerX, centerY, 16, "#ffd6ba", centerX - blastX, centerY - blastY, 430, 0.82);
+    if (enemy.hp <= 0) {
+      knockDownHumanoidEnemy(run, data, enemy);
+      continue;
+    }
+    applyHumanoidStaggerDamage(run, enemy, weaponStats || {}, aimContext);
+  }
+}
+
 function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
   let best = null;
   const consider = (hit) => {
@@ -5086,7 +5250,10 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
     duration: 0.2,
     weaponType: context.stats.type,
   });
-  spawnPlayerBullet(run, context.stats, aim);
+  const visualChargeLevel = pendingChargeMultiplier > 1
+    ? clamp((pendingChargeMultiplier - 1) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - 1), 0.2, 1)
+    : 0;
+  spawnRecoilBlast(run, data, context.stats, aim, recoilChargeMultiplier, visualChargeLevel);
   spawnWeaponModuleEffects(run, data, aim, context.stats);
   pushAfterimage(run, player);
   for (let index = 0; index < 4; index += 1) {
@@ -8944,6 +9111,8 @@ function clearLevelTransitionEffects(run) {
   run.afterimages = [];
   run.recoilFocusAfterimages = [];
   run.recoilFocusAfterimageTimer = 0;
+  run.screenShakeTimer = 0;
+  run.screenShakeIntensity = 0;
   run.loot = {
     active: false,
     crateId: null,

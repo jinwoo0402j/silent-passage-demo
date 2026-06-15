@@ -4,7 +4,7 @@ import {
   computeArmWeaponStats,
   ensureWeaponLoadoutState,
   hasUnlocked,
-} from "./state.js?v=20260615-heat-v1";
+} from "./state.js?v=20260615-blast-v5";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
@@ -4015,6 +4015,122 @@ function drawAttackFx(ctx, run) {
 function drawRecoilFx(ctx, run) {
   run.recoilFx.forEach((effect) => {
     const alpha = Math.max(0, effect.life / effect.duration);
+    if (effect.type === "weapon-blast") {
+      const progress = 1 - alpha;
+      const chargeLevel = clamp(effect.chargeLevel ?? ((effect.charge ?? 1) - 1) / 2.4, 0, 1);
+      const blastScale = 1 + chargeLevel * 1.15;
+      const radius = (effect.radius ?? 92) * (0.68 + progress * 0.28) * blastScale;
+      const coreRadius = Math.max(10, radius * 0.22);
+      const dirX = effect.dirX ?? 1;
+      const dirY = effect.dirY ?? 0;
+      const normalX = -dirY;
+      const normalY = dirX;
+      const originX = Number.isFinite(effect.originX) ? effect.originX : effect.x - dirX * radius * 0.7;
+      const originY = Number.isFinite(effect.originY) ? effect.originY : effect.y - dirY * radius * 0.7;
+      const flashLength = radius * (1.62 + progress * 0.52 + chargeLevel * 0.72);
+      const flashWidth = radius * (0.3 + progress * 0.14 + chargeLevel * 0.18);
+      const noseX = effect.x + dirX * flashLength;
+      const noseY = effect.y + dirY * flashLength;
+      const tailX = effect.x - dirX * radius * 0.35;
+      const tailY = effect.y - dirY * radius * 0.35;
+
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      const glow = ctx.createRadialGradient(effect.x, effect.y, 0, effect.x, effect.y, radius * 0.82);
+      glow.addColorStop(0, `rgba(255, 255, 255, ${0.88 * alpha})`);
+      glow.addColorStop(0.22, `rgba(255, 214, 128, ${0.72 * alpha})`);
+      glow.addColorStop(0.54, `rgba(255, 118, 74, ${0.34 * alpha})`);
+      glow.addColorStop(1, "rgba(98, 214, 255, 0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.ellipse(effect.x, effect.y, radius * 0.82, radius * 0.48, Math.atan2(dirY, dirX), 0, Math.PI * 2);
+      ctx.fill();
+
+      const cone = ctx.createLinearGradient(originX, originY, noseX, noseY);
+      cone.addColorStop(0, `rgba(147, 234, 255, ${0.06 * alpha})`);
+      cone.addColorStop(0.18, `rgba(255, 255, 255, ${0.9 * alpha})`);
+      cone.addColorStop(0.48, `rgba(255, 214, 128, ${0.72 * alpha})`);
+      cone.addColorStop(1, "rgba(255, 118, 74, 0)");
+      ctx.shadowColor = "rgba(255, 238, 189, 0.95)";
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(tailX + normalX * flashWidth * 0.52, tailY + normalY * flashWidth * 0.52);
+      ctx.lineTo(effect.x + normalX * flashWidth, effect.y + normalY * flashWidth);
+      ctx.lineTo(noseX, noseY);
+      ctx.lineTo(effect.x - normalX * flashWidth, effect.y - normalY * flashWidth);
+      ctx.lineTo(tailX - normalX * flashWidth * 0.52, tailY - normalY * flashWidth * 0.52);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.shadowColor = "rgba(255, 255, 255, 0.92)";
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.88 * alpha})`;
+      ctx.lineWidth = 6 + progress * 4;
+      ctx.beginPath();
+      ctx.moveTo(originX, originY);
+      ctx.lineTo(effect.x + dirX * flashLength * 0.86, effect.y + dirY * flashLength * 0.86);
+      ctx.stroke();
+
+      ctx.shadowColor = "rgba(147, 234, 255, 0.9)";
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = `rgba(147, 234, 255, ${0.5 * alpha})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(effect.x - normalX * radius * 0.62, effect.y - normalY * radius * 0.62);
+      ctx.quadraticCurveTo(
+        effect.x + dirX * radius * 0.25,
+        effect.y + dirY * radius * 0.25,
+        effect.x + normalX * radius * 0.62,
+        effect.y + normalY * radius * 0.62,
+      );
+      ctx.stroke();
+
+      ctx.shadowBlur = 10;
+      const sparkCount = 5 + Math.round(chargeLevel * 7);
+      for (let index = -sparkCount; index <= sparkCount; index += 1) {
+        const spread = index * (0.12 + chargeLevel * 0.018);
+        const sparkDirX = dirX + normalX * spread;
+        const sparkDirY = dirY + normalY * spread;
+        const centerBias = Math.max(0, sparkCount - Math.abs(index));
+        const sparkLength = radius * (0.8 + centerBias * 0.08 + chargeLevel * 0.46);
+        const startBack = radius * (0.12 + Math.abs(index) * 0.025);
+        ctx.strokeStyle = index === 0
+          ? `rgba(255, 255, 255, ${0.78 * alpha})`
+          : `rgba(255, 220, 152, ${0.5 * alpha})`;
+        ctx.lineWidth = index === 0 ? 4 : 1.8;
+        ctx.beginPath();
+        ctx.moveTo(effect.x - sparkDirX * startBack, effect.y - sparkDirY * startBack);
+        ctx.lineTo(effect.x + sparkDirX * sparkLength, effect.y + sparkDirY * sparkLength);
+        ctx.stroke();
+      }
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.78 * alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(effect.x, effect.y, coreRadius * 1.35 * alpha, coreRadius * 0.75 * alpha, Math.atan2(dirY, dirX), 0, Math.PI * 2);
+      ctx.fill();
+
+      if (chargeLevel > 0.18) {
+        ctx.strokeStyle = `rgba(255, 246, 214, ${0.44 * alpha * chargeLevel})`;
+        ctx.lineWidth = 2.5 + chargeLevel * 3.5;
+        ctx.beginPath();
+        ctx.moveTo(effect.x - normalX * radius * (0.72 + chargeLevel * 0.25), effect.y - normalY * radius * (0.72 + chargeLevel * 0.25));
+        ctx.quadraticCurveTo(
+          effect.x + dirX * radius * (0.7 + chargeLevel * 0.35),
+          effect.y + dirY * radius * (0.7 + chargeLevel * 0.35),
+          effect.x + normalX * radius * (0.72 + chargeLevel * 0.25),
+          effect.y + normalY * radius * (0.72 + chargeLevel * 0.25),
+        );
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+
     if (effect.weaponType === "recoil-charge") {
       const progress = clamp(effect.progress ?? 0, 0, 1);
       const pulse = 1 - alpha;
@@ -6620,14 +6736,34 @@ function drawFaceOffEntryTransition(ctx, run, data) {
   ctx.restore();
 }
 
+function getScreenShakeOffset(run) {
+  const duration = Math.max(0.001, run.screenShakeDuration ?? 0);
+  const ratio = clamp((run.screenShakeTimer ?? 0) / duration, 0, 1);
+  if (ratio <= 0) {
+    return { x: 0, y: 0 };
+  }
+  const intensity = Math.max(0, Number(run.screenShakeIntensity ?? 0)) * ratio * ratio;
+  const time = typeof performance !== "undefined" ? performance.now() * 0.001 : 0;
+  const dirX = Number.isFinite(run.screenShakeDirX) ? run.screenShakeDirX : 0;
+  const dirY = Number.isFinite(run.screenShakeDirY) ? run.screenShakeDirY : 0;
+  const sidewaysX = -dirY;
+  const sidewaysY = dirX;
+  return {
+    x: Math.sin(time * 72) * intensity + sidewaysX * Math.sin(time * 113) * intensity * 0.42,
+    y: Math.cos(time * 87) * intensity * 0.62 + sidewaysY * Math.cos(time * 101) * intensity * 0.36,
+  };
+}
+
 function renderExpedition(ctx, state, data) {
   const run = state.run;
   const theme = getUiTheme(data);
   const cameraZoom = getRunCameraZoom(run, data);
+  const screenShake = getScreenShakeOffset(run);
 
   drawScenicBackdrop(ctx, theme, state.pulse, run.cameraX);
 
   ctx.save();
+  ctx.translate(screenShake.x, screenShake.y);
   applyFaceOffEntryCameraTransform(ctx, run, data, cameraZoom);
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
   ctx.scale(cameraZoom, cameraZoom);
@@ -6696,6 +6832,7 @@ function renderExpedition(ctx, state, data) {
   drawVaultLockdownOverlay(ctx, run, state.pulse);
   drawFaceOffEntryTransition(ctx, run, data);
   ctx.save();
+  ctx.translate(screenShake.x, screenShake.y);
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
   ctx.scale(cameraZoom, cameraZoom);
   drawThreatSense(ctx, run, state);

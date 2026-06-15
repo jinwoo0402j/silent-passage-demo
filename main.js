@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260615-heat-v1";
+import { GAME_DATA } from "./level-data.js?v=20260615-blast-v5";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
@@ -13,7 +13,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260615-heat-v1";
+} from "./movement-tuning.js?v=20260615-blast-v5";
 import {
   AUDIO_OPTION_CHANNELS,
   applyAudioOptions,
@@ -21,7 +21,7 @@ import {
   resetAudioOptions,
   saveAudioOptions,
 } from "./audio-options.js?v=20260613-sound-options-v1";
-import { renderGame } from "./render.js?v=20260615-heat-v1";
+import { renderGame } from "./render.js?v=20260615-blast-v5";
 import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -33,8 +33,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260615-heat-v1";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260615-heat-v1";
+} from "./state.js?v=20260615-blast-v5";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260615-blast-v5";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -944,6 +944,8 @@ function clearRunActionEffects(run) {
   run.afterimages = [];
   run.recoilFocusAfterimages = [];
   run.recoilFocusAfterimageTimer = 0;
+  run.screenShakeTimer = 0;
+  run.screenShakeIntensity = 0;
   if (run.recoilAim) {
     run.recoilAim.active = false;
     run.recoilAim.aiming = false;
