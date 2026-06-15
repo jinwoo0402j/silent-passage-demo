@@ -76,7 +76,6 @@ const FOCUS_MAX = 100;
 const FOCUS_DRAIN_PER_SECOND = 18;
 const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
-const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
 const WEAPON_HEAT_EMPTY_RATIO = 0.08;
 const RECOIL_CHARGE_GRAVITY_MULTIPLIER = 0.32;
@@ -3625,6 +3624,46 @@ function getWeaponHeatCost(context) {
   return 6;
 }
 
+function clearRecoilJumpChargeState(player, clearPending = false) {
+  if (!player) {
+    return;
+  }
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargeEffectStep = 0;
+  if (clearPending) {
+    player.recoilJumpChargePendingMultiplier = 1;
+    player.recoilJumpChargePendingShot = false;
+  }
+}
+
+function triggerHeatManagementFailure(run, player = run?.player) {
+  if (!run) {
+    return;
+  }
+  const alreadyLocked = Boolean(run.focusDepleted);
+  run.focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  run.focus = 0;
+  run.focusActive = false;
+  run.focusDepleted = true;
+  run.heatFailureNotified = true;
+  clearRecoilJumpChargeState(player, true);
+  if (!alreadyLocked) {
+    pushNotice(run, "Heat management failure.", 1.8);
+  }
+}
+
+function refreshHeatManagementLock(run) {
+  if (!run?.focusDepleted) {
+    return;
+  }
+  if (run.focus >= run.focusMax) {
+    run.focusDepleted = false;
+    run.heatFailureNotified = false;
+  }
+}
+
 function hasWeaponHeat(run, context, multiplier = 1) {
   const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
   const available = clamp(Number(run.focus ?? focusMax), 0, focusMax);
@@ -3638,8 +3677,7 @@ function spendWeaponHeat(run, context, multiplier = 1) {
   run.focusMax = focusMax;
   run.focus = Math.max(0, clamp(Number(run.focus ?? focusMax), 0, focusMax) - cost);
   if (run.focus <= 0) {
-    run.focus = 0;
-    run.focusDepleted = true;
+    triggerHeatManagementFailure(run);
   }
 }
 
@@ -3659,16 +3697,25 @@ function canChargeRecoilJumpWeapon(run, data, player) {
     return false;
   }
   const context = getSelectedArmContext(run, data);
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const availableHeat = clamp(Number(run.focus ?? focusMax), 0, focusMax);
+  const chargeAlreadyActive = Boolean(
+    player.recoilJumpChargeActive ||
+    (player.recoilJumpChargeFocusSpent ?? 0) > 0
+  );
   const recoilJumpInProgress = Boolean(
     player.recoilShotActive ||
     player.recoilShotTimer > 0 ||
     player.recoilSpinTimer > 0 ||
     player.recoilCameraTimer > 0
   );
+  const hasChargeHeat = chargeAlreadyActive
+    ? !run.focusDepleted && availableHeat > 0
+    : hasWeaponHeat(run, context);
   return Boolean(
     context.stats.type === "shotgun" &&
     (recoilJumpInProgress || (context.arm.fireCooldownTimer ?? 0) === 0) &&
-    hasWeaponHeat(run, context)
+    hasChargeHeat
   );
 }
 
@@ -4691,9 +4738,7 @@ function updateFocusState(run, data, state, dt) {
   run.focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
   run.focus = clamp(Number(run.focus ?? run.focusMax), 0, run.focusMax);
   run.focusDepleted = Boolean(run.focusDepleted);
-  if (run.focusDepleted && run.focus >= run.focusMax * FOCUS_REENTRY_RATIO) {
-    run.focusDepleted = false;
-  }
+  refreshHeatManagementLock(run);
 
   const recoilJumpChargeRequested = shouldChargeRecoilJump(run, data, state);
   const requested =
@@ -4748,16 +4793,13 @@ function updateFocusState(run, data, state, dt) {
       player.recoilJumpChargeEffectStep = Math.max(player.recoilJumpChargeEffectStep ?? 0, chargeStep);
     }
     if (run.focus <= 0) {
-      run.focus = 0;
-      run.focusDepleted = true;
+      triggerHeatManagementFailure(run, player);
     }
   } else {
     run.focus = Math.min(run.focusMax, run.focus + FOCUS_RECOVER_PER_SECOND * dt);
+    refreshHeatManagementLock(run);
     if (!recoilJumpChargeRequested || !active) {
-      player.recoilJumpChargeActive = false;
-      player.recoilJumpChargeFocusSpent = 0;
-      player.recoilJumpChargeMultiplier = 1;
-      player.recoilJumpChargeEffectStep = 0;
+      clearRecoilJumpChargeState(player);
     }
   }
 
@@ -9399,6 +9441,7 @@ function applyShelterRestRecovery(run, data) {
   run.focus = run.focusMax;
   run.focusActive = false;
   run.focusDepleted = false;
+  run.heatFailureNotified = false;
   run.time = 0;
   run.timePhase = "day";
   run.nightActive = false;

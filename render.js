@@ -8120,13 +8120,18 @@ function drawObjectiveCardV3(ctx, state, data, theme, layout) {
   });
 }
 
+function getHeatHudColor(run, activeColor = "#87e1ff", idleColor = "#729cff") {
+  return run?.focusDepleted ? "#ff5d78" : (run?.focusActive ? activeColor : idleColor);
+}
+
 function drawStatusBarsV3(ctx, run, data, theme, layout) {
   const shotValue = getRecoilShotUiState(run, data);
   const focusValue = clamp((run.focus ?? run.focusMax ?? 100) / Math.max(1, run.focusMax ?? 100), 0, 1);
+  const heatColor = getHeatHudColor(run, "#87e1ff", "#729cff");
   const bars = [
     { label: "HP", value: run.hp / data.player.maxHp, color: "#fbfefe" },
     { label: "BAT", value: run.battery / data.player.maxBattery, color: theme.accentSecondary },
-    { label: "HEAT", value: focusValue, color: run.focusActive ? "#87e1ff" : "#729cff" },
+    { label: "HEAT", value: focusValue, color: heatColor },
     { label: "SHOT", value: shotValue, color: run.player.recoilFocusActive ? "#e7f47e" : theme.accent },
   ];
 
@@ -8633,6 +8638,7 @@ function drawOperatorHudV4(ctx, state, data, theme) {
   const portraitSize = 84;
   const status = getCharacterHudStatus(run);
   const focusValue = clamp((run.focus ?? run.focusMax ?? 100) / Math.max(1, run.focusMax ?? 100), 0, 1);
+  const heatColor = getHeatHudColor(run, "#87e1ff", "#729cff");
 
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 14,
@@ -8652,8 +8658,8 @@ function drawOperatorHudV4(ctx, state, data, theme) {
   drawMeterBarV4(ctx, theme, x + 124, y + 76, 224, "HP", run.hp / data.player.maxHp, "#fbfefe", {
     active: run.hp / data.player.maxHp <= 0.3,
   });
-  drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "HEAT", focusValue, run.focusActive ? "#87e1ff" : "#729cff", {
-    active: run.focusActive,
+  drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "HEAT", focusValue, heatColor, {
+    active: run.focusActive || run.focusDepleted,
   });
   drawMeterBarV4(ctx, theme, x + 124, y + 132, 152, "BAT", run.battery / data.player.maxBattery, theme.accentSecondary);
 }
@@ -8865,6 +8871,7 @@ function drawOperatorHudV5(ctx, state, data, theme) {
   const hpRatio = clamp(run.hp / (data.player.maxHp || 100), 0, 1);
   const focusMax = Math.max(1, run.focusMax ?? 100);
   const focusValue = clamp((run.focus ?? focusMax) / focusMax, 0, 1);
+  const heatColor = getHeatHudColor(run, "#87e1ff", "#68d8ec");
   const batteryRatio = clamp(run.battery / data.player.maxBattery, 0, 1);
   const momentum = clamp(run.player?.verticalMomentum ?? 0, 0, 1);
   const momentumStage = Math.max(0, Math.floor(run.player?.verticalMomentumStage ?? 0));
@@ -8887,8 +8894,8 @@ function drawOperatorHudV5(ctx, state, data, theme) {
     active: hpRatio <= 0.3,
     valueText: `${Math.max(0, Math.round(run.hp))}/${data.player.maxHp || 100}`,
   });
-  drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "HEAT", focusValue, run.focusActive ? "#87e1ff" : "#68d8ec", {
-    active: run.focusActive,
+  drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "HEAT", focusValue, heatColor, {
+    active: run.focusActive || run.focusDepleted,
     valueText: `${Math.round(run.focus ?? focusMax)}/${focusMax}`,
   });
   drawMeterBarV5(ctx, theme, x + 76, y + 72, 92, "BAT", batteryRatio, theme.accentSecondary, {
@@ -8954,6 +8961,7 @@ function drawWeaponHudV5(ctx, run, data, theme) {
   const height = 70;
   const heatMax = Math.max(1, run.focusMax ?? 100);
   const heatRatio = clamp((run.focus ?? heatMax) / heatMax, 0, 1);
+  const heatColor = getHeatHudColor(run, theme.accentSecondary, theme.accentSecondary);
 
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 12,
@@ -8986,12 +8994,12 @@ function drawWeaponHudV5(ctx, run, data, theme) {
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "800 8px 'Segoe UI', sans-serif";
   ctx.fillText(`${hud.stats.ammoType.toUpperCase()} NO MAG`, x + 88, y + 50);
-  ctx.fillStyle = theme.textDim;
+  ctx.fillStyle = run.focusDepleted ? heatColor : theme.textDim;
   ctx.fillText(`HEAT ${Math.round(run.focus ?? heatMax)}/${heatMax}`, x + 88, y + 63);
 
   ctx.fillStyle = "rgba(255,255,255,0.08)";
   ctx.fillRect(x + 154, y + 58, 42, 4);
-  ctx.fillStyle = heatRatio > 0.08 ? theme.accentSecondary : "#ff9fb4";
+  ctx.fillStyle = run.focusDepleted ? heatColor : (heatRatio > 0.08 ? theme.accentSecondary : "#ff9fb4");
   ctx.fillRect(x + 154, y + 58, 42 * heatRatio, 4);
 }
 
@@ -9038,7 +9046,7 @@ function drawPromptHudV5(ctx, state, theme) {
   if (!text && !run.focusActive && !run.focusDepleted) {
     return;
   }
-  const label = text || (run.focusDepleted ? "HEAT RECOVERING" : "RMB HEAT");
+  const label = text || (run.focusDepleted ? "HEAT FAILURE" : "RMB HEAT");
   const x = 544;
   const y = 662;
   drawBeveledPanel(ctx, theme, x, y, 192, 28, {

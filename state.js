@@ -955,6 +955,7 @@ export function createRunState(data, meta) {
     focus: 100,
     focusMax: 100,
     focusDepleted: false,
+    heatFailureNotified: false,
     focusActive: false,
     day: 1,
     time: 0,
