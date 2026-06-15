@@ -7,7 +7,7 @@
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260615-blast-v5";
+} from "./state.js?v=20260615-speedfx-v11";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
 import {
   clearSavedGame,
@@ -44,7 +44,7 @@ const CAMERA_USER_ZOOM_OUT_KEYS = ["Minus", "NumpadSubtract"];
 const CAMERA_USER_ZOOM_MIN = 0.5;
 const CAMERA_USER_ZOOM_MAX = 2;
 const CAMERA_USER_ZOOM_STEP = 1.12;
-const CAMERA_ABSOLUTE_ZOOM_MIN = 0.5;
+const CAMERA_ABSOLUTE_ZOOM_MIN = 0.35;
 const CAMERA_ABSOLUTE_ZOOM_MAX = 5;
 const CAMERA_MAX_LERP_STEP_SECONDS = 1 / 30;
 const CAMERA_ACTION_ZOOM_OUT_SCALE = 0.5;
@@ -80,7 +80,7 @@ const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
 const WEAPON_HEAT_EMPTY_RATIO = 0.08;
 const RECOIL_CHARGE_GRAVITY_MULTIPLIER = 0.32;
-const RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND = 3.4;
+const RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND = 0.35;
 const RECOIL_JUMP_CHARGE_HOLD_SECONDS = 0;
 const RECOIL_JUMP_CHARGE_STEPS = 5;
 const RECOIL_JUMP_CHARGE_MAX_MULTIPLIER = 2;
@@ -90,6 +90,11 @@ const RECOIL_JUMP_INPUT_START_STEP_RATIO = 0.12;
 const RECOIL_JUMP_FORCE_MULTIPLIER = 0.75;
 const RECOIL_JUMP_MIN_STAGE_FORCE_RATIO = 0.5;
 const RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER = 1.2;
+const RECOIL_CHARGE_CAMERA_ZOOM_MIN = 0.36;
+const RECOIL_FLIGHT_CAMERA_ZOOM_MIN = 0.44;
+const RECOIL_FLIGHT_CAMERA_MIN_SECONDS = 0.34;
+const RECOIL_FLIGHT_CAMERA_MAX_SECONDS = 0.72;
+const RECOIL_CAMERA_RETURN_ZOOM_PER_SECOND = 0.72;
 const INTERACT_KEYS = ["KeyE"];
 const WORLD_INTERACT_KEYS = ["ArrowUp", "KeyE"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
@@ -1167,10 +1172,19 @@ function getReducedCameraZoomRatio(value, fallback) {
   return 1 - (1 - zoomRatio) * CAMERA_ACTION_ZOOM_OUT_SCALE;
 }
 
+function updateRecoilCameraTimers(player, dt) {
+  const previousTimer = Math.max(0, Number(player.recoilCameraTimer ?? 0));
+  player.recoilCameraTimer = Math.max(0, previousTimer - dt);
+  if (previousTimer > 0 && player.recoilCameraTimer === 0) {
+    player.recoilCameraReturning = true;
+  }
+}
+
 function getCameraTargetZoom(player, config, fallCamera = null) {
   const baseZoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
   let targetZoom = baseZoom;
   let sprintZoomFloor = null;
+  let actionZoomFloor = baseZoom * getReducedCameraZoomRatio(config.minZoom ?? config.speedZoomMin, 0.88);
   if (player.wallRunActive || player.wallRunBoostActive) {
     targetZoom = getCameraScaledZoom(baseZoom, config.wallRunZoom, 0.94);
   } else if (player.dashTimer > 0 && config.dashAffectsCamera !== false) {
@@ -1185,6 +1199,21 @@ function getCameraTargetZoom(player, config, fallCamera = null) {
       ? getCameraScaledZoom(baseZoom, config.sprintZoom, 0.96)
       : getCameraScaledZoom(baseZoom, config.sprintJumpZoom, 0.92);
     sprintZoomFloor = targetZoom;
+  }
+
+  if (player.recoilJumpChargeActive) {
+    const chargeProgress = clamp(
+      ((player.recoilJumpChargeMultiplier ?? 1) - 1) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - 1),
+      0,
+      1,
+    );
+    const chargeZoom = baseZoom * lerp(0.9, RECOIL_CHARGE_CAMERA_ZOOM_MIN, chargeProgress);
+    targetZoom = Math.min(targetZoom, chargeZoom);
+    actionZoomFloor = Math.min(actionZoomFloor, baseZoom * RECOIL_CHARGE_CAMERA_ZOOM_MIN);
+  } else if (player.recoilCameraTimer > 0) {
+    const flightZoom = baseZoom * RECOIL_FLIGHT_CAMERA_ZOOM_MIN;
+    targetZoom = Math.min(targetZoom, flightZoom);
+    actionZoomFloor = Math.min(actionZoomFloor, flightZoom);
   }
 
   const fallRatio = fallCamera?.ratio ?? 0;
@@ -1202,7 +1231,7 @@ function getCameraTargetZoom(player, config, fallCamera = null) {
   }
 
   const minZoom = clamp(
-    baseZoom * getReducedCameraZoomRatio(config.minZoom ?? config.speedZoomMin, 0.88),
+    actionZoomFloor,
     CAMERA_ABSOLUTE_ZOOM_MIN,
     baseZoom,
   );
@@ -1354,8 +1383,17 @@ function syncCamera(run, data, dt) {
     ? { ratio: 0, zoom: targetZoom }
     : getSpeedZoomState(player, config);
   const zoomLerp = Math.min(1, cameraDt * (config.zoomLerp ?? 4.2));
+  const linearRecoilCameraReturn = !freezeActionCamera && Boolean(player.recoilCameraReturning);
+  const currentZoom = clamp(run.cameraZoom ?? (config.zoom ?? 1), CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  let nextZoom = linearRecoilCameraReturn
+    ? Math.min(targetZoom, currentZoom + RECOIL_CAMERA_RETURN_ZOOM_PER_SECOND * cameraDt)
+    : lerp(currentZoom, targetZoom, zoomLerp);
+  if (linearRecoilCameraReturn && nextZoom >= targetZoom - 0.001) {
+    nextZoom = targetZoom;
+    player.recoilCameraReturning = false;
+  }
   const zoom = clamp(
-    lerp(run.cameraZoom ?? (config.zoom ?? 1), targetZoom, zoomLerp),
+    nextZoom,
     CAMERA_ABSOLUTE_ZOOM_MIN,
     CAMERA_ABSOLUTE_ZOOM_MAX,
   );
@@ -3681,13 +3719,12 @@ function clearRecoilJumpForce(player) {
     Math.abs(player.vx ?? 0) > 0 ||
     Math.abs(player.vy ?? 0) > 0
   );
-  player.vx = 0;
-  player.vy = 0;
   player.recoilShotTimer = 0;
   player.recoilShotActive = false;
   player.recoilSpinTimer = 0;
   player.recoilSpinDuration = 0;
   player.recoilCameraTimer = 0;
+  player.recoilCameraReturning = false;
   player.recoilCameraDirX = 0;
   player.recoilCameraDirY = -1;
   player.dashCarryTimer = 0;
@@ -5176,6 +5213,10 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   const maxHorizontal = (config.recoilShotMaxHorizontalSpeed ?? 1180) * recoilChargeMultiplier;
   const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180) * recoilChargeMultiplier;
   const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760) * recoilChargeMultiplier;
+  const stackSpeedMultiplier = Math.max(1, Number(config.recoilShotStackSpeedMultiplier ?? 3));
+  const stackMaxHorizontal = maxHorizontal * stackSpeedMultiplier;
+  const stackMaxUp = maxUp * stackSpeedMultiplier;
+  const stackMaxFall = maxFall * stackSpeedMultiplier;
   const verticalPoseThreshold = config.recoilAimVerticalPoseThreshold ?? 0.45;
   const shotFacing = Math.abs(aim.shotDirX) > 0.08
     ? Math.sign(aim.shotDirX)
@@ -5217,11 +5258,18 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   } else {
     clearRecoilSpin(player);
   }
-  player.recoilCameraTimer = (config.recoilShotCameraHoldMs ?? 240) / 1000;
+  const visualChargeLevel = pendingChargeMultiplier > 1
+    ? clamp((pendingChargeMultiplier - 1) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - 1), 0.2, 1)
+    : 0;
+  player.recoilCameraTimer = Math.max(
+    (config.recoilShotCameraHoldMs ?? 240) / 1000,
+    lerp(RECOIL_FLIGHT_CAMERA_MIN_SECONDS, RECOIL_FLIGHT_CAMERA_MAX_SECONDS, visualChargeLevel),
+  );
+  player.recoilCameraReturning = false;
   player.recoilCameraDirX = recoilX;
   player.recoilCameraDirY = recoilY;
-  player.vx = clamp(player.vx + recoilX * force, -maxHorizontal, maxHorizontal);
-  player.vy = clamp(player.vy + recoilY * force, -maxUp, maxFall);
+  player.vx = clamp(player.vx + recoilX * force, -stackMaxHorizontal, stackMaxHorizontal);
+  player.vy = clamp(player.vy + recoilY * force, -stackMaxUp, stackMaxFall);
   player.onGround = false;
   player.coyoteTimer = 0;
   player.jumpBufferTimer = 0;
@@ -5250,9 +5298,6 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
     duration: 0.2,
     weaponType: context.stats.type,
   });
-  const visualChargeLevel = pendingChargeMultiplier > 1
-    ? clamp((pendingChargeMultiplier - 1) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - 1), 0.2, 1)
-    : 0;
   spawnRecoilBlast(run, data, context.stats, aim, recoilChargeMultiplier, visualChargeLevel);
   spawnWeaponModuleEffects(run, data, aim, context.stats);
   pushAfterimage(run, player);
@@ -5895,7 +5940,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.recoilShotCooldownTimer = Math.max(0, player.recoilShotCooldownTimer - dt);
   player.recoilShotTimer = Math.max(0, player.recoilShotTimer - dt);
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
-  player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
+  updateRecoilCameraTimers(player, dt);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
   updateVerticalMomentum(player, config, dt);
   decaySlideTimer(player, config, dt);
@@ -6521,11 +6566,31 @@ function updatePlayer(run, data, state, dt, input) {
     const decel = player.onGround
       ? config.groundDecel
       : config.groundDecel * airControl;
+    const currentDirection = Math.sign(player.vx);
+    const targetDirection = Math.sign(momentumTargetSpeed);
+    const preservingAirInertia = (
+      !player.onGround &&
+      Math.abs(player.vx) > Math.abs(momentumTargetSpeed) &&
+      (moveAxis === 0 || currentDirection === targetDirection)
+    );
+    const reversingAirDirection = (
+      !player.onGround &&
+      moveAxis !== 0 &&
+      currentDirection !== 0 &&
+      targetDirection !== 0 &&
+      currentDirection !== targetDirection
+    );
 
     const stopDecel = moveAxis === 0 && player.onGround
       ? getStopInertiaDecel(player, config, decel)
       : decel;
-    player.vx = approach(player.vx, momentumTargetSpeed, (moveAxis !== 0 ? accel : stopDecel) * dt);
+    let horizontalChangeRate = moveAxis !== 0 ? accel : stopDecel;
+    if (preservingAirInertia) {
+      horizontalChangeRate = decel * (config.airInertiaDecelMultiplier ?? 0.18);
+    } else if (reversingAirDirection) {
+      horizontalChangeRate = decel * (config.airTurnDecelMultiplier ?? 0.52);
+    }
+    player.vx = approach(player.vx, momentumTargetSpeed, horizontalChangeRate * dt);
 
     if (
       player.onGround &&
@@ -8374,7 +8439,7 @@ function updateLootLockedPlayer(run, dt) {
   player.recoilShotCooldownTimer = Math.max(0, player.recoilShotCooldownTimer - dt);
   player.recoilShotTimer = Math.max(0, player.recoilShotTimer - dt);
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
-  player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
+  updateRecoilCameraTimers(player, dt);
   player.slideTimer = Math.max(0, player.slideTimer - dt);
   player.vx = approach(player.vx, 0, 2400 * dt);
   player.vy = approach(player.vy, 0, 2600 * dt);

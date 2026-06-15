@@ -929,6 +929,7 @@ export function createRunState(data, meta) {
     recoilDirX: 0,
     recoilDirY: -1,
     recoilCameraTimer: 0,
+    recoilCameraReturning: false,
     recoilCameraDirX: 0,
     recoilCameraDirY: -1,
   };

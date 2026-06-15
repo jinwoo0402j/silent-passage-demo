@@ -34,9 +34,12 @@ export const SPRINT_TUNING_FIELDS = [
   { key: "recoilShotMaxHorizontalSpeed", label: "Recoil Max X Speed", min: 120, max: 6000, step: 10 },
   { key: "recoilShotMaxUpSpeed", label: "Recoil Max Up Speed", min: 120, max: 6000, step: 10 },
   { key: "recoilShotMaxFallSpeed", label: "Recoil Max Fall Speed", min: 120, max: 6000, step: 10 },
+  { key: "recoilShotStackSpeedMultiplier", label: "Recoil Stack Cap", min: 1, max: 6, step: 0.1 },
   { key: "recoilShotFocusTimeScale", label: "Focus Time Scale", min: 0.05, max: 1, step: 0.01 },
   { key: "recoilSpinDurationMs", label: "Recoil Spin Time", min: 60, max: 520, step: 10 },
   { key: "recoilSpinLoopCount", label: "Recoil Spin Loops", min: 1, max: 4, step: 1 },
+  { key: "airInertiaDecelMultiplier", label: "Air Inertia Decel", min: 0.05, max: 1, step: 0.01 },
+  { key: "airTurnDecelMultiplier", label: "Air Turn Decel", min: 0.05, max: 1.5, step: 0.01 },
 ];
 
 function clampNumber(value, min, max, fallback) {

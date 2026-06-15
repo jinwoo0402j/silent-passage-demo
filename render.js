@@ -4,7 +4,7 @@ import {
   computeArmWeaponStats,
   ensureWeaponLoadoutState,
   hasUnlocked,
-} from "./state.js?v=20260615-blast-v5";
+} from "./state.js?v=20260615-speedfx-v11";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
@@ -116,7 +116,7 @@ function getCameraZoom(data) {
 }
 
 function getRunCameraZoom(run, data) {
-  return clamp(run?.cameraZoom ?? getCameraZoom(data), 0.5, 2.5);
+  return clamp(run?.cameraZoom ?? getCameraZoom(data), 0.35, 2.5);
 }
 
 function getUiTheme(data) {

@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260615-blast-v5";
+import { GAME_DATA } from "./level-data.js?v=20260615-speedfx-v11";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
@@ -13,7 +13,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260615-blast-v5";
+} from "./movement-tuning.js?v=20260615-speedfx-v11";
 import {
   AUDIO_OPTION_CHANNELS,
   applyAudioOptions,
@@ -21,7 +21,7 @@ import {
   resetAudioOptions,
   saveAudioOptions,
 } from "./audio-options.js?v=20260613-sound-options-v1";
-import { renderGame } from "./render.js?v=20260615-blast-v5";
+import { renderGame } from "./render.js?v=20260615-speedfx-v11";
 import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -33,8 +33,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260615-blast-v5";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260615-blast-v5";
+} from "./state.js?v=20260615-speedfx-v11";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260615-speedfx-v11";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -208,6 +208,8 @@ const LEVEL_ZERO_MOVEMENT_TUNING = {
   groundAccel: 5200,
   groundDecel: 6200,
   airControlMultiplier: 0.88,
+  airInertiaDecelMultiplier: 0.18,
+  airTurnDecelMultiplier: 0.52,
   jumpVelocity: -920,
   dashDurationMs: 95,
   dashWindupMs: 35,
@@ -236,6 +238,7 @@ const LEVEL_ZERO_MOVEMENT_TUNING = {
   recoilShotMaxHorizontalSpeed: 1900,
   recoilShotMaxUpSpeed: 1650,
   recoilShotMaxFallSpeed: 720,
+  recoilShotStackSpeedMultiplier: 3,
   recoilShotFocusTimeScale: 0.05,
   recoilSpinDurationMs: 180,
   recoilSpinLoopCount: 2,
