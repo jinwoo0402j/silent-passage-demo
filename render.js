@@ -1027,22 +1027,23 @@ function drawPlatformMass(ctx, platform, theme) {
     return;
   }
 
-  if (platform.kind === "damage") {
+  if (platform.kind === "damage" || platform.kind === "recallDamage") {
+    const isRecallDamage = platform.kind === "recallDamage";
     const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
-    gradient.addColorStop(0, "rgba(255, 126, 102, 0.68)");
-    gradient.addColorStop(0.38, platform.color || "#8b3446");
-    gradient.addColorStop(1, "rgba(34, 12, 18, 0.92)");
+    gradient.addColorStop(0, isRecallDamage ? "rgba(94, 190, 255, 0.72)" : "rgba(255, 126, 102, 0.68)");
+    gradient.addColorStop(0.38, platform.color || (isRecallDamage ? "#2367a8" : "#8b3446"));
+    gradient.addColorStop(1, isRecallDamage ? "rgba(8, 24, 46, 0.92)" : "rgba(34, 12, 18, 0.92)");
     ctx.fillStyle = gradient;
     ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
 
     ctx.fillStyle = "rgba(255, 226, 126, 0.25)";
     ctx.fillRect(platform.x, platform.y, platform.width, Math.max(3, platform.height * 0.16));
 
-    ctx.strokeStyle = "rgba(255, 190, 102, 0.7)";
+    ctx.strokeStyle = isRecallDamage ? "rgba(94, 190, 255, 0.78)" : "rgba(255, 190, 102, 0.7)";
     ctx.lineWidth = 2;
     ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
 
-    ctx.strokeStyle = "rgba(255, 226, 126, 0.42)";
+    ctx.strokeStyle = isRecallDamage ? "rgba(147, 234, 255, 0.44)" : "rgba(255, 226, 126, 0.42)";
     ctx.lineWidth = 1.5;
     ctx.save();
     ctx.beginPath();
@@ -1092,11 +1093,11 @@ function drawPlatformMass(ctx, platform, theme) {
 }
 
 function drawTerrain(ctx, data) {
-  data.platforms.filter((platform) => platform.kind === "damage").forEach((platform) => {
+  data.platforms.filter((platform) => platform.kind === "damage" || platform.kind === "recallDamage").forEach((platform) => {
     drawPlatformMass(ctx, platform, getUiTheme(data));
   });
 
-  data.platforms.filter((platform) => platform.kind !== "damage").forEach((platform) => {
+  data.platforms.filter((platform) => platform.kind !== "damage" && platform.kind !== "recallDamage").forEach((platform) => {
     drawPlatformMass(ctx, platform, getUiTheme(data));
   });
 

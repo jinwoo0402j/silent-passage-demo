@@ -38,6 +38,7 @@ const TOOL_IDS = {
   BACKGROUND_TILE: "backgroundTile",
   TEMPORARY_BLOCK: "temporaryBlock",
   DAMAGE_BLOCK: "damageBlock",
+  RECALL_DAMAGE_BLOCK: "recallDamageBlock",
   ZIP_LINE: "zipLine",
   SIGN: "sign",
   LANTERN: "lantern",
@@ -70,6 +71,7 @@ const TOOL_SHORTCUTS = {
   KeyB: TOOL_IDS.BACKGROUND_TILE,
   KeyT: TOOL_IDS.TEMPORARY_BLOCK,
   KeyV: TOOL_IDS.DAMAGE_BLOCK,
+  KeyR: TOOL_IDS.RECALL_DAMAGE_BLOCK,
   KeyZ: TOOL_IDS.ZIP_LINE,
   Digit4: TOOL_IDS.SIGN,
   Numpad4: TOOL_IDS.SIGN,
@@ -98,6 +100,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.BACKGROUND_TILE]: "B",
   [TOOL_IDS.TEMPORARY_BLOCK]: "T",
   [TOOL_IDS.DAMAGE_BLOCK]: "V",
+  [TOOL_IDS.RECALL_DAMAGE_BLOCK]: "R",
   [TOOL_IDS.ZIP_LINE]: "Z",
   [TOOL_IDS.SIGN]: "4",
   [TOOL_IDS.SPAWN]: "5",
@@ -127,6 +130,7 @@ TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
 TOOL_HINTS[TOOL_IDS.BACKGROUND_TILE] = "Drag to place a non-colliding background tile";
 TOOL_HINTS[TOOL_IDS.TEMPORARY_BLOCK] = "Drag to place a shoot-open temporary block";
 TOOL_HINTS[TOOL_IDS.DAMAGE_BLOCK] = "Drag to place a contact-damage solid block";
+TOOL_HINTS[TOOL_IDS.RECALL_DAMAGE_BLOCK] = "Drag to place a damage block that returns the player to the last safe footing";
 TOOL_HINTS[TOOL_IDS.ZIP_LINE] = "Click to place a zipline node and auto-connect nearby nodes";
 
 TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
@@ -631,7 +635,10 @@ function isSlopeTool(tool) {
 }
 
 function isPlatformDrawTool(tool) {
-  return tool === TOOL_IDS.PLATFORM || isSlopeTool(tool) || tool === TOOL_IDS.DAMAGE_BLOCK;
+  return tool === TOOL_IDS.PLATFORM
+    || isSlopeTool(tool)
+    || tool === TOOL_IDS.DAMAGE_BLOCK
+    || tool === TOOL_IDS.RECALL_DAMAGE_BLOCK;
 }
 
 function getSlopeDirectionForTool(tool) {
@@ -2280,6 +2287,7 @@ function renderSelectionFields(editor, dom) {
       { value: "solid", label: "Solid block" },
       { value: "slope", label: "Slope block" },
       { value: "damage", label: "Damage block" },
+      { value: "recallDamage", label: "Recall damage block" },
     ]);
     if (entity.kind === "slope") {
       addSelect("Slope", "slopeDirection", getPlatformSlopeDirection(entity), [
@@ -2287,7 +2295,7 @@ function renderSelectionFields(editor, dom) {
         { value: "up-right", label: "Up right" },
       ]);
     }
-    if (entity.kind === "damage") {
+    if (entity.kind === "damage" || entity.kind === "recallDamage") {
       addNumber("Damage", "damage", entity.damage ?? 10, { min: 0 });
     }
     addNumber("X", "x", entity.x);
@@ -3254,8 +3262,8 @@ function applySelectionField(editor, dom, field, value) {
         entity.kind = "slope";
         entity.slopeDirection = getPlatformSlopeDirection(entity);
         delete entity.damage;
-      } else if (value === "damage") {
-        entity.kind = "damage";
+      } else if (value === "damage" || value === "recallDamage") {
+        entity.kind = value;
         entity.damage = Number.isFinite(entity.damage) ? entity.damage : 10;
         delete entity.slopeDirection;
       } else {
@@ -3656,9 +3664,9 @@ function createPlatformFromPreview(editor, dom) {
   if (rect.kind === "slope") {
     platform.kind = "slope";
     platform.slopeDirection = getPlatformSlopeDirection(rect);
-  } else if (rect.kind === "damage") {
-    platform.kind = "damage";
-    platform.color = "#8b3446";
+  } else if (rect.kind === "damage" || rect.kind === "recallDamage") {
+    platform.kind = rect.kind;
+    platform.color = rect.kind === "recallDamage" ? "#2367a8" : "#8b3446";
     platform.damage = 10;
   }
 
@@ -4226,6 +4234,8 @@ function handlePointerDown(editor, dom, event) {
       end: snapped,
       platformKind: editor.tool === TOOL_IDS.DAMAGE_BLOCK
         ? "damage"
+        : editor.tool === TOOL_IDS.RECALL_DAMAGE_BLOCK
+          ? "recallDamage"
         : isSlopeTool(editor.tool)
           ? "slope"
           : "solid",
@@ -5414,18 +5424,19 @@ function drawCameraGuide(ctx, editor) {
 }
 
 function drawPlatformBlock(ctx, editor, platform, selected) {
-  const isDamage = platform.kind === "damage";
-  ctx.fillStyle = platform.color || (isDamage ? "#8b3446" : "#54697b");
+  const isDamage = platform.kind === "damage" || platform.kind === "recallDamage";
+  const isRecallDamage = platform.kind === "recallDamage";
+  ctx.fillStyle = platform.color || (isRecallDamage ? "#2367a8" : isDamage ? "#8b3446" : "#54697b");
   ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
 
   ctx.fillStyle = isDamage ? "rgba(255, 190, 102, 0.28)" : "rgba(255, 255, 255, 0.16)";
   ctx.fillRect(platform.x, platform.y, platform.width, Math.max(2, platform.height * 0.18));
 
   if (isDamage) {
-    ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 126, 102, 0.72)";
+    ctx.strokeStyle = selected ? COLORS.accent : (isRecallDamage ? "rgba(94, 190, 255, 0.82)" : "rgba(255, 126, 102, 0.72)");
     ctx.lineWidth = (selected ? 3 : 1.6) / editor.view.zoom;
     ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
-    ctx.strokeStyle = "rgba(255, 226, 126, 0.55)";
+    ctx.strokeStyle = isRecallDamage ? "rgba(147, 234, 255, 0.56)" : "rgba(255, 226, 126, 0.55)";
     ctx.lineWidth = 1.4 / editor.view.zoom;
     const step = Math.max(18 / editor.view.zoom, 24);
     ctx.save();
@@ -5436,6 +5447,15 @@ function drawPlatformBlock(ctx, editor, platform, selected) {
       ctx.beginPath();
       ctx.moveTo(x, platform.y + platform.height);
       ctx.lineTo(x + platform.height, platform.y);
+      ctx.stroke();
+    }
+    if (isRecallDamage) {
+      ctx.strokeStyle = "rgba(225, 245, 255, 0.62)";
+      ctx.beginPath();
+      ctx.moveTo(platform.x + platform.width * 0.24, platform.y + platform.height * 0.52);
+      ctx.lineTo(platform.x + platform.width * 0.48, platform.y + platform.height * 0.28);
+      ctx.lineTo(platform.x + platform.width * 0.48, platform.y + platform.height * 0.43);
+      ctx.lineTo(platform.x + platform.width * 0.76, platform.y + platform.height * 0.43);
       ctx.stroke();
     }
     ctx.restore();
@@ -5499,7 +5519,7 @@ function drawSlopePlatform(ctx, editor, platform, selected, options = {}) {
 
 function drawPlatforms(ctx, editor) {
   editor.data.platforms.forEach((platform, index) => {
-    if (platform.kind !== "damage") {
+    if (platform.kind !== "damage" && platform.kind !== "recallDamage") {
       return;
     }
     const selected = isSelectionItemSelected(editor.selected, { kind: "platform", index });
@@ -5507,7 +5527,7 @@ function drawPlatforms(ctx, editor) {
   });
 
   editor.data.platforms.forEach((platform, index) => {
-    if (platform.kind === "damage") {
+    if (platform.kind === "damage" || platform.kind === "recallDamage") {
       return;
     }
     const selected = isSelectionItemSelected(editor.selected, { kind: "platform", index });
@@ -6081,11 +6101,16 @@ function drawPreview(ctx, editor) {
         stroke: COLORS.accentAlt,
       });
     } else if (rect) {
-      ctx.fillStyle = rect.kind === "damage"
+      const isDamagePreview = rect.kind === "damage" || rect.kind === "recallDamage";
+      ctx.fillStyle = isDamagePreview
         ? "rgba(255, 126, 102, 0.2)"
         : "rgba(147, 234, 255, 0.16)";
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-      ctx.strokeStyle = rect.kind === "damage" ? "rgba(255, 190, 102, 0.85)" : COLORS.accentAlt;
+      ctx.strokeStyle = rect.kind === "recallDamage"
+        ? "rgba(94, 190, 255, 0.92)"
+        : rect.kind === "damage"
+          ? "rgba(255, 190, 102, 0.85)"
+          : COLORS.accentAlt;
       ctx.lineWidth = 2 / editor.view.zoom;
       ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
     }

@@ -364,7 +364,10 @@ export function startNewSavedRun(state, data, options = {}) {
   const startLevelId = options.useUrlLevel && shouldStartFromUrlLevel()
     ? data.currentLevelId || getRunStartLevelId(baseData)
     : getRunStartLevelId(baseData);
-  loadRuntimeLevelData(data, startLevelId);
+  loadRuntimeLevelData(data, startLevelId, {
+    ...(data.__runtimeLevelOptions || {}),
+    applyLevelOverride: options.applyLevelOverride ?? true,
+  });
   state.run = createRunState(data, state.meta);
   state.scene = SCENES.EXPEDITION;
   state.sceneTimer = 0;

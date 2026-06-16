@@ -730,8 +730,8 @@ function sanitizePlatform(platform, index, basePlatform = null) {
       : ["up-right", "down-right"].includes(fallback.slopeDirection)
         ? fallback.slopeDirection
         : "down-right";
-  } else if (kind === "damage") {
-    next.kind = "damage";
+  } else if (kind === "damage" || kind === "recallDamage") {
+    next.kind = kind;
     next.damage = safeNumber(source?.damage, fallback.damage ?? 10, 0);
   }
   return next;

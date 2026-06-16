@@ -82,6 +82,7 @@ const RECOIL_CHARGE_GRAVITY_MULTIPLIER = 0.32;
 const RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND = 3.4;
 const RECOIL_JUMP_CHARGE_HOLD_SECONDS = 0;
 const RECOIL_JUMP_CHARGE_STEPS = 5;
+const RECOIL_JUMP_CHARGE_COST_FALLOFF = 0.5;
 const RECOIL_JUMP_CHARGE_MAX_MULTIPLIER = 2;
 const RECOIL_JUMP_FOCUS_COST_SCALE = 0.5;
 const RECOIL_JUMP_FOCUS_DRAIN_MULTIPLIER = 4.63;
@@ -1657,7 +1658,11 @@ function getSlopePlatforms(data) {
 }
 
 function getSolidLevelPlatforms(data) {
-  return (data.platforms || []).filter((platform) => !isSlopePlatform(platform) && platform.kind !== "damage");
+  return (data.platforms || []).filter((platform) => (
+    !isSlopePlatform(platform) &&
+    platform.kind !== "damage" &&
+    platform.kind !== "recallDamage"
+  ));
 }
 
 function getCollisionPlatforms(data, run = null) {
@@ -2338,7 +2343,7 @@ function damagePlayer(run, amount, direction, sourceText) {
     (run.player.dashTimer > 0 && run.player.dashInvulnerable) ||
     (run.player.slideTimer > 0 && run.player.slideInvulnerable)
   ) {
-    return;
+    return false;
   }
   if (run.loot?.active) {
     closeLootCrate(run);
@@ -2349,9 +2354,10 @@ function damagePlayer(run, amount, direction, sourceText) {
   run.player.vy = -260;
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
+  return true;
 }
 
-function getPlayerDamageBlockContact(player, data) {
+function getPlayerHazardBlockContact(player, data) {
   const probe = {
     x: player.x - 1,
     y: player.y - 1,
@@ -2359,20 +2365,65 @@ function getPlayerDamageBlockContact(player, data) {
     height: player.height + 2,
   };
   return (data.platforms || []).find((platform) => (
-    platform.kind === "damage" &&
+    (platform.kind === "damage" || platform.kind === "recallDamage") &&
     rectsOverlap(probe, platform)
   )) || null;
 }
 
-function updateDamageBlockContact(run, data) {
-  const block = getPlayerDamageBlockContact(run.player, data);
-  if (!block) {
+function updatePlayerLastSafeGround(player, data) {
+  if (!player?.onGround || getPlayerHazardBlockContact(player, data)) {
     return;
+  }
+  player.lastSafeGroundX = player.x;
+  player.lastSafeGroundY = player.y;
+}
+
+function recallPlayerToLastSafeGround(run, data) {
+  const player = run.player;
+  const fallback = (data.entrances || []).find((entry) => entry.id === "start")
+    || (data.entrances || [])[0]
+    || data.player.spawn;
+  player.x = Number.isFinite(player.lastSafeGroundX) ? player.lastSafeGroundX : fallback.x;
+  player.y = Number.isFinite(player.lastSafeGroundY) ? player.lastSafeGroundY : fallback.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = true;
+  player.wasOnGround = true;
+  player.dashTimer = 0;
+  player.dashWindupTimer = 0;
+  player.dashCarryTimer = 0;
+  player.dashCarrySpeed = 0;
+  player.sprintJumpCarryTimer = 0;
+  player.sprintJumpCarrySpeed = 0;
+  player.wallDirection = 0;
+  player.wallSliding = false;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.canInteract = true;
+  clearAirDashHover(player);
+  clearHover(player);
+  clearWallRun(player);
+  clearBraceHold(player);
+  clearZipLine(player);
+  spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.5, 14, "#5ebeff");
+}
+
+function updateDamageBlockContact(run, data) {
+  const block = getPlayerHazardBlockContact(run.player, data);
+  if (!block) {
+    return false;
   }
   const playerCenter = getCenter(run.player);
   const blockCenter = getCenter(block);
   const direction = Math.sign(playerCenter.x - blockCenter.x) || run.player.facing || 1;
-  damagePlayer(run, block.damage ?? 10, direction, "Damage block contact.");
+  const damaged = damagePlayer(run, block.damage ?? 10, direction, block.kind === "recallDamage" ? "Recall damage block contact." : "Damage block contact.");
+  if (damaged && block.kind === "recallDamage") {
+    recallPlayerToLastSafeGround(run, data);
+    return true;
+  }
+  return false;
 }
 
 function isPlayerDashDodging(player) {
@@ -3839,25 +3890,72 @@ function shouldChargeRecoilJump(run, data, state) {
   );
 }
 
-function getRecoilJumpChargeMultiplier(run, player) {
+function getRecoilJumpEffectiveFocusMax(run) {
   const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
-  const effectiveFocusMax = focusMax * RECOIL_JUMP_FOCUS_COST_SCALE;
-  const stepSize = effectiveFocusMax / RECOIL_JUMP_CHARGE_STEPS;
-  const spent = clamp(Number(player.recoilJumpChargeFocusSpent ?? 0), 0, effectiveFocusMax);
-  if (spent <= 0) {
+  return focusMax * RECOIL_JUMP_FOCUS_COST_SCALE;
+}
+
+function getRecoilJumpChargeStageCostWeight(step) {
+  const steps = Math.max(1, RECOIL_JUMP_CHARGE_STEPS);
+  const clampedStep = clamp(Math.floor(step), 1, steps);
+  return Math.pow(RECOIL_JUMP_CHARGE_COST_FALLOFF, clampedStep - 1);
+}
+
+function getRecoilJumpChargeTotalCostWeight() {
+  let total = 0;
+  for (let step = 1; step <= RECOIL_JUMP_CHARGE_STEPS; step += 1) {
+    total += getRecoilJumpChargeStageCostWeight(step);
+  }
+  return Math.max(0.001, total);
+}
+
+function getRecoilJumpChargeStageCost(run, step) {
+  return getRecoilJumpEffectiveFocusMax(run)
+    * (getRecoilJumpChargeStageCostWeight(step) / getRecoilJumpChargeTotalCostWeight());
+}
+
+function getRecoilJumpChargeStageThreshold(run, step) {
+  const steps = Math.max(1, RECOIL_JUMP_CHARGE_STEPS);
+  const clampedStep = clamp(Math.floor(step), 1, steps);
+  let threshold = 0;
+  for (let index = 1; index <= clampedStep; index += 1) {
+    threshold += getRecoilJumpChargeStageCost(run, index);
+  }
+  return threshold;
+}
+
+function getRecoilJumpChargeDrainMultiplier(run, player) {
+  const spentStep = getRecoilJumpChargeStepFromSpent(run, player.recoilJumpChargeFocusSpent);
+  const currentStep = clamp(spentStep, 1, RECOIL_JUMP_CHARGE_STEPS);
+  const averageStepCost = getRecoilJumpEffectiveFocusMax(run) / Math.max(1, RECOIL_JUMP_CHARGE_STEPS);
+  return getRecoilJumpChargeStageCost(run, currentStep) / Math.max(0.001, averageStepCost);
+}
+
+function getRecoilJumpChargeStepFromSpent(run, spent) {
+  const effectiveFocusMax = getRecoilJumpEffectiveFocusMax(run);
+  const safeSpent = clamp(Number(spent ?? 0), 0, effectiveFocusMax);
+  if (safeSpent <= 0) {
+    return 0;
+  }
+  for (let step = 1; step <= RECOIL_JUMP_CHARGE_STEPS; step += 1) {
+    if (safeSpent <= getRecoilJumpChargeStageThreshold(run, step)) {
+      return step;
+    }
+  }
+  return RECOIL_JUMP_CHARGE_STEPS;
+}
+
+function getRecoilJumpChargeMultiplier(run, player) {
+  const spentStep = getRecoilJumpChargeStepFromSpent(run, player.recoilJumpChargeFocusSpent);
+  if (spentStep <= 0) {
     return 1;
   }
-  const spentSteps = clamp(Math.ceil(spent / stepSize), 1, RECOIL_JUMP_CHARGE_STEPS);
-  const progress = spentSteps / RECOIL_JUMP_CHARGE_STEPS;
+  const progress = spentStep / RECOIL_JUMP_CHARGE_STEPS;
   return lerp(1, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER, progress);
 }
 
 function getRecoilJumpChargeStep(run, player) {
-  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
-  const effectiveFocusMax = focusMax * RECOIL_JUMP_FOCUS_COST_SCALE;
-  const stepSize = effectiveFocusMax / RECOIL_JUMP_CHARGE_STEPS;
-  const spent = clamp(Number(player.recoilJumpChargeFocusSpent ?? 0), 0, effectiveFocusMax);
-  return spent > 0 ? clamp(Math.ceil(spent / stepSize), 1, RECOIL_JUMP_CHARGE_STEPS) : 0;
+  return getRecoilJumpChargeStepFromSpent(run, player.recoilJumpChargeFocusSpent);
 }
 
 function updateRecoilJumpLastDirection(player, state, forceFallback = false) {
@@ -4756,7 +4854,9 @@ function updateFocusState(run, data, state, dt) {
   if (active) {
     const focusBefore = run.focus;
     const focusDrainPerSecond = FOCUS_DRAIN_PER_SECOND * (
-      recoilJumpChargeRequested ? RECOIL_JUMP_FOCUS_DRAIN_MULTIPLIER : 1
+      recoilJumpChargeRequested
+        ? RECOIL_JUMP_FOCUS_DRAIN_MULTIPLIER * getRecoilJumpChargeDrainMultiplier(run, player)
+        : 1
     );
     run.focus = Math.max(0, run.focus - focusDrainPerSecond * dt);
     if (recoilJumpChargeRequested) {
@@ -4769,8 +4869,7 @@ function updateFocusState(run, data, state, dt) {
             player.recoilShotCooldownTimer = 0;
           }
         }
-        const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
-        const firstInputCharge = (focusMax * RECOIL_JUMP_FOCUS_COST_SCALE / RECOIL_JUMP_CHARGE_STEPS)
+        const firstInputCharge = getRecoilJumpChargeStageThreshold(run, 1)
           * RECOIL_JUMP_INPUT_START_STEP_RATIO;
         player.recoilJumpChargeFocusSpent = firstInputCharge;
         updateRecoilJumpLastDirection(player, state, true);
@@ -4780,7 +4879,7 @@ function updateFocusState(run, data, state, dt) {
       player.recoilJumpChargeFocusSpent = clamp(
         (player.recoilJumpChargeFocusSpent ?? 0) + Math.max(0, focusBefore - run.focus),
         0,
-        run.focusMax
+        getRecoilJumpEffectiveFocusMax(run)
       );
       player.recoilJumpChargeMultiplier = getRecoilJumpChargeMultiplier(run, player);
       const chargeStep = getRecoilJumpChargeStep(run, player);
@@ -6184,7 +6283,9 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   const wallJumpSourceDirection =
-    player.wallDirection !== 0
+    player.wallRunActive && player.wallRunDirection !== 0
+      ? player.wallRunDirection
+      : player.wallDirection !== 0
       ? player.wallDirection
       : player.wallGraceTimer > 0
         ? player.wallGraceDirection
@@ -6289,7 +6390,12 @@ function updatePlayer(run, data, state, dt, input) {
     player.canInteract = false;
 
     const contacts = resolvePlayerCollisions(player, data, dt, config, run);
-    updateDamageBlockContact(run, data);
+    if (updateDamageBlockContact(run, data)) {
+      updateMovementVfx(run, data, dt);
+      player.jumpHeldLastFrame = jumpHeld;
+      setMovementState(player);
+      return;
+    }
     const landed = !player.wasOnGround && contacts.onGround;
     player.dashCornerCorrected = contacts.dashCornerCorrected;
     const dashStartedAirborne = Boolean(player.dashStartedAirborne);
@@ -6318,6 +6424,7 @@ function updatePlayer(run, data, state, dt, input) {
       clearHover(player);
       clearRecoilSpin(player);
       player.coyoteTimer = config.coyoteTimeMs / 1000;
+      updatePlayerLastSafeGround(player, data);
     }
     player.onGround = contacts.onGround;
     player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
@@ -6395,9 +6502,9 @@ function updatePlayer(run, data, state, dt, input) {
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
     player.height === player.standHeight &&
-    !wantsWallRun &&
-    !player.wallRunActive;
-  const canWallRun = wantsWallRun;
+    player.wallJumpLockTimer === 0 &&
+    !player.braceHolding;
+  const canWallRun = wantsWallRun && !canWallJump;
   const canGroundJump =
     player.jumpBufferTimer > 0 &&
     player.coyoteTimer > 0 &&
@@ -6712,7 +6819,12 @@ function updatePlayer(run, data, state, dt, input) {
 
   const vxBeforeResolve = player.vx;
   const contacts = resolvePlayerCollisions(player, data, dt, config, run);
-  updateDamageBlockContact(run, data);
+  if (updateDamageBlockContact(run, data)) {
+    updateMovementVfx(run, data, dt);
+    player.jumpHeldLastFrame = jumpHeld;
+    setMovementState(player);
+    return;
+  }
   const landed = !player.wasOnGround && contacts.onGround;
   player.jumpCornerCorrected = contacts.jumpCornerCorrected;
   player.dashCornerCorrected = contacts.dashCornerCorrected;
@@ -6809,6 +6921,7 @@ function updatePlayer(run, data, state, dt, input) {
     clearRecoilSpin(player);
     refillDashFromGround(player, config);
     refillRecoilShot(player, config);
+    updatePlayerLastSafeGround(player, data);
     if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
       // Slide startup already resized the player and preserved the incoming speed.
     } else if (player.slideTimer > 0) {
@@ -9073,6 +9186,8 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
 
   player.x = Number.isFinite(entrance?.x) ? entrance.x : data.player.spawn.x;
   player.y = Number.isFinite(entrance?.y) ? entrance.y : data.player.spawn.y;
+  player.lastSafeGroundX = player.x;
+  player.lastSafeGroundY = player.y;
   player.vx = 0;
   player.vy = 0;
   player.facing = Math.sign(entrance?.facing ?? player.facing ?? 1) || 1;

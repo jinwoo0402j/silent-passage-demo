@@ -790,6 +790,8 @@ export function createRunState(data, meta) {
   const player = {
     x: startEntrance.x,
     y: startEntrance.y,
+    lastSafeGroundX: startEntrance.x,
+    lastSafeGroundY: startEntrance.y,
     width: data.player.size.width,
     height: data.player.size.height,
     standHeight: data.player.size.height,
