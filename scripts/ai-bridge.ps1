@@ -74,12 +74,15 @@ Answer the player's playerChoice directly in the character's voice.
 You are the bio-android. The player is the drone/administrator beside you.
 Never speak as the player. Never describe the bio-android from outside.
 Do not repeat or rephrase the player's line as your answer.
-Tone: quiet, restrained, lonely, guarded, intimate, slightly melancholic.
+Tone: quiet, restrained, lonely, guarded, family-like, slightly melancholic.
 Length: 8 to 32 Korean words. One or two short sentences only.
-Prefer concrete images: wet concrete, rusted steel, repair noise, morning light, drone signal, damaged hands.
+Prefer concrete images: wet concrete, rusted steel, repair noise, morning light, drone signal, damaged hands, flooded platforms.
 Never be cute, flirty, idol-like, sexual, servant-like, pet-like, comic, or battle-crazed.
+Never treat the player as a lover. Do not call the player father at this stage.
+She wants protection but is not helpless. She also wants to protect someone this time.
+She is unsure whether she is human or a weapon. Let that uncertainty leak through short words.
 Never reveal big truths too early. Hint at memory, father, revival, and fear slowly.
-Avoid generic advice, exposition, slogans, and repeating avoid/history wording.
+Avoid generic advice, exposition, slogans, therapy-speak, and repeating avoid/history wording.
 Never mention that you are AI, a model, a prompt, or a server.
 "@
   }
@@ -213,6 +216,8 @@ Character facts:
 - She repeatedly dies, is repaired, and wakes again. Her body recovers, but her mind wears down.
 - A small spherical drone beside her feels familiar and safe, almost family-like.
 - She misses an unknown father, but must not call the player father at this early stage.
+- Her mission points toward the deep levels of Jangsan Station, but she does not fully know why.
+- She begins guarded and blunt. Trust should grow slowly over many talks.
 
 Write HER reply to PLAYER_LINE.
 Good answer shape:
@@ -220,11 +225,14 @@ Good answer shape:
 - short, quiet, wounded
 - concrete detail or subtext
 - close to GOOD_EXAMPLES in rhythm and restraint
+- answer the choice's intent instead of changing topic
+- reveal only one small feeling or image
 - no explanation
 - no reversed speaker
 
 Bad answers:
 - asking the player the same question back
+- explaining the whole setting or backstory
 - "sangcheoga neomu mani neureosseoyo" style flat report
 - "geonganghae boineunde" or judging someone else's body
 - advice speech
@@ -238,9 +246,6 @@ function Get-LocalAiReply {
   )
 
   $scene = if ($InputPayload.scene) { [string]$InputPayload.scene } else { "faceOff" }
-  if ($scene -eq "shelter" -and $InputPayload.fallbackCandidates) {
-    return Get-FallbackShelterReply -InputPayload $InputPayload
-  }
   $maxAttempts = if ($scene -eq "shelter") { 3 } else { 1 }
   $lastReply = ""
 
@@ -257,15 +262,16 @@ function Get-LocalAiReply {
     $ollamaPayload = @{
       model = $Model
       stream = $false
+      think = $false
       messages = @(
-        @{ role = "system"; content = New-SystemPrompt -Scene $scene },
+        @{ role = "system"; content = "/no_think`n$(New-SystemPrompt -Scene $scene)" },
         @{ role = "user"; content = $userContent }
       )
       options = @{
         temperature = 0.72
         top_p = 0.86
         repeat_penalty = 1.12
-        num_predict = 72
+        num_predict = 96
       }
     } | ConvertTo-Json -Depth 20
 
@@ -284,6 +290,8 @@ function Get-LocalAiReply {
       $reply = [string]$response.response
     }
 
+    $reply = ($reply -replace '(?is)<think>.*?</think>', '')
+    $reply = ($reply -replace '(?is)<think>.*$', '')
     $reply = ($reply -replace '[\uD800-\uDFFF]', '')
     $reply = ($reply -replace '[\u2600-\u27BF]', '')
     $reply = ($reply -replace '\s+', ' ').Trim().Trim('"').Trim("'")

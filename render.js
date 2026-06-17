@@ -8359,14 +8359,6 @@ function drawShelterMemorialTalkOverlay(ctx, state, data, theme, rest) {
     glow: true,
   });
 
-  const history = Array.isArray(talk.history) ? talk.history : [];
-  const lastPlayerLine = [...history].reverse().find((entry) => entry?.speaker === "drone")?.text || "";
-  if (lastPlayerLine) {
-    ctx.fillStyle = "rgba(245,248,251,0.5)";
-    ctx.font = "800 12px 'Segoe UI', sans-serif";
-    ctx.fillText(`당신: ${lastPlayerLine}`, dialogueX + 26, dialogueY - 12);
-  }
-
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "900 12px 'Segoe UI', sans-serif";
   ctx.fillText("TYPE-07A", dialogueX + 26, dialogueY + 27);
