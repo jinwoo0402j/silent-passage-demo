@@ -197,6 +197,8 @@ function clearTransientRunState(run) {
     run.player.airDashHoverTimer = 0;
     run.player.airDashDirectionGraceTimer = 0;
     run.player.airDashDirectionPending = false;
+    run.player.airDashPendingDirX = 0;
+    run.player.airDashPendingDirY = 0;
     run.player.airDashHoverConsumed = false;
   }
 }
@@ -364,7 +366,10 @@ export function startNewSavedRun(state, data, options = {}) {
   const startLevelId = options.useUrlLevel && shouldStartFromUrlLevel()
     ? data.currentLevelId || getRunStartLevelId(baseData)
     : getRunStartLevelId(baseData);
-  loadRuntimeLevelData(data, startLevelId);
+  loadRuntimeLevelData(data, startLevelId, {
+    ...(data.__runtimeLevelOptions || {}),
+    applyLevelOverride: options.applyLevelOverride ?? true,
+  });
   state.run = createRunState(data, state.meta);
   state.scene = SCENES.EXPEDITION;
   state.sceneTimer = 0;

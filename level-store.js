@@ -9,7 +9,11 @@ export const LEVEL_OVERRIDES_VERSION = 3;
 
 const DEFAULT_PLATFORM_COLOR = "#4b6075";
 const DEFAULT_SIGN_TEXT = "표지";
-const VALID_PROP_KINDS = new Set(["sign", "lantern", "backgroundTile"]);
+const DEFAULT_BACKGROUND_TILE_COLOR = "#34383a";
+const DEFAULT_SHADOW_TILE_COLOR = "#24313a";
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157"]);
+const PROP_KIND_ALIASES = {};
+const VALID_PROP_KINDS = new Set(["sign", "lantern", "backgroundTile", "shadowTile"]);
 const PLAYER_RENDER_FIELDS = [
   "widthRatio",
   "heightRatio",
@@ -730,8 +734,8 @@ function sanitizePlatform(platform, index, basePlatform = null) {
       : ["up-right", "down-right"].includes(fallback.slopeDirection)
         ? fallback.slopeDirection
         : "down-right";
-  } else if (kind === "damage") {
-    next.kind = "damage";
+  } else if (kind === "damage" || kind === "recallDamage") {
+    next.kind = kind;
     next.damage = safeNumber(source?.damage, fallback.damage ?? 10, 0);
   }
   return next;
@@ -766,7 +770,9 @@ function sanitizeProp(prop, index, baseProp = null) {
     y: 860,
     text: DEFAULT_SIGN_TEXT,
   };
-  const kind = VALID_PROP_KINDS.has(prop?.kind) ? prop.kind : fallback.kind;
+  const requestedKind = PROP_KIND_ALIASES[prop?.kind] || prop?.kind;
+  const fallbackKind = PROP_KIND_ALIASES[fallback.kind] || fallback.kind;
+  const kind = VALID_PROP_KINDS.has(requestedKind) ? requestedKind : fallbackKind;
 
   if (kind === "sign") {
     return {
@@ -777,14 +783,16 @@ function sanitizeProp(prop, index, baseProp = null) {
     };
   }
 
-  if (kind === "backgroundTile") {
+  if (kind === "backgroundTile" || kind === "shadowTile") {
+    const defaultColor = kind === "shadowTile" ? DEFAULT_SHADOW_TILE_COLOR : DEFAULT_BACKGROUND_TILE_COLOR;
+    const sourceColor = safeString(prop?.color, fallback.color || defaultColor);
     return {
       kind,
       x: safeNumber(prop?.x, fallback.x),
       y: safeNumber(prop?.y, fallback.y),
       width: safeNumber(prop?.width, fallback.width || 64, 8),
       height: safeNumber(prop?.height, fallback.height || 64, 8),
-      color: safeString(prop?.color, fallback.color || "#4f6f7d"),
+      color: LEGACY_TILE_COLORS.has(sourceColor.toLowerCase()) ? defaultColor : sourceColor,
     };
   }
 
@@ -792,7 +800,12 @@ function sanitizeProp(prop, index, baseProp = null) {
     kind,
     x: safeNumber(prop?.x, fallback.x),
     y: safeNumber(prop?.y, fallback.y),
+    lightRadius: safeNumber(prop?.lightRadius, fallback.lightRadius ?? 260, 24),
   };
+}
+
+function isValidPropKind(kind) {
+  return VALID_PROP_KINDS.has(PROP_KIND_ALIASES[kind] || kind);
 }
 
 function sanitizeBraceWall(wall, index, baseWall = null) {
@@ -1128,7 +1141,7 @@ export function extractEditableLevelData(data) {
       if (prop.kind === "sign") {
         return { kind: prop.kind, x: prop.x, y: prop.y, text: prop.text };
       }
-      if (prop.kind === "backgroundTile") {
+      if (prop.kind === "backgroundTile" || prop.kind === "shadowTile") {
         return {
           kind: prop.kind,
           x: prop.x,
@@ -1138,7 +1151,7 @@ export function extractEditableLevelData(data) {
           color: prop.color,
         };
       }
-      return { kind: prop.kind, x: prop.x, y: prop.y };
+      return { kind: prop.kind, x: prop.x, y: prop.y, lightRadius: prop.lightRadius };
     }),
     braceWalls: (data.braceWalls || []).map((wall) => ({
       id: wall.id,
@@ -1247,7 +1260,7 @@ export function normalizeEditableLevelData(raw, baseData) {
       : (fallback.temporaryBlocks || []).map((block, index) => sanitizeTemporaryBlock(block, index)),
     props: Array.isArray(source.props)
       ? source.props
-        .filter((prop) => VALID_PROP_KINDS.has(prop?.kind))
+        .filter((prop) => isValidPropKind(prop?.kind))
         .map((prop, index) => sanitizeProp(prop, index, fallback.props[index]))
       : fallback.props.map((prop, index) => sanitizeProp(prop, index)),
     braceWalls: Array.isArray(source.braceWalls)
