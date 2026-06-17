@@ -39,6 +39,9 @@ const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
     window.__SILENT_PASSAGE_PERF === "lite" ||
     new URLSearchParams(window.location.search).get("perf") === "lite"
   );
+const BACKGROUND_TILE_COLOR = "#34383a";
+const SHADOW_TILE_COLOR = "#24313a";
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157"]);
 const LOOT_RARITY_META = {
   common: { label: "COMMON", color: "#dce7ec", glow: "rgba(220, 231, 236, 0.16)" },
   uncommon: { label: "UNCOMMON", color: "#8ef0c2", glow: "rgba(142, 240, 194, 0.2)" },
@@ -1358,17 +1361,10 @@ function drawBraceWalls(ctx, data, theme) {
 
 function drawProps(ctx, data, pulse, theme) {
   data.props.forEach((prop) => {
-    if (prop.kind === "backgroundTile") {
+    if (isRectPropTileKind(prop.kind)) {
       return;
     }
     if (prop.kind === "lantern") {
-      const glow = 0.18 + Math.sin(pulse * 2 + prop.x * 0.02) * 0.06;
-      ctx.fillStyle = `rgba(231, 244, 126, ${glow})`;
-      ctx.beginPath();
-      ctx.arc(prop.x, prop.y, 22, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = theme.accent;
-      ctx.fillRect(prop.x - 3, prop.y - 18, 6, 18);
       return;
     }
 
@@ -1412,24 +1408,298 @@ function getBackgroundTileRect(prop) {
   };
 }
 
+function isShadowTileKind(kind) {
+  return kind === "shadowTile";
+}
+
+function isBackgroundTileKind(kind) {
+  return kind === "backgroundTile";
+}
+
+function isRectPropTileKind(kind) {
+  return isBackgroundTileKind(kind) || isShadowTileKind(kind);
+}
+
+function getRectPropTileColor(prop) {
+  const fallback = isShadowTileKind(prop?.kind) ? SHADOW_TILE_COLOR : BACKGROUND_TILE_COLOR;
+  const color = prop?.color || fallback;
+  return LEGACY_TILE_COLORS.has(String(color).toLowerCase()) ? fallback : color;
+}
+
 function getBackgroundTileAlpha(prop, run) {
   const rect = getBackgroundTileRect(prop);
   const player = run?.player;
   if (player && rectsIntersect(rect, player)) {
-    return prop.occupiedAlpha ?? 0.16;
+    return prop.occupiedAlpha ?? 0.42;
   }
   return prop.alpha ?? 0.86;
 }
 
-function drawBackgroundTiles(ctx, data, run = null) {
+function getLanternProps(data) {
+  return (data.props || []).filter((prop) => prop.kind === "lantern");
+}
+
+function getLanternLightRadius(prop) {
+  return Math.max(24, Number(prop.lightRadius ?? 260) || 260);
+}
+
+function createLayerCanvas(width, height) {
+  const safeWidth = Math.max(1, Math.ceil(width));
+  const safeHeight = Math.max(1, Math.ceil(height));
+  if (typeof OffscreenCanvas !== "undefined") {
+    const canvas = new OffscreenCanvas(safeWidth, safeHeight);
+    return { canvas, ctx: canvas.getContext("2d") };
+  }
+  if (typeof document !== "undefined") {
+    const canvas = document.createElement("canvas");
+    canvas.width = safeWidth;
+    canvas.height = safeHeight;
+    return { canvas, ctx: canvas.getContext("2d") };
+  }
+  return null;
+}
+
+function drawLanternCutouts(ctx, lanterns, offsetX = 0, offsetY = 0, scale = 1, blockers = null) {
+  if (!lanterns.length) {
+    return;
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  lanterns.forEach((lantern) => {
+    const radius = getLanternLightRadius(lantern) * scale;
+    const x = (lantern.x - offsetX) * scale;
+    const y = (lantern.y - offsetY) * scale;
+    const core = Math.max(8, radius * 0.16);
+    const light = ctx.createRadialGradient(x, y, core, x, y, radius);
+    light.addColorStop(0, "rgba(0,0,0,0.96)");
+    light.addColorStop(0.38, "rgba(0,0,0,0.64)");
+    light.addColorStop(0.74, "rgba(0,0,0,0.22)");
+    light.addColorStop(1, "rgba(0,0,0,0)");
+    fillOccludedLight(ctx, x, y, radius, blockers, light);
+  });
+  ctx.restore();
+}
+
+function getLanternScreenLights(data, run, cameraZoom) {
+  if (!run) {
+    return [];
+  }
+  return getLanternProps(data)
+    .map((lantern) => ({
+      x: (lantern.x - run.cameraX) * cameraZoom,
+      y: (lantern.y - run.cameraY) * cameraZoom,
+      lightRadius: getLanternLightRadius(lantern) * cameraZoom,
+    }))
+    .filter((lantern) => (
+      lantern.x + lantern.lightRadius >= 0 &&
+      lantern.x - lantern.lightRadius <= SCREEN_WIDTH &&
+      lantern.y + lantern.lightRadius >= 0 &&
+      lantern.y - lantern.lightRadius <= SCREEN_HEIGHT
+    ));
+}
+
+function getScreenLightBlockers(data, run, cameraZoom) {
+  if (!run) {
+    return [];
+  }
+  return (data.platforms || [])
+    .map((platform) => ({
+      x: (platform.x - run.cameraX) * cameraZoom,
+      y: (platform.y - run.cameraY) * cameraZoom,
+      width: Math.max(1, platform.width * cameraZoom),
+      height: Math.max(1, platform.height * cameraZoom),
+    }))
+    .filter((rect) => (
+      rect.x + rect.width >= -SCREEN_WIDTH * 0.2 &&
+      rect.x <= SCREEN_WIDTH * 1.2 &&
+      rect.y + rect.height >= -SCREEN_HEIGHT * 0.2 &&
+      rect.y <= SCREEN_HEIGHT * 1.2
+    ));
+}
+
+function getWorldLightBlockers(data) {
+  return (data.platforms || []).map((platform) => ({
+    x: platform.x,
+    y: platform.y,
+    width: Math.max(1, platform.width),
+    height: Math.max(1, platform.height),
+  }));
+}
+
+function translateLightBlockers(blockers, offsetX, offsetY, scale = 1) {
+  return (blockers || [])
+    .map((rect) => ({
+      x: (rect.x - offsetX) * scale,
+      y: (rect.y - offsetY) * scale,
+      width: rect.width * scale,
+      height: rect.height * scale,
+    }));
+}
+
+function raySegmentIntersection(originX, originY, dirX, dirY, x1, y1, x2, y2) {
+  const segX = x2 - x1;
+  const segY = y2 - y1;
+  const cross = dirX * segY - dirY * segX;
+  if (Math.abs(cross) < 0.000001) {
+    return null;
+  }
+  const relX = x1 - originX;
+  const relY = y1 - originY;
+  const distance = (relX * segY - relY * segX) / cross;
+  const segmentT = (relX * dirY - relY * dirX) / cross;
+  if (distance < 0 || segmentT < 0 || segmentT > 1) {
+    return null;
+  }
+  return {
+    x: originX + dirX * distance,
+    y: originY + dirY * distance,
+    distance,
+  };
+}
+
+function getLightVisibilityPolygon(originX, originY, radius, blockers) {
+  const tau = Math.PI * 2;
+  const left = originX - radius;
+  const right = originX + radius;
+  const top = originY - radius;
+  const bottom = originY + radius;
+  const segments = [
+    [left, top, right, top],
+    [right, top, right, bottom],
+    [right, bottom, left, bottom],
+    [left, bottom, left, top],
+  ];
+  const angles = [];
+  const sampleCount = LOW_PERFORMANCE_MODE ? 48 : 96;
+  for (let index = 0; index < sampleCount; index += 1) {
+    angles.push((tau * index) / sampleCount);
+  }
+
+  blockers.forEach((rect) => {
+    if (
+      originX >= rect.x &&
+      originX <= rect.x + rect.width &&
+      originY >= rect.y &&
+      originY <= rect.y + rect.height
+    ) {
+      return;
+    }
+    if (
+      rect.x > right ||
+      rect.x + rect.width < left ||
+      rect.y > bottom ||
+      rect.y + rect.height < top
+    ) {
+      return;
+    }
+    const x1 = rect.x;
+    const y1 = rect.y;
+    const x2 = rect.x + rect.width;
+    const y2 = rect.y + rect.height;
+    segments.push([x1, y1, x2, y1], [x2, y1, x2, y2], [x2, y2, x1, y2], [x1, y2, x1, y1]);
+    [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].forEach(([cornerX, cornerY]) => {
+      const angle = Math.atan2(cornerY - originY, cornerX - originX);
+      angles.push(angle - 0.0008, angle, angle + 0.0008);
+    });
+  });
+
+  return angles
+    .map((angle) => {
+      const castAngle = ((angle % tau) + tau) % tau;
+      const dirX = Math.cos(castAngle);
+      const dirY = Math.sin(castAngle);
+      let nearest = {
+        x: originX + dirX * radius,
+        y: originY + dirY * radius,
+        distance: radius,
+      };
+      segments.forEach(([x1, y1, x2, y2]) => {
+        const hit = raySegmentIntersection(originX, originY, dirX, dirY, x1, y1, x2, y2);
+        if (hit && hit.distance < nearest.distance) {
+          nearest = hit;
+        }
+      });
+      return { ...nearest, angle: castAngle };
+    })
+    .sort((a, b) => a.angle - b.angle);
+}
+
+function fillOccludedLight(ctx, x, y, radius, blockers, fillStyle) {
+  if (!blockers?.length) {
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  const polygon = getLightVisibilityPolygon(x, y, radius, blockers);
+  if (polygon.length < 3) {
+    return;
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(polygon[0].x, polygon[0].y);
+  polygon.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = fillStyle;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBackgroundTiles(ctx, data) {
   data.props.forEach((prop) => {
-    if (prop.kind !== "backgroundTile") {
+    if (!isBackgroundTileKind(prop.kind)) {
+      return;
+    }
+    const rect = getBackgroundTileRect(prop);
+    ctx.save();
+    ctx.fillStyle = getRectPropTileColor(prop);
+    ctx.globalAlpha = prop.alpha ?? 0.72;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.restore();
+  });
+}
+
+function drawShadowTiles(ctx, data, run = null) {
+  const lanterns = getLanternProps(data);
+  const worldLightBlockers = getWorldLightBlockers(data);
+  data.props.forEach((prop) => {
+    if (!isShadowTileKind(prop.kind)) {
       return;
     }
     const rect = getBackgroundTileRect(prop);
     const alpha = getBackgroundTileAlpha(prop, run);
+    const nearbyLanterns = lanterns.filter((lantern) => {
+      const radius = getLanternLightRadius(lantern);
+      return lantern.x + radius >= rect.x &&
+        lantern.x - radius <= rect.x + rect.width &&
+        lantern.y + radius >= rect.y &&
+        lantern.y - radius <= rect.y + rect.height;
+    });
+    if (nearbyLanterns.length) {
+      const layer = createLayerCanvas(rect.width, rect.height);
+      if (layer?.ctx) {
+        layer.ctx.fillStyle = getRectPropTileColor(prop);
+        layer.ctx.globalAlpha = alpha;
+        layer.ctx.fillRect(0, 0, rect.width, rect.height);
+        layer.ctx.globalAlpha = 1;
+        drawLanternCutouts(
+          layer.ctx,
+          nearbyLanterns,
+          rect.x,
+          rect.y,
+          1,
+          translateLightBlockers(worldLightBlockers, rect.x, rect.y, 1),
+        );
+        ctx.drawImage(layer.canvas, rect.x, rect.y, rect.width, rect.height);
+        return;
+      }
+    }
     ctx.save();
-    ctx.fillStyle = prop.color || "#4f6f7d";
+    ctx.fillStyle = getRectPropTileColor(prop);
     ctx.globalAlpha = alpha;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.restore();
@@ -4590,6 +4860,7 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   const transitionPulse = Math.sin((1 - transition) * Math.PI) * transition;
   const sanityPenalty = run.sanity < 40 ? 0.12 : run.sanity < 70 ? 0.05 : 0;
   const overlayCtx = overlay.ctx;
+  const lightBlockers = getScreenLightBlockers(data, run, cameraZoom);
 
   overlayCtx.save();
   overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -4629,30 +4900,33 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   overlayCtx.globalCompositeOperation = "destination-out";
-  overlayCtx.fillStyle = "rgba(0,0,0,1)";
-  overlayCtx.beginPath();
-  overlayCtx.arc(playerX, playerY, clearCoreRadius, 0, Math.PI * 2);
-  overlayCtx.fill();
+  fillOccludedLight(overlayCtx, playerX, playerY, clearCoreRadius, lightBlockers, "rgba(0,0,0,1)");
 
   const sight = overlayCtx.createRadialGradient(playerX, playerY, clearCoreRadius * 0.55, playerX, playerY, sightRadius);
   sight.addColorStop(0, `rgba(0,0,0,${0.88 + lightBoost * 0.1})`);
   sight.addColorStop(0.42, `rgba(0,0,0,${0.5 + lightBoost * 0.22})`);
   sight.addColorStop(0.78, `rgba(0,0,0,${0.16 + lightBoost * 0.08})`);
   sight.addColorStop(1, "rgba(0,0,0,0)");
-  overlayCtx.fillStyle = sight;
-  overlayCtx.beginPath();
-  overlayCtx.arc(playerX, playerY, sightRadius, 0, Math.PI * 2);
-  overlayCtx.fill();
+  fillOccludedLight(overlayCtx, playerX, playerY, sightRadius, lightBlockers, sight);
+
+  const lanternLights = getLanternScreenLights(data, run, cameraZoom);
+  drawLanternCutouts(overlayCtx, lanternLights, 0, 0, 1, lightBlockers);
 
   overlayCtx.globalCompositeOperation = "screen";
   const halo = overlayCtx.createRadialGradient(playerX, playerY, 10, playerX, playerY, sightRadius * 0.72);
   halo.addColorStop(0, `rgba(154, 231, 255, ${0.16 * strength + lightBoost * 0.12})`);
   halo.addColorStop(0.62, `rgba(42, 148, 188, ${0.06 * strength})`);
   halo.addColorStop(1, "rgba(0,0,0,0)");
-  overlayCtx.fillStyle = halo;
-  overlayCtx.beginPath();
-  overlayCtx.arc(playerX, playerY, sightRadius * 0.72, 0, Math.PI * 2);
-  overlayCtx.fill();
+  fillOccludedLight(overlayCtx, playerX, playerY, sightRadius * 0.72, lightBlockers, halo);
+
+  lanternLights.forEach((lantern) => {
+    const radius = getLanternLightRadius(lantern);
+    const lanternHalo = overlayCtx.createRadialGradient(lantern.x, lantern.y, 8, lantern.x, lantern.y, radius);
+    lanternHalo.addColorStop(0, `rgba(237, 248, 152, ${0.16 * strength})`);
+    lanternHalo.addColorStop(0.48, `rgba(137, 214, 176, ${0.06 * strength})`);
+    lanternHalo.addColorStop(1, "rgba(0,0,0,0)");
+    fillOccludedLight(overlayCtx, lantern.x, lantern.y, radius, lightBlockers, lanternHalo);
+  });
 
   if (!LOW_PERFORMANCE_MODE) {
     overlayCtx.globalCompositeOperation = "screen";
@@ -6770,13 +7044,14 @@ function renderExpedition(ctx, state, data) {
   ctx.scale(cameraZoom, cameraZoom);
   drawWorldMegastructures(ctx, run);
   drawGroundShine(ctx);
+  drawBackgroundTiles(ctx, data);
   drawTerrain(ctx, data);
   drawTemporaryBlocks(ctx, run, theme);
   drawEscapeBarriers(ctx, run);
   drawZipLines(ctx, data, theme);
   drawGate(ctx, data, theme);
   drawBraceWalls(ctx, data, theme);
-  drawBackgroundTiles(ctx, data, run);
+  drawShadowTiles(ctx, data, run);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
   drawVaultSecurityObjects(ctx, run, theme, state.pulse);

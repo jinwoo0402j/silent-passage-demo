@@ -197,6 +197,8 @@ function clearTransientRunState(run) {
     run.player.airDashHoverTimer = 0;
     run.player.airDashDirectionGraceTimer = 0;
     run.player.airDashDirectionPending = false;
+    run.player.airDashPendingDirX = 0;
+    run.player.airDashPendingDirY = 0;
     run.player.airDashHoverConsumed = false;
   }
 }

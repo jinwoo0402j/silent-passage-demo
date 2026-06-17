@@ -853,6 +853,8 @@ export function createRunState(data, meta) {
     airDashHoverTimer: 0,
     airDashDirectionGraceTimer: 0,
     airDashDirectionPending: false,
+    airDashPendingDirX: 0,
+    airDashPendingDirY: 0,
     airDashHoverConsumed: false,
     wallDirection: 0,
     wallSliding: false,

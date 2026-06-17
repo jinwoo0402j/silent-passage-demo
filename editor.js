@@ -36,6 +36,7 @@ const TOOL_IDS = {
   SLOPE_UP: "slopeUp",
   BRACE_WALL: "braceWall",
   BACKGROUND_TILE: "backgroundTile",
+  SHADOW_TILE: "shadowTile",
   TEMPORARY_BLOCK: "temporaryBlock",
   DAMAGE_BLOCK: "damageBlock",
   RECALL_DAMAGE_BLOCK: "recallDamageBlock",
@@ -69,6 +70,7 @@ const TOOL_SHORTCUTS = {
   Digit3: TOOL_IDS.BRACE_WALL,
   Numpad3: TOOL_IDS.BRACE_WALL,
   KeyB: TOOL_IDS.BACKGROUND_TILE,
+  KeyG: TOOL_IDS.SHADOW_TILE,
   KeyT: TOOL_IDS.TEMPORARY_BLOCK,
   KeyV: TOOL_IDS.DAMAGE_BLOCK,
   KeyR: TOOL_IDS.RECALL_DAMAGE_BLOCK,
@@ -98,6 +100,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.SLOPE_UP]: "U",
   [TOOL_IDS.BRACE_WALL]: "3",
   [TOOL_IDS.BACKGROUND_TILE]: "B",
+  [TOOL_IDS.SHADOW_TILE]: "G",
   [TOOL_IDS.TEMPORARY_BLOCK]: "T",
   [TOOL_IDS.DAMAGE_BLOCK]: "V",
   [TOOL_IDS.RECALL_DAMAGE_BLOCK]: "R",
@@ -128,6 +131,7 @@ const TOOL_HINTS = {
 
 TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
 TOOL_HINTS[TOOL_IDS.BACKGROUND_TILE] = "Drag to place a non-colliding background tile";
+TOOL_HINTS[TOOL_IDS.SHADOW_TILE] = "Drag to place a shadow tile that fades when it covers the player";
 TOOL_HINTS[TOOL_IDS.TEMPORARY_BLOCK] = "Drag to place a shoot-open temporary block";
 TOOL_HINTS[TOOL_IDS.DAMAGE_BLOCK] = "Drag to place a contact-damage solid block";
 TOOL_HINTS[TOOL_IDS.RECALL_DAMAGE_BLOCK] = "Drag to place a damage block that returns the player to the last safe footing";
@@ -600,6 +604,12 @@ const COLORS = {
   droneFill: "rgba(255, 190, 102, 0.13)",
 };
 
+const BACKGROUND_TILE_COLOR = "#34383a";
+const SHADOW_TILE_COLOR = "#24313a";
+const BACKGROUND_TILE_PREVIEW = "rgba(52, 56, 58, 0.36)";
+const SHADOW_TILE_PREVIEW = "rgba(36, 49, 58, 0.44)";
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157"]);
+
 const IMAGE_CACHE = new Map();
 
 function getScaleConfig(data = GAME_DATA) {
@@ -649,6 +659,28 @@ function getPlatformSlopeDirection(platform) {
   return platform?.slopeDirection === "up-right" ? "up-right" : "down-right";
 }
 
+function isShadowTileKind(kind) {
+  return kind === "shadowTile";
+}
+
+function isBackgroundTileKind(kind) {
+  return kind === "backgroundTile";
+}
+
+function isRectPropTileKind(kind) {
+  return isBackgroundTileKind(kind) || isShadowTileKind(kind);
+}
+
+function getLanternLightRadius(prop) {
+  return Math.max(24, Number(prop?.lightRadius ?? 260) || 260);
+}
+
+function getRectPropTileColor(prop) {
+  const fallback = isShadowTileKind(prop?.kind) ? SHADOW_TILE_COLOR : BACKGROUND_TILE_COLOR;
+  const color = prop?.color || fallback;
+  return LEGACY_TILE_COLORS.has(String(color).toLowerCase()) ? fallback : color;
+}
+
 function getPreviewPlatformRect(editor) {
   if (!editor.preview || editor.preview.kind !== "platform") {
     return null;
@@ -668,7 +700,7 @@ function getPreviewPlatformRect(editor) {
 }
 
 function getPreviewBackgroundTileRect(editor) {
-  if (!editor.preview || editor.preview.kind !== "backgroundTile") {
+  if (!editor.preview || !isRectPropTileKind(editor.preview.kind)) {
     return null;
   }
   const scale = getScaleConfig(editor.data);
@@ -1457,7 +1489,7 @@ function syncStartEntranceToSpawn(editor) {
 }
 
 function getPropRect(prop) {
-  if (prop.kind === "backgroundTile") {
+  if (isRectPropTileKind(prop.kind)) {
     return {
       x: prop.x,
       y: prop.y,
@@ -2178,8 +2210,11 @@ function describeSelection(editor) {
 
   if (editor.selected.kind === "prop") {
     const prop = editor.data.props[editor.selected.index];
-    if (prop?.kind === "backgroundTile") {
+    if (isBackgroundTileKind(prop?.kind)) {
       return `Background tile ${editor.selected.index + 1}`;
+    }
+    if (isShadowTileKind(prop?.kind)) {
+      return `Shadow tile ${editor.selected.index + 1}`;
     }
     return prop?.kind === "sign"
       ? `표지 ${editor.selected.index + 1}`
@@ -2333,10 +2368,13 @@ function renderSelectionFields(editor, dom) {
     if (entity.kind === "sign") {
       addText("문구", "text", entity.text || "");
     }
-    if (entity.kind === "backgroundTile") {
+    if (entity.kind === "lantern") {
+      addNumber("Light Radius", "lightRadius", entity.lightRadius ?? 260, { min: 24 });
+    }
+    if (isRectPropTileKind(entity.kind)) {
       addNumber("Width", "width", entity.width, { min: 8 });
       addNumber("Height", "height", entity.height, { min: 8 });
-      addColor("Color", "color", entity.color || "#4f6f7d");
+      addColor("Color", "color", getRectPropTileColor(entity));
     }
   } else if (editor.selected.kind === "enemy") {
     addText("ID", "id", entity.id || "");
@@ -3803,7 +3841,7 @@ function createCameraZoneFromPreview(editor, dom) {
 }
 
 function createBackgroundTileFromPreview(editor, dom) {
-  if (!editor.preview || editor.preview.kind !== "backgroundTile") {
+  if (!editor.preview || !isRectPropTileKind(editor.preview.kind)) {
     return;
   }
 
@@ -3815,12 +3853,12 @@ function createBackgroundTileFromPreview(editor, dom) {
   }
 
   const prop = {
-    kind: "backgroundTile",
+    kind: editor.preview.kind,
     x: rect.x,
     y: rect.y,
     width: rect.width,
     height: rect.height,
-    color: "#4f6f7d",
+    color: isShadowTileKind(editor.preview.kind) ? SHADOW_TILE_COLOR : BACKGROUND_TILE_COLOR,
   };
   editor.data.props.push(prop);
   setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
@@ -3833,6 +3871,9 @@ function placeProp(editor, dom, kind, point) {
   const prop = kind === "sign"
     ? { kind, x: snapped.x, y: snapped.y, text: "표지" }
     : { kind, x: snapped.x, y: snapped.y };
+  if (kind === "lantern") {
+    prop.lightRadius = 260;
+  }
   editor.data.props.push(prop);
   setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
   markDirty(editor, dom);
@@ -4319,6 +4360,19 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
+  if (editor.tool === TOOL_IDS.SHADOW_TILE) {
+    editor.preview = {
+      kind: "shadowTile",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewBackgroundTile",
+    };
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.tool === TOOL_IDS.SIGN) {
     placeProp(editor, dom, "sign", world);
     queueRender(editor, dom);
@@ -4738,7 +4792,9 @@ function saveCurrentLevelOverride(editor, dom, options = {}) {
     return null;
   }
   if (options.refresh !== false) {
-    editor.data = prepareEditorData(mergeLevelData(createBaseLevelData(GAME_DATA, saved.levelId), saved));
+    editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, saved.levelId, {
+      applyLevelOverride: true,
+    }));
     renderLevelControls(editor, dom);
     renderSelectionFields(editor, dom);
     queueRender(editor, dom);
@@ -5059,7 +5115,7 @@ function snapEntireLevelToScale(editor, dom) {
     ...prop,
     x: snapValue(prop.x, step),
     y: snapValue(prop.y, step),
-    ...(prop.kind === "backgroundTile"
+    ...(isRectPropTileKind(prop.kind)
       ? {
         width: Math.max(step, snapValue(prop.width, step)),
         height: Math.max(step, snapValue(prop.height, step)),
@@ -5688,7 +5744,7 @@ function drawZipLines(ctx, editor) {
 
 function drawProps(ctx, editor) {
   editor.data.props.forEach((prop, index) => {
-    if (prop.kind === "backgroundTile") {
+    if (isRectPropTileKind(prop.kind)) {
       return;
     }
     const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
@@ -5705,24 +5761,42 @@ function drawProps(ctx, editor) {
       ctx.textAlign = "center";
       ctx.fillText(prop.text || "표지", prop.x, prop.y - 32);
       ctx.textAlign = "left";
-    } else {
-      const gradient = ctx.createRadialGradient(prop.x, prop.y - 4, 2, prop.x, prop.y - 4, 24);
+    } else if (prop.kind === "lantern") {
+      const radius = getLanternLightRadius(prop);
+      const light = ctx.createRadialGradient(prop.x, prop.y, Math.max(8, radius * 0.12), prop.x, prop.y, radius);
+      light.addColorStop(0, "rgba(231, 244, 126, 0.22)");
+      light.addColorStop(0.48, "rgba(147, 234, 255, 0.08)");
+      light.addColorStop(1, "rgba(231, 244, 126, 0)");
+      ctx.fillStyle = light;
+      ctx.beginPath();
+      ctx.arc(prop.x, prop.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = selected ? COLORS.accent : "rgba(231, 244, 126, 0.34)";
+      ctx.lineWidth = (selected ? 2.5 : 1.25) / editor.view.zoom;
+      ctx.setLineDash(selected ? [] : [12 / editor.view.zoom, 8 / editor.view.zoom]);
+      ctx.beginPath();
+      ctx.arc(prop.x, prop.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const gradient = ctx.createRadialGradient(prop.x, prop.y, 2, prop.x, prop.y, 24);
       gradient.addColorStop(0, "rgba(231, 244, 126, 0.92)");
       gradient.addColorStop(1, "rgba(231, 244, 126, 0)");
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(prop.x, prop.y - 4, 24, 0, Math.PI * 2);
+      ctx.arc(prop.x, prop.y, 24, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = COLORS.lantern;
       ctx.beginPath();
-      ctx.arc(prop.x, prop.y - 4, 10, 0, Math.PI * 2);
+      ctx.arc(prop.x, prop.y, 7 / editor.view.zoom + 4, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 255, 255, 0.16)";
       ctx.lineWidth = 2 / editor.view.zoom;
       ctx.beginPath();
-      ctx.arc(prop.x, prop.y - 4, 14, 0, Math.PI * 2);
+      ctx.arc(prop.x, prop.y, 14 / editor.view.zoom + 2, 0, Math.PI * 2);
       ctx.stroke();
     }
   });
@@ -5730,12 +5804,29 @@ function drawProps(ctx, editor) {
 
 function drawBackgroundTiles(ctx, editor) {
   editor.data.props.forEach((prop, index) => {
-    if (prop.kind !== "backgroundTile") {
+    if (!isBackgroundTileKind(prop.kind)) {
       return;
     }
     const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
     const rect = getPropRect(prop);
-    ctx.fillStyle = prop.color || "#4f6f7d";
+    ctx.fillStyle = getRectPropTileColor(prop);
+    ctx.globalAlpha = 0.58;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.backgroundTileStroke;
+    ctx.lineWidth = (selected ? 3 : 1.5) / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  });
+}
+
+function drawShadowTiles(ctx, editor) {
+  editor.data.props.forEach((prop, index) => {
+    if (!isShadowTileKind(prop.kind)) {
+      return;
+    }
+    const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
+    const rect = getPropRect(prop);
+    ctx.fillStyle = getRectPropTileColor(prop);
     ctx.globalAlpha = 0.72;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.globalAlpha = 1;
@@ -6177,10 +6268,12 @@ function drawPreview(ctx, editor) {
     ctx.fill();
   }
 
-  if (editor.preview?.kind === "backgroundTile") {
+  if (isRectPropTileKind(editor.preview?.kind)) {
     const rect = getPreviewBackgroundTileRect(editor);
     if (rect) {
-      ctx.fillStyle = "rgba(79, 111, 125, 0.42)";
+      ctx.fillStyle = isShadowTileKind(editor.preview.kind)
+        ? SHADOW_TILE_PREVIEW
+        : BACKGROUND_TILE_PREVIEW;
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
       ctx.strokeStyle = COLORS.accentAlt;
       ctx.lineWidth = 2 / editor.view.zoom;
@@ -6325,12 +6418,13 @@ function renderEditor(editor, dom) {
   drawGrid(ctx, editor);
   drawWorldBounds(ctx, editor);
   drawCameraGuide(ctx, editor);
+  drawBackgroundTiles(ctx, editor);
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawTemporaryBlocks(ctx, editor);
   drawEscapeBarriers(ctx, editor);
   drawCameraZones(ctx, editor);
-  drawBackgroundTiles(ctx, editor);
+  drawShadowTiles(ctx, editor);
   drawZipLines(ctx, editor);
   drawProps(ctx, editor);
   drawLootCrates(ctx, editor);

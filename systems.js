@@ -3499,6 +3499,8 @@ function clearAirDashHover(player) {
   player.airDashHoverTimer = 0;
   player.airDashDirectionGraceTimer = 0;
   player.airDashDirectionPending = false;
+  player.airDashPendingDirX = 0;
+  player.airDashPendingDirY = 0;
 }
 
 function clearRecoilSpin(player) {
@@ -5438,6 +5440,8 @@ function startAirDashHover(player, run, config) {
   player.airDashHoverTimer = AIR_DASH_HOVER_SECONDS;
   player.airDashDirectionGraceTimer = 0;
   player.airDashDirectionPending = false;
+  player.airDashPendingDirX = 0;
+  player.airDashPendingDirY = 0;
   player.airDashHoverConsumed = true;
   player.hoverActive = true;
   player.hoverBoostActive = true;
@@ -6304,21 +6308,31 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallJumpLockTimer === 0 &&
     !player.braceHolding;
 
-  if ((player.airDashHoverTimer ?? 0) > 0 && !airDashDirection) {
+  if (
+    (player.airDashHoverTimer ?? 0) > 0 &&
+    !airDashDirection &&
+    Math.hypot(player.airDashPendingDirX || 0, player.airDashPendingDirY || 0) <= 0.001
+  ) {
     player.airDashDirectionPending = false;
     player.airDashDirectionGraceTimer = 0;
   }
 
   if (
     (player.airDashHoverTimer ?? 0) > 0 &&
-    airDashDirection &&
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0 &&
     player.wallJumpLockTimer === 0 &&
     player.height === player.standHeight
   ) {
-    const airDashDiagonalReady = Math.abs(airDashDirection.x) > 0.001 && Math.abs(airDashDirection.y) > 0.001;
-    if (!player.airDashDirectionPending && !airDashDiagonalReady) {
+    if (airDashDirection) {
+      player.airDashPendingDirX = airDashDirection.x;
+      player.airDashPendingDirY = airDashDirection.y;
+    }
+    const pendingDashX = player.airDashPendingDirX || 0;
+    const pendingDashY = player.airDashPendingDirY || 0;
+    const hasPendingAirDashDirection = Math.hypot(pendingDashX, pendingDashY) > 0.001;
+    const airDashDiagonalReady = Math.abs(pendingDashX) > 0.001 && Math.abs(pendingDashY) > 0.001;
+    if (hasPendingAirDashDirection && !player.airDashDirectionPending && !airDashDiagonalReady) {
       player.airDashDirectionPending = true;
       player.airDashDirectionGraceTimer = Math.min(
         AIR_DASH_DIAGONAL_GRACE_SECONDS,
@@ -6326,12 +6340,14 @@ function updatePlayer(run, data, state, dt, input) {
       );
     }
     if (
-      airDashDiagonalReady ||
-      (player.airDashDirectionPending && (player.airDashDirectionGraceTimer ?? 0) === 0) ||
-      (player.airDashHoverTimer ?? 0) <= dt
+      hasPendingAirDashDirection &&
+      (
+        airDashDiagonalReady ||
+        (player.airDashDirectionPending && (player.airDashDirectionGraceTimer ?? 0) === 0)
+      )
     ) {
       const airDashDistanceScale = (getJumpMaxHeight(data, config) * AIR_DASH_DISTANCE_MULTIPLIER) / Math.max(1, Number(config.dashDistance ?? 1));
-      startDash(player, run, config, airDashDirection.x, airDashDirection.y, airDashDistanceScale, false);
+      startDash(player, run, config, pendingDashX, pendingDashY, airDashDistanceScale, false);
     }
   }
 
@@ -6347,10 +6363,11 @@ function updatePlayer(run, data, state, dt, input) {
     player.height === player.standHeight
   ) {
     if (!player.onGround) {
-      const dashX = airDashDirection?.x ?? moveAxis ?? player.facing;
-      const dashY = airDashDirection?.y ?? 0;
-      const airDashDistanceScale = (getJumpMaxHeight(data, config) * AIR_DASH_DISTANCE_MULTIPLIER) / Math.max(1, Number(config.dashDistance ?? 1));
-      startDash(player, run, config, dashX || player.facing || 1, dashY, airDashDistanceScale, false);
+      startAirDashHover(player, run, config);
+      if (airDashDirection) {
+        player.airDashPendingDirX = airDashDirection.x;
+        player.airDashPendingDirY = airDashDirection.y;
+      }
     } else {
       const direction = moveAxis || player.facing;
       if (direction !== 0) {
