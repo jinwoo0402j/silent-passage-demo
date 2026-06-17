@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260615-speedfx-v11";
+import { GAME_DATA } from "./level-data.js?v=20260617-shelter-emotions-v5";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
@@ -21,7 +21,7 @@ import {
   resetAudioOptions,
   saveAudioOptions,
 } from "./audio-options.js?v=20260613-sound-options-v1";
-import { renderGame } from "./render.js?v=20260615-speedfx-v11";
+import { renderGame } from "./render.js?v=20260617-shelter-emotions-v4";
 import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -34,7 +34,7 @@ import {
   normalizePartInstance,
   saveMetaState,
 } from "./state.js?v=20260615-speedfx-v11";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260615-speedfx-v11";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260617-voice-bank-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -1260,11 +1260,16 @@ function isTestDebugToggleKey(event) {
 }
 
 function syncBrowserControls(currentDom, currentState) {
+  const shelterTalkActive = currentState.scene === SCENES.SHELTER && (
+    Boolean(currentState.shelter?.talk?.active)
+    || Boolean(currentState.run?.shelterRest?.active && currentState.run.shelterRest.phase === "talk")
+  );
   document.body.classList.toggle("is-map-overlay-active", Boolean(currentState.run?.mapOverlay?.active));
   document.body.classList.toggle("is-inventory-overlay-active", Boolean(currentState.run?.inventoryOverlay?.active));
+  document.body.classList.toggle("is-shelter-talk-active", shelterTalkActive);
 
   if (currentDom.sceneActionButton) {
-    const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION;
+    const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION && !shelterTalkActive;
     currentDom.sceneActionButton.hidden = !sceneActionVisible;
     currentDom.sceneActionButton.textContent = getSceneActionLabel(currentState);
   }

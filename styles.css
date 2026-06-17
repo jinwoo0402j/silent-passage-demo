@@ -101,6 +101,17 @@ canvas {
   background: rgba(17, 31, 45, 0.9);
 }
 
+body.is-shelter-talk-active .app-links,
+body.is-shelter-talk-active .live-edit-button,
+body.is-shelter-talk-active .debug-button,
+body.is-shelter-talk-active .movement-tuning-button,
+body.is-shelter-talk-active .sound-options-button,
+body.is-shelter-talk-active .scene-action-button,
+body.is-shelter-talk-active .test-debug-button,
+body.is-shelter-talk-active .test-debug-panel {
+  display: none;
+}
+
 .live-edit-button {
   position: absolute;
   top: 66px;

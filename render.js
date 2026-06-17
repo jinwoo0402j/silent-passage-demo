@@ -34,6 +34,24 @@ const SHELTER_REST_MENU = [
   { id: "rest", label: "휴식 완료", icon: "rest", detail: "체력, 정신력, 배터리와 탄약이 회복됐다." },
   { id: "exit", label: "밖으로 나가기", icon: "exit", detail: "피난처 밖으로 돌아가 탐사를 이어간다." },
 ];
+const SHELTER_REST_TALK_ITEM = {
+  id: "talk",
+  label: "대화",
+  icon: "log",
+  detail: "쉘터의 상대와 짧게 이야기를 나눈다.",
+};
+
+function getShelterRestMenuItems() {
+  return [SHELTER_REST_TALK_ITEM, ...SHELTER_REST_MENU];
+}
+
+function getShelterHomeMenuItems() {
+  return [
+    SHELTER_REST_TALK_ITEM,
+    { id: "exit", label: "출격", icon: "exit", detail: "피난처 밖으로 나가 원정을 시작한다." },
+  ];
+}
+
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
   && (
     window.__SILENT_PASSAGE_PERF === "lite" ||
@@ -7620,8 +7638,9 @@ function drawShelterPartPanelV3(ctx, theme, state, options = {}) {
 
   const rest = options.rest || null;
   if (rest?.active) {
-    const selectedIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_REST_MENU.length - 1);
-    const selectedItem = SHELTER_REST_MENU[selectedIndex] || SHELTER_REST_MENU[0];
+    const restMenuItems = getShelterRestMenuItems();
+    const selectedIndex = clamp(Math.floor(rest.menuIndex || 0), 0, restMenuItems.length - 1);
+    const selectedItem = restMenuItems[selectedIndex] || restMenuItems[0];
     const run = state.run || {};
     ctx.textAlign = "left";
     ctx.fillStyle = theme.accentSecondary;
@@ -7711,12 +7730,13 @@ function drawShelterWorkbenchHudV3(ctx, theme, options = {}) {
 
 function drawShelterSceneV3(ctx, state, data, options = {}) {
   const theme = getUiTheme(data);
+  preloadShelterEmotionPortraits(data);
   const rest = options.rest || null;
   const inRunRest = Boolean(rest?.active);
   drawShelterHubBackdrop(ctx, theme, state, data);
   drawShelterMenuV3(ctx, theme, {
-    items: inRunRest ? SHELTER_REST_MENU : SHELTER_HUB_MENU,
-    selectedIndex: inRunRest ? rest.menuIndex : 0,
+    items: inRunRest ? getShelterRestMenuItems() : getShelterHomeMenuItems(),
+    selectedIndex: inRunRest ? rest.menuIndex : (state.shelter?.menuIndex ?? 0),
   });
   drawShelterWorkbenchHudV3(ctx, theme, { rest });
   drawShelterPartPanelV3(ctx, theme, state, {
@@ -7839,7 +7859,7 @@ function drawShelterRestMenuOverlay(ctx, state, data, theme, rest) {
   const panelX = 58;
   const panelY = 132;
   const panelW = 332;
-  const panelH = 310;
+  const panelH = 364;
   drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
     cut: 12,
     fill: "rgba(5, 12, 16, 0.66)",
@@ -7850,22 +7870,297 @@ function drawShelterRestMenuOverlay(ctx, state, data, theme, rest) {
   ctx.fillStyle = theme.textDim;
   ctx.font = "800 12px 'Segoe UI', sans-serif";
   ctx.fillText("REST OPTIONS", panelX + 24, panelY + 34);
-  SHELTER_REST_MENU.forEach((item, index) => {
-    const y = panelY + 68 + index * 68;
+  [
+    { id: "talk", label: "대화", icon: "log", detail: "쉘터의 상대와 짧게 이야기를 나눈다." },
+    ...SHELTER_REST_MENU,
+  ].forEach((item, index) => {
+    const y = panelY + 62 + index * 48;
     const selected = index === Math.floor(rest.menuIndex || 0);
-    drawBeveledPanel(ctx, theme, panelX + 20, y, panelW - 40, 50, {
+    drawBeveledPanel(ctx, theme, panelX + 20, y, panelW - 40, 40, {
       cut: 8,
       fill: selected ? "rgba(29, 52, 60, 0.82)" : "rgba(7, 15, 20, 0.44)",
       stroke: selected ? "rgba(147,234,255,0.45)" : "rgba(255,255,255,0.12)",
       innerLines: false,
     });
     ctx.fillStyle = selected ? theme.textMain : theme.textDim;
-    ctx.font = "900 18px 'Segoe UI', sans-serif";
-    ctx.fillText(item.label, panelX + 44, y + 32);
+    ctx.font = "900 16px 'Segoe UI', sans-serif";
+    ctx.fillText(item.label, panelX + 44, y + 26);
   });
   ctx.fillStyle = theme.accent;
   ctx.font = "900 13px 'Segoe UI', sans-serif";
   ctx.fillText("Z 선택    C 밖으로", panelX + 24, panelY + panelH - 26);
+}
+
+function drawShelterMemorialTopButton(ctx, theme, label, x, y, width, active = false) {
+  ctx.save();
+  drawBeveledPanel(ctx, theme, x, y, width, 38, {
+    cut: 10,
+    fill: active ? "rgba(224, 232, 165, 0.18)" : "rgba(5, 12, 17, 0.42)",
+    stroke: active ? "rgba(231,244,126,0.46)" : "rgba(245,248,251,0.16)",
+    innerLines: false,
+    glow: false,
+  });
+  ctx.textAlign = "center";
+  ctx.fillStyle = active ? theme.textMain : "rgba(245,248,251,0.78)";
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x + width / 2, y + 24);
+  ctx.restore();
+}
+
+function drawShelterMemorialChoice(ctx, theme, choice, x, y, width, selected) {
+  drawBeveledPanel(ctx, theme, x, y, width, 42, {
+    cut: 14,
+    fill: selected ? "rgba(18, 44, 54, 0.72)" : "rgba(5, 12, 17, 0.36)",
+    stroke: selected ? "rgba(147,234,255,0.72)" : "rgba(245,248,251,0.16)",
+    innerLines: false,
+    glow: selected,
+  });
+  ctx.fillStyle = selected ? theme.textMain : "rgba(235,242,244,0.76)";
+  ctx.font = "900 15px 'Segoe UI', sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(choice?.label || "", x + 20, y + 27);
+}
+
+const SHELTER_EMOTION_ASSETS = {
+  neutral: "shelterEmotionNeutral",
+  anxious: "shelterEmotionAnxious",
+  warm: "shelterEmotionWarm",
+  tired: "shelterEmotionTired",
+  hurt: "shelterEmotionHurt",
+  angry: "shelterEmotionAngry",
+};
+
+function preloadShelterEmotionPortraits(data) {
+  Object.values(SHELTER_EMOTION_ASSETS).forEach((assetKey) => {
+    getImageAsset(data.art?.[assetKey]?.src);
+  });
+}
+
+function getShelterTalkEmotion(talk) {
+  const emotion = typeof talk?.emotion === "string" ? talk.emotion : "";
+  if (SHELTER_EMOTION_ASSETS[emotion]) {
+    return emotion;
+  }
+  const line = `${talk?.lastChoice?.label || ""} ${talk?.line || ""}`;
+  if (/무서|두려|불안|가지 마|곁에|버려|혼자|신호가 흐려|이어지지/.test(line)) {
+    return "anxious";
+  }
+  if (/아버지|기억|이름|병기|사람이었|왜 계속|모르겠/.test(line)) {
+    return "tired";
+  }
+  if (/괜찮|고마|믿|옆에|따뜻|쉬|좋아/.test(line)) {
+    return "warm";
+  }
+  if (/망가|아파|상처|피|파손|고장|죽|닳/.test(line)) {
+    return "hurt";
+  }
+  if (/도망치지|선택|지킬|명령|위험|전투|원인|가야/.test(line)) {
+    return "angry";
+  }
+  return "neutral";
+}
+
+function drawShelterEmotionPortrait(ctx, state, data, theme, talk) {
+  const emotion = getShelterTalkEmotion(talk);
+  const assetKey = SHELTER_EMOTION_ASSETS[emotion] || SHELTER_EMOTION_ASSETS.neutral;
+  const image = getImageAsset(data.art?.[assetKey]?.src);
+  const x = 758;
+  const y = 104;
+  const size = 350;
+  ctx.save();
+  ctx.globalAlpha = 0.98;
+  ctx.shadowColor = "rgba(0,0,0,0.46)";
+  ctx.shadowBlur = 32;
+  ctx.shadowOffsetY = 20;
+  drawBeveledPanel(ctx, theme, x - 14, y - 14, size + 28, size + 28, {
+    cut: 18,
+    fill: "rgba(2, 8, 12, 0.32)",
+    stroke: "rgba(147,234,255,0.18)",
+    innerLines: false,
+    glow: true,
+  });
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  if (image && image.complete && image.naturalWidth) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.drawImage(image, x, y, size, size);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "rgba(147,234,255,0.08)";
+    ctx.fillRect(x, y, size, size);
+  }
+  const fade = ctx.createLinearGradient(0, y + size * 0.55, 0, y + size);
+  fade.addColorStop(0, "rgba(2,7,10,0)");
+  fade.addColorStop(1, "rgba(2,7,10,0.72)");
+  ctx.fillStyle = fade;
+  ctx.fillRect(x, y, size, size);
+  ctx.restore();
+}
+
+function drawShelterMemorialTalkOverlay(ctx, state, data, theme, rest) {
+  drawShelterRestBackground(ctx, state, data, theme, 1);
+  preloadShelterEmotionPortraits(data);
+  const talk = rest?.talk || state.shelter?.talk || {};
+  const day = Math.max(1, Math.floor(state.run?.day || state.meta?.completedRuns || 1));
+
+  const leftShade = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.44, 0);
+  leftShade.addColorStop(0, "rgba(2, 7, 10, 0.54)");
+  leftShade.addColorStop(0.58, "rgba(2, 7, 10, 0.12)");
+  leftShade.addColorStop(1, "rgba(2, 7, 10, 0)");
+  ctx.fillStyle = leftShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const bottomShade = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.52, 0, SCREEN_HEIGHT);
+  bottomShade.addColorStop(0, "rgba(2, 7, 10, 0)");
+  bottomShade.addColorStop(0.6, "rgba(2, 7, 10, 0.58)");
+  bottomShade.addColorStop(1, "rgba(2, 7, 10, 0.9)");
+  ctx.fillStyle = bottomShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const glow = ctx.createRadialGradient(840, 286, 24, 840, 286, 236);
+  glow.addColorStop(0, "rgba(147,234,255,0.16)");
+  glow.addColorStop(0.42, "rgba(147,234,255,0.06)");
+  glow.addColorStop(1, "rgba(147,234,255,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(520, 70, 560, 450);
+  drawShelterEmotionPortrait(ctx, state, data, theme, talk);
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`DAY ${day}`, 42, 36);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 25px 'Segoe UI', sans-serif";
+  ctx.fillText("쉘터", 42, 66);
+  ctx.fillStyle = "rgba(245,248,251,0.54)";
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText("침수된 해운대 임시 거점", 42, 88);
+
+  drawShelterMemorialTopButton(ctx, theme, "기록", 1018, 28, 94, false);
+  drawShelterMemorialTopButton(ctx, theme, "출격", 1126, 28, 102, true);
+
+  ctx.save();
+  ctx.globalAlpha = 0.88 + Math.sin((state.pulse || 0) * 2.2) * 0.08;
+  ctx.strokeStyle = "rgba(147,234,255,0.58)";
+  ctx.fillStyle = "rgba(147,234,255,0.14)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(828, 270, 18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(147,234,255,0.22)";
+  ctx.beginPath();
+  ctx.arc(828, 270, 30, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  const choices = Array.isArray(talk.choices) ? talk.choices.slice(0, 3) : [];
+  const selectedChoice = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, choices.length - 1));
+  if (!talk.pending && choices.length) {
+    const choiceY = 526;
+    const choiceW = 292;
+    const gap = 18;
+    const totalW = choiceW * choices.length + gap * (choices.length - 1);
+    let choiceX = Math.round((SCREEN_WIDTH - totalW) / 2);
+    choices.forEach((choice, index) => {
+      drawShelterMemorialChoice(ctx, theme, choice, choiceX, choiceY, choiceW, index === selectedChoice);
+      choiceX += choiceW + gap;
+    });
+  }
+
+  const dialogueX = 118;
+  const dialogueY = 574;
+  const dialogueW = 1044;
+  const dialogueH = 108;
+  drawBeveledPanel(ctx, theme, dialogueX, dialogueY, dialogueW, dialogueH, {
+    cut: 18,
+    fill: "rgba(5, 12, 17, 0.72)",
+    stroke: "rgba(245,248,251,0.2)",
+    innerLines: false,
+    glow: true,
+  });
+
+  const history = Array.isArray(talk.history) ? talk.history : [];
+  const lastPlayerLine = [...history].reverse().find((entry) => entry?.speaker === "drone")?.text || "";
+  if (lastPlayerLine) {
+    ctx.fillStyle = "rgba(245,248,251,0.5)";
+    ctx.font = "800 12px 'Segoe UI', sans-serif";
+    ctx.fillText(`당신: ${lastPlayerLine}`, dialogueX + 26, dialogueY - 12);
+  }
+
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText("TYPE-07A", dialogueX + 26, dialogueY + 27);
+  const line = talk.line || (talk.pending ? "......" : "……말해도 돼. 듣고 있어.");
+  wrapText(ctx, line, dialogueX + 26, dialogueY + 62, dialogueW - 52, 27, theme.textMain, "900 22px 'Segoe UI', sans-serif");
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = talk.pending ? theme.accentSecondary : theme.accent;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText(talk.pending ? "응답 대기 중..." : "W/S 선택   Z/Enter 말하기   Esc 돌아가기", dialogueX + dialogueW - 24, dialogueY + dialogueH - 18);
+  ctx.textAlign = "left";
+}
+
+function drawShelterTalkOverlay(ctx, state, data, theme, rest) {
+  drawShelterMemorialTalkOverlay(ctx, state, data, theme, rest);
+  return;
+  drawShelterRestBackground(ctx, state, data, theme, 1);
+  drawShelterRestHeader(ctx, theme, state, "쉘터 대화");
+  const talk = rest?.talk || state.shelter?.talk || {};
+  const panelX = 158;
+  const panelY = 170;
+  const panelW = 964;
+  const panelH = 318;
+  drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
+    cut: 16,
+    fill: "rgba(5, 12, 16, 0.72)",
+    stroke: "rgba(147,234,255,0.28)",
+    glow: true,
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText("LOCAL AI", panelX + 32, panelY + 44);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 23px 'Segoe UI', sans-serif";
+  ctx.fillText("피난처의 목소리", panelX + 32, panelY + 78);
+
+  const line = talk.line || (talk.pending ? "......" : "Z를 눌러 말을 건다.");
+  wrapText(ctx, line, panelX + 42, panelY + 142, panelW - 84, 30, theme.textMain, "800 24px 'Segoe UI', sans-serif");
+
+  const history = Array.isArray(talk.history) ? talk.history.slice(-3) : [];
+  history.forEach((entry, index) => {
+    ctx.fillStyle = "rgba(245,248,251,0.48)";
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    const speaker = entry.speaker === "drone" ? "당신: " : "";
+    ctx.fillText(`${speaker}${entry.text || ""}`, panelX + 42, panelY + 218 + index * 22);
+  });
+
+  if (!talk.pending) {
+    const choices = Array.isArray(talk.choices) ? talk.choices.slice(0, 3) : [];
+    const selectedChoice = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, choices.length - 1));
+    choices.forEach((choice, index) => {
+      const choiceX = panelX + 42 + index * 292;
+      const choiceY = panelY + panelH - 76;
+      const selected = index === selectedChoice;
+      drawBeveledPanel(ctx, theme, choiceX, choiceY, 268, 36, {
+        cut: 8,
+        fill: selected ? "rgba(29, 52, 60, 0.82)" : "rgba(7, 15, 20, 0.52)",
+        stroke: selected ? "rgba(147,234,255,0.58)" : "rgba(255,255,255,0.12)",
+        innerLines: false,
+      });
+      ctx.fillStyle = selected ? theme.textMain : theme.textDim;
+      ctx.font = "900 14px 'Segoe UI', sans-serif";
+      ctx.fillText(choice.label || "", choiceX + 18, choiceY + 23);
+    });
+  }
+
+  ctx.fillStyle = talk.pending ? theme.accentSecondary : theme.accent;
+  ctx.font = "900 14px 'Segoe UI', sans-serif";
+  ctx.fillText(talk.pending ? "응답 대기 중..." : "W/S 선택    Z/Enter 말하기    Esc 돌아가기", panelX + 32, panelY + panelH - 28);
 }
 
 function drawShelterPhotoOverlay(ctx, state, data, theme, rest) {
@@ -8021,6 +8316,8 @@ function drawShelterRestOverlay(ctx, state, data, theme) {
   preloadShelterPhotoSceneAssets(data);
   if (rest.phase === "arrival") {
     drawShelterArrivalOverlay(ctx, state, data, theme, rest);
+  } else if (rest.phase === "talk") {
+    drawShelterTalkOverlay(ctx, state, data, theme, rest);
   } else if (rest.phase === "photo" || rest.phase === "photoPreview") {
     drawShelterPhotoOverlay(ctx, state, data, theme, rest);
   } else if (rest.phase === "records") {
@@ -10329,7 +10626,14 @@ export function renderGame(dom, state, data) {
   if (state.scene === SCENES.TITLE) {
     drawTitleSceneV3(ctx, state, data);
   } else if (state.scene === SCENES.SHELTER) {
-    drawShelterSceneV3(ctx, state, data);
+    const restTalk = state.run?.shelterRest?.active && state.run.shelterRest.phase === "talk"
+      ? state.run.shelterRest.talk
+      : null;
+    if (state.shelter?.talk?.active || restTalk) {
+      drawShelterTalkOverlay(ctx, state, data, getUiTheme(data), { talk: restTalk || state.shelter.talk });
+    } else {
+      drawShelterSceneV3(ctx, state, data);
+    }
   } else if (state.scene === SCENES.EXPEDITION && state.run) {
     renderExpedition(ctx, state, data);
   } else if (state.scene === SCENES.RESULTS) {

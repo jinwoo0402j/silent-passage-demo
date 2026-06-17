@@ -22,6 +22,8 @@ import {
   getAudioChannelVolume,
   registerAudioElement,
 } from "./audio-options.js?v=20260613-sound-options-v1";
+import { requestFaceOffLine, requestShelterLine } from "./ai-client.js?v=20260617-shelter-talk-v6";
+import { speakFaceOffLine } from "./tts-client.js?v=20260617-voice-bank-v2";
 import {
   approach,
   clamp,
@@ -61,7 +63,7 @@ const LEGACY_CROUCH_KEYS = CROUCH_KEYS;
 const LEGACY_JUMP_KEYS = JUMP_KEYS;
 const LEGACY_ZIPLINE_MOUNT_KEYS = ZIPLINE_MOUNT_KEYS;
 const LEGACY_DASH_KEYS = DASH_KEYS;
-const LEGACY_INTERACT_KEYS = ["ArrowUp", "KeyE"];
+const LEGACY_INTERACT_KEYS = ["ArrowUp", "KeyE", "KeyZ"];
 const LEGACY_ARM_SWITCH_KEYS = ["MouseMiddle"];
 const LEGACY_RELOAD_KEYS = ["KeyR"];
 const CAPSLOCK_DASH_TAP_SECONDS = 0.28;
@@ -98,7 +100,7 @@ const RECOIL_CAMERA_RETURN_ZOOM_PER_SECOND = 0.72;
 const INTERACT_KEYS = ["KeyE"];
 const WORLD_INTERACT_KEYS = ["ArrowUp", "KeyE"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
-const CONFIRM_KEYS = ["KeyC", "Enter"];
+const CONFIRM_KEYS = ["KeyC", "Enter", "KeyZ"];
 const NEW_RUN_KEYS = ["KeyN"];
 const TITLE_MENU_ITEMS = ["new", "continue"];
 const TITLE_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
@@ -121,7 +123,36 @@ const MAP_KEYS = ["KeyM"];
 const MAP_CLOSE_KEYS = ["Escape", "KeyM"];
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
-const SHELTER_MENU_ITEMS = ["photo", "records", "background", "rest", "exit"];
+const SHELTER_MENU_ITEMS = ["talk", "photo", "records", "background", "rest", "exit"];
+const SHELTER_HOME_MENU_ITEMS = ["talk", "exit"];
+const SHELTER_TALK_TOPICS = [
+  "오늘 피난처의 분위기를 말한다",
+  "다음 원정에 대해 조용히 조언한다",
+  "Type-07A의 몸 상태를 걱정한다",
+  "잃어버린 기억에 대해 짧게 묻는다",
+  "창밖 풍경을 보고 떠오른 생각을 말한다",
+  "정비 중인 장비 소리를 듣고 한마디 한다",
+  "잠깐 쉬어도 된다고 조심스럽게 말한다",
+  "내일도 돌아오라는 말을 돌려서 한다",
+];
+const SHELTER_TALK_VARIATIONS = [
+  "one sensory detail",
+  "one quiet question",
+  "one practical warning",
+  "one memory fragment",
+  "one soft joke",
+  "one unfinished thought",
+];
+const SHELTER_TALK_CHOICES = [
+  { label: "상태는 괜찮아?", intent: "드론이 몸 상태와 손상 부위를 조심스럽게 확인한다" },
+  { label: "기억나는 게 있어?", intent: "관리자가 잃어버린 이름과 기억에 대해 낮게 묻는다" },
+  { label: "조금 쉬자.", intent: "드론이 출격보다 휴식을 먼저 권한다" },
+  { label: "난 여기 있어.", intent: "당신이 곁을 떠나지 않겠다고 짧게 말한다" },
+  { label: "무서웠어?", intent: "드론이 반복되는 죽음과 부활의 공포를 묻는다" },
+  { label: "이번엔 네가 골라.", intent: "관리자가 명령이 아니라 선택을 맡긴다" },
+  { label: "아버지 생각이 나?", intent: "당신이 아버지의 잔향을 조심스럽게 건드린다" },
+  { label: "나가면 내가 볼게.", intent: "드론이 다음 탐색에서 그녀를 지켜보겠다고 말한다" },
+];
 const SHELTER_ARRIVAL_SECONDS = 2.4;
 const SHELTER_EXIT_COOLDOWN_SECONDS = 1.2;
 const SHELTER_NIGHT_LOCK_MESSAGE = "Shelter opens only at night.";
@@ -132,8 +163,9 @@ const SHELTER_VIEW_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const SHELTER_VIEW_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const SHELTER_EXIT_KEYS = ["KeyC"];
 const SHELTER_BACK_KEYS = ["Escape"];
+const SHELTER_TALK_CONFIRM_KEYS = ["KeyZ", "Enter"];
 const CG_PHOTO_LIMIT = 12;
-const FACE_OFF_ENTRY_KEYS = ["ArrowUp"];
+const FACE_OFF_ENTRY_KEYS = ["ArrowUp", "KeyE", "KeyZ"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD", "KeyS"];
 const FACE_OFF_CANCEL_KEYS = ["Escape"];
 const FACE_OFF_RELEASE_KEY = "KeyQ";
@@ -2581,22 +2613,61 @@ function getFaceOffEnemyLine(data, key, fallback) {
   return typeof line === "string" && line.length ? line : fallback;
 }
 
-function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback) {
+function applyFaceOffLineText(faceOff, text) {
+  faceOff.enemyLine = text;
+  faceOff.enemyLineVisible = "";
+  faceOff.enemyLineIndex = 0;
+  faceOff.enemyLineTimer = 0;
+  faceOff.spokenLine = "";
+}
+
+function queueFaceOffLocalAiLine(run, data, enemy, encounterState, lineKey, fallback, option = null) {
+  const faceOff = run.faceOff;
+  if (!faceOff?.active) {
+    return;
+  }
+  const requestId = (faceOff.aiRequestId ?? 0) + 1;
+  faceOff.aiRequestId = requestId;
+  faceOff.aiPending = true;
+  requestFaceOffLine({ data, enemy, encounterState, lineKey, fallback, option }).then((reply) => {
+    if (!reply || !run.faceOff?.active || run.faceOff.aiRequestId !== requestId) {
+      return;
+    }
+    run.faceOff.aiPending = false;
+    applyFaceOffLineText(run.faceOff, reply);
+    run.faceOff.message = "local AI";
+  }).catch(() => {
+    if (run.faceOff?.aiRequestId === requestId) {
+      run.faceOff.aiPending = false;
+    }
+  });
+}
+
+function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback, option = null) {
   const faceOff = run.faceOff;
   if (!faceOff) {
     return;
   }
   faceOff.encounterState = encounterState;
-  faceOff.enemyLine = getFaceOffEnemyLine(data, lineKey, fallback);
-  faceOff.enemyLineVisible = "";
-  faceOff.enemyLineIndex = 0;
-  faceOff.enemyLineTimer = 0;
+  applyFaceOffLineText(faceOff, getFaceOffEnemyLine(data, lineKey, fallback));
   faceOff.enemyLineCharDelay = getFaceOffConfig(data).enemyLineCharDelay ?? 0.035;
   faceOff.choiceRevealTimer = 0;
   faceOff.choiceRevealHold = getFaceOffConfig(data).enemyLineHoldDuration ?? 0.35;
   faceOff.choiceRevealDuration = getFaceOffConfig(data).choiceSlideDuration ?? 0.26;
   faceOff.choiceRevealProgress = 0;
   faceOff.choicesReady = false;
+  queueFaceOffLocalAiLine(run, data, getFaceOffTarget(run), encounterState, lineKey, faceOff.enemyLine, option);
+}
+
+function updateFaceOffLineTts(faceOff) {
+  if (!faceOff?.enemyLine || faceOff.enemyLineIndex < faceOff.enemyLine.length) {
+    return;
+  }
+  if (faceOff.spokenLine === faceOff.enemyLine) {
+    return;
+  }
+  faceOff.spokenLine = faceOff.enemyLine;
+  speakFaceOffLine(faceOff.enemyLine);
 }
 
 function playFaceOffBeep(faceOff) {
@@ -3247,24 +3318,24 @@ function applyFaceOffDialogue(run, data, enemy, option) {
   const faceOff = run.faceOff;
   const chance = getDialogueChance(enemy, option);
   faceOff.selectedDialogueKey = option.key;
-  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "留먮줈 ?앸궡怨??띕떎硫?鍮⑤━ 留먰빐.");
+  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "留먮줈 ?앸궡怨??띕떎硫?鍮⑤━ 留먰빐.", option);
 
   if (Math.random() <= chance) {
     if (option.successEffect === "dealProgress") {
       enemy.dialogueStage = (enemy.dialogueStage ?? 0) + 1;
       if (enemy.dialogueStage >= 2) {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "醫뗭븘. 猷⑦듃 ?섎굹???뚮젮二쇱?.");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "醫뗭븘. 猷⑦듃 ?섎굹???뚮젮二쇱?.", option);
         finishFaceOff(run, enemy, "deal", "deal");
       } else {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "?뺣낫? ?ㅺ? 萸?以????덈뒗??");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "?뺣낫? ?ㅺ? 萸?以????덈뒗??", option);
         faceOff.message = "deal lead";
       }
       return;
     }
     if (option.type === "threaten") {
-      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "?뚯븯?? 珥??대젮?볦쓣寃?");
+      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "?뚯븯?? 珥??대젮?볦쓣寃?", option);
     } else if (option.type === "deescalate") {
-      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "醫뗭븘... ?좉퉸 硫덉텛吏.");
+      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "醫뗭븘... ?좉퉸 硫덉텛吏.", option);
     }
     finishFaceOff(run, enemy, "surrender", "surrender");
     return;
@@ -3277,11 +3348,11 @@ function applyFaceOffDialogue(run, data, enemy, option) {
   social.fear = clamp(Number(social.fear ?? 0.5) + 0.04, 0, 1);
   social.aggression = clamp(Number(social.aggression ?? 0.5) + 0.03, 0, 1);
   if (option.type === "threaten") {
-    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "洹??묐컯? ???듯빐.");
+    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "洹??묐컯? ???듯빐.", option);
   } else if (option.type === "deescalate") {
-    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "硫덉텛??嫄???履쎌씠??");
+    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "硫덉텛??嫄???履쎌씠??", option);
   } else {
-    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "移쒓뎄 媛숈? ?뚮━ ?섏? 留?");
+    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "移쒓뎄 媛숈? ?뚮━ ?섏? 留?", option);
   }
   faceOff.message = "dialogue failed";
 }
@@ -3358,6 +3429,7 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
 
   updateFaceOffWeaponRuntime(run, data, state, dt);
   updateFaceOffEnemyLine(faceOff, dt);
+  updateFaceOffLineTts(faceOff);
   updateFaceOffChoiceReveal(faceOff, data, dt);
 
   if (faceOff.result) {
@@ -9301,9 +9373,246 @@ function createActiveShelterRestState(returnLevelId, returnEntranceId) {
       capturedImage: null,
       flashTimer: 0,
     },
+    talk: {
+      requestId: 0,
+      pending: false,
+      topicIndex: 0,
+      line: "",
+      history: [],
+      choices: [],
+      choiceIndex: 0,
+      lastChoice: null,
+      error: "",
+    },
     recordsIndex: 0,
     backgroundIndex: 0,
   };
+}
+
+function ensureShelterTalkState(rest) {
+  rest.talk = rest.talk && typeof rest.talk === "object" ? rest.talk : {};
+  rest.talk.requestId = Number.isFinite(rest.talk.requestId) ? rest.talk.requestId : 0;
+  rest.talk.pending = Boolean(rest.talk.pending);
+  rest.talk.topicIndex = Number.isFinite(rest.talk.topicIndex) ? Math.max(0, Math.floor(rest.talk.topicIndex)) : 0;
+  rest.talk.line = typeof rest.talk.line === "string" ? rest.talk.line : "";
+  rest.talk.history = Array.isArray(rest.talk.history) ? rest.talk.history.slice(-8) : [];
+  rest.talk.choices = Array.isArray(rest.talk.choices) ? rest.talk.choices.slice(0, 3) : [];
+  rest.talk.choiceIndex = Number.isFinite(rest.talk.choiceIndex) ? clamp(Math.floor(rest.talk.choiceIndex), 0, Math.max(0, rest.talk.choices.length - 1)) : 0;
+  rest.talk.lastChoice = rest.talk.lastChoice && typeof rest.talk.lastChoice === "object" ? rest.talk.lastChoice : null;
+  rest.talk.error = typeof rest.talk.error === "string" ? rest.talk.error : "";
+  rest.talk.emotion = typeof rest.talk.emotion === "string" ? rest.talk.emotion : "neutral";
+  return rest.talk;
+}
+
+function getShelterTalkChoices(talk) {
+  const start = (Math.floor(talk.topicIndex || 0) + Math.floor(talk.requestId || 0)) % SHELTER_TALK_CHOICES.length;
+  return [0, 1, 2].map((offset) => SHELTER_TALK_CHOICES[(start + offset) % SHELTER_TALK_CHOICES.length]);
+}
+
+function prepareShelterTalkChoices(talk) {
+  talk.choices = getShelterTalkChoices(talk);
+  talk.choiceIndex = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, talk.choices.length - 1));
+  if (!talk.line) {
+    talk.line = "……말해도 돼. 듣고 있어.";
+  }
+}
+
+function inferShelterTalkEmotion(text = "", playerChoice = null) {
+  const source = `${playerChoice?.label || ""} ${playerChoice?.intent || ""} ${text || ""}`;
+  if (/무서|두려|불안|가지 마|곁에|버려|혼자|떨|신호가 흐려|이어지지/.test(source)) {
+    return "anxious";
+  }
+  if (/아버지|그리|기억|이름|사람이었|병기|왜 계속|모르겠/.test(source)) {
+    return "tired";
+  }
+  if (/괜찮|고마|덜 무서|믿|옆에|따뜻|쉬|안도|좋아/.test(source)) {
+    return "warm";
+  }
+  if (/망가|아파|상처|피|파손|고장|죽|닳/.test(source)) {
+    return "hurt";
+  }
+  if (/도망치지|선택|지킬|명령|위험|전투|원인|가야/.test(source)) {
+    return "angry";
+  }
+  return "neutral";
+}
+
+function getSelectedShelterTalkChoice(talk) {
+  prepareShelterTalkChoices(talk);
+  return talk.choices[clamp(Math.floor(talk.choiceIndex || 0), 0, talk.choices.length - 1)] || talk.choices[0] || null;
+}
+
+function queueShelterTalkLine(state, data, playerChoice = null) {
+  const run = state.run;
+  const rest = run?.shelterRest;
+  if (!rest?.active) {
+    return;
+  }
+  const talk = ensureShelterTalkState(rest);
+  const topic = SHELTER_TALK_TOPICS[talk.topicIndex % SHELTER_TALK_TOPICS.length];
+  const variation = SHELTER_TALK_VARIATIONS[(talk.requestId + talk.topicIndex) % SHELTER_TALK_VARIATIONS.length];
+  talk.topicIndex = (talk.topicIndex + 1) % SHELTER_TALK_TOPICS.length;
+  talk.pending = true;
+  talk.error = "";
+  talk.line = "......";
+  talk.lastChoice = playerChoice;
+  talk.emotion = inferShelterTalkEmotion("", playerChoice);
+  const requestId = talk.requestId + 1;
+  talk.requestId = requestId;
+
+  const recentLines = talk.history.map((entry) => entry?.text || "").filter(Boolean);
+  const requestHistory = playerChoice
+    ? [...talk.history, { speaker: "drone", text: playerChoice.label }]
+    : talk.history;
+  const requestPayload = {
+    data,
+    rest: { day: run.day },
+    topic: playerChoice?.intent || topic,
+    history: requestHistory,
+    avoid: recentLines,
+    seed: Date.now() + requestId,
+    variation,
+    playerChoice,
+  };
+
+  requestShelterLine(requestPayload).then(async (reply) => {
+    const currentRest = state.run?.shelterRest;
+    const currentTalk = currentRest ? ensureShelterTalkState(currentRest) : null;
+    if (!currentRest?.active || currentRest.phase !== "talk" || currentTalk.requestId !== requestId) {
+      return;
+    }
+    if (reply && recentLines.includes(reply)) {
+      reply = await requestShelterLine({
+        ...requestPayload,
+        topic: `${topic}. 반드시 방금과 다른 문장으로 말한다.`,
+        seed: Date.now() + requestId + 7919,
+        variation: "strongly different wording",
+      });
+    }
+    if (!reply) {
+      currentTalk.pending = false;
+      currentTalk.error = "local AI empty";
+      currentTalk.line = "아직 말이 잘 이어지지 않아. 다시 한 번 말을 걸어줘.";
+      currentTalk.emotion = "anxious";
+      return;
+    }
+    currentTalk.pending = false;
+    currentTalk.line = reply;
+    currentTalk.emotion = inferShelterTalkEmotion(reply, playerChoice);
+    if (playerChoice) {
+      currentTalk.history.push({ speaker: "drone", text: playerChoice.label });
+    }
+    currentTalk.history.push({ speaker: "shelter", text: reply });
+    currentTalk.history = currentTalk.history.slice(-8);
+    prepareShelterTalkChoices(currentTalk);
+    speakFaceOffLine(reply, {
+      scene: "shelter",
+      emotion: currentTalk.emotion,
+      topic: playerChoice?.intent || topic,
+      choice: playerChoice?.label || "",
+    });
+  }).catch(() => {
+    const currentTalk = state.run?.shelterRest ? ensureShelterTalkState(state.run.shelterRest) : null;
+    if (currentTalk?.requestId === requestId) {
+      currentTalk.pending = false;
+      currentTalk.error = "local AI offline";
+      currentTalk.line = "지금은 신호가 흐려. 조금 있다가 다시 말하자.";
+      currentTalk.emotion = "anxious";
+    }
+  });
+}
+
+function ensureHomeShelterTalkState(state) {
+  state.shelter = state.shelter && typeof state.shelter === "object" ? state.shelter : {};
+  state.shelter.talk = state.shelter.talk && typeof state.shelter.talk === "object" ? state.shelter.talk : {};
+  const talk = state.shelter.talk;
+  talk.active = Boolean(talk.active);
+  talk.requestId = Number.isFinite(talk.requestId) ? talk.requestId : 0;
+  talk.pending = Boolean(talk.pending);
+  talk.topicIndex = Number.isFinite(talk.topicIndex) ? Math.max(0, Math.floor(talk.topicIndex)) : 0;
+  talk.line = typeof talk.line === "string" ? talk.line : "";
+  talk.history = Array.isArray(talk.history) ? talk.history.slice(-8) : [];
+  talk.choices = Array.isArray(talk.choices) ? talk.choices.slice(0, 3) : [];
+  talk.choiceIndex = Number.isFinite(talk.choiceIndex) ? clamp(Math.floor(talk.choiceIndex), 0, Math.max(0, talk.choices.length - 1)) : 0;
+  talk.lastChoice = talk.lastChoice && typeof talk.lastChoice === "object" ? talk.lastChoice : null;
+  talk.error = typeof talk.error === "string" ? talk.error : "";
+  talk.emotion = typeof talk.emotion === "string" ? talk.emotion : "neutral";
+  return talk;
+}
+
+function queueHomeShelterTalkLine(state, data, playerChoice = null) {
+  const talk = ensureHomeShelterTalkState(state);
+  const topic = SHELTER_TALK_TOPICS[talk.topicIndex % SHELTER_TALK_TOPICS.length];
+  const variation = SHELTER_TALK_VARIATIONS[(talk.requestId + talk.topicIndex) % SHELTER_TALK_VARIATIONS.length];
+  talk.topicIndex = (talk.topicIndex + 1) % SHELTER_TALK_TOPICS.length;
+  talk.active = true;
+  talk.pending = true;
+  talk.error = "";
+  talk.line = "......";
+  talk.lastChoice = playerChoice;
+  talk.emotion = inferShelterTalkEmotion("", playerChoice);
+  const requestId = talk.requestId + 1;
+  talk.requestId = requestId;
+
+  const recentLines = talk.history.map((entry) => entry?.text || "").filter(Boolean);
+  const requestHistory = playerChoice
+    ? [...talk.history, { speaker: "drone", text: playerChoice.label }]
+    : talk.history;
+  const requestPayload = {
+    data,
+    rest: { day: state.run?.day ?? state.meta?.completedRuns ?? 1 },
+    topic: playerChoice?.intent || topic,
+    history: requestHistory,
+    avoid: recentLines,
+    seed: Date.now() + requestId,
+    variation,
+    playerChoice,
+  };
+
+  requestShelterLine(requestPayload).then(async (reply) => {
+    const currentTalk = ensureHomeShelterTalkState(state);
+    if (!currentTalk.active || currentTalk.requestId !== requestId) {
+      return;
+    }
+    if (reply && recentLines.includes(reply)) {
+      reply = await requestShelterLine({
+        ...requestPayload,
+        topic: `${topic}. 반드시 방금과 다른 문장으로 말한다.`,
+        seed: Date.now() + requestId + 7919,
+        variation: "strongly different wording",
+      });
+    }
+    if (!reply) {
+      currentTalk.pending = false;
+      currentTalk.error = "local AI empty";
+      currentTalk.line = "아직 말이 잘 이어지지 않아. 다시 한 번 말을 걸어줘.";
+      currentTalk.emotion = "anxious";
+      return;
+    }
+    currentTalk.pending = false;
+    currentTalk.line = reply;
+    currentTalk.emotion = inferShelterTalkEmotion(reply, playerChoice);
+    if (playerChoice) {
+      currentTalk.history.push({ speaker: "drone", text: playerChoice.label });
+    }
+    currentTalk.history.push({ speaker: "shelter", text: reply });
+    currentTalk.history = currentTalk.history.slice(-8);
+    prepareShelterTalkChoices(currentTalk);
+    speakFaceOffLine(reply, {
+      scene: "shelter",
+      emotion: currentTalk.emotion,
+      topic: playerChoice?.intent || topic,
+      choice: playerChoice?.label || "",
+    });
+  }).catch(() => {
+    const currentTalk = ensureHomeShelterTalkState(state);
+    if (currentTalk.requestId === requestId) {
+      currentTalk.pending = false;
+      currentTalk.error = "local AI offline";
+      currentTalk.line = "지금은 신호가 흐려. 조금 있다가 다시 말하자.";
+      currentTalk.emotion = "anxious";
+    }
+  });
 }
 
 function resetShelterPhoto(rest) {
@@ -9657,6 +9966,17 @@ function leaveShelterRest(state, data) {
       capturedImage: null,
       flashTimer: 0,
     },
+    talk: {
+      requestId: 0,
+      pending: false,
+      topicIndex: 0,
+      line: "",
+      history: [],
+      choices: [],
+      choiceIndex: 0,
+      lastChoice: null,
+      error: "",
+    },
     recordsIndex: 0,
     backgroundIndex: 0,
   };
@@ -9915,7 +10235,8 @@ function updateInteractions(state, data, canInteract) {
   }
 
   if (nearest.kind === "faceOff") {
-    const faceOffPressed = consumeEitherPress(state, getFaceOffEntryKeys(state));
+    const faceOffPressed = consumeEitherPress(state, getFaceOffEntryKeys(state))
+      || isEitherPressed(state, getFaceOffEntryKeys(state));
     if (!faceOffPressed) {
       return;
     }
@@ -10059,7 +10380,12 @@ function updateShelterRestMode(state, data, dt) {
     }
     if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, CONFIRM_KEYS)) {
       const item = SHELTER_MENU_ITEMS[clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1)];
-      if (item === "photo") {
+      if (item === "talk") {
+        rest.phase = "talk";
+        rest.timer = 0;
+        prepareShelterTalkChoices(ensureShelterTalkState(rest));
+        setStatus(state, "Shelter talk. W/S choose. Z select.");
+      } else if (item === "photo") {
         rest.phase = "photo";
         rest.timer = 0;
         resetShelterPhoto(rest);
@@ -10086,6 +10412,29 @@ function updateShelterRestMode(state, data, dt) {
     } else {
       setStatus(state, "Shelter menu. Z select. C exit.");
     }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  if (rest.phase === "talk") {
+    const talk = ensureShelterTalkState(rest);
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      rest.phase = "menu";
+      rest.timer = 0;
+      talk.pending = false;
+    } else if (!talk.pending) {
+      prepareShelterTalkChoices(talk);
+      if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+      }
+      if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+      }
+      if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
+        queueShelterTalkLine(state, data, getSelectedShelterTalkChoice(talk));
+      }
+    }
+    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z select. Esc back.");
     updateAutoSave(state, data, dt);
     return true;
   }
@@ -10408,11 +10757,61 @@ function updateExpedition(state, data, dt) {
 }
 
 function updateShelter(state) {
-  setStatus(state, isMovementLab(state.data) ? "?쇰궃泥??湲? C: 異쒓꺽" : "?쇰궃泥??湲? C: 異쒓꺽");
-  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+  state.shelter = state.shelter && typeof state.shelter === "object" ? state.shelter : { menuIndex: 0 };
+  const talk = ensureHomeShelterTalkState(state);
+
+  if (talk.active) {
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      talk.active = false;
+      talk.pending = false;
+      setStatus(state, "Shelter menu.");
+      return;
+    }
+    if (!talk.pending) {
+      prepareShelterTalkChoices(talk);
+      if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+      }
+      if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+      }
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+        queueHomeShelterTalkLine(state, state.data, getSelectedShelterTalkChoice(talk));
+        setStatus(state, "Shelter talk. Waiting...");
+        return;
+      }
+    }
+    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z select. Esc back.");
+    return;
+  }
+
+  if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+    state.shelter.menuIndex = (Math.max(0, Math.floor(state.shelter.menuIndex || 0)) + SHELTER_HOME_MENU_ITEMS.length - 1) % SHELTER_HOME_MENU_ITEMS.length;
+  }
+  if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+    state.shelter.menuIndex = (Math.max(0, Math.floor(state.shelter.menuIndex || 0)) + 1) % SHELTER_HOME_MENU_ITEMS.length;
+  }
+
+  if (consumeEitherPress(state, SHELTER_EXIT_KEYS)) {
     startNewSavedRun(state, state.data);
     setStatus(state, "異쒓꺽 以?");
+    return;
   }
+
+  if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, CONFIRM_KEYS)) {
+    const selected = SHELTER_HOME_MENU_ITEMS[clamp(Math.floor(state.shelter.menuIndex || 0), 0, SHELTER_HOME_MENU_ITEMS.length - 1)];
+    if (selected === "talk") {
+      talk.active = true;
+      prepareShelterTalkChoices(talk);
+      setStatus(state, "Shelter talk. W/S choose. Z select.");
+      return;
+    }
+    startNewSavedRun(state, state.data);
+    setStatus(state, "異쒓꺽 以?");
+    return;
+  }
+
+  setStatus(state, "Shelter. W/S menu. Z talk. C sortie.");
 }
 
 function ensureTitleMenuState(state, hasRun) {

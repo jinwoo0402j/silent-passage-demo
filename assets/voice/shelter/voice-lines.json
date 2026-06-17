@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "voice": "type07a",
+  "format": "ogg",
+  "lines": [
+    {
+      "id": "shelter_neutral_0001",
+      "emotion": "neutral",
+      "topic": "idle",
+      "text": "……말해도 돼. 듣고 있어.",
+      "file": "neutral/shelter_neutral_0001.ogg"
+    },
+    {
+      "id": "shelter_anxious_0001",
+      "emotion": "anxious",
+      "topic": "fear",
+      "text": "가지 마. 명령이 아니야. 그냥…… 부탁이야.",
+      "file": "anxious/shelter_anxious_0001.ogg"
+    },
+    {
+      "id": "shelter_warm_0001",
+      "emotion": "warm",
+      "topic": "trust",
+      "text": "이상해. 네 목소리를 들으면 조금 덜 무서워.",
+      "file": "warm/shelter_warm_0001.ogg"
+    },
+    {
+      "id": "shelter_tired_0001",
+      "emotion": "tired",
+      "topic": "memory",
+      "text": "기억은 조각나 있어. 네 목소리가 닿으면, 잠깐 덜 흩어져.",
+      "file": "tired/shelter_tired_0001.ogg"
+    },
+    {
+      "id": "shelter_hurt_0001",
+      "emotion": "hurt",
+      "topic": "damage",
+      "text": "괜찮아. 아직 움직일 수 있어. 조금 느릴 뿐이야.",
+      "file": "hurt/shelter_hurt_0001.ogg"
+    },
+    {
+      "id": "shelter_angry_0001",
+      "emotion": "angry",
+      "topic": "choice",
+      "text": "이번에는 도망치지 않을래. 내가 선택할 거야.",
+      "file": "angry/shelter_angry_0001.ogg"
+    }
+  ]
+}

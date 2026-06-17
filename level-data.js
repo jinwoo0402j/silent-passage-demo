@@ -129,6 +129,24 @@ export const GAME_DATA = {
     },
     "operatorEmotionSheet": {
       "src": "./assets/ui/type07a-emotion-sheet.png?v=20260425-1"
+    },
+    "shelterEmotionNeutral": {
+      "src": "./assets/ui/shelter-emotions/type07a-neutral.png?v=20260617-5"
+    },
+    "shelterEmotionAnxious": {
+      "src": "./assets/ui/shelter-emotions/type07a-anxious.png?v=20260617-5"
+    },
+    "shelterEmotionWarm": {
+      "src": "./assets/ui/shelter-emotions/type07a-warm.png?v=20260617-5"
+    },
+    "shelterEmotionTired": {
+      "src": "./assets/ui/shelter-emotions/type07a-tired.png?v=20260617-5"
+    },
+    "shelterEmotionHurt": {
+      "src": "./assets/ui/shelter-emotions/type07a-hurt.png?v=20260617-5"
+    },
+    "shelterEmotionAngry": {
+      "src": "./assets/ui/shelter-emotions/type07a-angry.png?v=20260617-5"
     }
   },
   "scale": {
