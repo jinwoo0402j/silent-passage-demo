@@ -1,0 +1,4 @@
+interface:
+  display_name: "Silent Passage Shelter Event"
+  short_description: "Design and implement Silent Passage shelter events."
+  default_prompt: "Use $silent-passage-shelter-event to turn this shelter event idea into implemented choices, imagery, flags, and validation."

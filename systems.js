@@ -7,7 +7,7 @@
   ensureWeaponLoadoutState,
   hasUnlocked,
   saveMetaState,
-} from "./state.js?v=20260615-speedfx-v11";
+} from "./state.js?v=20260618-memorial-reaction-v1";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260520-night-pp-mask-v2";
 import {
   clearSavedGame,
@@ -21,9 +21,9 @@ import {
 import {
   getAudioChannelVolume,
   registerAudioElement,
-} from "./audio-options.js?v=20260613-sound-options-v1";
-import { requestFaceOffLine, requestShelterLine } from "./ai-client.js?v=20260617-shelter-talk-v6";
-import { speakFaceOffLine } from "./tts-client.js?v=20260617-voice-bank-v2";
+} from "./audio-options.js?v=20260619-shelter-bgm-v1";
+import { requestFaceOffLine } from "./ai-client.js?v=20260618-direct-chat-v7";
+import { speakFaceOffLine } from "./tts-client.js?v=20260619-shelter-bgm-v1";
 import {
   approach,
   clamp,
@@ -125,6 +125,22 @@ const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
 const SHELTER_MENU_ITEMS = ["talk", "photo", "records", "background", "rest", "exit"];
 const SHELTER_HOME_MENU_ITEMS = ["talk", "exit"];
+const SHELTER_CHAT_SUBMIT_EVENT = "silent-passage-shelter-chat-submit";
+const SHELTER_TALK_HISTORY_LIMIT = 40;
+const SHELTER_TALK_EMOTIONS = new Set(["neutral", "anxious", "warm", "tired", "hurt", "angry"]);
+const SHELTER_HOME_EMOTION_ART_ASSETS = {
+  neutral: "shelterHomeNeutralCg",
+  anxious: "shelterHomeAnxiousCg",
+  warm: "shelterHomeWarmCg",
+  tired: "shelterHomeTiredCg",
+  hurt: "shelterHomeHurtCg",
+  angry: "shelterHomeAngryCg",
+};
+const SHELTER_HOME_BASE_ART_ASSET_KEYS = new Set([
+  "shelterFirstArrivalCg",
+  "shelterHomeCharmCg",
+  ...Object.values(SHELTER_HOME_EMOTION_ART_ASSETS),
+]);
 const SHELTER_TALK_TOPICS = [
   "오늘 피난처의 분위기를 말한다",
   "다음 원정에 대해 조용히 조언한다",
@@ -148,25 +164,112 @@ const SHELTER_TALK_VARIATIONS = [
   "one unfinished thought",
 ];
 const SHELTER_TALK_CHOICES = [
-  { label: "상태는 괜찮아?", intent: "드론이 몸 상태와 손상 부위를 조심스럽게 확인한다" },
-  { label: "기억나는 게 있어?", intent: "관리자가 잃어버린 이름과 기억에 대해 낮게 묻는다" },
-  { label: "조금 쉬자.", intent: "드론이 출격보다 휴식을 먼저 권한다" },
-  { label: "난 여기 있어.", intent: "당신이 곁을 떠나지 않겠다고 짧게 말한다" },
-  { label: "무서웠어?", intent: "드론이 반복되는 죽음과 부활의 공포를 묻는다" },
-  { label: "이번엔 네가 골라.", intent: "관리자가 명령이 아니라 선택을 맡긴다" },
-  { label: "아버지 생각이 나?", intent: "당신이 아버지의 잔향을 조심스럽게 건드린다" },
-  { label: "나가면 내가 볼게.", intent: "드론이 다음 탐색에서 그녀를 지켜보겠다고 말한다" },
-  { label: "이름을 찾아보자.", intent: "관리자가 잃어버린 이름을 함께 찾자고 말한다" },
-  { label: "무리하지 마.", intent: "드론이 임무보다 그녀의 손상을 먼저 걱정한다" },
-  { label: "장산역이 신경 쓰여?", intent: "관리자가 심층으로 향해야 하는 이유를 조심스럽게 묻는다" },
-  { label: "오늘은 여기서 멈추자.", intent: "당신이 반복되는 출격을 끊고 쉘터의 온기를 붙잡는다" },
-  { label: "네가 사람이라면?", intent: "드론이 병기와 인간 사이의 정체성 혼란을 건드린다" },
-  { label: "신호 계속 보낼게.", intent: "드론이 어둠 속에서도 연결을 유지하겠다고 약속한다" },
-  { label: "아픈 곳부터 말해줘.", intent: "관리자가 전투 보고가 아니라 통증을 먼저 묻는다" },
-  { label: "이번엔 지켜보자.", intent: "드론이 성급한 전투보다 관찰과 생존을 권한다" },
+  {
+    label: "상태는 괜찮아?",
+    intent: "드론이 몸 상태와 손상 부위를 조심스럽게 확인한다",
+    emotion: "hurt",
+    reply: "괜찮다고 말하면 거짓말이야. 그래도 아직 움직일 수 있어.",
+  },
+  {
+    label: "기억나는 게 있어?",
+    intent: "관리자가 잃어버린 이름과 기억에 대해 낮게 묻는다",
+    emotion: "tired",
+    reply: "파도 소리랑 흰 방 조각뿐이야. 이름은 아직 떠오르지 않아.",
+  },
+  {
+    label: "조금 쉬자.",
+    intent: "드론이 출격보다 휴식을 먼저 권한다",
+    emotion: "warm",
+    reply: "응. 명령이 아니라 쉬자는 말이라서, 조금 숨이 놓여.",
+  },
+  {
+    label: "난 여기 있어.",
+    intent: "당신이 곁을 떠나지 않겠다고 짧게 말한다",
+    emotion: "warm",
+    reply: "그 말, 신호보다 더 잘 들려. 그러면 아직 혼자는 아니네.",
+  },
+  {
+    label: "무서웠어?",
+    intent: "드론이 반복되는 죽음과 부활의 공포를 묻는다",
+    emotion: "anxious",
+    reply: "무서웠어. 깨어날 때마다 내가 어디까지 남았는지 먼저 확인하게 돼.",
+  },
+  {
+    label: "이번엔 네가 골라.",
+    intent: "관리자가 명령이 아니라 선택을 맡긴다",
+    emotion: "neutral",
+    reply: "내가 골라도 된다면, 오늘은 무모하게 뛰어들고 싶지 않아.",
+  },
+  {
+    label: "아버지 생각이 나?",
+    intent: "당신이 아버지의 잔향을 조심스럽게 건드린다",
+    emotion: "tired",
+    reply: "얼굴은 흐릿한데, 기다리던 목소리만 남아 있어. 그래서 더 아파.",
+  },
+  {
+    label: "나가면 내가 볼게.",
+    intent: "드론이 다음 탐색에서 그녀를 지켜보겠다고 말한다",
+    emotion: "warm",
+    reply: "그럼 뒤를 맡길게. 네 신호가 있으면 발을 헛디디진 않을 것 같아.",
+  },
+  {
+    label: "이름을 찾아보자.",
+    intent: "관리자가 잃어버린 이름을 함께 찾자고 말한다",
+    emotion: "tired",
+    reply: "응. 번호 말고, 누가 불러주던 이름이 있었는지 알고 싶어.",
+  },
+  {
+    label: "무리하지 마.",
+    intent: "드론이 임무보다 그녀의 손상을 먼저 걱정한다",
+    emotion: "hurt",
+    reply: "알겠어. 부품보다 마음이 먼저 삐걱거릴 때가 있거든.",
+  },
+  {
+    label: "장산역이 신경 쓰여?",
+    intent: "관리자가 심층으로 향해야 하는 이유를 조심스럽게 묻는다",
+    emotion: "angry",
+    reply: "응. 아래에서 날 부르는 신호가 있어. 싫은데도 눈을 돌릴 수 없어.",
+  },
+  {
+    label: "오늘은 여기서 멈추자.",
+    intent: "당신이 반복되는 출격을 끊고 쉘터의 온기를 붙잡는다",
+    emotion: "warm",
+    reply: "좋아. 멈춰도 된다는 말이 이렇게 낯설 줄은 몰랐어.",
+  },
+  {
+    label: "네가 사람이라면?",
+    intent: "드론이 병기와 인간 사이의 정체성 혼란을 건드린다",
+    emotion: "tired",
+    reply: "사람이면 이런 질문에 바로 대답할 수 있었을까. 나는 아직 모르겠어.",
+  },
+  {
+    label: "신호 계속 보낼게.",
+    intent: "드론이 어둠 속에서도 연결을 유지하겠다고 약속한다",
+    emotion: "anxious",
+    reply: "끊기지 않게 해줘. 어둠 속에서는 그 소리 하나로 방향을 잡아.",
+  },
+  {
+    label: "아픈 곳부터 말해줘.",
+    intent: "관리자가 전투 보고가 아니라 통증을 먼저 묻는다",
+    emotion: "hurt",
+    reply: "오른쪽 어깨랑 목 뒤가 둔해. 하지만 제일 아픈 건 깨어난 직후야.",
+  },
+  {
+    label: "이번엔 지켜보자.",
+    intent: "드론이 성급한 전투보다 관찰과 생존을 권한다",
+    emotion: "neutral",
+    reply: "응. 싸우기 전에 먼저 보자. 이번엔 살아서 돌아오는 쪽을 고를래.",
+  },
 ];
 const SHELTER_ARRIVAL_SECONDS = 2.4;
 const SHELTER_EXIT_COOLDOWN_SECONDS = 1.2;
+const SHELTER_EVENT_BRIDGE_SECONDS = 1.15;
+const SHELTER_CHOICE_REVEAL_DELAY_SECONDS = 0.42;
+const SHELTER_CHOICE_REACTION_SECONDS = 0.48;
+const SHELTER_TALK_DOOR_TRANSITION_SECONDS = 0.62;
+const SHELTER_SUBTITLE_TYPE_CHARS_PER_SECOND = 30;
+const SHELTER_SUBTITLE_TYPE_MIN_SECONDS = 0.18;
+const SHELTER_SUBTITLE_TYPE_MAX_SECONDS = 2.6;
 const SHELTER_NIGHT_LOCK_MESSAGE = "Shelter opens only at night.";
 const SHELTER_COOLDOWN_MESSAGE = "Shelter door is still closing.";
 const SHELTER_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
@@ -196,6 +299,7 @@ const AIR_DASH_HOVER_SECONDS = 0.5;
 const AIR_DASH_HOVER_RISE_SPEED = 35;
 const AIR_DASH_HOVER_BRAKE = 420;
 const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
+const SHELTER_MUSIC_SRC = "./assets/audio/bloom-through-concrete.mp3";
 const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
 const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
 const AIR_DASH_DISTANCE_MULTIPLIER = 1.25;
@@ -2840,6 +2944,91 @@ function getGameAudioContext() {
   return context;
 }
 
+function getAudioClockSeconds() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now() / 1000;
+  }
+  return Date.now() / 1000;
+}
+
+function setAudioElementFadeVolume(element, fadeVolume = 1) {
+  if (!element?.dataset) {
+    return;
+  }
+  element.dataset.fadeVolume = String(clamp(Number(fadeVolume), 0, 1));
+}
+
+function applyLoopingAudioTrackVolume(track) {
+  const element = track?.element;
+  if (!element) {
+    return;
+  }
+  const fadeVolume = clamp(Number(track.fadeVolume ?? 1), 0, 1);
+  setAudioElementFadeVolume(element, fadeVolume);
+  element.volume = getAudioChannelVolume("bgm", Number(track.baseVolume ?? 1) * fadeVolume);
+}
+
+function fadeLoopingAudioTrack(track, targetFadeVolume, duration = 0.7, options = {}) {
+  if (!track?.element) {
+    return;
+  }
+  const now = getAudioClockSeconds();
+  updateLoopingAudioTrackFade(track, now);
+  track.fade = {
+    from: clamp(Number(track.fadeVolume ?? 1), 0, 1),
+    to: clamp(Number(targetFadeVolume), 0, 1),
+    startedAt: now,
+    duration: Math.max(0.02, Number(duration) || 0.02),
+    stopWhenDone: Boolean(options.stopWhenDone),
+    resetWhenStopped: Boolean(options.resetWhenStopped),
+  };
+  applyLoopingAudioTrackVolume(track);
+}
+
+function updateLoopingAudioTrackFade(track, now = getAudioClockSeconds()) {
+  if (!track?.element || !track.fade) {
+    if (track?.element) {
+      applyLoopingAudioTrackVolume(track);
+    }
+    return;
+  }
+  const fade = track.fade;
+  const progress = clamp((now - fade.startedAt) / Math.max(0.02, fade.duration), 0, 1);
+  track.fadeVolume = lerp(fade.from, fade.to, progress);
+  applyLoopingAudioTrackVolume(track);
+  if (progress < 1) {
+    return;
+  }
+  const stopWhenDone = fade.stopWhenDone;
+  const resetWhenStopped = fade.resetWhenStopped;
+  track.fade = null;
+  track.fadeVolume = fade.to;
+  applyLoopingAudioTrackVolume(track);
+  if (stopWhenDone) {
+    try {
+      track.element.pause();
+      if (resetWhenStopped) {
+        track.element.currentTime = 0;
+      }
+      track.pending = false;
+    } catch {
+      // Music should never affect gameplay.
+    }
+  }
+}
+
+function updateLoopingAudioFades() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  ["__searchMusic", "__shelterMusic", "__vaultEscapeMusic"].forEach((slotName) => {
+    const track = window[slotName];
+    if (track?.kind === "file") {
+      updateLoopingAudioTrackFade(track);
+    }
+  });
+}
+
 function getLoopingAudioTrack(slotName, src, volume = 0.45) {
   if (typeof window === "undefined" || typeof window.Audio === "undefined") {
     return null;
@@ -2851,11 +3040,15 @@ function getLoopingAudioTrack(slotName, src, volume = 0.45) {
   const element = new window.Audio(src);
   element.loop = true;
   element.preload = "auto";
+  setAudioElementFadeVolume(element, 1);
   registerAudioElement(element, "bgm", volume);
   const track = {
     kind: "file",
     src,
     element,
+    baseVolume: volume,
+    fadeVolume: 1,
+    fade: null,
     pending: false,
     blocked: false,
     lastPlayAttemptAt: 0,
@@ -2864,15 +3057,31 @@ function getLoopingAudioTrack(slotName, src, volume = 0.45) {
   return track;
 }
 
-function playLoopingAudioTrack(slotName, src, volume = 0.45, playbackRate = 1) {
+function playLoopingAudioTrack(slotName, src, volume = 0.45, playbackRate = 1, options = {}) {
   const track = getLoopingAudioTrack(slotName, src, volume);
   const element = track?.element;
   if (!element) {
     return null;
   }
+  const fadeSeconds = Math.max(0, Number(options.fadeSeconds ?? 0) || 0);
+  const wasPaused = element.paused;
+  track.baseVolume = volume;
+  if (wasPaused && fadeSeconds > 0) {
+    track.fadeVolume = 0;
+    track.fade = null;
+    setAudioElementFadeVolume(element, 0);
+  } else if (wasPaused) {
+    track.fadeVolume = 1;
+    track.fade = null;
+    setAudioElementFadeVolume(element, 1);
+  }
   registerAudioElement(element, "bgm", volume);
   element.playbackRate = playbackRate;
+  applyLoopingAudioTrackVolume(track);
   if (!element.paused || track.pending) {
+    if (fadeSeconds > 0 && track.fade?.to === 0) {
+      fadeLoopingAudioTrack(track, 1, fadeSeconds);
+    }
     return track;
   }
   const now = Date.now();
@@ -2888,6 +3097,13 @@ function playLoopingAudioTrack(slotName, src, volume = 0.45, playbackRate = 1) {
       .then(() => {
         track.pending = false;
         track.blocked = false;
+        if (fadeSeconds > 0) {
+          fadeLoopingAudioTrack(track, 1, fadeSeconds);
+        } else {
+          track.fadeVolume = 1;
+          track.fade = null;
+          applyLoopingAudioTrackVolume(track);
+        }
       })
       .catch(() => {
         track.pending = false;
@@ -2895,11 +3111,14 @@ function playLoopingAudioTrack(slotName, src, volume = 0.45, playbackRate = 1) {
       });
   } else {
     track.pending = false;
+    if (fadeSeconds > 0) {
+      fadeLoopingAudioTrack(track, 1, fadeSeconds);
+    }
   }
   return track;
 }
 
-function stopLoopingAudioTrack(slotName, reset = false) {
+function stopLoopingAudioTrack(slotName, reset = false, fadeSeconds = 0) {
   if (typeof window === "undefined") {
     return;
   }
@@ -2908,12 +3127,22 @@ function stopLoopingAudioTrack(slotName, reset = false) {
   if (!element) {
     return;
   }
+  if (!element.paused && fadeSeconds > 0) {
+    fadeLoopingAudioTrack(track, 0, fadeSeconds, {
+      stopWhenDone: true,
+      resetWhenStopped: reset,
+    });
+    return;
+  }
   try {
     element.pause();
     if (reset) {
       element.currentTime = 0;
     }
     track.pending = false;
+    track.fade = null;
+    track.fadeVolume = 0;
+    applyLoopingAudioTrackVolume(track);
   } catch {
     // Music should never affect gameplay.
   }
@@ -2925,14 +3154,28 @@ function updateSearchMusic(run) {
   }
   const vault = run?.vaultEscape;
   if (!run || vault?.active || vault?.lockdownActive || run.faceOff?.active) {
-    stopLoopingAudioTrack("__searchMusic");
+    stopLoopingAudioTrack("__searchMusic", false, 0.75);
     return;
   }
-  playLoopingAudioTrack("__searchMusic", SEARCH_MUSIC_SRC, 0.34, 1);
+  stopLoopingAudioTrack("__shelterMusic", false, 0.9);
+  playLoopingAudioTrack("__searchMusic", SEARCH_MUSIC_SRC, 0.34, 1, { fadeSeconds: 0.9 });
 }
 
-function stopSearchMusic(reset = false) {
-  stopLoopingAudioTrack("__searchMusic", reset);
+function stopSearchMusic(reset = false, fadeSeconds = 0.75) {
+  stopLoopingAudioTrack("__searchMusic", reset, fadeSeconds);
+}
+
+function updateShelterMusic(state) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (state?.scene !== SCENES.SHELTER) {
+    stopLoopingAudioTrack("__shelterMusic", false, 1.1);
+    return;
+  }
+  stopSearchMusic(false, 0.85);
+  stopVaultEscapeMusic(0.55);
+  playLoopingAudioTrack("__shelterMusic", SHELTER_MUSIC_SRC, 0.44, 1, { fadeSeconds: 1.45 });
 }
 
 function playVaultPulse(audio, frequency, duration, gainValue, type = "square") {
@@ -2959,8 +3202,9 @@ function startVaultEscapeMusic(run) {
   if (!run?.vaultEscape || typeof window === "undefined") {
     return;
   }
-  stopSearchMusic();
-  const fileTrack = playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, 0.58, 1);
+  stopSearchMusic(false, 0.3);
+  stopLoopingAudioTrack("__shelterMusic", false, 0.45);
+  const fileTrack = playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, 0.58, 1, { fadeSeconds: 0.18 });
   if (fileTrack) {
     return;
   }
@@ -3007,8 +3251,7 @@ function stopVaultEscapeMusic(fadeSeconds = 0.16) {
   }
   const audio = window.__vaultEscapeMusic;
   if (audio.kind === "file") {
-    stopLoopingAudioTrack("__vaultEscapeMusic", true);
-    window.__vaultEscapeMusic = null;
+    stopLoopingAudioTrack("__vaultEscapeMusic", true, fadeSeconds);
     return;
   }
   window.__vaultEscapeMusic = null;
@@ -3050,7 +3293,7 @@ function updateVaultEscapeMusic(run) {
     const urgency = vault.lockdownActive ? 1 : clamp(1 - timeLeft / duration, 0, 1);
     const volume = vault.lockdownActive ? 0.68 : lerp(0.52, 0.62, urgency);
     const playbackRate = vault.lockdownActive ? 1.08 : lerp(1, 1.04, urgency);
-    playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, volume, playbackRate);
+    playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, volume, playbackRate, { fadeSeconds: 0.18 });
     return;
   }
   if (!audio?.context) {
@@ -9491,6 +9734,527 @@ function getShelterConfig(data) {
   };
 }
 
+function getShelterScriptedEvents(data) {
+  return Array.isArray(data.shelter?.events)
+    ? data.shelter.events.filter((event) => event && typeof event === "object" && typeof event.id === "string")
+    : [];
+}
+
+function getShelterScriptedEvent(data, eventId) {
+  return getShelterScriptedEvents(data).find((event) => event.id === eventId) || null;
+}
+
+function getShelterScriptedEventNode(event, nodeId = "") {
+  const nodes = Array.isArray(event?.nodes) ? event.nodes : [];
+  const targetId = nodeId || event?.startNodeId || nodes[0]?.id || "";
+  return nodes.find((node) => node && typeof node === "object" && node.id === targetId) || nodes[0] || null;
+}
+
+function getShelterEventCompletionFlag(event) {
+  return event?.completionFlag || (event?.id ? `shelter-event:${event.id}` : "");
+}
+
+function getShelterEventBridgeConfig(event) {
+  const transition = event?.transition && typeof event.transition === "object" ? event.transition : {};
+  const node = getShelterScriptedEventNode(event, event?.startNodeId);
+  const line = String(transition.line || event?.transitionLine || event?.bridgeLine || "").trim();
+  const rawDuration = Number(transition.seconds ?? event?.transitionSeconds ?? event?.bridgeSeconds);
+  const duration = Number.isFinite(rawDuration)
+    ? clamp(rawDuration, 0.45, 3)
+    : SHELTER_EVENT_BRIDGE_SECONDS;
+  return {
+    line,
+    duration,
+    emotion: normalizeShelterTalkEmotion(
+      transition.emotion || event?.transitionEmotion,
+      normalizeShelterTalkEmotion(node?.emotion, normalizeShelterTalkEmotion(event?.emotion, "neutral")),
+    ),
+    artAssetKey: normalizeShelterArtAssetKey(transition.backgroundAssetKey)
+      || normalizeShelterArtAssetKey(transition.artAssetKey)
+      || normalizeShelterArtAssetKey(event?.transitionAssetKey)
+      || getShelterEventStartArtAssetKey(event, node),
+  };
+}
+
+function hasMetaStoryFlag(state, flag) {
+  return Boolean(flag && Array.isArray(state?.meta?.storyFlags) && state.meta.storyFlags.includes(flag));
+}
+
+function addMetaStoryFlag(state, flag) {
+  if (!flag) {
+    return false;
+  }
+  state.meta = state.meta && typeof state.meta === "object" ? state.meta : {};
+  state.meta.storyFlags = Array.isArray(state.meta.storyFlags) ? state.meta.storyFlags : [];
+  if (state.meta.storyFlags.includes(flag)) {
+    return false;
+  }
+  state.meta.storyFlags.push(flag);
+  return true;
+}
+
+function canStartShelterScriptedEvent(state, event) {
+  if (!event?.id) {
+    return false;
+  }
+  const trigger = event.trigger && typeof event.trigger === "object" ? event.trigger : {};
+  const completionFlag = getShelterEventCompletionFlag(event);
+  if (event.once !== false && hasMetaStoryFlag(state, completionFlag)) {
+    return false;
+  }
+  if (trigger.requiredStoryFlag && !hasMetaStoryFlag(state, trigger.requiredStoryFlag)) {
+    return false;
+  }
+  if (trigger.missingStoryFlag && hasMetaStoryFlag(state, trigger.missingStoryFlag)) {
+    return false;
+  }
+  return true;
+}
+
+function getNextShelterScriptedEvent(state, data) {
+  return getShelterScriptedEvents(data).find((event) => canStartShelterScriptedEvent(state, event)) || null;
+}
+
+function getNextAutoShelterScriptedEvent(state, data) {
+  return getShelterScriptedEvents(data).find((event) => {
+    const trigger = event.trigger && typeof event.trigger === "object" ? event.trigger : {};
+    return trigger.autoStart === true && canStartShelterScriptedEvent(state, event);
+  }) || null;
+}
+
+function normalizeShelterAutoEventBridge(host) {
+  const bridge = host?.autoEventBridge;
+  if (!bridge || typeof bridge !== "object" || !bridge.eventId) {
+    if (host && bridge) {
+      host.autoEventBridge = null;
+    }
+    return null;
+  }
+  bridge.line = String(bridge.line || "").trim();
+  bridge.duration = Number.isFinite(bridge.duration)
+    ? clamp(Number(bridge.duration), 0.45, 3)
+    : SHELTER_EVENT_BRIDGE_SECONDS;
+  bridge.startedAt = Number.isFinite(bridge.startedAt) ? Number(bridge.startedAt) : 0;
+  bridge.emotion = normalizeShelterTalkEmotion(bridge.emotion, "neutral");
+  bridge.artAssetKey = normalizeShelterArtAssetKey(bridge.artAssetKey);
+  return bridge;
+}
+
+function beginShelterAutoEventBridge(host, state, event) {
+  if (!host || !event?.id) {
+    return false;
+  }
+  const bridge = getShelterEventBridgeConfig(event);
+  if (!bridge.line) {
+    return false;
+  }
+  host.autoEventBridge = {
+    eventId: event.id,
+    line: bridge.line,
+    duration: bridge.duration,
+    startedAt: Number.isFinite(state?.pulse) ? state.pulse : 0,
+    emotion: bridge.emotion,
+    artAssetKey: bridge.artAssetKey,
+  };
+  return true;
+}
+
+function stepShelterAutoEventBridge(talk, state, data, host) {
+  const bridge = normalizeShelterAutoEventBridge(host);
+  if (!bridge) {
+    return "none";
+  }
+  const event = getShelterScriptedEvent(data, bridge.eventId);
+  if (!event || !canStartShelterScriptedEvent(state, event)) {
+    host.autoEventBridge = null;
+    return "none";
+  }
+  const elapsed = Math.max(0, (Number.isFinite(state?.pulse) ? state.pulse : 0) - bridge.startedAt);
+  const skip = consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS);
+  if (elapsed < bridge.duration && !skip) {
+    setStatus(state, "Shelter scene.");
+    return "bridging";
+  }
+  host.autoEventBridge = null;
+  talk.blockScriptedEventStart = false;
+  return startShelterScriptedEvent(talk, event, state) ? "started" : "none";
+}
+
+function normalizeShelterTalkEmotion(emotion, fallback = "neutral") {
+  return SHELTER_TALK_EMOTIONS.has(emotion) ? emotion : fallback;
+}
+
+function normalizeShelterArtAssetKey(assetKey = "") {
+  return typeof assetKey === "string" ? assetKey.trim() : "";
+}
+
+function getShelterDialogueArtAssetKey(emotion, fallbackAssetKey = "") {
+  const fallback = normalizeShelterArtAssetKey(fallbackAssetKey);
+  if (fallback && !SHELTER_HOME_BASE_ART_ASSET_KEYS.has(fallback)) {
+    return fallback;
+  }
+  const emotionKey = normalizeShelterArtAssetKey(
+    SHELTER_HOME_EMOTION_ART_ASSETS[normalizeShelterTalkEmotion(emotion, "neutral")],
+  );
+  return emotionKey || fallback;
+}
+
+function getShelterDialogueSegments(text = "") {
+  return String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function isShelterScriptedTalk(talk) {
+  return Boolean(talk?.event?.eventId || talk?.lastChoice?.eventId || talk?.eventArtAssetKey);
+}
+
+function getShelterPulseTime(state) {
+  return Number.isFinite(state?.pulse) ? state.pulse : 0;
+}
+
+function normalizeShelterTalkTransition(talk) {
+  const transition = talk?.transition;
+  if (!transition || typeof transition !== "object") {
+    return null;
+  }
+  const direction = transition.direction === "out" ? "out" : "in";
+  transition.direction = direction;
+  transition.startedAt = Number.isFinite(transition.startedAt) ? Number(transition.startedAt) : 0;
+  transition.duration = Number.isFinite(transition.duration)
+    ? clamp(Number(transition.duration), 0.2, 1.4)
+    : SHELTER_TALK_DOOR_TRANSITION_SECONDS;
+  return transition;
+}
+
+function beginShelterTalkTransition(talk, state = null, direction = "in") {
+  if (!talk) {
+    return;
+  }
+  talk.transition = {
+    direction: direction === "out" ? "out" : "in",
+    startedAt: getShelterPulseTime(state),
+    duration: SHELTER_TALK_DOOR_TRANSITION_SECONDS,
+  };
+}
+
+function updateShelterTalkTransition(talk, state = null) {
+  const transition = normalizeShelterTalkTransition(talk);
+  if (!transition) {
+    return "none";
+  }
+  const elapsed = Math.max(0, getShelterPulseTime(state) - transition.startedAt);
+  if (elapsed < transition.duration) {
+    setStatus(state, "Shelter scene.");
+    return "running";
+  }
+  const direction = transition.direction;
+  talk.transition = null;
+  return direction === "out" ? "exit-complete" : "done";
+}
+
+function markShelterLineShown(talk, state = null) {
+  if (talk) {
+    talk.lineShownAt = getShelterPulseTime(state);
+  }
+}
+
+function resetShelterLineProgress(talk, state = null) {
+  if (talk) {
+    talk.lineIndex = 0;
+    markShelterLineShown(talk, state);
+  }
+}
+
+function canAdvanceShelterLine(talk) {
+  if (!isShelterScriptedTalk(talk) || talk?.pending) {
+    return false;
+  }
+  const segments = getShelterDialogueSegments(talk.line);
+  const lineIndex = clamp(Math.floor(talk.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return segments.length > 1 && lineIndex < segments.length - 1;
+}
+
+function advanceShelterLine(talk, state = null) {
+  if (!canAdvanceShelterLine(talk)) {
+    return false;
+  }
+  const segments = getShelterDialogueSegments(talk.line);
+  talk.lineIndex = clamp(Math.floor(talk.lineIndex || 0) + 1, 0, Math.max(0, segments.length - 1));
+  markShelterLineShown(talk, state);
+  return true;
+}
+
+function isShelterLineComplete(talk) {
+  if (!isShelterScriptedTalk(talk)) {
+    return true;
+  }
+  const segments = getShelterDialogueSegments(talk.line);
+  const lineIndex = clamp(Math.floor(talk.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return lineIndex >= segments.length - 1;
+}
+
+function getShelterCurrentLineAge(talk, state = null) {
+  const shownAt = Number.isFinite(talk?.lineShownAt) ? talk.lineShownAt : -999;
+  return Math.max(0, getShelterPulseTime(state) - shownAt);
+}
+
+function getShelterCurrentDialogueSegment(talk) {
+  const segments = getShelterDialogueSegments(talk?.line || "");
+  if (!segments.length) {
+    return "";
+  }
+  const lineIndex = clamp(Math.floor(talk?.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return segments[lineIndex] || segments[0] || "";
+}
+
+function getShelterLineTypeDuration(line) {
+  const length = Array.from(String(line || "").trim()).length;
+  if (!length) {
+    return 0;
+  }
+  return clamp(
+    length / SHELTER_SUBTITLE_TYPE_CHARS_PER_SECOND,
+    SHELTER_SUBTITLE_TYPE_MIN_SECONDS,
+    SHELTER_SUBTITLE_TYPE_MAX_SECONDS,
+  );
+}
+
+function getShelterCurrentLineTypeProgress(talk, state = null) {
+  if (!isShelterScriptedTalk(talk) || talk?.pending) {
+    return 1;
+  }
+  const duration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  if (duration <= 0) {
+    return 1;
+  }
+  return clamp(getShelterCurrentLineAge(talk, state) / duration, 0, 1);
+}
+
+function isShelterCurrentLineTypedComplete(talk, state = null) {
+  return getShelterCurrentLineTypeProgress(talk, state) >= 1;
+}
+
+function completeShelterCurrentLineTyping(talk, state = null) {
+  if (!isShelterScriptedTalk(talk) || !talk) {
+    return false;
+  }
+  const duration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  talk.lineShownAt = getShelterPulseTime(state) - duration;
+  return true;
+}
+
+function isShelterChoiceRevealReady(talk, state = null) {
+  if (!isShelterScriptedTalk(talk)) {
+    return true;
+  }
+  const currentLineTypeDuration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  return isShelterLineComplete(talk)
+    && isShelterCurrentLineTypedComplete(talk, state)
+    && getShelterCurrentLineAge(talk, state) >= currentLineTypeDuration + SHELTER_CHOICE_REVEAL_DELAY_SECONDS;
+}
+
+function canSelectShelterTalkChoice(talk, state = null) {
+  if (!isShelterScriptedTalk(talk)) {
+    return true;
+  }
+  return Boolean(talk?.event?.eventId)
+    && !talk?.choiceReaction
+    && isShelterChoiceRevealReady(talk, state);
+}
+
+function getShelterEventStartArtAssetKey(event, node = null) {
+  return normalizeShelterArtAssetKey(node?.backgroundAssetKey)
+    || normalizeShelterArtAssetKey(node?.artAssetKey)
+    || normalizeShelterArtAssetKey(event?.backgroundAssetKey)
+    || normalizeShelterArtAssetKey(event?.artAssetKey);
+}
+
+function getShelterChoiceReplyArtAssetKey(choice) {
+  return normalizeShelterArtAssetKey(choice?.backgroundAssetKey)
+    || normalizeShelterArtAssetKey(choice?.artAssetKey);
+}
+
+function normalizeShelterEventChoice(choice, event) {
+  if (!choice || typeof choice !== "object") {
+    return null;
+  }
+  const label = String(choice.label || "").trim();
+  if (!label) {
+    return null;
+  }
+  return {
+    ...choice,
+    label,
+    intent: String(choice.intent || event?.title || event?.id || "scripted shelter event"),
+    reply: String(choice.reply || "").trim(),
+    emotion: normalizeShelterTalkEmotion(choice.emotion, normalizeShelterTalkEmotion(event?.emotion, "neutral")),
+    eventId: event?.id || "",
+  };
+}
+
+function getShelterActiveEventNode(data, talk) {
+  const eventId = talk?.event?.eventId || "";
+  const event = getShelterScriptedEvent(data, eventId);
+  if (!event) {
+    return null;
+  }
+  return {
+    event,
+    node: getShelterScriptedEventNode(event, talk.event.nodeId),
+  };
+}
+
+function getShelterEventChoices(data, talk) {
+  const active = getShelterActiveEventNode(data, talk);
+  if (!active?.node) {
+    return null;
+  }
+  const choices = Array.isArray(active.node.choices)
+    ? active.node.choices.map((choice) => normalizeShelterEventChoice(choice, active.event)).filter(Boolean)
+    : [];
+  return choices.length ? choices.slice(0, 3) : null;
+}
+
+function startShelterScriptedEvent(talk, event, state = null) {
+  const node = getShelterScriptedEventNode(event, event?.startNodeId);
+  if (!event?.id || !node) {
+    return false;
+  }
+  talk.event = {
+    eventId: event.id,
+    nodeId: node.id,
+  };
+  talk.line = String(node.line || event.title || "").trim() || "……";
+  talk.emotion = normalizeShelterTalkEmotion(node.emotion, normalizeShelterTalkEmotion(event.emotion, "neutral"));
+  talk.eventBaseArtAssetKey = getShelterEventStartArtAssetKey(event, node);
+  talk.eventArtAssetKey = getShelterDialogueArtAssetKey(talk.emotion, talk.eventBaseArtAssetKey);
+  talk.lastChoice = null;
+  talk.reaction = null;
+  talk.choiceReaction = null;
+  talk.eventResult = null;
+  talk.pending = false;
+  talk.blockScriptedEventStart = false;
+  resetShelterLineProgress(talk, state);
+  return true;
+}
+
+function prepareShelterScriptedEvent(talk, state, data) {
+  if (!talk || !state || !data) {
+    return false;
+  }
+  if (talk.event?.eventId && getShelterActiveEventNode(data, talk)?.node) {
+    return true;
+  }
+  talk.event = null;
+  if (talk.blockScriptedEventStart) {
+    return false;
+  }
+  const event = getNextShelterScriptedEvent(state, data);
+  return event ? startShelterScriptedEvent(talk, event, state) : false;
+}
+
+function prepareShelterAutoEvent(talk, state, data) {
+  return updateShelterAutoEvent(talk, state, data) === "started";
+}
+
+function updateShelterAutoEvent(talk, state, data, bridgeHost = null) {
+  if (!talk || !state || !data || talk.event?.eventId) {
+    return "none";
+  }
+  if (talk.blockScriptedEventStart) {
+    return "none";
+  }
+  if (bridgeHost) {
+    const bridgeState = stepShelterAutoEventBridge(talk, state, data, bridgeHost);
+    if (bridgeState !== "none") {
+      return bridgeState;
+    }
+  }
+  const event = getNextAutoShelterScriptedEvent(state, data);
+  if (!event) {
+    return "none";
+  }
+  if (bridgeHost && beginShelterAutoEventBridge(bridgeHost, state, event)) {
+    setStatus(state, "Shelter scene.");
+    return "bridging";
+  }
+  return startShelterScriptedEvent(talk, event, state) ? "started" : "none";
+}
+
+function applyShelterEventChoiceEffects(state, data, playerChoice) {
+  if (!state || !playerChoice?.eventId) {
+    return false;
+  }
+  let changed = false;
+  const effects = playerChoice.effects && typeof playerChoice.effects === "object" ? playerChoice.effects : {};
+  if (Number.isFinite(effects.trust)) {
+    state.meta = state.meta && typeof state.meta === "object" ? state.meta : {};
+    state.meta.trust = clamp(Number(state.meta.trust || 0) + effects.trust, -1, 1);
+    changed = true;
+  }
+  if (Array.isArray(effects.storyFlags)) {
+    effects.storyFlags.forEach((flag) => {
+      changed = addMetaStoryFlag(state, String(flag || "")) || changed;
+    });
+  }
+
+  const event = getShelterScriptedEvent(data, playerChoice.eventId);
+  if (event && playerChoice.endEvent !== false && !playerChoice.nextNodeId) {
+    changed = addMetaStoryFlag(state, getShelterEventCompletionFlag(event)) || changed;
+  }
+  if (changed) {
+    saveMetaState(state.meta);
+  }
+  return changed;
+}
+
+function createShelterEventResult(playerChoice, event) {
+  if (!playerChoice?.eventId || !event) {
+    return null;
+  }
+  const effects = playerChoice.effects && typeof playerChoice.effects === "object" ? playerChoice.effects : {};
+  const lines = [];
+  if (Number.isFinite(effects.trust) && Number(effects.trust) !== 0) {
+    const trustDelta = Math.round(Number(effects.trust) * 100);
+    lines.push(`신뢰도 ${trustDelta > 0 ? "+" : ""}${trustDelta}`);
+  }
+  const recordsUpdated = playerChoice.endEvent !== false
+    || (Array.isArray(effects.storyFlags) && effects.storyFlags.length > 0);
+  if (recordsUpdated) {
+    lines.push("기록 갱신");
+  }
+  if (!lines.length) {
+    lines.push("변화 없음");
+  }
+  return {
+    title: "대화 종료",
+    lines,
+    choiceLabel: typeof playerChoice.label === "string" ? playerChoice.label : "",
+  };
+}
+
+function isShelterEventResultReady(talk, state = null) {
+  const currentLineTypeDuration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  return Boolean(talk?.eventResult)
+    && !talk.pending
+    && !talk.choiceReaction
+    && isShelterLineComplete(talk)
+    && isShelterCurrentLineTypedComplete(talk, state)
+    && getShelterCurrentLineAge(talk, state) >= currentLineTypeDuration + 0.24;
+}
+
+function beginShelterTalkExit(talk, state = null) {
+  if (!talk) {
+    return;
+  }
+  talk.pending = false;
+  talk.choiceReaction = null;
+  beginShelterTalkTransition(talk, state, "out");
+  setStatus(state, "Shelter scene.");
+}
+
 function isShelterRouteExit(routeExit, data) {
   const shelterLevelId = getShelterConfig(data).levelId;
   return routeExit?.kind === "shelter"
@@ -9568,8 +10332,16 @@ function createActiveShelterRestState(returnLevelId, returnEntranceId) {
       choices: [],
       choiceIndex: 0,
       lastChoice: null,
+      reaction: null,
       error: "",
+      lineIndex: 0,
+      lineShownAt: 0,
+      choiceReaction: null,
+      transition: null,
+      eventResult: null,
+      blockScriptedEventStart: false,
     },
+    autoEventBridge: null,
     recordsIndex: 0,
     backgroundIndex: 0,
   };
@@ -9581,22 +10353,39 @@ function ensureShelterTalkState(rest) {
   rest.talk.pending = Boolean(rest.talk.pending);
   rest.talk.topicIndex = Number.isFinite(rest.talk.topicIndex) ? Math.max(0, Math.floor(rest.talk.topicIndex)) : 0;
   rest.talk.line = typeof rest.talk.line === "string" ? rest.talk.line : "";
-  rest.talk.history = Array.isArray(rest.talk.history) ? rest.talk.history.slice(-8) : [];
+  rest.talk.history = Array.isArray(rest.talk.history) ? rest.talk.history.slice(-SHELTER_TALK_HISTORY_LIMIT) : [];
   rest.talk.choices = Array.isArray(rest.talk.choices) ? rest.talk.choices.slice(0, 3) : [];
   rest.talk.choiceIndex = Number.isFinite(rest.talk.choiceIndex) ? clamp(Math.floor(rest.talk.choiceIndex), 0, Math.max(0, rest.talk.choices.length - 1)) : 0;
   rest.talk.lastChoice = rest.talk.lastChoice && typeof rest.talk.lastChoice === "object" ? rest.talk.lastChoice : null;
+  rest.talk.reaction = rest.talk.reaction && typeof rest.talk.reaction === "object" ? rest.talk.reaction : null;
   rest.talk.error = typeof rest.talk.error === "string" ? rest.talk.error : "";
   rest.talk.emotion = typeof rest.talk.emotion === "string" ? rest.talk.emotion : "neutral";
+  rest.talk.lineIndex = Number.isFinite(rest.talk.lineIndex) ? Math.max(0, Math.floor(rest.talk.lineIndex)) : 0;
+  rest.talk.lineShownAt = Number.isFinite(rest.talk.lineShownAt) ? Number(rest.talk.lineShownAt) : 0;
+  rest.talk.choiceReaction = rest.talk.choiceReaction && typeof rest.talk.choiceReaction === "object" ? rest.talk.choiceReaction : null;
+  rest.talk.transition = rest.talk.transition && typeof rest.talk.transition === "object" ? rest.talk.transition : null;
+  rest.talk.eventResult = rest.talk.eventResult && typeof rest.talk.eventResult === "object" ? rest.talk.eventResult : null;
+  rest.talk.event = rest.talk.event && typeof rest.talk.event === "object" ? rest.talk.event : null;
+  rest.talk.eventBaseArtAssetKey = normalizeShelterArtAssetKey(rest.talk.eventBaseArtAssetKey);
+  rest.talk.eventArtAssetKey = normalizeShelterArtAssetKey(rest.talk.eventArtAssetKey);
+  rest.talk.blockScriptedEventStart = Boolean(rest.talk.blockScriptedEventStart);
   return rest.talk;
 }
 
-function getShelterTalkChoices(talk) {
+function getShelterTalkChoices(talk, state = null, data = null) {
+  if (state && data) {
+    prepareShelterScriptedEvent(talk, state, data);
+  }
+  const eventChoices = data ? getShelterEventChoices(data, talk) : null;
+  if (eventChoices) {
+    return eventChoices;
+  }
   const start = (Math.floor(talk.topicIndex || 0) + Math.floor(talk.requestId || 0)) % SHELTER_TALK_CHOICES.length;
   return [0, 1, 2].map((offset) => SHELTER_TALK_CHOICES[(start + offset) % SHELTER_TALK_CHOICES.length]);
 }
 
-function prepareShelterTalkChoices(talk) {
-  talk.choices = getShelterTalkChoices(talk);
+function prepareShelterTalkChoices(talk, state = null, data = null) {
+  talk.choices = getShelterTalkChoices(talk, state, data);
   talk.choiceIndex = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, talk.choices.length - 1));
   if (!talk.line) {
     talk.line = "……말해도 돼. 듣고 있어.";
@@ -9623,9 +10412,178 @@ function inferShelterTalkEmotion(text = "", playerChoice = null) {
   return "neutral";
 }
 
-function getSelectedShelterTalkChoice(talk) {
-  prepareShelterTalkChoices(talk);
+function getSelectedShelterTalkChoice(talk, state = null, data = null) {
+  prepareShelterTalkChoices(talk, state, data);
   return talk.choices[clamp(Math.floor(talk.choiceIndex || 0), 0, talk.choices.length - 1)] || talk.choices[0] || null;
+}
+
+function getShelterChoiceReply(playerChoice, talk) {
+  if (!playerChoice) {
+    return "……말해도 돼. 듣고 있어.";
+  }
+  if (Array.isArray(playerChoice.replies) && playerChoice.replies.length) {
+    const index = Math.abs(Math.floor(talk?.requestId || 0)) % playerChoice.replies.length;
+    return String(playerChoice.replies[index] || "").trim();
+  }
+  if (playerChoice.nextNodeId && !String(playerChoice.reply || "").trim()) {
+    return "";
+  }
+  return String(playerChoice.reply || "").trim() || "응. 들었어. 그 말은 놓치지 않을게.";
+}
+
+function getShelterChoiceEmotion(playerChoice, reply = "") {
+  const emotion = typeof playerChoice?.emotion === "string" ? playerChoice.emotion : "";
+  return ["neutral", "anxious", "warm", "tired", "hurt", "angry"].includes(emotion)
+    ? emotion
+    : inferShelterTalkEmotion(reply, playerChoice);
+}
+
+function getShelterChoiceDisplay(talk, playerChoice, data = null) {
+  const reply = getShelterChoiceReply(playerChoice, talk);
+  const emotion = getShelterChoiceEmotion(playerChoice, reply);
+  const event = playerChoice?.eventId ? getShelterScriptedEvent(data, playerChoice.eventId) : null;
+  const nextNode = playerChoice?.nextNodeId ? getShelterScriptedEventNode(event, playerChoice.nextNodeId) : null;
+  const nextNodeLine = String(nextNode?.line || "").trim();
+  const showNextNode = Boolean(nextNode && !reply && nextNodeLine);
+  const displayLine = showNextNode ? nextNodeLine : reply;
+  const displayEmotion = showNextNode
+    ? normalizeShelterTalkEmotion(nextNode.emotion, emotion)
+    : emotion;
+  const inheritedArtAssetKey = normalizeShelterArtAssetKey(talk?.eventBaseArtAssetKey)
+    || normalizeShelterArtAssetKey(talk?.eventArtAssetKey)
+    || getShelterEventStartArtAssetKey(event, nextNode);
+  const baseArtAssetKey = showNextNode
+    ? (getShelterEventStartArtAssetKey(event, nextNode) || inheritedArtAssetKey)
+    : inheritedArtAssetKey;
+  const eventArtAssetKey = getShelterChoiceReplyArtAssetKey(playerChoice)
+    || getShelterDialogueArtAssetKey(displayEmotion, baseArtAssetKey);
+  return {
+    reply,
+    emotion,
+    event,
+    nextNode,
+    showNextNode,
+    displayLine,
+    displayEmotion,
+    eventArtAssetKey,
+  };
+}
+
+function normalizeShelterChoiceReaction(talk) {
+  const reaction = talk?.choiceReaction;
+  if (!reaction || typeof reaction !== "object" || !reaction.playerChoice) {
+    if (talk && reaction) {
+      talk.choiceReaction = null;
+    }
+    return null;
+  }
+  reaction.duration = Number.isFinite(reaction.duration)
+    ? clamp(Number(reaction.duration), 0.18, 1.4)
+    : SHELTER_CHOICE_REACTION_SECONDS;
+  reaction.startedAt = Number.isFinite(reaction.startedAt) ? reaction.startedAt : 0;
+  reaction.topic = typeof reaction.topic === "string" ? reaction.topic : "";
+  return reaction;
+}
+
+function beginShelterChoiceReaction(talk, playerChoice, topic = "", state = null, data = null) {
+  if (!talk || !playerChoice?.eventId) {
+    return false;
+  }
+  const display = getShelterChoiceDisplay(talk, playerChoice, data);
+  const event = display.event;
+  const rawDuration = Number(event?.choiceReactionSeconds ?? playerChoice.choiceReactionSeconds);
+  const duration = Number.isFinite(rawDuration)
+    ? clamp(rawDuration, 0.18, 1.4)
+    : SHELTER_CHOICE_REACTION_SECONDS;
+  talk.choiceReaction = {
+    playerChoice,
+    topic,
+    startedAt: getShelterPulseTime(state),
+    duration,
+  };
+  talk.pending = true;
+  talk.error = "";
+  talk.eventResult = null;
+  talk.lastChoice = playerChoice;
+  talk.emotion = display.displayEmotion;
+  talk.eventArtAssetKey = display.eventArtAssetKey || talk.eventArtAssetKey;
+  talk.reaction = {
+    emotion: display.displayEmotion,
+    startedAt: getShelterPulseTime(state),
+    requestId: talk.requestId,
+    choice: playerChoice?.label || "",
+  };
+  return true;
+}
+
+function stepShelterChoiceReaction(talk, state = null, data = null) {
+  const reaction = normalizeShelterChoiceReaction(talk);
+  if (!reaction) {
+    return false;
+  }
+  const elapsed = Math.max(0, getShelterPulseTime(state) - reaction.startedAt);
+  if (elapsed < reaction.duration) {
+    setStatus(state, "Shelter scene.");
+    return true;
+  }
+  const playerChoice = reaction.playerChoice;
+  const topic = reaction.topic;
+  talk.choiceReaction = null;
+  commitShelterChoiceReply(talk, playerChoice, topic, state, data);
+  return true;
+}
+
+function commitShelterChoiceReply(talk, playerChoice, topic = "", state = null, data = null) {
+  const display = getShelterChoiceDisplay(talk, playerChoice, data);
+  const { event, nextNode, displayLine, displayEmotion, eventArtAssetKey } = display;
+  talk.pending = false;
+  talk.error = "";
+  talk.line = displayLine;
+  talk.lastChoice = playerChoice;
+  talk.emotion = displayEmotion;
+  talk.choiceReaction = null;
+  talk.eventResult = null;
+  resetShelterLineProgress(talk, state);
+  talk.eventArtAssetKey = eventArtAssetKey;
+  talk.reaction = {
+    emotion: displayEmotion,
+    startedAt: getShelterPulseTime(state),
+    requestId: talk.requestId,
+    choice: playerChoice?.label || "",
+  };
+  if (playerChoice?.eventId) {
+    applyShelterEventChoiceEffects(state, data, playerChoice);
+    if (playerChoice.nextNodeId) {
+      talk.event = {
+        eventId: playerChoice.eventId,
+        nodeId: playerChoice.nextNodeId,
+      };
+      talk.eventBaseArtAssetKey = getShelterEventStartArtAssetKey(event, nextNode) || talk.eventBaseArtAssetKey;
+      talk.eventArtAssetKey = talk.eventArtAssetKey || getShelterEventStartArtAssetKey(event, nextNode);
+    } else if (playerChoice.endEvent !== false) {
+      talk.event = null;
+      talk.blockScriptedEventStart = true;
+      talk.eventResult = createShelterEventResult(playerChoice, event);
+    }
+  }
+  if (playerChoice?.label) {
+    talk.history.push({ speaker: "drone", text: playerChoice.label });
+  }
+  if (displayLine) {
+    talk.history.push({ speaker: "shelter", text: displayLine });
+  }
+  talk.history = talk.history.slice(-SHELTER_TALK_HISTORY_LIMIT);
+  prepareShelterTalkChoices(talk, state, data);
+  speakFaceOffLine(displayLine, {
+    scene: "shelter",
+    emotion: displayEmotion,
+    topic: playerChoice?.intent || topic,
+    choice: playerChoice?.label || "",
+  });
+}
+
+function submitShelterChatText() {
+  return false;
 }
 
 function queueShelterTalkLine(state, data, playerChoice = null) {
@@ -9636,76 +10594,14 @@ function queueShelterTalkLine(state, data, playerChoice = null) {
   }
   const talk = ensureShelterTalkState(rest);
   const topic = SHELTER_TALK_TOPICS[talk.topicIndex % SHELTER_TALK_TOPICS.length];
-  const variation = SHELTER_TALK_VARIATIONS[(talk.requestId + talk.topicIndex) % SHELTER_TALK_VARIATIONS.length];
   talk.topicIndex = (talk.topicIndex + 1) % SHELTER_TALK_TOPICS.length;
-  talk.pending = true;
-  talk.error = "";
-  talk.line = "......";
-  talk.lastChoice = playerChoice;
-  talk.emotion = inferShelterTalkEmotion("", playerChoice);
-  const requestId = talk.requestId + 1;
-  talk.requestId = requestId;
-
-  const recentLines = talk.history.map((entry) => entry?.text || "").filter(Boolean);
-  const requestHistory = playerChoice
-    ? [...talk.history, { speaker: "drone", text: playerChoice.label }]
-    : talk.history;
-  const requestPayload = {
-    data,
-    rest: { day: run.day },
-    topic: playerChoice?.intent || topic,
-    history: requestHistory,
-    avoid: recentLines,
-    seed: Date.now() + requestId,
-    variation,
-    playerChoice,
-  };
-
-  requestShelterLine(requestPayload).then(async (reply) => {
-    const currentRest = state.run?.shelterRest;
-    const currentTalk = currentRest ? ensureShelterTalkState(currentRest) : null;
-    if (!currentRest?.active || currentRest.phase !== "talk" || currentTalk.requestId !== requestId) {
-      return;
-    }
-    if (reply && recentLines.includes(reply)) {
-      reply = await requestShelterLine({
-        ...requestPayload,
-        topic: `${topic}. 반드시 방금과 다른 문장으로 말한다.`,
-        seed: Date.now() + requestId + 7919,
-        variation: "strongly different wording",
-      });
-    }
-    if (!reply) {
-      currentTalk.pending = false;
-      currentTalk.error = "local AI empty";
-      currentTalk.line = "아직 말이 잘 이어지지 않아. 다시 한 번 말을 걸어줘.";
-      currentTalk.emotion = "anxious";
-      return;
-    }
-    currentTalk.pending = false;
-    currentTalk.line = reply;
-    currentTalk.emotion = inferShelterTalkEmotion(reply, playerChoice);
-    if (playerChoice) {
-      currentTalk.history.push({ speaker: "drone", text: playerChoice.label });
-    }
-    currentTalk.history.push({ speaker: "shelter", text: reply });
-    currentTalk.history = currentTalk.history.slice(-8);
-    prepareShelterTalkChoices(currentTalk);
-    speakFaceOffLine(reply, {
-      scene: "shelter",
-      emotion: currentTalk.emotion,
-      topic: playerChoice?.intent || topic,
-      choice: playerChoice?.label || "",
-    });
-  }).catch(() => {
-    const currentTalk = state.run?.shelterRest ? ensureShelterTalkState(state.run.shelterRest) : null;
-    if (currentTalk?.requestId === requestId) {
-      currentTalk.pending = false;
-      currentTalk.error = "local AI offline";
-      currentTalk.line = "지금은 신호가 흐려. 조금 있다가 다시 말하자.";
-      currentTalk.emotion = "anxious";
-    }
-  });
+  talk.requestId += 1;
+  if (beginShelterChoiceReaction(talk, playerChoice, topic, state, data)) {
+    setStatus(state, "Shelter scene.");
+    return;
+  }
+  commitShelterChoiceReply(talk, playerChoice, topic, state, data);
+  setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
 }
 
 function ensureHomeShelterTalkState(state) {
@@ -9717,88 +10613,37 @@ function ensureHomeShelterTalkState(state) {
   talk.pending = Boolean(talk.pending);
   talk.topicIndex = Number.isFinite(talk.topicIndex) ? Math.max(0, Math.floor(talk.topicIndex)) : 0;
   talk.line = typeof talk.line === "string" ? talk.line : "";
-  talk.history = Array.isArray(talk.history) ? talk.history.slice(-8) : [];
+  talk.history = Array.isArray(talk.history) ? talk.history.slice(-SHELTER_TALK_HISTORY_LIMIT) : [];
   talk.choices = Array.isArray(talk.choices) ? talk.choices.slice(0, 3) : [];
   talk.choiceIndex = Number.isFinite(talk.choiceIndex) ? clamp(Math.floor(talk.choiceIndex), 0, Math.max(0, talk.choices.length - 1)) : 0;
   talk.lastChoice = talk.lastChoice && typeof talk.lastChoice === "object" ? talk.lastChoice : null;
+  talk.reaction = talk.reaction && typeof talk.reaction === "object" ? talk.reaction : null;
   talk.error = typeof talk.error === "string" ? talk.error : "";
   talk.emotion = typeof talk.emotion === "string" ? talk.emotion : "neutral";
+  talk.lineIndex = Number.isFinite(talk.lineIndex) ? Math.max(0, Math.floor(talk.lineIndex)) : 0;
+  talk.lineShownAt = Number.isFinite(talk.lineShownAt) ? Number(talk.lineShownAt) : 0;
+  talk.choiceReaction = talk.choiceReaction && typeof talk.choiceReaction === "object" ? talk.choiceReaction : null;
+  talk.transition = talk.transition && typeof talk.transition === "object" ? talk.transition : null;
+  talk.eventResult = talk.eventResult && typeof talk.eventResult === "object" ? talk.eventResult : null;
+  talk.event = talk.event && typeof talk.event === "object" ? talk.event : null;
+  talk.eventBaseArtAssetKey = normalizeShelterArtAssetKey(talk.eventBaseArtAssetKey);
+  talk.eventArtAssetKey = normalizeShelterArtAssetKey(talk.eventArtAssetKey);
+  talk.blockScriptedEventStart = Boolean(talk.blockScriptedEventStart);
   return talk;
 }
 
 function queueHomeShelterTalkLine(state, data, playerChoice = null) {
   const talk = ensureHomeShelterTalkState(state);
   const topic = SHELTER_TALK_TOPICS[talk.topicIndex % SHELTER_TALK_TOPICS.length];
-  const variation = SHELTER_TALK_VARIATIONS[(talk.requestId + talk.topicIndex) % SHELTER_TALK_VARIATIONS.length];
   talk.topicIndex = (talk.topicIndex + 1) % SHELTER_TALK_TOPICS.length;
   talk.active = true;
-  talk.pending = true;
-  talk.error = "";
-  talk.line = "......";
-  talk.lastChoice = playerChoice;
-  talk.emotion = inferShelterTalkEmotion("", playerChoice);
-  const requestId = talk.requestId + 1;
-  talk.requestId = requestId;
-
-  const recentLines = talk.history.map((entry) => entry?.text || "").filter(Boolean);
-  const requestHistory = playerChoice
-    ? [...talk.history, { speaker: "drone", text: playerChoice.label }]
-    : talk.history;
-  const requestPayload = {
-    data,
-    rest: { day: state.run?.day ?? state.meta?.completedRuns ?? 1 },
-    topic: playerChoice?.intent || topic,
-    history: requestHistory,
-    avoid: recentLines,
-    seed: Date.now() + requestId,
-    variation,
-    playerChoice,
-  };
-
-  requestShelterLine(requestPayload).then(async (reply) => {
-    const currentTalk = ensureHomeShelterTalkState(state);
-    if (!currentTalk.active || currentTalk.requestId !== requestId) {
-      return;
-    }
-    if (reply && recentLines.includes(reply)) {
-      reply = await requestShelterLine({
-        ...requestPayload,
-        topic: `${topic}. 반드시 방금과 다른 문장으로 말한다.`,
-        seed: Date.now() + requestId + 7919,
-        variation: "strongly different wording",
-      });
-    }
-    if (!reply) {
-      currentTalk.pending = false;
-      currentTalk.error = "local AI empty";
-      currentTalk.line = "아직 말이 잘 이어지지 않아. 다시 한 번 말을 걸어줘.";
-      currentTalk.emotion = "anxious";
-      return;
-    }
-    currentTalk.pending = false;
-    currentTalk.line = reply;
-    currentTalk.emotion = inferShelterTalkEmotion(reply, playerChoice);
-    if (playerChoice) {
-      currentTalk.history.push({ speaker: "drone", text: playerChoice.label });
-    }
-    currentTalk.history.push({ speaker: "shelter", text: reply });
-    currentTalk.history = currentTalk.history.slice(-8);
-    prepareShelterTalkChoices(currentTalk);
-    speakFaceOffLine(reply, {
-      scene: "shelter",
-      emotion: currentTalk.emotion,
-      topic: playerChoice?.intent || topic,
-      choice: playerChoice?.label || "",
-    });
-  }).catch(() => {
-    const currentTalk = ensureHomeShelterTalkState(state);
-    if (currentTalk.requestId === requestId) {
-      currentTalk.pending = false;
-      currentTalk.error = "local AI offline";
-      currentTalk.line = "지금은 신호가 흐려. 조금 있다가 다시 말하자.";
-      currentTalk.emotion = "anxious";
-    }
-  });
+  talk.requestId += 1;
+  if (beginShelterChoiceReaction(talk, playerChoice, topic, state, data)) {
+    setStatus(state, "Shelter scene.");
+    return;
+  }
+  commitShelterChoiceReply(talk, playerChoice, topic, state, data);
+  setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
 }
 
 function resetShelterPhoto(rest) {
@@ -10546,6 +11391,17 @@ function updateShelterRestMode(state, data, dt) {
       rest.timer = 0;
       rest.menuIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1);
       setStatus(state, "?쇰궃泥??湲?");
+      const talk = ensureShelterTalkState(rest);
+      const autoEventState = updateShelterAutoEvent(talk, state, data, rest);
+      if (autoEventState === "started") {
+        rest.phase = "talk";
+        rest.timer = 0;
+        prepareShelterTalkChoices(talk, state, data);
+        beginShelterTalkTransition(talk, state, "in");
+        setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      } else if (autoEventState === "bridging") {
+        setStatus(state, "Shelter scene.");
+      }
       saveCurrentGame(state, data);
     } else {
       setStatus(state, "?쇰궃泥??먯뇙 以?");
@@ -10555,6 +11411,22 @@ function updateShelterRestMode(state, data, dt) {
   }
 
   if (rest.phase === "menu") {
+    const talk = ensureShelterTalkState(rest);
+    const autoEventState = updateShelterAutoEvent(talk, state, data, rest);
+    if (autoEventState === "started") {
+      rest.phase = "talk";
+      rest.timer = 0;
+      prepareShelterTalkChoices(talk, state, data);
+      beginShelterTalkTransition(talk, state, "in");
+      setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (autoEventState === "bridging") {
+      setStatus(state, "Shelter scene.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
     if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
       rest.menuIndex = (Math.max(0, Math.floor(rest.menuIndex || 0)) + SHELTER_MENU_ITEMS.length - 1) % SHELTER_MENU_ITEMS.length;
     }
@@ -10570,8 +11442,14 @@ function updateShelterRestMode(state, data, dt) {
       if (item === "talk") {
         rest.phase = "talk";
         rest.timer = 0;
-        prepareShelterTalkChoices(ensureShelterTalkState(rest));
-        setStatus(state, "Shelter talk. W/S choose. Z select.");
+        const talk = ensureShelterTalkState(rest);
+        talk.blockScriptedEventStart = false;
+        prepareShelterTalkChoices(talk, state, data);
+        if (!talk.line) {
+          talk.line = "……말해도 돼. 듣고 있어.";
+        }
+        beginShelterTalkTransition(talk, state, "in");
+        setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
       } else if (item === "photo") {
         rest.phase = "photo";
         rest.timer = 0;
@@ -10605,23 +11483,69 @@ function updateShelterRestMode(state, data, dt) {
 
   if (rest.phase === "talk") {
     const talk = ensureShelterTalkState(rest);
-    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+    prepareShelterTalkChoices(talk, state, data);
+    const transitionState = updateShelterTalkTransition(talk, state);
+    if (transitionState === "running") {
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (transitionState === "exit-complete") {
       rest.phase = "menu";
       rest.timer = 0;
       talk.pending = false;
-    } else if (!talk.pending) {
-      prepareShelterTalkChoices(talk);
-      if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
-        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+      talk.choiceReaction = null;
+      talk.eventResult = null;
+      setStatus(state, "Shelter menu.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (stepShelterChoiceReaction(talk, state, data)) {
+      setStatus(state, "Shelter scene.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (isShelterEventResultReady(talk, state)) {
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+        beginShelterTalkExit(talk, state);
+      } else {
+        setStatus(state, "Shelter result. Z close.");
       }
-      if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
-        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
-      }
-      if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
-        queueShelterTalkLine(state, data, getSelectedShelterTalkChoice(talk));
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      beginShelterTalkExit(talk, state);
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (!talk.line) {
+      talk.line = "……말해도 돼. 듣고 있어.";
+    }
+    if (!talk.pending) {
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
+        if (!isShelterCurrentLineTypedComplete(talk, state)) {
+          completeShelterCurrentLineTyping(talk, state);
+          updateAutoSave(state, data, dt);
+          return true;
+        }
+        if (advanceShelterLine(talk, state)) {
+          updateAutoSave(state, data, dt);
+          return true;
+        }
+        if (canSelectShelterTalkChoice(talk, state)) {
+          const playerChoice = getSelectedShelterTalkChoice(talk, state, data);
+          queueShelterTalkLine(state, data, playerChoice);
+        }
+      } else if (isShelterLineComplete(talk) && canSelectShelterTalkChoice(talk, state)) {
+        if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+        }
+        if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+        }
       }
     }
-    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z select. Esc back.");
+    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z listen. Esc back.");
     updateAutoSave(state, data, dt);
     return true;
   }
@@ -10947,28 +11871,97 @@ function updateShelter(state) {
   state.shelter = state.shelter && typeof state.shelter === "object" ? state.shelter : { menuIndex: 0 };
   const talk = ensureHomeShelterTalkState(state);
 
+  if (!talk.active) {
+    const autoEventState = updateShelterAutoEvent(talk, state, state.data, state.shelter);
+    if (autoEventState === "started") {
+      talk.active = true;
+      prepareShelterTalkChoices(talk, state, state.data);
+      beginShelterTalkTransition(talk, state, "in");
+      setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      return;
+    }
+    if (autoEventState === "bridging") {
+      setStatus(state, "Shelter scene.");
+      return;
+    }
+  }
+
   if (talk.active) {
-    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+    prepareShelterTalkChoices(talk, state, state.data);
+    const transitionState = updateShelterTalkTransition(talk, state);
+    if (transitionState === "running") {
+      return;
+    }
+    if (transitionState === "exit-complete") {
       talk.active = false;
       talk.pending = false;
+      talk.choiceReaction = null;
+      talk.eventResult = null;
       setStatus(state, "Shelter menu.");
       return;
     }
+    if (stepShelterChoiceReaction(talk, state, state.data)) {
+      setStatus(state, "Shelter scene.");
+      return;
+    }
+    if (isShelterEventResultReady(talk, state)) {
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+        beginShelterTalkExit(talk, state);
+      } else {
+        setStatus(state, "Shelter result. Z close.");
+      }
+      return;
+    }
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      beginShelterTalkExit(talk, state);
+      return;
+    }
     if (!talk.pending) {
-      prepareShelterTalkChoices(talk);
-      if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
-        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+      if (!talk.line) {
+        talk.line = "……말해도 돼. 듣고 있어.";
       }
-      if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
-        talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
-      }
-      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
-        queueHomeShelterTalkLine(state, state.data, getSelectedShelterTalkChoice(talk));
-        setStatus(state, "Shelter talk. Waiting...");
-        return;
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
+        if (!isShelterCurrentLineTypedComplete(talk, state)) {
+          completeShelterCurrentLineTyping(talk, state);
+          return;
+        }
+        if (advanceShelterLine(talk, state)) {
+          return;
+        }
+        if (canSelectShelterTalkChoice(talk, state)) {
+          const playerChoice = getSelectedShelterTalkChoice(talk, state, state.data);
+          queueHomeShelterTalkLine(state, state.data, playerChoice);
+          return;
+        }
+      } else if (isShelterLineComplete(talk) && canSelectShelterTalkChoice(talk, state)) {
+        if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+        }
+        if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+        }
       }
     }
-    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z select. Esc back.");
+    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z listen. Esc back.");
+    return;
+  }
+
+  const pointerAction = getShelterHomePointerAction(state);
+  if (pointerAction) {
+    state.mouse.primaryJustPressed = false;
+    if (pointerAction === "talk") {
+      talk.active = true;
+      talk.blockScriptedEventStart = false;
+      prepareShelterTalkChoices(talk, state, state.data);
+      if (!talk.line) {
+        talk.line = "……말해도 돼. 듣고 있어.";
+      }
+      beginShelterTalkTransition(talk, state, "in");
+      setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      return;
+    }
+    startNewSavedRun(state, state.data);
+    setStatus(state, "異쒓꺽 以?");
     return;
   }
 
@@ -10989,8 +11982,13 @@ function updateShelter(state) {
     const selected = SHELTER_HOME_MENU_ITEMS[clamp(Math.floor(state.shelter.menuIndex || 0), 0, SHELTER_HOME_MENU_ITEMS.length - 1)];
     if (selected === "talk") {
       talk.active = true;
-      prepareShelterTalkChoices(talk);
-      setStatus(state, "Shelter talk. W/S choose. Z select.");
+      talk.blockScriptedEventStart = false;
+      prepareShelterTalkChoices(talk, state, state.data);
+      if (!talk.line) {
+        talk.line = "……말해도 돼. 듣고 있어.";
+      }
+      beginShelterTalkTransition(talk, state, "in");
+      setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
       return;
     }
     startNewSavedRun(state, state.data);
@@ -11139,8 +12137,48 @@ function updateGameOver(state) {
   }
 }
 
+function getShelterHomePointerAction(state) {
+  const mouse = state.mouse;
+  if (!mouse?.primaryJustPressed || mouse.onCanvas === false) {
+    return null;
+  }
+  const x = Number(mouse.screenX);
+  const y = Number(mouse.screenY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  const rowX = 44;
+  const rowY = 96;
+  const rowW = 210;
+  const rowH = 38;
+  const rowGap = 47;
+  for (let index = 0; index < SHELTER_HOME_MENU_ITEMS.length; index += 1) {
+    const top = rowY + index * rowGap;
+    if (x >= rowX && x <= rowX + rowW && y >= top && y <= top + rowH) {
+      state.shelter.menuIndex = index;
+      return SHELTER_HOME_MENU_ITEMS[index];
+    }
+  }
+  return null;
+}
+
 export function bindInput(state) {
+  const isTextInputTarget = (target) => {
+    const tagName = String(target?.tagName || "").toLowerCase();
+    return Boolean(target?.isContentEditable)
+      || tagName === "input"
+      || tagName === "textarea"
+      || tagName === "select";
+  };
+
+  window.addEventListener(SHELTER_CHAT_SUBMIT_EVENT, (event) => {
+    submitShelterChatText(state, event.detail?.text || "");
+  });
+
   window.addEventListener("keydown", (event) => {
+    if (isTextInputTarget(event.target)) {
+      return;
+    }
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "CapsLock", "Digit1", "Digit2", "Digit8", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "Minus", "Equal", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyE", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
@@ -11155,6 +12193,9 @@ export function bindInput(state) {
   });
 
   window.addEventListener("keyup", (event) => {
+    if (isTextInputTarget(event.target)) {
+      return;
+    }
     if (typeof event.getModifierState === "function") {
       state.capsLockActive = event.getModifierState("CapsLock");
     }
@@ -11214,6 +12255,9 @@ export function updateGame(state, data, dt) {
   } else if (state.scene === SCENES.GAME_OVER) {
     updateGameOver(state);
   }
+
+  updateShelterMusic(state);
+  updateLoopingAudioFades();
 
   if (state.mouse) {
     state.mouse.primaryJustPressed = false;

@@ -88,7 +88,8 @@ export function registerAudioElement(element, channel, baseVolume = 1) {
   window.__silentPassageAudioElements.add(element);
   element.dataset.audioChannel = channel;
   element.dataset.baseVolume = String(clampVolume(baseVolume, 1));
-  element.volume = getAudioChannelVolume(channel, baseVolume);
+  const fadeVolume = clampVolume(element.dataset.fadeVolume ?? 1, 1);
+  element.volume = getAudioChannelVolume(channel, baseVolume * fadeVolume);
 }
 
 export function updateActiveAudioElements() {
@@ -99,9 +100,10 @@ export function updateActiveAudioElements() {
     if (!element?.dataset) {
       return;
     }
+    const fadeVolume = clampVolume(element.dataset.fadeVolume ?? 1, 1);
     element.volume = getAudioChannelVolume(
       element.dataset.audioChannel || "master",
-      Number(element.dataset.baseVolume ?? 1),
+      Number(element.dataset.baseVolume ?? 1) * fadeVolume,
     );
   });
 }

@@ -147,6 +147,48 @@ export const GAME_DATA = {
     },
     "shelterEmotionAngry": {
       "src": "./assets/ui/shelter-emotions/type07a-angry.png?v=20260617-5"
+    },
+    "shelterMemorialNeutral": {
+      "src": "./assets/ui/shelter-memorial/type07a-memorial-lobby-v1.png?v=20260618-memorial-lobby-v1"
+    },
+    "shelterMemorialAnxious": {
+      "src": "./assets/ui/shelter-memorial/type07a-memorial-anxious-v1.png?v=20260618-memorial-variants-v1"
+    },
+    "shelterMemorialWarm": {
+      "src": "./assets/ui/shelter-memorial/type07a-memorial-warm-v1.png?v=20260618-memorial-variants-v1"
+    },
+    "shelterMemorialTired": {
+      "src": "./assets/ui/shelter-memorial/type07a-memorial-tired-v1.png?v=20260618-memorial-variants-v1"
+    },
+    "shelterMemorialHurt": {
+      "src": "./assets/ui/shelter-memorial/type07a-memorial-hurt-v1.png?v=20260618-memorial-variants-v1"
+    },
+    "shelterMemorialAngry": {
+      "src": "./assets/ui/shelter-memorial/type07a-memorial-angry-v1.png?v=20260618-memorial-variants-v1"
+    },
+    "shelterFirstArrivalCg": {
+      "src": "./assets/cg/shelter-home-charm-01.png?v=20260618-home-charm-2"
+    },
+    "shelterHomeCharmCg": {
+      "src": "./assets/cg/shelter-home-charm-01.png?v=20260618-home-charm-2"
+    },
+    "shelterHomeNeutralCg": {
+      "src": "./assets/cg/shelter-home-emotion-neutral-01.png?v=20260619-emotion-cg-v1"
+    },
+    "shelterHomeAnxiousCg": {
+      "src": "./assets/cg/shelter-home-emotion-anxious-01.png?v=20260619-emotion-cg-v1"
+    },
+    "shelterHomeWarmCg": {
+      "src": "./assets/cg/shelter-home-emotion-warm-01.png?v=20260619-emotion-cg-v1"
+    },
+    "shelterHomeTiredCg": {
+      "src": "./assets/cg/shelter-home-emotion-tired-01.png?v=20260619-emotion-cg-v1"
+    },
+    "shelterHomeHurtCg": {
+      "src": "./assets/cg/shelter-home-emotion-hurt-01.png?v=20260619-emotion-cg-v1"
+    },
+    "shelterHomeAngryCg": {
+      "src": "./assets/cg/shelter-home-emotion-angry-01.png?v=20260619-emotion-cg-v1"
     }
   },
   "scale": {
@@ -1441,6 +1483,325 @@ GAME_DATA.shelter = {
     { id: "shelter-photo-day-02", day: 2, label: "작업대", assetKey: "shelterPhotoDay02" },
     { id: "shelter-photo-day-03", day: 3, label: "황혼 귀환", assetKey: "shelterPhotoDay03" },
     { id: "shelter-photo-day-04", day: 4, label: "우천 대기", assetKey: "shelterPhotoDay04" }
+  ],
+  events: [
+    {
+      id: "shelter-first-arrival-01",
+      title: "첫 쉘터 진입",
+      once: true,
+      completionFlag: "shelter-event:shelter-first-arrival-01",
+      trigger: {
+        autoStart: true,
+        missingStoryFlag: "shelter-event:shelter-first-arrival-01"
+      },
+      backgroundAssetKey: "shelterFirstArrivalCg",
+      startNodeId: "arrival",
+      nodes: [
+        {
+          id: "arrival",
+          emotion: "anxious",
+          line: "쉘터 문이 닫히고, 안쪽 조명이 천천히 켜진다.\nType-07A가 주변을 둘러본다.\n“와... 여기 생각보다 멀쩡하네.”",
+          choices: [
+            {
+              label: "계속 들어준다",
+              intent: "listen as she settles into the shelter",
+              emotion: "warm",
+              nextNodeId: "cable-check"
+            }
+          ]
+        },
+        {
+          id: "cable-check",
+          emotion: "warm",
+          line: "“아빠, 여기 우리 임시 집 같은 거야? 나 그런 거 좀 좋은데.”\n“근데 케이블 정리 진짜 엉망이다. 이거 아빠가 한 거지?”\n“아니, 뭐... 싫다는 건 아니고. 아빠 냄새 나서 좀 안심돼.”",
+          choices: [
+            {
+              label: "여기선 쉬어도 돼",
+              intent: "let her rest in the shelter",
+              emotion: "warm",
+              reply: "“진짜? 그럼 나 5분만 뻗을래. 아빠, 깨우지 마.”\n“아, 위험하면 깨워. 그건 깨워야 돼.”",
+              effects: {
+                trust: 0.03,
+                storyFlags: ["shelter-first-rest"]
+              }
+            },
+            {
+              label: "먼저 상태부터 보자",
+              intent: "check her condition first",
+              emotion: "tired",
+              reply: "“아, 바로 점검이야? 완전 아빠다.”\n“알겠어. 대신 끝나면 쉬는 거야. 약속.”",
+              effects: {
+                storyFlags: ["shelter-first-checkup"]
+              }
+            },
+            {
+              label: "무서웠지",
+              intent: "comfort her after the escape",
+              emotion: "warm",
+              reply: "“조금? ...아니, 좀 많이.”\n“근데 아빠 목소리 들리니까 괜찮아졌어. 진짜로.”",
+              effects: {
+                trust: 0.02,
+                storyFlags: ["shelter-first-comfort"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "shelter-power-warmup-01",
+      title: "첫 전원 점검",
+      once: true,
+      completionFlag: "shelter-event:shelter-power-warmup-01",
+      trigger: {
+        autoStart: true,
+        requiredStoryFlag: "shelter-event:shelter-first-arrival-01",
+        missingStoryFlag: "shelter-event:shelter-power-warmup-01"
+      },
+      backgroundAssetKey: "shelterHomeCharmCg",
+      transitionLine: "잠깐 조용해진 뒤, 벽 안쪽에서 낮은 진동이 들린다.",
+      transitionSeconds: 1.15,
+      transitionEmotion: "anxious",
+      startNodeId: "power-panel",
+      nodes: [
+        {
+          id: "power-panel",
+          emotion: "anxious",
+          line: "쉘터 조명이 한 번 깜빡이고, 환풍기가 낮게 돌기 시작한다.\nType-07A가 배전함 앞에 쪼그려 앉아 있다.\n“아빠, 이거 불빛 색깔 좀 불안한데?”\n“초록이면 정상인 거지? 근데 지금 약간... 라임맛 노란색이야.”",
+          choices: [
+            {
+              label: "천천히 봐도 돼",
+              intent: "calm her down while she checks the shelter power",
+              emotion: "warm",
+              reply: "“오케이. 그 말 좋다.”\n“나 지금 엄청 침착한 척하는 중이었거든. 티 안 났지?”\n“아빠가 옆에서 봐주면 나 할 수 있어.”",
+              effects: {
+                trust: 0.03,
+                storyFlags: ["shelter-power-calm"]
+              }
+            },
+            {
+              label: "위쪽 스위치부터 확인해",
+              intent: "guide her through the power panel check",
+              emotion: "tired",
+              reply: "“아, 바로 지시 들어오는 거 봐. 완전 아빠 모드.”\n“근데 맞는 말이라서 짜증나. 위쪽부터 볼게.”\n“끝나면 칭찬해줘. 그건 계약임.”",
+              effects: {
+                storyFlags: ["shelter-power-check"]
+              }
+            },
+            {
+              label: "무서우면 내가 할게",
+              intent: "offer to take over if she is scared",
+              emotion: "warm",
+              reply: "“아니야, 나도 할 수 있어.”\n“근데 그렇게 말해주는 건 좋아. 엄청 좋아.”\n“아빠, 나 손 떨리면 그냥 모른 척해줘.”",
+              effects: {
+                trust: 0.02,
+                storyFlags: ["shelter-power-support"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "shelter-home-charm-01",
+      title: "첫 장식",
+      once: true,
+      completionFlag: "shelter-event:shelter-home-charm-01",
+      trigger: {
+        autoStart: true,
+        requiredStoryFlag: "shelter-event:shelter-power-warmup-01",
+        missingStoryFlag: "shelter-event:shelter-home-charm-01"
+      },
+      backgroundAssetKey: "shelterHomeCharmCg",
+      transitionLine: "점검이 끝나자, 좁은 방 안에 잠깐 조용한 틈이 생긴다.",
+      transitionSeconds: 1.15,
+      transitionEmotion: "warm",
+      startNodeId: "charm-found",
+      nodes: [
+        {
+          id: "charm-found",
+          emotion: "warm",
+          line: "Type-07A가 공구함 옆에서 작은 장식 스티커를 꺼낸다.\n수리한 장치 위에 대 보다가, 슬쩍 관리자를 본다.\n“아빠, 이거 붙여도 돼?”",
+          choices: [
+            {
+              label: "계속 봐준다",
+              intent: "let her show the small charm she wants to add to the shelter",
+              emotion: "warm",
+              nextNodeId: "make-it-home"
+            }
+          ]
+        },
+        {
+          id: "make-it-home",
+          emotion: "warm",
+          line: "“아니, 막 꾸미자는 건 아니고. 여기 너무 군부대 냄새 나잖아.”\n“우리 집이면... 조금 귀여운 것도 있어야지.”\n“아빠가 싫다 하면 안 붙일게. 아마도.”",
+          choices: [
+            {
+              label: "붙여. 우리 집 맞아",
+              intent: "tell her the shelter can feel like home",
+              emotion: "warm",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“진짜? 오케이, 허가 받았다.”\n“그럼 여기 1호 장식임. 아빠도 나중에 불평 금지.”\n“...우리 집 맞다는 말, 좀 좋았다.”",
+              effects: {
+                trust: 0.03,
+                storyFlags: ["shelter-home-charm-placed"]
+              }
+            },
+            {
+              label: "삐뚤어지면 내가 다시 붙일게",
+              intent: "help her place the charm neatly",
+              emotion: "warm",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“아, 그런 디테일 챙기는 거 진짜 아빠다.”\n“좋아. 그럼 나는 귀여움 담당, 아빠는 수평 담당.”\n“둘이 같이 붙이면 덜 망할 듯?”",
+              effects: {
+                trust: 0.02,
+                storyFlags: ["shelter-home-charm-team"]
+              }
+            },
+            {
+              label: "통풍구만 막지 마",
+              intent: "warn her to avoid blocking the shelter vents",
+              emotion: "tired",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“알겠거든요. 나도 그 정도는 알아.”\n“근데 걱정하는 얼굴 좀 웃겼다. 완전 정비반장 아빠.”\n“통풍구 피해서 붙일게. 됐지?”",
+              effects: {
+                storyFlags: ["shelter-home-charm-careful"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "shelter-first-night-brave-face-01",
+      title: "첫날 밤의 괜찮은 척",
+      once: true,
+      completionFlag: "shelter-event:shelter-first-night-brave-face-01",
+      trigger: {
+        autoStart: true,
+        requiredStoryFlag: "shelter-event:shelter-home-charm-01",
+        missingStoryFlag: "shelter-event:shelter-first-night-brave-face-01"
+      },
+      backgroundAssetKey: "shelterHomeCharmCg",
+      transitionLine: "조명이 어두워지고, 쉘터의 첫 밤이 시작된다.",
+      transitionSeconds: 1.2,
+      transitionEmotion: "anxious",
+      startNodeId: "brave-face",
+      nodes: [
+        {
+          id: "brave-face",
+          emotion: "anxious",
+          line: "“아빠, 나 지금 완전 괜찮은 얼굴 하고 있지?”\n“응. 아니, 사실 좀 아닌데. 그래도 괜찮은 척은 잘하지?”\n“밖에서 소리 날 때마다 심장 쿵 하는 거... 좀 짜증나.”",
+          choices: [
+            {
+              label: "계속 들어준다",
+              intent: "listen as she tries to keep herself together on the first night",
+              emotion: "warm",
+              nextNodeId: "stay-close"
+            }
+          ]
+        },
+        {
+          id: "stay-close",
+          emotion: "warm",
+          line: "“근데 아빠 목소리 들리면 바로 좀 괜찮아져.”\n“그러니까 오늘은 멀리 가지 마.”\n“관리자라면서. 딸 관리도 해야지, 그치?”",
+          choices: [
+            {
+              label: "안 가. 여기 있을게",
+              intent: "promise to stay nearby through the night",
+              emotion: "warm",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“좋아. 그 말 방금 저장했다?”\n“아빠가 여기 있다고 했으니까, 나도 오늘은 좀 잘 수 있을 듯.”",
+              effects: {
+                trust: 0.03,
+                storyFlags: ["shelter-first-night-stayed"]
+              }
+            },
+            {
+              label: "무서우면 내 옆에 앉아",
+              intent: "offer her a safe place beside you",
+              emotion: "warm",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“헐, 바로 그렇게 말하기 있음?”\n“근데... 싫진 않음. 아니, 꽤 좋음.”\n“조금만 옆에 있을게. 진짜 조금만.”",
+              effects: {
+                trust: 0.04,
+                storyFlags: ["shelter-first-night-close"]
+              }
+            },
+            {
+              label: "오늘은 아무것도 안 해도 돼",
+              intent: "let her be just your daughter for the night",
+              emotion: "tired",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“진짜? 나 오늘 쓸모 없어도 돼?”\n“그 말 좀 좋다. 완전 좋다.”\n“그럼 나 오늘은 아빠 딸 모드만 할래.”",
+              effects: {
+                trust: 0.03,
+                storyFlags: ["shelter-first-night-rest"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "shelter-first-night-still-there-01",
+      title: "아빠 아직 있지?",
+      once: true,
+      completionFlag: "shelter-event:shelter-first-night-still-there-01",
+      trigger: {
+        autoStart: true,
+        requiredStoryFlag: "shelter-event:shelter-first-night-brave-face-01",
+        missingStoryFlag: "shelter-event:shelter-first-night-still-there-01"
+      },
+      backgroundAssetKey: "shelterHomeCharmCg",
+      transitionLine: "쉘터 안이 조용해지고, 잠들기 전의 시간이 천천히 온다.",
+      transitionSeconds: 1.2,
+      transitionEmotion: "anxious",
+      choiceReactionSeconds: 0.58,
+      startNodeId: "still-there",
+      nodes: [
+        {
+          id: "still-there",
+          emotion: "anxious",
+          line: "“아빠, 나 지금 자는 척 연습 중인데.”\n“근데 있잖아. 내가 눈 감으면...”\n“아빠 목소리 안 없어지지?”",
+          choices: [
+            {
+              label: "안 없어져. 여기 있어",
+              intent: "promise that your voice will stay with her",
+              emotion: "warm",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“좋아. 그거면 됐어.”\n“나 지금 좀 안심함. 아니, 많이.”\n“그럼 나 눈 감는다? 진짜 감는다?”",
+              effects: {
+                trust: 0.03,
+                storyFlags: ["shelter-first-night-voice-stayed"]
+              }
+            },
+            {
+              label: "눈 감고 있으면 내가 확인할게",
+              intent: "watch over her while she tries to sleep",
+              emotion: "warm",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“와, 그거 완전 아빠 서비스네.”\n“좋아. 그럼 나 자는 척 말고 진짜 자볼게.”\n“중간에 깨면... 그때도 있어야 됨.”",
+              effects: {
+                trust: 0.04,
+                storyFlags: ["shelter-first-night-watched-over"]
+              }
+            },
+            {
+              label: "무서우면 불 조금 켜둘게",
+              intent: "leave a small light on so she feels safer",
+              emotion: "warm",
+              backgroundAssetKey: "shelterHomeCharmCg",
+              reply: "“나 애는 아닌데.”\n“근데 오늘은 예외. 조금만 켜두자.”\n“아빠가 그렇게 말하면... 이상하게 덜 창피함.”",
+              effects: {
+                trust: 0.02,
+                storyFlags: ["shelter-first-night-light-left-on"]
+              }
+            }
+          ]
+        }
+      ]
+    }
   ]
 };
 

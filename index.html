@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>윤회무명2</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css?v=20260617-shelter-memorial-v1">
+  <link rel="preload" as="image" href="./assets/cg/shelter-home-charm-01.png?v=20260618-home-charm-2">
+  <link rel="stylesheet" href="./styles.css?v=20260617-direct-chat-v1">
 </head>
 <body>
   <main class="app-shell">
@@ -71,9 +72,21 @@
       </div>
 
       <canvas id="gameCanvas" width="1280" height="720" aria-label="윤회무명2 게임 화면"></canvas>
+      <form id="shelterChatForm" class="shelter-chat-form" hidden autocomplete="off">
+        <input
+          id="shelterChatInput"
+          class="shelter-chat-input"
+          type="text"
+          name="shelterChat"
+          maxlength="180"
+          placeholder="드론으로 말을 건다..."
+          aria-label="쉘터 대화 입력"
+        >
+        <button class="shelter-chat-submit" type="submit">전송</button>
+      </form>
     </div>
   </main>
 
-  <script type="module" src="./main.js?v=20260617-shelter-emotions-v4"></script>
+  <script type="module" src="./main.js?v=20260619-shelter-emotion-art-v1"></script>
 </body>
 </html>

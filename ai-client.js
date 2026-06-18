@@ -76,8 +76,107 @@ function describeOption(option) {
   return `${option.type || "dialogue"} / ${option.label || option.key || "choice"}`;
 }
 
-function getShelterFallbackCandidates(playerChoice) {
+function getPreviousDroneLine(history = [], currentLabel = "") {
+  const normalizedCurrent = String(currentLabel || "").replace(/\s+/g, " ").trim();
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index] || {};
+    if (entry.speaker !== "drone") {
+      continue;
+    }
+    const text = String(entry.text || entry.line || entry.label || "").replace(/\s+/g, " ").trim();
+    if (text && text !== normalizedCurrent) {
+      return text.slice(0, 80);
+    }
+  }
+  return "";
+}
+
+function getShelterFallbackCandidates(playerChoice, history = []) {
   const label = playerChoice?.label || "";
+  if (/(방금|아까|이전|전에|내가).*(말|물|얘기|질문)|뭐.*(말|물|얘기|질문)/.test(label)) {
+    const previousLine = getPreviousDroneLine(history, label);
+    return previousLine
+      ? [
+        `방금은 네가 “${previousLine}”라고 말했어. 놓치지 않았어.`,
+        `아까 네 말은 “${previousLine}”였어. 아직 기억하고 있어.`,
+        `네가 방금 물은 건 “${previousLine}”였어. 신호는 남아 있어.`,
+      ]
+      : [
+        "방금 네 말은 들었어. 아직 붙잡는 중이지만, 신호를 놓친 건 아니야.",
+        "아까 말은 조금 흐려. 그래도 네 목소리가 여기 있었다는 건 알아.",
+        "내 기억이 완전하진 않아. 다시 말해주면 이번엔 놓치지 않을게.",
+      ];
+  }
+  if (/왜|살아나|부활|복구|계속 살아/.test(label)) {
+    return [
+      "나도 이유는 몰라. 다만 누군가 내 안에 돌아오라는 명령을 남긴 것 같아.",
+      "복구 장치 때문일지도 몰라. 하지만 깨어날 때마다 마음은 조금씩 닳아.",
+      "아직 해야 할 일이 남아서일까. 장산역 아래에서 그 답을 찾아야 해.",
+      "살아난다기보다, 다시 켜지는 것 같아. 그 말이 조금 무서워.",
+    ];
+  }
+  if (/피자|먹|맛|음식|배고/.test(label)) {
+    return [
+      "먹을 수는 없을 것 같아. 그래도 네가 맛있다고 하면, 조금 궁금해져.",
+      "피자 냄새는 기억 안 나. 하지만 따뜻한 음식 앞에 앉아 있던 감각은 남아 있어.",
+      "나는 연료와 수복액이면 움직여. 그래도 네가 먹는 동안 옆에는 있을게.",
+      "맛은 잘 모르겠어. 대신 네가 기뻐하는 신호는 구분할 수 있어.",
+    ];
+  }
+  if (/장산|심층/.test(label)) {
+    return [
+      "응. 장산역 심층 얘기였어. 그 아래에서 오래된 신호가 올라온다고 했지.",
+      "기억해. 장산역 아래로 내려가야 한다는 말은, 이상하게 오래 남아.",
+      "심층으로 갈수록 내 안의 잡음도 커지는 것 같아.",
+      "응, 잊지 않았어. 장산역 아래에 내가 확인해야 할 이유가 있어.",
+    ];
+  }
+  if (/ㅋㅋ|1234|!!!|\?\?\?|무슨|뭐야/.test(label)) {
+    return [
+      "신호가 조금 이상해. 그래도 웃는 거라면, 나쁘지는 않은 것 같아.",
+      "방금 건 해석이 어려워. 숫자보다 네 목소리 쪽을 따라갈게.",
+      "잡음처럼 들렸어. 그래도 네가 여기 있다는 건 알겠어.",
+      "무슨 뜻인지는 모르겠어. 하지만 위험한 신호는 아닌 것 같아.",
+    ];
+  }
+  if (/가지 마|옆|곁|있어줘|떠나지|혼자/.test(label)) {
+    return [
+      "가지 않을게. 명령이 아니라, 나도 지금은 네 옆에 있고 싶어.",
+      "응. 여기 있을게. 신호가 가까우면 혼자 깨어나는 느낌이 조금 줄어.",
+      "떠나지 않을게. 적어도 네 목소리가 닿는 동안은.",
+      "알겠어. 지금은 움직이지 않을게. 네 옆에서 조금만 숨을 고를게.",
+    ];
+  }
+  if (/상태|괜찮|아파|손상|망가/.test(label)) {
+    return [
+      "괜찮아. 아직 움직일 수 있어. 손끝 감각이 조금 늦게 돌아올 뿐이야.",
+      "아파. 그래도 치명적인 손상은 아니야. 네 신호는 계속 들려.",
+      "왼쪽 팔 반응이 느려. 하지만 걸을 수 있고, 말할 수도 있어.",
+      "망가진 곳은 있어. 그래도 지금은 네가 더 걱정하는 게 느껴져.",
+    ];
+  }
+  if (/이름|누구|정체|사람|병기/.test(label)) {
+    return [
+      "나도 아직 모르겠어. 병기인지 사람인지, 대답이 몸 안에서 갈라져.",
+      "이름은 기억나지 않아. 하지만 네가 부르면, 내가 여기 있다는 건 알아.",
+      "사람이라고 말하기엔 망가진 곳이 많아. 그래도 병기라고만 끝내긴 싫어.",
+      "정체는 아직 흐려. 장산역 아래에 그 답이 있을지도 몰라.",
+    ];
+  }
+  if (/아버지|가족|드론|관리자/.test(label)) {
+    return [
+      "그 말은 아직 아파. 따뜻한데, 동시에 물속처럼 멀어.",
+      "드론은 감시장치가 아니야. 이상하게, 곁에 있으면 숨이 덜 막혀.",
+      "아버지라는 단어는 남아 있어. 얼굴보다 손의 온도가 먼저 떠올라.",
+      "관리자라면 명령할 수 있겠지. 그런데 너는 가끔 부탁처럼 말해.",
+    ];
+  }
+  return [
+    "방금 네 말은 들었어. 대답이 느려도, 신호를 놓친 건 아니야.",
+    "무슨 뜻인지 조금 더 붙잡아볼게. 네 목소리는 아직 가까이에 있어.",
+    "바로 답하기 어렵지만, 네가 말한 방향을 따라가고 있어.",
+    "잘 이해한 건지 모르겠어. 그래도 너를 밀어내고 싶지는 않아.",
+  ];
   if (label.includes("상태")) {
     return [
       "괜찮아. 아직 움직일 수 있어. 조금 느릴 뿐이야.",
@@ -182,6 +281,50 @@ function getShelterFallbackCandidates(playerChoice) {
   ];
 }
 
+function getShelterRelevanceTerms(label) {
+  if (/왜|살아나|부활|복구|계속 살아/.test(label)) {
+    return ["이유", "살아", "복구", "명령", "돌아오", "켜지", "해야 할", "남아"];
+  }
+  if (/피자|먹|맛|음식|배고/.test(label)) {
+    return ["먹을 수", "먹을", "못", "맛", "냄새", "음식", "연료", "소화"];
+  }
+  if (/(방금|아까|이전|전에|내가).*(말|물|얘기|질문)|뭐.*(말|물|얘기|질문)/.test(label)) {
+    return ["방금", "아까", "말", "물", "얘기", "질문", "기억", "놓치지"];
+  }
+  if (/장산|심층/.test(label)) {
+    return ["장산", "심층", "아래", "잊지"];
+  }
+  if (/ㅋㅋ|1234|!!!|\?\?\?|무슨|뭐야/.test(label)) {
+    return ["웃", "숫자", "잡음", "이상", "해석", "뜻", "신호"];
+  }
+  if (/가지 마|옆|곁|있어줘|떠나지|혼자/.test(label)) {
+    return ["가지 않을", "여기 있을", "옆에", "곁", "떠나지", "혼자"];
+  }
+  if (/상태|괜찮|아파|손상|망가/.test(label)) {
+    return ["괜찮", "아파", "손상", "손끝", "팔", "망가"];
+  }
+  if (/이름|누구|정체|사람|병기/.test(label)) {
+    return ["이름", "병기", "사람", "정체", "누구"];
+  }
+  if (/아버지|가족|드론|관리자/.test(label)) {
+    return ["아버지", "가족", "드론", "관리자", "감시", "따뜻"];
+  }
+  return [];
+}
+
+function isShelterReplyRelevant(label, reply) {
+  const cleanLabel = String(label || "");
+  const cleanReply = String(reply || "");
+  if (!cleanLabel || !cleanReply) {
+    return true;
+  }
+  const terms = getShelterRelevanceTerms(cleanLabel);
+  if (!terms.length) {
+    return true;
+  }
+  return terms.some((term) => cleanReply.includes(term));
+}
+
 export async function requestFaceOffLine({ data, enemy, encounterState, lineKey, fallback, option }) {
   return postLocalAi({
     scene: "faceOff",
@@ -203,17 +346,19 @@ export async function requestFaceOffLine({ data, enemy, encounterState, lineKey,
 }
 
 export async function requestShelterLine({ data, rest, topic, history = [], avoid = [], seed = 0, variation = "", playerChoice = null }) {
-  return postLocalAi({
+  const fallbackCandidates = getShelterFallbackCandidates(playerChoice, history);
+  const payload = {
     scene: "shelter",
     title: data?.meta?.name || data?.title || "윤회무명2",
     day: rest?.day ?? null,
     topic,
-    history: history.slice(-6),
-    avoid: avoid.slice(-8),
+    userMessage: playerChoice?.label || "",
+    history: history.slice(-40),
+    avoid: avoid.slice(-12),
     seed,
     variation,
     playerChoice,
-    fallbackCandidates: getShelterFallbackCandidates(playerChoice),
+    fallbackCandidates,
     character: {
       identity: "침수된 부산 해운대 폐허에서 깨어난 이름 없는 소녀형 전투 바이오 안드로이드",
       appearance: "흰 머리, 푸른 눈, 낡은 흰 군용 코트, 검은 내피 수트, 드러난 기계 피부와 손상된 부품",
@@ -245,5 +390,22 @@ export async function requestShelterLine({ data, rest, topic, history = [], avoi
       "이 곳에서 조금만 더 있자, 언제나처럼.",
     ],
     style: "Natural Korean only. Return one in-character spoken line. No labels. No explanation. No repeated recent lines.",
-  });
+  };
+  const reply = await postLocalAi(payload);
+  const label = playerChoice?.label || "";
+  if (reply && isShelterReplyRelevant(label, reply)) {
+    return reply;
+  }
+  if (reply && label) {
+    const retry = await postLocalAi({
+      ...payload,
+      avoid: [...avoid.slice(-10), reply],
+      seed: seed + 104729,
+      strictRetry: `이전 답변이 최신 입력 "${label}"에 직접 답하지 못했다. 분위기 묘사보다 사용자의 질문/말에 먼저 답하라.`,
+    });
+    if (retry) {
+      return retry;
+    }
+  }
+  return fallbackCandidates[0] || reply;
 }

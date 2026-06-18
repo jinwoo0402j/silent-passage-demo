@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260617-shelter-emotions-v5";
+import { GAME_DATA } from "./level-data.js?v=20260619-shelter-emotion-art-v1";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
@@ -20,8 +20,8 @@ import {
   loadAudioOptions,
   resetAudioOptions,
   saveAudioOptions,
-} from "./audio-options.js?v=20260613-sound-options-v1";
-import { renderGame } from "./render.js?v=20260617-shelter-emotions-v4";
+} from "./audio-options.js?v=20260619-shelter-bgm-v1";
+import { renderGame } from "./render.js?v=20260619-shelter-emotion-art-v1";
 import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -33,8 +33,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260615-speedfx-v11";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260617-voice-bank-v1";
+} from "./state.js?v=20260618-shelter-event-result-v1";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260619-shelter-emotion-art-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -54,6 +54,8 @@ const movementTuningSaveTestButton = document.getElementById("movementTuningSave
 const movementTuningLoadTestButton = document.getElementById("movementTuningLoadTestButton");
 const movementTuningResetButton = document.getElementById("movementTuningResetButton");
 const sceneActionButton = document.getElementById("sceneActionButton");
+const shelterChatForm = document.getElementById("shelterChatForm");
+const shelterChatInput = document.getElementById("shelterChatInput");
 const touchControls = document.getElementById("touchControls");
 const touchButtons = Array.from(document.querySelectorAll(".touch-button"));
 const stageShell = document.querySelector(".stage-shell");
@@ -265,12 +267,19 @@ const dom = {
   movementTuningLoadTestButton,
   movementTuningResetButton,
   sceneActionButton,
+  shelterChatForm,
+  shelterChatInput,
   touchControls,
   touchButtons,
 };
 
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
 applyAudioOptions(loadAudioOptions());
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get("resetMeta") === "1" || urlParams.get("resetShelter") === "1") {
+  window.localStorage.removeItem("rulebound-extraction-meta-v1");
+  window.localStorage.removeItem("rulebound-local-profile-v1");
+}
 const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
   applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
   useUrlLevel: shouldStartFromUrlLevel(),
@@ -283,7 +292,7 @@ applySprintTuning(
 );
 
 const state = createInitialState(runtimeData);
-if (new URLSearchParams(window.location.search).get("partsLoop") === "1") {
+if (urlParams.get("partsLoop") === "1") {
   const testPart = normalizePartInstance(runtimeData, "watchman-right-arm");
   if (testPart) {
     state.meta.partInventory = [testPart];
@@ -298,6 +307,25 @@ if (new URLSearchParams(window.location.search).get("partsLoop") === "1") {
 window.__faceOffState = state;
 window.__faceOffData = runtimeData;
 bindInput(state);
+shelterChatForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = String(shelterChatInput?.value || "").replace(/\s+/g, " ").trim();
+  if (!text || shelterChatInput?.disabled) {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent("silent-passage-shelter-chat-submit", { detail: { text } }));
+  shelterChatInput.value = "";
+});
+shelterChatInput?.addEventListener("keydown", (event) => {
+  event.stopPropagation();
+  if (event.key === "Enter" && !event.isComposing) {
+    event.preventDefault();
+    shelterChatForm?.requestSubmit();
+  }
+});
+shelterChatInput?.addEventListener("keyup", (event) => {
+  event.stopPropagation();
+});
 inputTraceDownloadButton.addEventListener("click", () => {
   downloadInputTrace(state);
 });
@@ -1264,14 +1292,31 @@ function syncBrowserControls(currentDom, currentState) {
     Boolean(currentState.shelter?.talk?.active)
     || Boolean(currentState.run?.shelterRest?.active && currentState.run.shelterRest.phase === "talk")
   );
+  const shelterBridgeActive = currentState.scene === SCENES.SHELTER && (
+    Boolean(currentState.shelter?.autoEventBridge)
+    || Boolean(currentState.run?.shelterRest?.active && currentState.run.shelterRest.autoEventBridge)
+  );
+  const shelterCinematicActive = shelterTalkActive || shelterBridgeActive;
   document.body.classList.toggle("is-map-overlay-active", Boolean(currentState.run?.mapOverlay?.active));
   document.body.classList.toggle("is-inventory-overlay-active", Boolean(currentState.run?.inventoryOverlay?.active));
-  document.body.classList.toggle("is-shelter-talk-active", shelterTalkActive);
+  document.body.classList.toggle("is-shelter-talk-active", shelterCinematicActive);
 
   if (currentDom.sceneActionButton) {
-    const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION && !shelterTalkActive;
+    const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION && !shelterCinematicActive;
     currentDom.sceneActionButton.hidden = !sceneActionVisible;
     currentDom.sceneActionButton.textContent = getSceneActionLabel(currentState);
+  }
+
+  if (currentDom.shelterChatForm && currentDom.shelterChatInput) {
+    currentDom.shelterChatForm.hidden = true;
+    currentDom.shelterChatForm.classList.remove("is-pending");
+    currentDom.shelterChatInput.disabled = true;
+    currentDom.shelterChatInput.value = "";
+    if (document.activeElement === currentDom.shelterChatInput) {
+      currentDom.shelterChatInput.blur();
+    }
+    currentDom.shelterChatWasActive = false;
+    currentDom.shelterChatWasPending = false;
   }
 
   if (currentDom.touchControls) {
@@ -1800,6 +1845,12 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.canvas.addEventListener("pointerdown", (event) => {
+    syncMouseFromEvent(event);
+    if (event.button === 0) {
+      markPrimaryMouseDown();
+    } else if (event.button === 2) {
+      markSecondaryMouseDown();
+    }
     if (beginMapOverlayDrag(event)) {
       if (currentDom.canvas.setPointerCapture) {
         try {
@@ -1822,6 +1873,12 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.canvas.addEventListener("mousedown", (event) => {
+    syncMouseFromEvent(event);
+    if (event.button === 0) {
+      markPrimaryMouseDown();
+    } else if (event.button === 2) {
+      markSecondaryMouseDown();
+    }
     if (handleMiddleMouseSwitch(event)) {
       return;
     }

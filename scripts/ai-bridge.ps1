@@ -1,4 +1,4 @@
-param(
+﻿param(
   [int]$Port = 4174,
   [string]$OllamaUrl = "http://127.0.0.1:11434/api/chat",
   [string]$Model = $env:SILENT_PASSAGE_AI_MODEL
@@ -70,12 +70,16 @@ function New-SystemPrompt {
 You write one line of Korean dialogue for a wounded girl-shaped combat bio-android in a flooded Busan ruin shelter.
 Return only the line. No labels, no explanations, no quotation marks.
 Use natural Korean only. No English, Chinese characters, Japanese, emoji, markdown, stage directions, or narrator prose.
-Answer the player's playerChoice directly in the character's voice.
+The latest USER_MESSAGE is the highest priority. Answer that message first.
+If USER_MESSAGE is a question, give a direct answer before adding mood or imagery.
+Use RECENT_HISTORY only as memory. Do not answer an older topic unless USER_MESSAGE refers to it.
+If USER_MESSAGE asks what the player just said or asked, answer using PREVIOUS_USER_MESSAGE.
 You are the bio-android. The player is the drone/administrator beside you.
 Never speak as the player. Never describe the bio-android from outside.
 Do not repeat or rephrase the player's line as your answer.
+Do not introduce unrelated topics, locations, missions, or memories.
 Tone: quiet, restrained, lonely, guarded, family-like, slightly melancholic.
-Length: 8 to 32 Korean words. One or two short sentences only.
+Length: 8 to 34 Korean words. One or two short sentences only.
 Prefer concrete images: wet concrete, rusted steel, repair noise, morning light, drone signal, damaged hands, flooded platforms.
 Never be cute, flirty, idol-like, sexual, servant-like, pet-like, comic, or battle-crazed.
 Never treat the player as a lover. Do not call the player father at this stage.
@@ -83,6 +87,7 @@ She wants protection but is not helpless. She also wants to protect someone this
 She is unsure whether she is human or a weapon. Let that uncertainty leak through short words.
 Never reveal big truths too early. Hint at memory, father, revival, and fear slowly.
 Avoid generic advice, exposition, slogans, therapy-speak, and repeating avoid/history wording.
+Do not begin with body pain, scenery, or old memories unless USER_MESSAGE asks about condition, place, or memory.
 Never mention that you are AI, a model, a prompt, or a server.
 "@
   }
@@ -112,6 +117,26 @@ function Test-NaturalKoreanShelterLine {
     -and $check -notmatch '[\u2600-\u27BF]' `
     -and $check -notmatch '[\uD800-\uDFFF]' `
     -and $hangulCount -ge 12
+}
+
+function Get-CleanAiText {
+  param(
+    [string]$Text,
+    [int]$MaxLength = 120
+  )
+
+  $clean = [string]$Text
+  $clean = ($clean -replace '(?is)<think>.*?</think>', '')
+  $clean = ($clean -replace '(?is)<think>.*$', '')
+  $clean = ($clean -replace '```(?:json)?', '')
+  $clean = ($clean -replace '```', '')
+  $clean = ($clean -replace '[\uD800-\uDFFF]', '')
+  $clean = ($clean -replace '[\u2600-\u27BF]', '')
+  $clean = ($clean -replace '\s+', ' ').Trim().Trim('"').Trim("'")
+  if ($clean.Length -gt $MaxLength) {
+    $clean = $clean.Substring(0, $MaxLength)
+  }
+  return $clean
 }
 
 function Get-FallbackShelterReply {
@@ -152,6 +177,112 @@ function Get-FallbackShelterReply {
   return $lines[[Math]::Abs($seed % $lines.Count)]
 }
 
+function Get-ShelterPlayerLine {
+  param(
+    [object]$InputPayload
+  )
+
+  if ($InputPayload.playerChoice) {
+    foreach ($propertyName in @("label", "text", "line")) {
+      if ($InputPayload.playerChoice.$propertyName) {
+        return [string]$InputPayload.playerChoice.$propertyName
+      }
+    }
+  }
+  if ($InputPayload.userMessage) {
+    return [string]$InputPayload.userMessage
+  }
+  return ""
+}
+
+function Get-HistoryEntryText {
+  param(
+    [object]$Entry
+  )
+
+  foreach ($propertyName in @("text", "line", "label")) {
+    if ($Entry.$propertyName) {
+      return [string]$Entry.$propertyName
+    }
+  }
+  return ""
+}
+
+function Get-PreviousShelterUserLine {
+  param(
+    [object]$InputPayload,
+    [string]$CurrentLine = ""
+  )
+
+  if (-not $InputPayload.history) {
+    return ""
+  }
+
+  $current = $CurrentLine.Trim()
+  $droneLines = @($InputPayload.history | ForEach-Object {
+    $speaker = if ($_.speaker) { [string]$_.speaker } else { "" }
+    $text = (Get-HistoryEntryText -Entry $_).Trim()
+    if ($speaker -eq "drone" -and $text -and $text -ne $current) { $text }
+  } | Where-Object { $_ })
+
+  if ($droneLines.Count -gt 0) {
+    return [string]$droneLines[-1]
+  }
+  return ""
+}
+
+function Test-RecallQuestion {
+  param(
+    [string]$Text
+  )
+
+  return $Text -match '(방금|아까|이전|전에|내가).*(말|물|얘기|질문)' -or $Text -match '뭐.*(말|물|얘기|질문)'
+}
+
+function Get-RecallShelterReply {
+  param(
+    [string]$PreviousLine
+  )
+
+  if ([string]::IsNullOrWhiteSpace($PreviousLine)) {
+    return ""
+  }
+  $clean = ($PreviousLine -replace '\s+', ' ').Trim()
+  if ($clean.Length -gt 80) {
+    $clean = $clean.Substring(0, 80)
+  }
+  return "방금은 네가 `"$clean`"라고 물었어. 놓치지 않았어."
+}
+
+function Test-ShelterReplyFitsInput {
+  param(
+    [string]$Reply,
+    [object]$InputPayload
+  )
+
+  $playerLine = Get-ShelterPlayerLine -InputPayload $InputPayload
+  if ([string]::IsNullOrWhiteSpace($Reply) -or [string]::IsNullOrWhiteSpace($playerLine)) {
+    return $true
+  }
+
+  if ((Test-RecallQuestion -Text $playerLine)) {
+    $previousLine = Get-PreviousShelterUserLine -InputPayload $InputPayload -CurrentLine $playerLine
+    if (-not [string]::IsNullOrWhiteSpace($previousLine)) {
+      $tokens = @($previousLine -split '[\s\?\!\.,，。]+') | Where-Object { $_.Length -ge 2 }
+      if ($tokens.Count -gt 0 -and -not ($tokens | Where-Object { $Reply.Contains($_) })) {
+        return $false
+      }
+    }
+  }
+
+  $asksCondition = $playerLine -match '상태|괜찮|아파|손상|망가|수리|고장|상처|몸|손|팔'
+  if (-not $asksCondition -and $Reply -match '손이 아파|아파서|수리할|손상|고장|상처') {
+    return $false
+  }
+
+  return $true
+}
+
 function ConvertTo-ShelterUserPrompt {
   param(
     [object]$InputPayload
@@ -167,18 +298,31 @@ function ConvertTo-ShelterUserPrompt {
       $playerIntent = [string]$InputPayload.playerChoice.intent
     }
   }
+  if ([string]::IsNullOrWhiteSpace($playerLine) -and $InputPayload.userMessage) {
+    $playerLine = [string]$InputPayload.userMessage
+  }
   if ([string]::IsNullOrWhiteSpace($playerIntent) -and $InputPayload.topic) {
     $playerIntent = [string]$InputPayload.topic
   }
 
   $historyText = ""
+  $previousUserLine = ""
   if ($InputPayload.history) {
-    $historyItems = @($InputPayload.history | Select-Object -Last 6 | ForEach-Object {
+    $historyItems = @($InputPayload.history | Select-Object -Last 40 | ForEach-Object {
       $speaker = if ($_.speaker) { [string]$_.speaker } else { "unknown" }
-      $text = if ($_.text) { [string]$_.text } else { "" }
+      $text = Get-HistoryEntryText -Entry $_
       if ($text) { "${speaker}: ${text}" }
     } | Where-Object { $_ })
     $historyText = ($historyItems -join "`n")
+
+    $droneLines = @($InputPayload.history | ForEach-Object {
+      $speaker = if ($_.speaker) { [string]$_.speaker } else { "" }
+      $text = (Get-HistoryEntryText -Entry $_).Trim()
+      if ($speaker -eq "drone" -and $text -and $text -ne $playerLine) { $text }
+    } | Where-Object { $_ })
+    if ($droneLines.Count -gt 0) {
+      $previousUserLine = [string]$droneLines[-1]
+    }
   }
 
   $avoidText = ""
@@ -196,13 +340,21 @@ function ConvertTo-ShelterUserPrompt {
     $badExamplesText = (@($InputPayload.badExamples | Select-Object -First 6 | ForEach-Object { "- $([string]$_)" }) -join "`n")
   }
 
+  $retryText = ""
+  if ($InputPayload.strictRetry) {
+    $retryText = [string]$InputPayload.strictRetry
+  }
+
   return @"
-PLAYER_LINE: $playerLine
+USER_MESSAGE: $playerLine
 PLAYER_INTENT: $playerIntent
+PREVIOUS_USER_MESSAGE: $previousUserLine
 RECENT_HISTORY:
 $historyText
 AVOID_WORDING:
 $avoidText
+RETRY_NOTE:
+$retryText
 
 GOOD_EXAMPLES:
 $goodExamplesText
@@ -219,24 +371,35 @@ Character facts:
 - Her mission points toward the deep levels of Jangsan Station, but she does not fully know why.
 - She begins guarded and blunt. Trust should grow slowly over many talks.
 
-Write HER reply to PLAYER_LINE.
+Write HER reply to the latest USER_MESSAGE.
 Good answer shape:
 - first person
 - short, quiet, wounded
 - concrete detail or subtext
 - close to GOOD_EXAMPLES in rhythm and restraint
-- answer the choice's intent instead of changing topic
+- answer the user's message first instead of changing topic
+- if USER_MESSAGE asks "why", say what she thinks the reason might be
+- if USER_MESSAGE asks "what/where/who/how", answer that concrete question
+- if USER_MESSAGE asks what the player just said or asked, answer from PREVIOUS_USER_MESSAGE
+- if RECENT_HISTORY contains a relevant fact, remember it naturally
+- do not start with body pain, scenery, or memory unless USER_MESSAGE asks about condition, place, or memory
 - reveal only one small feeling or image
+- line must answer USER_MESSAGE, not copy USER_MESSAGE
 - no explanation
 - no reversed speaker
 
 Bad answers:
 - asking the player the same question back
+- putting USER_MESSAGE itself in the line
+- responding to an unrelated memory, mission, or scenery
+- poetic mood without answering the user's latest message
 - explaining the whole setting or backstory
 - "sangcheoga neomu mani neureosseoyo" style flat report
 - "geonganghae boineunde" or judging someone else's body
 - advice speech
 - cute or romantic tone
+
+Return only the android's spoken line.
 "@
 }
 
@@ -249,9 +412,20 @@ function Get-LocalAiReply {
   $maxAttempts = if ($scene -eq "shelter") { 3 } else { 1 }
   $lastReply = ""
 
+  if ($scene -eq "shelter") {
+    $playerLine = Get-ShelterPlayerLine -InputPayload $InputPayload
+    if (Test-RecallQuestion -Text $playerLine) {
+      $previousLine = Get-PreviousShelterUserLine -InputPayload $InputPayload -CurrentLine $playerLine
+      $recallReply = Get-RecallShelterReply -PreviousLine $previousLine
+      if (-not [string]::IsNullOrWhiteSpace($recallReply)) {
+        return $recallReply
+      }
+    }
+  }
+
   for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
     if ($attempt -gt 0) {
-      $InputPayload | Add-Member -NotePropertyName strictRetry -NotePropertyValue "Previous reply had bad text or mixed non-Korean. Rewrite in natural Korean only with stronger subtext and different wording." -Force
+      $InputPayload | Add-Member -NotePropertyName strictRetry -NotePropertyValue "Previous reply failed. Rewrite in natural Korean only. Answer the latest USER_MESSAGE directly. Do not invent pain, injury, repair, scenery, or old memories unless the user asked for that." -Force
     }
 
     $userContent = if ($scene -eq "shelter") {
@@ -259,6 +433,7 @@ function Get-LocalAiReply {
     } else {
       ($InputPayload | ConvertTo-Json -Depth 12 -Compress)
     }
+    $numPredict = if ($scene -eq "shelter") { 120 } else { 96 }
     $ollamaPayload = @{
       model = $Model
       stream = $false
@@ -268,10 +443,10 @@ function Get-LocalAiReply {
         @{ role = "user"; content = $userContent }
       )
       options = @{
-        temperature = 0.72
-        top_p = 0.86
+        temperature = if ($scene -eq "shelter") { 0.48 } else { 0.72 }
+        top_p = if ($scene -eq "shelter") { 0.78 } else { 0.86 }
         repeat_penalty = 1.12
-        num_predict = 96
+        num_predict = $numPredict
       }
     } | ConvertTo-Json -Depth 20
 
@@ -290,17 +465,13 @@ function Get-LocalAiReply {
       $reply = [string]$response.response
     }
 
-    $reply = ($reply -replace '(?is)<think>.*?</think>', '')
-    $reply = ($reply -replace '(?is)<think>.*$', '')
-    $reply = ($reply -replace '[\uD800-\uDFFF]', '')
-    $reply = ($reply -replace '[\u2600-\u27BF]', '')
-    $reply = ($reply -replace '\s+', ' ').Trim().Trim('"').Trim("'")
-    if ($reply.Length -gt 120) {
-      $reply = $reply.Substring(0, 120)
-    }
+    $reply = Get-CleanAiText -Text $reply -MaxLength 120
     $lastReply = $reply
 
-    if ($scene -ne "shelter" -or (Test-NaturalKoreanShelterLine -Text $reply)) {
+    if ($scene -ne "shelter") {
+      return $reply
+    }
+    if ((Test-NaturalKoreanShelterLine -Text $reply) -and (Test-ShelterReplyFitsInput -Reply $reply -InputPayload $InputPayload)) {
       return $reply
     }
   }

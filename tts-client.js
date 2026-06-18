@@ -1,4 +1,4 @@
-import { getAudioChannelVolume } from "./audio-options.js?v=20260613-sound-options-v1";
+import { getAudioChannelVolume } from "./audio-options.js?v=20260619-shelter-bgm-v1";
 
 const TTS_ENABLED_KEY = "silent-passage-tts-enabled-v1";
 const VOICE_BANK_MANIFEST_URL = "./assets/voice/shelter/manifest.json?v=20260617-1";

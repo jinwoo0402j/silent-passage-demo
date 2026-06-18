@@ -112,6 +112,67 @@ body.is-shelter-talk-active .test-debug-panel {
   display: none;
 }
 
+.shelter-chat-form {
+  position: absolute;
+  left: 50%;
+  bottom: 158px;
+  z-index: 5;
+  display: flex;
+  width: min(74%, 860px);
+  height: 46px;
+  transform: translateX(-50%);
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.shelter-chat-form[hidden] {
+  display: none;
+}
+
+.shelter-chat-input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid rgba(147, 234, 255, 0.38);
+  border-radius: 4px;
+  background: rgba(3, 10, 15, 0.78);
+  color: #f4f8fb;
+  padding: 0 16px;
+  font: 800 16px "Segoe UI", sans-serif;
+  outline: none;
+  box-shadow: inset 0 0 20px rgba(147, 234, 255, 0.08), 0 14px 32px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(10px);
+}
+
+.shelter-chat-input::placeholder {
+  color: rgba(244, 248, 251, 0.46);
+}
+
+.shelter-chat-input:focus {
+  border-color: rgba(147, 234, 255, 0.78);
+  box-shadow: inset 0 0 22px rgba(147, 234, 255, 0.12), 0 0 0 2px rgba(147, 234, 255, 0.16), 0 14px 32px rgba(0, 0, 0, 0.34);
+}
+
+.shelter-chat-submit {
+  width: 76px;
+  border: 1px solid rgba(231, 244, 126, 0.5);
+  border-radius: 4px;
+  background: rgba(38, 47, 20, 0.82);
+  color: #f8ffd3;
+  font: 900 14px "Segoe UI", sans-serif;
+  cursor: pointer;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.3);
+}
+
+.shelter-chat-submit:hover {
+  background: rgba(58, 70, 28, 0.92);
+}
+
+.shelter-chat-form.is-pending .shelter-chat-submit,
+.shelter-chat-input:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .live-edit-button {
   position: absolute;
   top: 66px;
