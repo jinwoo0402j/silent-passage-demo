@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "presetId": "model-amitaro",
+  "label": "모델 원본: amitaro",
+  "description": "설치 모델 amitaro의 기본 음색. 튜닝을 거의 넣지 않은 비교용.",
+  "tags": [
+    "model",
+    "amitaro",
+    "raw"
+  ],
+  "scene": "shelter",
+  "speaker": "type-07a",
+  "voice": "type07a",
+  "format": "wav",
+  "generator": "Style-Bert-VITS2",
+  "modelName": "amitaro",
+  "generatedAt": "2026-06-19T05:38:19.232Z",
+  "playbackRate": 1,
+  "preservesPitch": true,
+  "lines": [
+    {
+      "id": "type07a_anxious_shelter-first-arrival-01_01x699w",
+      "emotion": "anxious",
+      "topic": "첫 쉘터 진입",
+      "text": "와... 여기 생각보다 멀쩡하네.",
+      "voiceText": "ここ、思ったより使えそうね。",
+      "src": "./assets/voice/shelter/presets/model-amitaro/anxious/type07a_anxious_shelter-first-arrival-01_01x699w.wav",
+      "tags": [
+        "anxious",
+        "첫 쉘터 진입"
+      ]
+    },
+    {
+      "id": "type07a_warm_shelter-first-arrival-01_1uuasii",
+      "emotion": "warm",
+      "topic": "첫 쉘터 진입",
+      "text": "아빠, 여기 우리 임시 집 같은 거야? 나 그런 거 좀 좋은데.",
+      "voiceText": "お父さん。ここが、私たちの仮住まいなのね。",
+      "src": "./assets/voice/shelter/presets/model-amitaro/warm/type07a_warm_shelter-first-arrival-01_1uuasii.wav",
+      "tags": [
+        "warm",
+        "첫 쉘터 진입"
+      ]
+    }
+  ]
+}

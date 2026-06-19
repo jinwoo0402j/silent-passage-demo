@@ -194,12 +194,23 @@ function clearTransientRunState(run) {
   }
   if (run.player) {
     run.player.attackWindow = 0;
+    run.player.attackAirHoldTimer = 0;
     run.player.attackHits = new Set();
     run.player.lightActive = false;
     run.player.recoilFocusActive = false;
     run.player.recoilFocusBlend = 0;
     run.player.zipLineActive = false;
     run.player.zipLineId = null;
+    run.player.dashVectorX = 1;
+    run.player.dashVectorY = 0;
+    run.player.dashDistanceScale = 1;
+    run.player.dashStartedAirborne = false;
+    run.player.airDashHoverTimer = 0;
+    run.player.airDashDirectionGraceTimer = 0;
+    run.player.airDashDirectionPending = false;
+    run.player.airDashPendingDirX = 0;
+    run.player.airDashPendingDirY = 0;
+    run.player.airDashHoverConsumed = false;
   }
 }
 
@@ -363,10 +374,13 @@ export function startNewSavedRun(state, data, options = {}) {
     clearSavedGame();
   }
   const baseData = data.__baseData || data;
-  const startLevelId = shouldStartFromUrlLevel()
+  const startLevelId = options.useUrlLevel && shouldStartFromUrlLevel()
     ? data.currentLevelId || getRunStartLevelId(baseData)
     : getRunStartLevelId(baseData);
-  loadRuntimeLevelData(data, startLevelId);
+  loadRuntimeLevelData(data, startLevelId, {
+    ...(data.__runtimeLevelOptions || {}),
+    applyLevelOverride: options.applyLevelOverride ?? true,
+  });
   state.run = createRunState(data, state.meta);
   state.scene = SCENES.EXPEDITION;
   state.sceneTimer = 0;

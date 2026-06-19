@@ -7,16 +7,19 @@ import {
   getShelterUpgradeCost,
   getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260526-sfx-v1";
+} from "./state.js?v=20260619-shelter-voice-v9";
+import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
+const shelterCinematicVisualStates = new WeakMap();
 let spriteTintCanvas = null;
 let spriteTintContext = null;
 let nightOverlayCanvas = null;
 let nightOverlayContext = null;
 const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
+const SHELTER_CG_CROSSFADE_SECONDS = 0.36;
 const MAP_EXPLORE_CELL_SIZE = 320;
 const NIGHT_TRANSITION_SECONDS = 1.4;
 const INVENTORY_BODY_PORTRAIT_SRC = "./assets/ui/body-status-operator-v1.png?v=20260526-sfx-v1";
@@ -39,14 +42,32 @@ const SHELTER_REST_MENU = [
   { id: "exit", label: "밖으로 나가기", icon: "exit", detail: "피난처 밖으로 돌아가 탐사를 이어간다." },
 ];
 const SHELTER_HUB_UPGRADE_MENU = [
-  { id: "upgrade", label: "업그레이드", icon: "parts" },
-  { id: "exit", label: "출격", icon: "exit" },
+  { id: "upgrade", label: "업그레이드", icon: "parts", detail: "파츠와 보급을 정비한다." },
+  { id: "exit", label: "출격", icon: "exit", detail: "피난처 밖으로 나가 원정을 시작한다." },
 ];
+const SHELTER_REST_TALK_ITEM = {
+  id: "talk",
+  label: "대화",
+  icon: "log",
+  detail: "쉘터의 상대와 짧게 이야기를 나눈다.",
+};
+
+function getShelterRestMenuItems() {
+  return [SHELTER_REST_TALK_ITEM, ...SHELTER_REST_MENU];
+}
+
+function getShelterHomeMenuItems() {
+  return [SHELTER_REST_TALK_ITEM, ...SHELTER_HUB_UPGRADE_MENU];
+}
+
 const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
   && (
     window.__SILENT_PASSAGE_PERF === "lite" ||
     new URLSearchParams(window.location.search).get("perf") === "lite"
   );
+const BACKGROUND_TILE_COLOR = "#70746f";
+const SHADOW_TILE_COLOR = "#24313a";
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157", "#34383a"]);
 const LOOT_RARITY_META = {
   common: { label: "COMMON", color: "#dce7ec", glow: "rgba(220, 231, 236, 0.16)" },
   uncommon: { label: "UNCOMMON", color: "#8ef0c2", glow: "rgba(142, 240, 194, 0.2)" },
@@ -247,7 +268,7 @@ function getCameraZoom(data) {
 }
 
 function getRunCameraZoom(run, data) {
-  return clamp(run?.cameraZoom ?? getCameraZoom(data), 0.5, 2.5);
+  return clamp(run?.cameraZoom ?? getCameraZoom(data), 0.35, 2.5);
 }
 
 function getUiTheme(data) {
@@ -419,24 +440,26 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, color = "#f4efe2", font
   ctx.save();
   ctx.fillStyle = color;
   ctx.font = font;
-  const words = text.split(" ");
-  let line = "";
   let lineIndex = 0;
 
-  for (const word of words) {
-    const testLine = line ? `${line} ${word}` : word;
-    if (ctx.measureText(testLine).width > maxWidth && line) {
-      ctx.fillText(line, x, y + lineIndex * lineHeight);
-      line = word;
-      lineIndex += 1;
-    } else {
-      line = testLine;
+  String(text || "").split("\n").forEach((paragraph) => {
+    const words = paragraph.split(" ");
+    let line = "";
+    for (const word of words) {
+      const testLine = line ? `${line} ${word}` : word;
+      if (ctx.measureText(testLine).width > maxWidth && line) {
+        ctx.fillText(line, x, y + lineIndex * lineHeight);
+        line = word;
+        lineIndex += 1;
+      } else {
+        line = testLine;
+      }
     }
-  }
-
-  if (line) {
-    ctx.fillText(line, x, y + lineIndex * lineHeight);
-  }
+    if (line) {
+      ctx.fillText(line, x, y + lineIndex * lineHeight);
+      lineIndex += 1;
+    }
+  });
 
   ctx.restore();
 }
@@ -1184,6 +1207,38 @@ function drawPlatformMass(ctx, platform, theme) {
     return;
   }
 
+  if (platform.kind === "damage" || platform.kind === "recallDamage") {
+    const isRecallDamage = platform.kind === "recallDamage";
+    const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+    gradient.addColorStop(0, isRecallDamage ? "rgba(94, 190, 255, 0.72)" : "rgba(255, 126, 102, 0.68)");
+    gradient.addColorStop(0.38, platform.color || (isRecallDamage ? "#2367a8" : "#8b3446"));
+    gradient.addColorStop(1, isRecallDamage ? "rgba(8, 24, 46, 0.92)" : "rgba(34, 12, 18, 0.92)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+    ctx.fillStyle = "rgba(255, 226, 126, 0.25)";
+    ctx.fillRect(platform.x, platform.y, platform.width, Math.max(3, platform.height * 0.16));
+
+    ctx.strokeStyle = isRecallDamage ? "rgba(94, 190, 255, 0.78)" : "rgba(255, 190, 102, 0.7)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+
+    ctx.strokeStyle = isRecallDamage ? "rgba(147, 234, 255, 0.44)" : "rgba(255, 226, 126, 0.42)";
+    ctx.lineWidth = 1.5;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(platform.x, platform.y, platform.width, platform.height);
+    ctx.clip();
+    for (let x = platform.x - platform.height; x < platform.x + platform.width; x += 26) {
+      ctx.beginPath();
+      ctx.moveTo(x, platform.y + platform.height);
+      ctx.lineTo(x + platform.height, platform.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
   const topGradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
   topGradient.addColorStop(0, "rgba(212, 230, 236, 0.24)");
   topGradient.addColorStop(0.18, "rgba(112, 130, 139, 0.46)");
@@ -1218,7 +1273,11 @@ function drawPlatformMass(ctx, platform, theme) {
 }
 
 function drawTerrain(ctx, data) {
-  data.platforms.forEach((platform) => {
+  data.platforms.filter((platform) => platform.kind === "damage" || platform.kind === "recallDamage").forEach((platform) => {
+    drawPlatformMass(ctx, platform, getUiTheme(data));
+  });
+
+  data.platforms.filter((platform) => platform.kind !== "damage" && platform.kind !== "recallDamage").forEach((platform) => {
     drawPlatformMass(ctx, platform, getUiTheme(data));
   });
 
@@ -1267,6 +1326,49 @@ function drawTemporaryBlocks(ctx, run, theme) {
     ctx.strokeStyle = "rgba(241, 249, 252, 0.28)";
     ctx.lineWidth = 2;
     ctx.strokeRect(block.x, block.y, block.width, block.height);
+    ctx.restore();
+  });
+}
+
+function isEscapeBarrierActive(run, barrier) {
+  const vault = run?.vaultEscape;
+  if ((barrier?.trigger || "vaultEscape") === "lockdown") {
+    return Boolean(vault?.lockdownActive);
+  }
+  return Boolean(vault?.active || vault?.lockdownActive);
+}
+
+function drawEscapeBarriers(ctx, run) {
+  (run.escapeBarriers || []).forEach((barrier) => {
+    const active = isEscapeBarrierActive(run, barrier);
+    const pulse = 0.45 + Math.sin((run.time ?? 0) * 8 + barrier.x * 0.01) * 0.18;
+    ctx.save();
+    ctx.globalAlpha = active ? 1 : 0.34;
+    if (active) {
+      ctx.shadowColor = barrier.color || "#ff7a66";
+      ctx.shadowBlur = 20 + pulse * 14;
+    }
+    const gradient = ctx.createLinearGradient(barrier.x, barrier.y, barrier.x, barrier.y + barrier.height);
+    gradient.addColorStop(0, active ? "rgba(255, 190, 102, 0.62)" : "rgba(255, 190, 102, 0.12)");
+    gradient.addColorStop(0.48, active ? "rgba(255, 122, 102, 0.72)" : "rgba(255, 122, 102, 0.16)");
+    gradient.addColorStop(1, active ? "rgba(28, 12, 16, 0.9)" : "rgba(28, 12, 16, 0.18)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(barrier.x, barrier.y, barrier.width, barrier.height);
+    ctx.strokeStyle = active
+      ? `rgba(255, 226, 126, ${0.5 + pulse * 0.32})`
+      : "rgba(255, 190, 102, 0.42)";
+    ctx.lineWidth = active ? 2.4 : 1.4;
+    ctx.strokeRect(barrier.x, barrier.y, barrier.width, barrier.height);
+    ctx.strokeStyle = active ? "rgba(255,255,255,0.32)" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1.2;
+    const slits = Math.max(2, Math.floor(barrier.width / 28));
+    for (let index = 0; index < slits; index += 1) {
+      const x = barrier.x + 8 + index * Math.max(1, (barrier.width - 16) / Math.max(1, slits - 1));
+      ctx.beginPath();
+      ctx.moveTo(x, barrier.y + 8);
+      ctx.lineTo(x, barrier.y + barrier.height - 8);
+      ctx.stroke();
+    }
     ctx.restore();
   });
 }
@@ -1436,17 +1538,10 @@ function drawBraceWalls(ctx, data, theme) {
 
 function drawProps(ctx, data, pulse, theme) {
   data.props.forEach((prop) => {
-    if (prop.kind === "backgroundTile") {
+    if (isRectPropTileKind(prop.kind)) {
       return;
     }
     if (prop.kind === "lantern") {
-      const glow = 0.18 + Math.sin(pulse * 2 + prop.x * 0.02) * 0.06;
-      ctx.fillStyle = `rgba(231, 244, 126, ${glow})`;
-      ctx.beginPath();
-      ctx.arc(prop.x, prop.y, 22, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = theme.accent;
-      ctx.fillRect(prop.x - 3, prop.y - 18, 6, 18);
       return;
     }
 
@@ -1490,24 +1585,333 @@ function getBackgroundTileRect(prop) {
   };
 }
 
+function isShadowTileKind(kind) {
+  return kind === "shadowTile";
+}
+
+function isBackgroundTileKind(kind) {
+  return kind === "backgroundTile";
+}
+
+function isRectPropTileKind(kind) {
+  return isBackgroundTileKind(kind) || isShadowTileKind(kind);
+}
+
+function getRectPropTileColor(prop) {
+  const fallback = isShadowTileKind(prop?.kind) ? SHADOW_TILE_COLOR : BACKGROUND_TILE_COLOR;
+  const color = prop?.color || fallback;
+  return LEGACY_TILE_COLORS.has(String(color).toLowerCase()) ? fallback : color;
+}
+
 function getBackgroundTileAlpha(prop, run) {
   const rect = getBackgroundTileRect(prop);
   const player = run?.player;
   if (player && rectsIntersect(rect, player)) {
-    return prop.occupiedAlpha ?? 0.16;
+    return prop.occupiedAlpha ?? 0.42;
   }
   return prop.alpha ?? 0.86;
 }
 
-function drawBackgroundTiles(ctx, data, run = null) {
+function getLanternProps(data) {
+  return (data.props || []).filter((prop) => prop.kind === "lantern");
+}
+
+function getLanternLightRadius(prop) {
+  return Math.max(24, Number(prop.lightRadius ?? 260) || 260);
+}
+
+function getLanternEnd(prop) {
+  return {
+    x: Number.isFinite(prop?.endX) ? prop.endX : prop.x,
+    y: Number.isFinite(prop?.endY) ? prop.endY : prop.y,
+  };
+}
+
+function getLanternLightSamples(prop) {
+  const radius = getLanternLightRadius(prop);
+  const end = getLanternEnd(prop);
+  const dx = end.x - prop.x;
+  const dy = end.y - prop.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 1) {
+    return [{ x: prop.x, y: prop.y, lightRadius: radius }];
+  }
+  const spacing = Math.max(64, radius * 0.55);
+  const steps = Math.min(48, Math.max(1, Math.ceil(distance / spacing)));
+  const samples = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    samples.push({
+      x: prop.x + dx * t,
+      y: prop.y + dy * t,
+      lightRadius: radius,
+    });
+  }
+  return samples;
+}
+
+function getLanternWorldLights(data) {
+  return getLanternProps(data).flatMap((lantern) => getLanternLightSamples(lantern));
+}
+
+function createLayerCanvas(width, height) {
+  const safeWidth = Math.max(1, Math.ceil(width));
+  const safeHeight = Math.max(1, Math.ceil(height));
+  if (typeof OffscreenCanvas !== "undefined") {
+    const canvas = new OffscreenCanvas(safeWidth, safeHeight);
+    return { canvas, ctx: canvas.getContext("2d") };
+  }
+  if (typeof document !== "undefined") {
+    const canvas = document.createElement("canvas");
+    canvas.width = safeWidth;
+    canvas.height = safeHeight;
+    return { canvas, ctx: canvas.getContext("2d") };
+  }
+  return null;
+}
+
+function drawLanternCutouts(ctx, lanterns, offsetX = 0, offsetY = 0, scale = 1, blockers = null) {
+  if (!lanterns.length) {
+    return;
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  lanterns.forEach((lantern) => {
+    const radius = getLanternLightRadius(lantern) * scale;
+    const x = (lantern.x - offsetX) * scale;
+    const y = (lantern.y - offsetY) * scale;
+    const core = Math.max(8, radius * 0.16);
+    const light = ctx.createRadialGradient(x, y, core, x, y, radius);
+    light.addColorStop(0, "rgba(0,0,0,0.96)");
+    light.addColorStop(0.38, "rgba(0,0,0,0.64)");
+    light.addColorStop(0.74, "rgba(0,0,0,0.22)");
+    light.addColorStop(1, "rgba(0,0,0,0)");
+    fillOccludedLight(ctx, x, y, radius, blockers, light);
+  });
+  ctx.restore();
+}
+
+function getLanternScreenLights(data, run, cameraZoom) {
+  if (!run) {
+    return [];
+  }
+  return getLanternProps(data)
+    .flatMap((lantern) => getLanternLightSamples(lantern))
+    .map((lantern) => ({
+      x: (lantern.x - run.cameraX) * cameraZoom,
+      y: (lantern.y - run.cameraY) * cameraZoom,
+      lightRadius: getLanternLightRadius(lantern) * cameraZoom,
+    }))
+    .filter((lantern) => (
+      lantern.x + lantern.lightRadius >= 0 &&
+      lantern.x - lantern.lightRadius <= SCREEN_WIDTH &&
+      lantern.y + lantern.lightRadius >= 0 &&
+      lantern.y - lantern.lightRadius <= SCREEN_HEIGHT
+    ));
+}
+
+function getScreenLightBlockers(data, run, cameraZoom) {
+  if (!run) {
+    return [];
+  }
+  return (data.platforms || [])
+    .map((platform) => ({
+      x: (platform.x - run.cameraX) * cameraZoom,
+      y: (platform.y - run.cameraY) * cameraZoom,
+      width: Math.max(1, platform.width * cameraZoom),
+      height: Math.max(1, platform.height * cameraZoom),
+    }))
+    .filter((rect) => (
+      rect.x + rect.width >= -SCREEN_WIDTH * 0.2 &&
+      rect.x <= SCREEN_WIDTH * 1.2 &&
+      rect.y + rect.height >= -SCREEN_HEIGHT * 0.2 &&
+      rect.y <= SCREEN_HEIGHT * 1.2
+    ));
+}
+
+function getWorldLightBlockers(data) {
+  return (data.platforms || []).map((platform) => ({
+    x: platform.x,
+    y: platform.y,
+    width: Math.max(1, platform.width),
+    height: Math.max(1, platform.height),
+  }));
+}
+
+function translateLightBlockers(blockers, offsetX, offsetY, scale = 1) {
+  return (blockers || [])
+    .map((rect) => ({
+      x: (rect.x - offsetX) * scale,
+      y: (rect.y - offsetY) * scale,
+      width: rect.width * scale,
+      height: rect.height * scale,
+    }));
+}
+
+function raySegmentIntersection(originX, originY, dirX, dirY, x1, y1, x2, y2) {
+  const segX = x2 - x1;
+  const segY = y2 - y1;
+  const cross = dirX * segY - dirY * segX;
+  if (Math.abs(cross) < 0.000001) {
+    return null;
+  }
+  const relX = x1 - originX;
+  const relY = y1 - originY;
+  const distance = (relX * segY - relY * segX) / cross;
+  const segmentT = (relX * dirY - relY * dirX) / cross;
+  if (distance < 0 || segmentT < 0 || segmentT > 1) {
+    return null;
+  }
+  return {
+    x: originX + dirX * distance,
+    y: originY + dirY * distance,
+    distance,
+  };
+}
+
+function getLightVisibilityPolygon(originX, originY, radius, blockers) {
+  const tau = Math.PI * 2;
+  const left = originX - radius;
+  const right = originX + radius;
+  const top = originY - radius;
+  const bottom = originY + radius;
+  const segments = [
+    [left, top, right, top],
+    [right, top, right, bottom],
+    [right, bottom, left, bottom],
+    [left, bottom, left, top],
+  ];
+  const angles = [];
+  const sampleCount = LOW_PERFORMANCE_MODE ? 48 : 96;
+  for (let index = 0; index < sampleCount; index += 1) {
+    angles.push((tau * index) / sampleCount);
+  }
+
+  blockers.forEach((rect) => {
+    if (
+      originX >= rect.x &&
+      originX <= rect.x + rect.width &&
+      originY >= rect.y &&
+      originY <= rect.y + rect.height
+    ) {
+      return;
+    }
+    if (
+      rect.x > right ||
+      rect.x + rect.width < left ||
+      rect.y > bottom ||
+      rect.y + rect.height < top
+    ) {
+      return;
+    }
+    const x1 = rect.x;
+    const y1 = rect.y;
+    const x2 = rect.x + rect.width;
+    const y2 = rect.y + rect.height;
+    segments.push([x1, y1, x2, y1], [x2, y1, x2, y2], [x2, y2, x1, y2], [x1, y2, x1, y1]);
+    [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].forEach(([cornerX, cornerY]) => {
+      const angle = Math.atan2(cornerY - originY, cornerX - originX);
+      angles.push(angle - 0.0008, angle, angle + 0.0008);
+    });
+  });
+
+  return angles
+    .map((angle) => {
+      const castAngle = ((angle % tau) + tau) % tau;
+      const dirX = Math.cos(castAngle);
+      const dirY = Math.sin(castAngle);
+      let nearest = {
+        x: originX + dirX * radius,
+        y: originY + dirY * radius,
+        distance: radius,
+      };
+      segments.forEach(([x1, y1, x2, y2]) => {
+        const hit = raySegmentIntersection(originX, originY, dirX, dirY, x1, y1, x2, y2);
+        if (hit && hit.distance < nearest.distance) {
+          nearest = hit;
+        }
+      });
+      return { ...nearest, angle: castAngle };
+    })
+    .sort((a, b) => a.angle - b.angle);
+}
+
+function fillOccludedLight(ctx, x, y, radius, blockers, fillStyle) {
+  if (!blockers?.length) {
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  const polygon = getLightVisibilityPolygon(x, y, radius, blockers);
+  if (polygon.length < 3) {
+    return;
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(polygon[0].x, polygon[0].y);
+  polygon.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = fillStyle;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBackgroundTiles(ctx, data) {
   data.props.forEach((prop) => {
-    if (prop.kind !== "backgroundTile") {
+    if (!isBackgroundTileKind(prop.kind)) {
+      return;
+    }
+    const rect = getBackgroundTileRect(prop);
+    ctx.save();
+    ctx.fillStyle = getRectPropTileColor(prop);
+    ctx.globalAlpha = 1;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.restore();
+  });
+}
+
+function drawShadowTiles(ctx, data, run = null) {
+  const lanterns = getLanternWorldLights(data);
+  const worldLightBlockers = getWorldLightBlockers(data);
+  data.props.forEach((prop) => {
+    if (!isShadowTileKind(prop.kind)) {
       return;
     }
     const rect = getBackgroundTileRect(prop);
     const alpha = getBackgroundTileAlpha(prop, run);
+    const nearbyLanterns = lanterns.filter((lantern) => {
+      const radius = getLanternLightRadius(lantern);
+      return lantern.x + radius >= rect.x &&
+        lantern.x - radius <= rect.x + rect.width &&
+        lantern.y + radius >= rect.y &&
+        lantern.y - radius <= rect.y + rect.height;
+    });
+    if (nearbyLanterns.length) {
+      const layer = createLayerCanvas(rect.width, rect.height);
+      if (layer?.ctx) {
+        layer.ctx.fillStyle = getRectPropTileColor(prop);
+        layer.ctx.globalAlpha = alpha;
+        layer.ctx.fillRect(0, 0, rect.width, rect.height);
+        layer.ctx.globalAlpha = 1;
+        drawLanternCutouts(
+          layer.ctx,
+          nearbyLanterns,
+          rect.x,
+          rect.y,
+          1,
+          translateLightBlockers(worldLightBlockers, rect.x, rect.y, 1),
+        );
+        ctx.drawImage(layer.canvas, rect.x, rect.y, rect.width, rect.height);
+        return;
+      }
+    }
     ctx.save();
-    ctx.fillStyle = prop.color || "#4f6f7d";
+    ctx.fillStyle = getRectPropTileColor(prop);
     ctx.globalAlpha = alpha;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.restore();
@@ -1615,6 +2019,73 @@ function drawSpilledLoot(ctx, run) {
     ctx.fillRect(drop.x - radius * 0.55, drop.y - 3, radius * 1.1, 6);
     ctx.fillStyle = `rgba(255,255,255,${0.42 + pulse * 0.24})`;
     ctx.fillRect(drop.x - radius * 0.28, drop.y - radius * 0.55, radius * 0.56, 3);
+    ctx.restore();
+  });
+}
+
+function drawVaultSecurityObjects(ctx, run, theme, pulse = 0) {
+  const alarmActive = Boolean(run.vaultEscape?.active);
+  (run.vaultDoors || []).forEach((door) => {
+    const hacked = Boolean(door.hacked);
+    const glow = alarmActive ? 0.38 + Math.sin(pulse * 9) * 0.16 : hacked ? 0.24 : 0.08;
+    ctx.save();
+    ctx.shadowColor = alarmActive ? "#ff7a66" : theme.accentSecondary;
+    ctx.shadowBlur = alarmActive ? 24 : 10;
+    drawBeveledPanel(ctx, theme, door.x, door.y, door.width, door.height, {
+      cut: 10,
+      fill: hacked ? "rgba(27, 39, 43, 0.72)" : "rgba(10, 16, 22, 0.92)",
+      stroke: alarmActive ? `rgba(255, 122, 102, ${0.62 + glow})` : "rgba(147,234,255,0.36)",
+      innerLines: false,
+    });
+    ctx.fillStyle = alarmActive ? `rgba(255, 122, 102, ${0.18 + glow})` : "rgba(147,234,255,0.11)";
+    ctx.fillRect(door.x + 8, door.y + 10, door.width - 16, 8);
+    ctx.fillStyle = hacked ? "rgba(231,244,126,0.78)" : "rgba(147,234,255,0.82)";
+    ctx.font = "800 12px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(door.label || "Vault", door.x + door.width / 2, door.y - 14);
+    ctx.restore();
+  });
+
+  (run.vaultLoot || []).forEach((loot) => {
+    if (loot.collected) {
+      return;
+    }
+    ctx.save();
+    ctx.shadowColor = alarmActive ? "#e7f47e" : theme.accent;
+    ctx.shadowBlur = alarmActive ? 18 : 8;
+    drawBeveledPanel(ctx, theme, loot.x, loot.y, loot.width, loot.height, {
+      cut: 7,
+      fill: "rgba(37, 44, 30, 0.88)",
+      stroke: "rgba(231,244,126,0.56)",
+      innerLines: false,
+    });
+    ctx.fillStyle = "rgba(231,244,126,0.72)";
+    ctx.fillRect(loot.x + 8, loot.y + 8, Math.max(4, loot.width - 16), 5);
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = "700 11px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(loot.label || "Supply", loot.x + loot.width / 2, loot.y - 10);
+    ctx.restore();
+  });
+
+  (run.escapeExits || []).forEach((exit) => {
+    const alpha = alarmActive ? 1 : 0.34;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = "#ff7a66";
+    ctx.shadowBlur = alarmActive ? 22 : 0;
+    drawBeveledPanel(ctx, theme, exit.x - 10, exit.y - 14, exit.width + 20, exit.height + 20, {
+      cut: 14,
+      fill: "rgba(31, 13, 15, 0.38)",
+      stroke: alarmActive ? "rgba(255,122,102,0.7)" : "rgba(255,255,255,0.18)",
+      innerLines: false,
+    });
+    ctx.fillStyle = alarmActive ? "rgba(255,122,102,0.16)" : "rgba(255,255,255,0.06)";
+    ctx.fillRect(exit.x, exit.y, exit.width, exit.height);
+    ctx.fillStyle = "rgba(255,255,255,0.84)";
+    ctx.font = "800 13px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(exit.label || "Escape", exit.x + exit.width / 2, exit.y - 24);
     ctx.restore();
   });
 }
@@ -4908,6 +5379,156 @@ function drawAttackFx(ctx, run) {
 function drawRecoilFx(ctx, run) {
   run.recoilFx.forEach((effect) => {
     const alpha = Math.max(0, effect.life / effect.duration);
+    if (effect.type === "weapon-blast") {
+      const progress = 1 - alpha;
+      const chargeLevel = clamp(effect.chargeLevel ?? ((effect.charge ?? 1) - 1) / 2.4, 0, 1);
+      const blastScale = 1 + chargeLevel * 1.15;
+      const radius = (effect.radius ?? 92) * (0.68 + progress * 0.28) * blastScale;
+      const coreRadius = Math.max(10, radius * 0.22);
+      const dirX = effect.dirX ?? 1;
+      const dirY = effect.dirY ?? 0;
+      const normalX = -dirY;
+      const normalY = dirX;
+      const originX = Number.isFinite(effect.originX) ? effect.originX : effect.x - dirX * radius * 0.7;
+      const originY = Number.isFinite(effect.originY) ? effect.originY : effect.y - dirY * radius * 0.7;
+      const flashLength = radius * (1.62 + progress * 0.52 + chargeLevel * 0.72);
+      const flashWidth = radius * (0.3 + progress * 0.14 + chargeLevel * 0.18);
+      const noseX = effect.x + dirX * flashLength;
+      const noseY = effect.y + dirY * flashLength;
+      const tailX = effect.x - dirX * radius * 0.35;
+      const tailY = effect.y - dirY * radius * 0.35;
+
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      const glow = ctx.createRadialGradient(effect.x, effect.y, 0, effect.x, effect.y, radius * 0.82);
+      glow.addColorStop(0, `rgba(255, 255, 255, ${0.88 * alpha})`);
+      glow.addColorStop(0.22, `rgba(255, 214, 128, ${0.72 * alpha})`);
+      glow.addColorStop(0.54, `rgba(255, 118, 74, ${0.34 * alpha})`);
+      glow.addColorStop(1, "rgba(98, 214, 255, 0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.ellipse(effect.x, effect.y, radius * 0.82, radius * 0.48, Math.atan2(dirY, dirX), 0, Math.PI * 2);
+      ctx.fill();
+
+      const cone = ctx.createLinearGradient(originX, originY, noseX, noseY);
+      cone.addColorStop(0, `rgba(147, 234, 255, ${0.06 * alpha})`);
+      cone.addColorStop(0.18, `rgba(255, 255, 255, ${0.9 * alpha})`);
+      cone.addColorStop(0.48, `rgba(255, 214, 128, ${0.72 * alpha})`);
+      cone.addColorStop(1, "rgba(255, 118, 74, 0)");
+      ctx.shadowColor = "rgba(255, 238, 189, 0.95)";
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(tailX + normalX * flashWidth * 0.52, tailY + normalY * flashWidth * 0.52);
+      ctx.lineTo(effect.x + normalX * flashWidth, effect.y + normalY * flashWidth);
+      ctx.lineTo(noseX, noseY);
+      ctx.lineTo(effect.x - normalX * flashWidth, effect.y - normalY * flashWidth);
+      ctx.lineTo(tailX - normalX * flashWidth * 0.52, tailY - normalY * flashWidth * 0.52);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.shadowColor = "rgba(255, 255, 255, 0.92)";
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.88 * alpha})`;
+      ctx.lineWidth = 6 + progress * 4;
+      ctx.beginPath();
+      ctx.moveTo(originX, originY);
+      ctx.lineTo(effect.x + dirX * flashLength * 0.86, effect.y + dirY * flashLength * 0.86);
+      ctx.stroke();
+
+      ctx.shadowColor = "rgba(147, 234, 255, 0.9)";
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = `rgba(147, 234, 255, ${0.5 * alpha})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(effect.x - normalX * radius * 0.62, effect.y - normalY * radius * 0.62);
+      ctx.quadraticCurveTo(
+        effect.x + dirX * radius * 0.25,
+        effect.y + dirY * radius * 0.25,
+        effect.x + normalX * radius * 0.62,
+        effect.y + normalY * radius * 0.62,
+      );
+      ctx.stroke();
+
+      ctx.shadowBlur = 10;
+      const sparkCount = 5 + Math.round(chargeLevel * 7);
+      for (let index = -sparkCount; index <= sparkCount; index += 1) {
+        const spread = index * (0.12 + chargeLevel * 0.018);
+        const sparkDirX = dirX + normalX * spread;
+        const sparkDirY = dirY + normalY * spread;
+        const centerBias = Math.max(0, sparkCount - Math.abs(index));
+        const sparkLength = radius * (0.8 + centerBias * 0.08 + chargeLevel * 0.46);
+        const startBack = radius * (0.12 + Math.abs(index) * 0.025);
+        ctx.strokeStyle = index === 0
+          ? `rgba(255, 255, 255, ${0.78 * alpha})`
+          : `rgba(255, 220, 152, ${0.5 * alpha})`;
+        ctx.lineWidth = index === 0 ? 4 : 1.8;
+        ctx.beginPath();
+        ctx.moveTo(effect.x - sparkDirX * startBack, effect.y - sparkDirY * startBack);
+        ctx.lineTo(effect.x + sparkDirX * sparkLength, effect.y + sparkDirY * sparkLength);
+        ctx.stroke();
+      }
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.78 * alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(effect.x, effect.y, coreRadius * 1.35 * alpha, coreRadius * 0.75 * alpha, Math.atan2(dirY, dirX), 0, Math.PI * 2);
+      ctx.fill();
+
+      if (chargeLevel > 0.18) {
+        ctx.strokeStyle = `rgba(255, 246, 214, ${0.44 * alpha * chargeLevel})`;
+        ctx.lineWidth = 2.5 + chargeLevel * 3.5;
+        ctx.beginPath();
+        ctx.moveTo(effect.x - normalX * radius * (0.72 + chargeLevel * 0.25), effect.y - normalY * radius * (0.72 + chargeLevel * 0.25));
+        ctx.quadraticCurveTo(
+          effect.x + dirX * radius * (0.7 + chargeLevel * 0.35),
+          effect.y + dirY * radius * (0.7 + chargeLevel * 0.35),
+          effect.x + normalX * radius * (0.72 + chargeLevel * 0.25),
+          effect.y + normalY * radius * (0.72 + chargeLevel * 0.25),
+        );
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+
+    if (effect.weaponType === "recoil-charge") {
+      const progress = clamp(effect.progress ?? 0, 0, 1);
+      const pulse = 1 - alpha;
+      const radius = (effect.radius ?? 52) * (effect.scale ?? 1) * (1 + pulse * 0.2);
+      const color = effect.color || "#93eaff";
+
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 14 + progress * 16;
+      ctx.strokeStyle = `rgba(245, 251, 255, ${0.68 * alpha})`;
+      ctx.lineWidth = 3.5 + progress * 2.5;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 22 + progress * 20;
+      ctx.strokeStyle = `rgba(98, 214, 255, ${0.42 * alpha})`;
+      ctx.lineWidth = 9 + progress * 7;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, radius * 0.94, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = `rgba(245, 251, 255, ${0.3 * alpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, radius * 1.16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
     const normalX = -effect.dirY;
     const normalY = effect.dirX;
 
@@ -5174,7 +5795,31 @@ function drawRecoilAimWorld(ctx, run) {
 
 function drawParticles(ctx, run) {
   run.particles.forEach((particle) => {
-    ctx.globalAlpha = Math.max(0, particle.life);
+    const alpha = Math.max(0, particle.maxLife ? particle.life / particle.maxLife : particle.life);
+    ctx.globalAlpha = alpha;
+    if (particle.shape === "concreteShard") {
+      const width = Math.max(2, particle.width ?? particle.radius * 2);
+      const height = Math.max(2, particle.height ?? particle.radius);
+      ctx.save();
+      ctx.translate(particle.x, particle.y);
+      ctx.rotate(particle.rotation ?? 0);
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.moveTo(-width * 0.5, -height * 0.35);
+      ctx.lineTo(width * 0.2, -height * 0.55);
+      ctx.lineTo(width * 0.55, height * 0.04);
+      ctx.lineTo(width * 0.08, height * 0.5);
+      ctx.lineTo(-width * 0.48, height * 0.28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = `rgba(32, 35, 34, ${0.28 * alpha})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = `rgba(210, 210, 198, ${0.22 * alpha})`;
+      ctx.fillRect(-width * 0.25, -height * 0.18, width * 0.34, Math.max(1, height * 0.12));
+      ctx.restore();
+      return;
+    }
     ctx.fillStyle = particle.color;
     ctx.beginPath();
     ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
@@ -5340,6 +5985,7 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   const transitionPulse = Math.sin((1 - transition) * Math.PI) * transition;
   const sanityPenalty = run.sanity < 40 ? 0.12 : run.sanity < 70 ? 0.05 : 0;
   const overlayCtx = overlay.ctx;
+  const lightBlockers = getScreenLightBlockers(data, run, cameraZoom);
 
   overlayCtx.save();
   overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -5379,20 +6025,17 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   overlayCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   overlayCtx.globalCompositeOperation = "destination-out";
-  overlayCtx.fillStyle = "rgba(0,0,0,1)";
-  overlayCtx.beginPath();
-  overlayCtx.arc(playerX, playerY, clearCoreRadius, 0, Math.PI * 2);
-  overlayCtx.fill();
+  fillOccludedLight(overlayCtx, playerX, playerY, clearCoreRadius, lightBlockers, "rgba(0,0,0,1)");
 
   const sight = overlayCtx.createRadialGradient(playerX, playerY, clearCoreRadius * 0.55, playerX, playerY, sightRadius);
   sight.addColorStop(0, `rgba(0,0,0,${0.9 + lightBoost * 0.08})`);
   sight.addColorStop(0.36, `rgba(0,0,0,${0.58 + lightBoost * 0.18})`);
   sight.addColorStop(0.72, `rgba(0,0,0,${0.18 + lightBoost * 0.08})`);
   sight.addColorStop(1, "rgba(0,0,0,0)");
-  overlayCtx.fillStyle = sight;
-  overlayCtx.beginPath();
-  overlayCtx.arc(playerX, playerY, sightRadius, 0, Math.PI * 2);
-  overlayCtx.fill();
+  fillOccludedLight(overlayCtx, playerX, playerY, sightRadius, lightBlockers, sight);
+
+  const lanternLights = getLanternScreenLights(data, run, cameraZoom);
+  drawLanternCutouts(overlayCtx, lanternLights, 0, 0, 1, lightBlockers);
 
   if (run.player.lightActive) {
     const direction = getFlashlightDirection(run);
@@ -5420,10 +6063,16 @@ function drawNightPostProcess(ctx, run, data, pulse = 0) {
   halo.addColorStop(0, `rgba(154, 231, 255, ${0.16 * strength + lightBoost * 0.12})`);
   halo.addColorStop(0.62, `rgba(42, 148, 188, ${0.06 * strength})`);
   halo.addColorStop(1, "rgba(0,0,0,0)");
-  overlayCtx.fillStyle = halo;
-  overlayCtx.beginPath();
-  overlayCtx.arc(playerX, playerY, sightRadius * 0.72, 0, Math.PI * 2);
-  overlayCtx.fill();
+  fillOccludedLight(overlayCtx, playerX, playerY, sightRadius * 0.72, lightBlockers, halo);
+
+  lanternLights.forEach((lantern) => {
+    const radius = getLanternLightRadius(lantern);
+    const lanternHalo = overlayCtx.createRadialGradient(lantern.x, lantern.y, 8, lantern.x, lantern.y, radius);
+    lanternHalo.addColorStop(0, `rgba(237, 248, 152, ${0.16 * strength})`);
+    lanternHalo.addColorStop(0.48, `rgba(137, 214, 176, ${0.06 * strength})`);
+    lanternHalo.addColorStop(1, "rgba(0,0,0,0)");
+    fillOccludedLight(overlayCtx, lantern.x, lantern.y, radius, lightBlockers, lanternHalo);
+  });
 
   if (run.player.lightActive) {
     const direction = getFlashlightDirection(run);
@@ -5635,10 +6284,11 @@ function drawDebugWorldOverlay(ctx, state, data) {
     player.dashResetActive ? "DashReset" : null,
     player.braceHoldActive ? "BraceHold" : null,
     player.braceActive ? "Brace" : null,
+    player.verticalMomentumStage > 0 ? `M${player.verticalMomentumStage}` : null,
   ].filter(Boolean).join(" · ");
   ctx.fillStyle = "rgba(210, 248, 255, 0.92)";
   ctx.fillText(
-    `Coy ${player.coyoteTimer.toFixed(2)}  Buf ${player.jumpBufferTimer.toFixed(2)}  Wall ${player.wallGraceTimer.toFixed(2)}  Slide ${player.wallSlideGraceTimer.toFixed(2)}  Dash ${player.dashCarryTimer.toFixed(2)}  Sprint ${player.sprintCharge.toFixed(2)}  Brace ${player.braceCooldownTimer.toFixed(2)}  Ret ${player.speedRetentionTimer.toFixed(2)}${debugFlags ? `  ${debugFlags}` : ""}`,
+    `Coy ${player.coyoteTimer.toFixed(2)}  Buf ${player.jumpBufferTimer.toFixed(2)}  Wall ${player.wallGraceTimer.toFixed(2)}  Slide ${player.wallSlideGraceTimer.toFixed(2)}  Dash ${player.dashCarryTimer.toFixed(2)}  Sprint ${player.sprintCharge.toFixed(2)}  MOM ${(player.verticalMomentum ?? 0).toFixed(2)}  Brace ${player.braceCooldownTimer.toFixed(2)}  Ret ${player.speedRetentionTimer.toFixed(2)}${debugFlags ? `  ${debugFlags}` : ""}`,
     player.x + 4,
     player.y - 18
   );
@@ -5656,10 +6306,10 @@ function drawDebugCameraOverlay(ctx, state, data) {
   const baseZoom = getCameraZoom(data);
   ctx.save();
   ctx.fillStyle = "rgba(6, 10, 16, 0.76)";
-  ctx.fillRect(18, SCREEN_HEIGHT - 82, 440, 58);
+  ctx.fillRect(18, SCREEN_HEIGHT - 104, 440, 80);
   ctx.strokeStyle = "rgba(231, 244, 126, 0.42)";
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(18, SCREEN_HEIGHT - 82, 440, 58);
+  ctx.strokeRect(18, SCREEN_HEIGHT - 104, 440, 80);
   ctx.fillStyle = "rgba(236, 249, 255, 0.94)";
   ctx.font = "12px 'Segoe UI', sans-serif";
   ctx.fillText(
@@ -5671,6 +6321,11 @@ function drawDebugCameraOverlay(ctx, state, data) {
     `focus ${Number(run.cameraFocusX ?? 0.5).toFixed(2)}, ${Number(run.cameraFocusY ?? 0.5).toFixed(2)}   look ${Number(run.cameraLookDirection ?? 0).toFixed(2)}   ahead ${Number(run.cameraLookAhead ?? 0).toFixed(2)}   speed ${Number(run.cameraSpeedRatio ?? 0).toFixed(2)}`,
     34,
     SCREEN_HEIGHT - 34,
+  );
+  ctx.fillText(
+    `zone ${run.activeCameraZoneLabel || run.activeCameraZoneId || "-"}`,
+    34,
+    SCREEN_HEIGHT - 78,
   );
   ctx.restore();
 }
@@ -5924,10 +6579,10 @@ function drawActionNode(ctx, theme, x, y, type, label, keyLabel, prominent = fal
 
 function drawActionCluster(ctx, theme) {
   drawActionNode(ctx, theme, 118, 610, "move", "이동", "A D", true);
-  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "W / Space");
-  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "X");
+  drawActionNode(ctx, theme, 54, 550, "jump", "점프", "Space / W");
+  drawActionNode(ctx, theme, 186, 570, "dash", "대시", "Shift");
   drawActionNode(ctx, theme, 56, 676, "crouch", "숙이기", "S");
-  drawActionNode(ctx, theme, 184, 684, "use", "사용", "Z");
+  drawActionNode(ctx, theme, 184, 684, "use", "사용", "↑ / E");
 }
 
 function getDashUiState(run, data) {
@@ -6653,6 +7308,7 @@ function drawAimCursorHud(ctx, state, data) {
   const mouse = state.mouse || {};
   if (
     state.scene !== SCENES.EXPEDITION ||
+    !state.capsLockActive ||
     !run ||
     mouse.onCanvas === false ||
     state.liveEdit?.active ||
@@ -7749,14 +8405,34 @@ function drawFaceOffEntryTransition(ctx, run, data) {
   ctx.restore();
 }
 
+function getScreenShakeOffset(run) {
+  const duration = Math.max(0.001, run.screenShakeDuration ?? 0);
+  const ratio = clamp((run.screenShakeTimer ?? 0) / duration, 0, 1);
+  if (ratio <= 0) {
+    return { x: 0, y: 0 };
+  }
+  const intensity = Math.max(0, Number(run.screenShakeIntensity ?? 0)) * ratio * ratio;
+  const time = typeof performance !== "undefined" ? performance.now() * 0.001 : 0;
+  const dirX = Number.isFinite(run.screenShakeDirX) ? run.screenShakeDirX : 0;
+  const dirY = Number.isFinite(run.screenShakeDirY) ? run.screenShakeDirY : 0;
+  const sidewaysX = -dirY;
+  const sidewaysY = dirX;
+  return {
+    x: Math.sin(time * 72) * intensity + sidewaysX * Math.sin(time * 113) * intensity * 0.42,
+    y: Math.cos(time * 87) * intensity * 0.62 + sidewaysY * Math.cos(time * 101) * intensity * 0.36,
+  };
+}
+
 function renderExpedition(ctx, state, data) {
   const run = state.run;
   const theme = getUiTheme(data);
   const cameraZoom = getRunCameraZoom(run, data);
+  const screenShake = getScreenShakeOffset(run);
 
   drawScenicBackdrop(ctx, theme, state.pulse, run.cameraX);
 
   ctx.save();
+  ctx.translate(screenShake.x, screenShake.y);
   applyFaceOffEntryCameraTransform(ctx, run, data, cameraZoom);
   const weaponKickOffset = getWeaponKickCameraOffset(run);
   ctx.translate(weaponKickOffset.x, weaponKickOffset.y);
@@ -7764,16 +8440,19 @@ function renderExpedition(ctx, state, data) {
   ctx.scale(cameraZoom, cameraZoom);
   drawWorldMegastructures(ctx, run);
   drawGroundShine(ctx);
+  drawBackgroundTiles(ctx, data);
   drawTerrain(ctx, data);
   drawTemporaryBlocks(ctx, run, theme);
+  drawEscapeBarriers(ctx, run);
   drawZipLines(ctx, data, theme);
   drawGate(ctx, data, theme);
-  drawRouteExits(ctx, data, theme, state.pulse, run);
   drawBraceWalls(ctx, data, theme);
-  drawBackgroundTiles(ctx, data, run);
+  drawShadowTiles(ctx, data, run);
   drawProps(ctx, data, state.pulse, theme);
   drawLootCrates(ctx, run, theme);
   drawSpilledLoot(ctx, run);
+  drawVaultSecurityObjects(ctx, run, theme, state.pulse);
+  drawRouteExits(ctx, data, theme, state.pulse, run);
   drawEntity(ctx, run.encounters.guard, {
     body: "#86a9c7",
     flash: "#eef5ff",
@@ -7823,8 +8502,10 @@ function renderExpedition(ctx, state, data) {
   drawRecoilFocusOverlay(ctx, run, data);
   drawNightPostProcess(ctx, run, data, state.pulse);
   drawProjectileDodgeOverlay(ctx, run, data);
+  drawVaultLockdownOverlay(ctx, run, state.pulse);
   drawFaceOffEntryTransition(ctx, run, data);
   ctx.save();
+  ctx.translate(screenShake.x, screenShake.y);
   ctx.translate(-run.cameraX * cameraZoom, -run.cameraY * cameraZoom);
   ctx.scale(cameraZoom, cameraZoom);
   drawThreatSense(ctx, run, state);
@@ -8635,8 +9316,9 @@ function drawShelterPartPanelV3(ctx, theme, state, options = {}) {
 
   const rest = options.rest || null;
   if (rest?.active) {
-    const selectedIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_REST_MENU.length - 1);
-    const selectedItem = SHELTER_REST_MENU[selectedIndex] || SHELTER_REST_MENU[0];
+    const restMenuItems = getShelterRestMenuItems();
+    const selectedIndex = clamp(Math.floor(rest.menuIndex || 0), 0, restMenuItems.length - 1);
+    const selectedItem = restMenuItems[selectedIndex] || restMenuItems[0];
     const run = state.run || {};
     ctx.textAlign = "left";
     ctx.fillStyle = theme.accentSecondary;
@@ -8820,12 +9502,13 @@ function drawShelterUpgradePanel(ctx, theme, state) {
 
 function drawShelterSceneV3(ctx, state, data, options = {}) {
   const theme = getUiTheme(data);
+  preloadShelterEmotionPortraits(data);
   const rest = options.rest || null;
   const inRunRest = Boolean(rest?.active);
   drawShelterHubBackdrop(ctx, theme, state, data);
   drawShelterMenuV3(ctx, theme, {
-    items: inRunRest ? SHELTER_REST_MENU : SHELTER_HUB_UPGRADE_MENU,
-    selectedIndex: inRunRest ? rest.menuIndex : state.shelterMenu?.menuIndex || 0,
+    items: inRunRest ? getShelterRestMenuItems() : getShelterHomeMenuItems(),
+    selectedIndex: inRunRest ? rest.menuIndex : (state.shelter?.menuIndex ?? 0),
   });
   drawShelterWorkbenchHudV3(ctx, theme, { rest });
   if (!inRunRest) {
@@ -8952,7 +9635,7 @@ function drawShelterRestMenuOverlay(ctx, state, data, theme, rest) {
   const panelX = 58;
   const panelY = 132;
   const panelW = 332;
-  const panelH = 310;
+  const panelH = 364;
   drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
     cut: 12,
     fill: "rgba(5, 12, 16, 0.66)",
@@ -8963,22 +9646,1272 @@ function drawShelterRestMenuOverlay(ctx, state, data, theme, rest) {
   ctx.fillStyle = theme.textDim;
   ctx.font = "800 12px 'Segoe UI', sans-serif";
   ctx.fillText("REST OPTIONS", panelX + 24, panelY + 34);
-  SHELTER_REST_MENU.forEach((item, index) => {
-    const y = panelY + 68 + index * 68;
+  [
+    { id: "talk", label: "대화", icon: "log", detail: "쉘터의 상대와 짧게 이야기를 나눈다." },
+    ...SHELTER_REST_MENU,
+  ].forEach((item, index) => {
+    const y = panelY + 62 + index * 48;
     const selected = index === Math.floor(rest.menuIndex || 0);
-    drawBeveledPanel(ctx, theme, panelX + 20, y, panelW - 40, 50, {
+    drawBeveledPanel(ctx, theme, panelX + 20, y, panelW - 40, 40, {
       cut: 8,
       fill: selected ? "rgba(29, 52, 60, 0.82)" : "rgba(7, 15, 20, 0.44)",
       stroke: selected ? "rgba(147,234,255,0.45)" : "rgba(255,255,255,0.12)",
       innerLines: false,
     });
     ctx.fillStyle = selected ? theme.textMain : theme.textDim;
-    ctx.font = "900 18px 'Segoe UI', sans-serif";
-    ctx.fillText(item.label, panelX + 44, y + 32);
+    ctx.font = "900 16px 'Segoe UI', sans-serif";
+    ctx.fillText(item.label, panelX + 44, y + 26);
   });
   ctx.fillStyle = theme.accent;
   ctx.font = "900 13px 'Segoe UI', sans-serif";
   ctx.fillText("Z 선택    C 밖으로", panelX + 24, panelY + panelH - 26);
+}
+
+function drawShelterMemorialTopButton(ctx, theme, label, x, y, width, active = false) {
+  ctx.save();
+  drawBeveledPanel(ctx, theme, x, y, width, 38, {
+    cut: 10,
+    fill: active ? "rgba(224, 232, 165, 0.18)" : "rgba(5, 12, 17, 0.42)",
+    stroke: active ? "rgba(231,244,126,0.46)" : "rgba(245,248,251,0.16)",
+    innerLines: false,
+    glow: false,
+  });
+  ctx.textAlign = "center";
+  ctx.fillStyle = active ? theme.textMain : "rgba(245,248,251,0.78)";
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x + width / 2, y + 24);
+  ctx.restore();
+}
+
+function drawShelterMemorialChoice(ctx, theme, choice, x, y, width, selected) {
+  const height = 34;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 10,
+    fill: selected ? "rgba(18, 44, 54, 0.66)" : "rgba(5, 12, 17, 0.32)",
+    stroke: selected ? "rgba(147,234,255,0.68)" : "rgba(245,248,251,0.13)",
+    innerLines: false,
+    glow: selected,
+  });
+  ctx.fillStyle = selected ? theme.textMain : "rgba(235,242,244,0.76)";
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.textAlign = "left";
+  const maxTextWidth = Math.max(24, width - 30);
+  let label = choice?.label || "";
+  if (ctx.measureText(label).width > maxTextWidth) {
+    while (label.length > 1 && ctx.measureText(`${label}...`).width > maxTextWidth) {
+      label = label.slice(0, -1);
+    }
+    label = `${label}...`;
+  }
+  ctx.fillText(label, x + 15, y + 22);
+}
+
+const SHELTER_EMOTION_ASSETS = {
+  neutral: "shelterEmotionNeutral",
+  anxious: "shelterEmotionAnxious",
+  warm: "shelterEmotionWarm",
+  tired: "shelterEmotionTired",
+  hurt: "shelterEmotionHurt",
+  angry: "shelterEmotionAngry",
+};
+
+const SHELTER_MEMORIAL_ASSETS = {
+  neutral: "shelterMemorialNeutral",
+  anxious: "shelterMemorialAnxious",
+  warm: "shelterMemorialWarm",
+  tired: "shelterMemorialTired",
+  hurt: "shelterMemorialHurt",
+  angry: "shelterMemorialAngry",
+};
+
+const SHELTER_HOME_EMOTION_ART_ASSETS = {
+  neutral: "shelterHomeNeutralCg",
+  anxious: "shelterHomeAnxiousCg",
+  warm: "shelterHomeWarmCg",
+  tired: "shelterHomeTiredCg",
+  hurt: "shelterHomeHurtCg",
+  angry: "shelterHomeAngryCg",
+};
+
+function getShelterCinematicVisualState(state, assetKey) {
+  const pulse = Number.isFinite(state?.pulse) ? state.pulse : 0;
+  let visual = shelterCinematicVisualStates.get(state);
+  if (!visual) {
+    visual = {
+      assetKey,
+      previousAssetKey: "",
+      changedAt: pulse,
+    };
+    shelterCinematicVisualStates.set(state, visual);
+    return visual;
+  }
+  if (visual.assetKey !== assetKey) {
+    visual.previousAssetKey = visual.assetKey || "";
+    visual.assetKey = assetKey;
+    visual.changedAt = pulse;
+  }
+  return visual;
+}
+
+function getShelterArtImage(data, assetKey) {
+  const key = typeof assetKey === "string" ? assetKey.trim() : "";
+  return key ? getImageAsset(data.art?.[key]?.src) : null;
+}
+
+function drawShelterCinematicReadability(ctx) {
+  const leftReadability = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.52, 0);
+  leftReadability.addColorStop(0, "rgba(2,7,10,0.5)");
+  leftReadability.addColorStop(0.7, "rgba(2,7,10,0.14)");
+  leftReadability.addColorStop(1, "rgba(2,7,10,0)");
+  ctx.fillStyle = leftReadability;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  const bottomReadability = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.56, 0, SCREEN_HEIGHT);
+  bottomReadability.addColorStop(0, "rgba(2,7,10,0)");
+  bottomReadability.addColorStop(0.58, "rgba(2,7,10,0.42)");
+  bottomReadability.addColorStop(1, "rgba(2,7,10,0.76)");
+  ctx.fillStyle = bottomReadability;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+}
+
+function drawShelterCinematicCg(ctx, state, data, theme, talk, assetKey, image, emotion) {
+  const reaction = getShelterMemorialReaction(talk, state, emotion);
+  const motion = getShelterMemorialMotion(state, reaction);
+  const visual = getShelterCinematicVisualState(state, assetKey);
+  const age = Math.max(0, (Number.isFinite(state?.pulse) ? state.pulse : 0) - visual.changedAt);
+  const fade = clamp(age / SHELTER_CG_CROSSFADE_SECONDS, 0, 1);
+  const previousImage = fade < 1 ? getShelterArtImage(data, visual.previousAssetKey) : null;
+  const hasCurrent = Boolean(image && image.complete && image.naturalWidth);
+  const hasPrevious = Boolean(previousImage && previousImage.complete && previousImage.naturalWidth);
+
+  if (!hasCurrent && !hasPrevious) {
+    drawShelterRestBackground(ctx, state, data, theme, 1);
+    return false;
+  }
+
+  ctx.save();
+  if (motion.filter && motion.filter !== "none") {
+    ctx.filter = motion.filter;
+  }
+  if (hasPrevious && fade < 1) {
+    drawImageCoverPan(
+      ctx,
+      previousImage,
+      -4 + motion.shakeX,
+      -4 + motion.shakeY,
+      SCREEN_WIDTH + 8,
+      SCREEN_HEIGHT + 8,
+      motion.panX,
+      motion.panY,
+      motion.zoom,
+      1 - fade,
+    );
+  }
+  if (hasCurrent) {
+    drawImageCoverPan(
+      ctx,
+      image,
+      -4 + motion.shakeX,
+      -4 + motion.shakeY,
+      SCREEN_WIDTH + 8,
+      SCREEN_HEIGHT + 8,
+      motion.panX,
+      motion.panY,
+      motion.zoom,
+      hasPrevious ? fade : 1,
+    );
+  }
+  ctx.filter = "none";
+  drawShelterCinematicReadability(ctx);
+  drawShelterCinematicReactionEffects(ctx, state, talk, reaction);
+  ctx.restore();
+  return true;
+}
+
+const SHELTER_MEMORIAL_REACTION_PRESETS = {
+  neutral: {
+    panX: 0,
+    panY: 0,
+    zoom: 1.014,
+    shake: 0,
+    color: [147, 234, 255],
+    filter: "saturate(1.02) brightness(1.01)",
+  },
+  anxious: {
+    panX: 0.06,
+    panY: -0.03,
+    zoom: 1.035,
+    shake: 3.2,
+    color: [132, 218, 255],
+    filter: "saturate(0.92) contrast(1.06) brightness(0.96)",
+  },
+  warm: {
+    panX: 0.035,
+    panY: -0.015,
+    zoom: 1.028,
+    shake: 0,
+    color: [255, 221, 156],
+    filter: "saturate(1.08) brightness(1.05)",
+  },
+  tired: {
+    panX: 0.018,
+    panY: 0.045,
+    zoom: 1.018,
+    shake: 0.4,
+    color: [170, 190, 220],
+    filter: "saturate(0.78) contrast(0.98) brightness(0.92)",
+  },
+  hurt: {
+    panX: 0.048,
+    panY: 0.018,
+    zoom: 1.034,
+    shake: 1.8,
+    color: [255, 124, 134],
+    filter: "saturate(0.92) contrast(1.08) brightness(0.96)",
+  },
+  angry: {
+    panX: 0.08,
+    panY: -0.015,
+    zoom: 1.04,
+    shake: 2.2,
+    color: [255, 86, 96],
+    filter: "saturate(1.12) contrast(1.12) brightness(0.98)",
+  },
+};
+
+function getShelterMemorialReaction(talk, state, emotion) {
+  const pulse = state.pulse || 0;
+  const reaction = talk?.reaction && typeof talk.reaction === "object" ? talk.reaction : null;
+  const startedAt = Number.isFinite(reaction?.startedAt) ? reaction.startedAt : -999;
+  const age = Math.max(0, pulse - startedAt);
+  const fresh = reaction?.emotion === emotion && age < 3.2;
+  const burst = fresh ? clamp(1 - age / 3.2, 0, 1) : 0;
+  const held = talk?.lastChoice ? 0.34 : 0;
+  const intensity = Math.max(held, burst);
+  return {
+    emotion,
+    age,
+    burst,
+    fresh,
+    intensity,
+    preset: SHELTER_MEMORIAL_REACTION_PRESETS[emotion] || SHELTER_MEMORIAL_REACTION_PRESETS.neutral,
+  };
+}
+
+function getShelterMemorialMotion(state, reaction) {
+  const pulse = state.pulse || 0;
+  const preset = reaction.preset;
+  const idlePanX = Math.sin(pulse * 0.18) * 0.018;
+  const idlePanY = Math.cos(pulse * 0.22) * 0.012;
+  const breathe = Math.sin(pulse * 0.85) * 0.003;
+  const hit = reaction.burst * (0.45 + Math.sin(reaction.age * 8) * 0.18);
+  const shake = preset.shake * reaction.burst;
+  return {
+    panX: idlePanX + preset.panX * reaction.intensity + Math.sin(pulse * 39) * shake * 0.0018,
+    panY: idlePanY + preset.panY * reaction.intensity + Math.cos(pulse * 43) * shake * 0.0014,
+    zoom: preset.zoom + breathe + hit * 0.01,
+    shakeX: Math.sin(pulse * 48 + reaction.age * 11) * shake,
+    shakeY: Math.cos(pulse * 51 + reaction.age * 9) * shake * 0.55,
+    filter: reaction.intensity > 0.05 ? preset.filter : "none",
+  };
+}
+
+function rgbaFromArray(rgb, alpha) {
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+}
+
+function drawShelterMemorialDronePulse(ctx, reaction, state, x = 1025, y = 286) {
+  const pulse = state.pulse || 0;
+  const [r, g, b] = reaction.preset.color;
+  const active = reaction.intensity;
+  const ring = 18 + Math.sin(pulse * 4.8) * 2 + reaction.burst * 13;
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = 0.3 + active * 0.42;
+  const glow = ctx.createRadialGradient(x, y, 6, x, y, 104 + reaction.burst * 46);
+  glow.addColorStop(0, `rgba(${r},${g},${b},0.34)`);
+  glow.addColorStop(0.42, `rgba(${r},${g},${b},0.12)`);
+  glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = glow;
+  ctx.fillRect(x - 150, y - 150, 300, 300);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = `rgba(${r},${g},${b},${0.46 + reaction.burst * 0.28})`;
+  ctx.beginPath();
+  ctx.arc(x, y, ring, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = `rgba(${r},${g},${b},${0.18 + reaction.burst * 0.18})`;
+  ctx.beginPath();
+  ctx.arc(x, y, ring + 17 + reaction.burst * 8, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawShelterMemorialReactionEffects(ctx, state, theme, talk, reaction) {
+  const intensity = reaction.intensity;
+  if (intensity <= 0.03) {
+    drawShelterMemorialDronePulse(ctx, reaction, state);
+    return;
+  }
+
+  const [r, g, b] = reaction.preset.color;
+  const pulse = state.pulse || 0;
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = 0.2 + intensity * 0.42;
+  const faceGlow = ctx.createRadialGradient(804, 254, 20, 804, 254, 218);
+  faceGlow.addColorStop(0, `rgba(${r},${g},${b},0.22)`);
+  faceGlow.addColorStop(0.52, `rgba(${r},${g},${b},0.08)`);
+  faceGlow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = faceGlow;
+  ctx.fillRect(560, 76, 500, 390);
+  ctx.restore();
+
+  drawShelterMemorialDronePulse(ctx, reaction, state);
+
+  ctx.save();
+  if (reaction.emotion === "warm") {
+    ctx.globalCompositeOperation = "screen";
+    const warmGlow = ctx.createLinearGradient(520, 120, 930, 490);
+    warmGlow.addColorStop(0, `rgba(255,225,156,${0.06 + intensity * 0.12})`);
+    warmGlow.addColorStop(1, "rgba(255,225,156,0)");
+    ctx.fillStyle = warmGlow;
+    ctx.fillRect(420, 70, 620, 520);
+    for (let i = 0; i < 5; i += 1) {
+      const dotX = 642 + i * 44 + Math.sin(pulse * 0.9 + i) * 7;
+      const dotY = 430 + Math.cos(pulse * 0.7 + i) * 9;
+      ctx.fillStyle = `rgba(255,226,170,${0.12 + intensity * 0.16})`;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 2.5 + intensity * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (reaction.emotion === "anxious") {
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = `rgba(132,218,255,${0.12 + intensity * 0.18})`;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 7; i += 1) {
+      const y = 150 + i * 34 + Math.sin(pulse * 5 + i) * 4;
+      ctx.beginPath();
+      ctx.moveTo(690, y);
+      ctx.lineTo(1115, y + 26);
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = `rgba(6, 20, 34,${0.1 + intensity * 0.2})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (reaction.emotion === "hurt") {
+    ctx.globalCompositeOperation = "screen";
+    const damageGlow = ctx.createRadialGradient(742, 420, 24, 742, 420, 170);
+    damageGlow.addColorStop(0, `rgba(255,96,108,${0.2 + intensity * 0.18})`);
+    damageGlow.addColorStop(0.58, `rgba(255,96,108,${0.08 + intensity * 0.08})`);
+    damageGlow.addColorStop(1, "rgba(255,96,108,0)");
+    ctx.fillStyle = damageGlow;
+    ctx.fillRect(560, 250, 420, 300);
+    ctx.strokeStyle = `rgba(255,136,146,${0.22 + intensity * 0.2})`;
+    for (let i = 0; i < 4; i += 1) {
+      const y = 346 + i * 28 + Math.sin(pulse * 7 + i) * 3;
+      ctx.beginPath();
+      ctx.moveTo(628, y);
+      ctx.lineTo(874, y - 16);
+      ctx.stroke();
+    }
+  } else if (reaction.emotion === "angry") {
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = `rgba(255,84,92,${0.16 + intensity * 0.22})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(944, 122);
+    ctx.lineTo(1136, 122);
+    ctx.lineTo(1192, 178);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(664, 520);
+    ctx.lineTo(536, 520);
+    ctx.lineTo(502, 486);
+    ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = `rgba(46, 4, 8,${0.08 + intensity * 0.14})`;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (reaction.emotion === "tired") {
+    ctx.globalCompositeOperation = "source-over";
+    const tiredShade = ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT);
+    tiredShade.addColorStop(0, `rgba(10, 18, 31,${0.08 + intensity * 0.12})`);
+    tiredShade.addColorStop(1, `rgba(2, 7, 10,${0.1 + intensity * 0.18})`);
+    ctx.fillStyle = tiredShade;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+  ctx.restore();
+}
+
+function drawShelterCinematicReactionEffects(ctx, state, talk, reaction) {
+  const intensity = reaction.intensity;
+  if (intensity <= 0.03) {
+    return;
+  }
+  const [r, g, b] = reaction.preset.color;
+  const pulse = state.pulse || 0;
+  ctx.save();
+  if (reaction.emotion === "warm") {
+    ctx.globalCompositeOperation = "screen";
+    const faceGlow = ctx.createRadialGradient(874, 182, 16, 874, 182, 240);
+    faceGlow.addColorStop(0, `rgba(255,226,170,${0.05 + intensity * 0.08})`);
+    faceGlow.addColorStop(0.45, `rgba(255,226,170,${0.025 + intensity * 0.035})`);
+    faceGlow.addColorStop(1, "rgba(255,226,170,0)");
+    ctx.fillStyle = faceGlow;
+    ctx.fillRect(610, 0, 470, 380);
+    for (let i = 0; i < 4; i += 1) {
+      const dotX = 612 + i * 58 + Math.sin(pulse * 0.8 + i) * 6;
+      const dotY = 436 + Math.cos(pulse * 0.65 + i) * 7;
+      ctx.fillStyle = `rgba(255,226,170,${0.045 + intensity * 0.06})`;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 1.8 + intensity, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (reaction.emotion === "anxious") {
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = `rgba(132,218,255,${0.045 + intensity * 0.065})`;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i += 1) {
+      const y = 178 + i * 44 + Math.sin(pulse * 4.2 + i) * 3;
+      ctx.beginPath();
+      ctx.moveTo(742, y);
+      ctx.lineTo(1054, y + 20);
+      ctx.stroke();
+    }
+  } else if (reaction.emotion === "tired") {
+    ctx.globalCompositeOperation = "source-over";
+    const tiredShade = ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT);
+    tiredShade.addColorStop(0, `rgba(10,18,31,${0.025 + intensity * 0.045})`);
+    tiredShade.addColorStop(1, `rgba(2,7,10,${0.04 + intensity * 0.06})`);
+    ctx.fillStyle = tiredShade;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  } else if (reaction.emotion === "hurt" || reaction.emotion === "angry") {
+    ctx.globalCompositeOperation = "screen";
+    const alertGlow = ctx.createRadialGradient(906, 380, 30, 906, 380, 250);
+    alertGlow.addColorStop(0, `rgba(${r},${g},${b},${0.045 + intensity * 0.08})`);
+    alertGlow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = alertGlow;
+    ctx.fillRect(630, 110, 560, 500);
+  }
+  ctx.restore();
+}
+
+function preloadShelterEmotionPortraits(data, talk = null) {
+  const eventArtAssetKey = typeof talk?.eventArtAssetKey === "string" ? talk.eventArtAssetKey.trim() : "";
+  const eventArtAssetKeys = new Set();
+  if (Array.isArray(data?.shelter?.events)) {
+    data.shelter.events.forEach((event) => {
+      if (!event || typeof event !== "object") {
+        return;
+      }
+      const transition = event.transition && typeof event.transition === "object" ? event.transition : {};
+      [
+        event.backgroundAssetKey,
+        event.artAssetKey,
+        event.transitionAssetKey,
+        transition.backgroundAssetKey,
+        transition.artAssetKey,
+      ].forEach((assetKey) => {
+        if (typeof assetKey === "string" && assetKey.trim()) {
+          eventArtAssetKeys.add(assetKey.trim());
+        }
+      });
+      if (!Array.isArray(event.nodes)) {
+        return;
+      }
+      event.nodes.forEach((node) => {
+        if (!node || typeof node !== "object") {
+          return;
+        }
+        [node.backgroundAssetKey, node.artAssetKey].forEach((assetKey) => {
+          if (typeof assetKey === "string" && assetKey.trim()) {
+            eventArtAssetKeys.add(assetKey.trim());
+          }
+        });
+        if (!Array.isArray(node.choices)) {
+          return;
+        }
+        node.choices.forEach((choice) => {
+          if (!choice || typeof choice !== "object") {
+            return;
+          }
+          [choice.backgroundAssetKey, choice.artAssetKey].forEach((assetKey) => {
+            if (typeof assetKey === "string" && assetKey.trim()) {
+              eventArtAssetKeys.add(assetKey.trim());
+            }
+          });
+        });
+      });
+    });
+  }
+  [
+    ...Object.values(SHELTER_EMOTION_ASSETS),
+    ...Object.values(SHELTER_MEMORIAL_ASSETS),
+    ...Object.values(SHELTER_HOME_EMOTION_ART_ASSETS),
+    ...eventArtAssetKeys,
+    eventArtAssetKey,
+  ].filter(Boolean).forEach((assetKey) => {
+    getImageAsset(data.art?.[assetKey]?.src);
+  });
+}
+
+function getShelterTalkEmotion(talk) {
+  const emotion = typeof talk?.emotion === "string" ? talk.emotion : "";
+  if (SHELTER_EMOTION_ASSETS[emotion]) {
+    return emotion;
+  }
+  const line = `${talk?.lastChoice?.label || ""} ${talk?.line || ""}`;
+  if (/무서|두려|불안|가지 마|곁에|버려|혼자|신호가 흐려|이어지지/.test(line)) {
+    return "anxious";
+  }
+  if (/아버지|기억|이름|병기|사람이었|왜 계속|모르겠/.test(line)) {
+    return "tired";
+  }
+  if (/괜찮|고마|믿|옆에|따뜻|쉬|좋아/.test(line)) {
+    return "warm";
+  }
+  if (/망가|아파|상처|피|파손|고장|죽|닳/.test(line)) {
+    return "hurt";
+  }
+  if (/도망치지|선택|지킬|명령|위험|전투|원인|가야/.test(line)) {
+    return "angry";
+  }
+  return "neutral";
+}
+
+function drawShelterEmotionPortrait(ctx, state, data, theme, talk) {
+  const emotion = getShelterTalkEmotion(talk);
+  const eventArtAssetKey = typeof talk?.eventArtAssetKey === "string" ? talk.eventArtAssetKey.trim() : "";
+  const eventImage = getShelterArtImage(data, eventArtAssetKey);
+  if (eventArtAssetKey) {
+    drawShelterCinematicCg(ctx, state, data, theme, talk, eventArtAssetKey, eventImage, emotion);
+    return;
+  }
+  const memorialKey = SHELTER_MEMORIAL_ASSETS[emotion] || SHELTER_MEMORIAL_ASSETS.neutral;
+  const memorialImage = getImageAsset(data.art?.[memorialKey]?.src);
+  if (memorialImage && memorialImage.complete && memorialImage.naturalWidth) {
+    ctx.save();
+    const pulse = state.pulse || 0;
+    const panX = Math.sin(pulse * 0.18) * 0.018;
+    const panY = Math.cos(pulse * 0.22) * 0.012;
+    const zoom = 1.012 + Math.sin(pulse * 0.85) * 0.003;
+    drawImageCoverPan(
+      ctx,
+      memorialImage,
+      -4,
+      -4,
+      SCREEN_WIDTH + 8,
+      SCREEN_HEIGHT + 8,
+      panX,
+      panY,
+      zoom,
+      1,
+    );
+    const leftReadability = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.5, 0);
+    leftReadability.addColorStop(0, "rgba(2,7,10,0.48)");
+    leftReadability.addColorStop(0.68, "rgba(2,7,10,0.12)");
+    leftReadability.addColorStop(1, "rgba(2,7,10,0)");
+    ctx.fillStyle = leftReadability;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    const bottomReadability = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.56, 0, SCREEN_HEIGHT);
+    bottomReadability.addColorStop(0, "rgba(2,7,10,0)");
+    bottomReadability.addColorStop(0.58, "rgba(2,7,10,0.42)");
+    bottomReadability.addColorStop(1, "rgba(2,7,10,0.76)");
+    ctx.fillStyle = bottomReadability;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    const topReadability = ctx.createLinearGradient(0, 0, 0, 128);
+    topReadability.addColorStop(0, "rgba(2,7,10,0.32)");
+    topReadability.addColorStop(1, "rgba(2,7,10,0)");
+    ctx.fillStyle = topReadability;
+    ctx.fillRect(0, 0, SCREEN_WIDTH, 128);
+    ctx.restore();
+    return;
+  }
+  const assetKey = SHELTER_EMOTION_ASSETS[emotion] || SHELTER_EMOTION_ASSETS.neutral;
+  const image = getImageAsset(data.art?.[assetKey]?.src);
+  const x = 500;
+  const y = -22;
+  const size = 768;
+  ctx.save();
+  const backGlow = ctx.createRadialGradient(x + size * 0.56, y + size * 0.34, 40, x + size * 0.56, y + size * 0.34, size * 0.64);
+  backGlow.addColorStop(0, "rgba(147,234,255,0.18)");
+  backGlow.addColorStop(0.48, "rgba(147,234,255,0.08)");
+  backGlow.addColorStop(1, "rgba(147,234,255,0)");
+  ctx.fillStyle = backGlow;
+  ctx.fillRect(x - 140, y - 100, size + 240, size + 180);
+  if (image && image.complete && image.naturalWidth) {
+    ctx.save();
+    ctx.globalAlpha = 0.98;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.shadowColor = "rgba(0,0,0,0.48)";
+    ctx.shadowBlur = 44;
+    ctx.shadowOffsetY = 24;
+    ctx.drawImage(image, x, y, size, size);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "rgba(147,234,255,0.08)";
+    ctx.fillRect(x, y, size, size);
+  }
+  const leftFade = ctx.createLinearGradient(x - 80, 0, x + size * 0.42, 0);
+  leftFade.addColorStop(0, "rgba(2,7,10,0.96)");
+  leftFade.addColorStop(0.28, "rgba(2,7,10,0.82)");
+  leftFade.addColorStop(1, "rgba(2,7,10,0)");
+  ctx.fillStyle = leftFade;
+  ctx.fillRect(x - 80, 0, size * 0.5, SCREEN_HEIGHT);
+  const rightFade = ctx.createLinearGradient(x + size * 0.68, 0, x + size, 0);
+  rightFade.addColorStop(0, "rgba(2,7,10,0)");
+  rightFade.addColorStop(1, "rgba(2,7,10,0.38)");
+  ctx.fillStyle = rightFade;
+  ctx.fillRect(x + size * 0.68, 0, size * 0.32, SCREEN_HEIGHT);
+  const fade = ctx.createLinearGradient(0, y + size * 0.55, 0, y + size);
+  fade.addColorStop(0, "rgba(2,7,10,0)");
+  fade.addColorStop(1, "rgba(2,7,10,0.92)");
+  ctx.fillStyle = fade;
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = "rgba(147,234,255,0.2)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 36, y + 18);
+  ctx.lineTo(x + size - 96, y + 18);
+  ctx.lineTo(x + size - 48, y + 66);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function getShelterDialogueSegments(text = "") {
+  return String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function isShelterCinematicTalk(talk) {
+  return Boolean(talk?.event?.eventId || talk?.lastChoice?.eventId || talk?.eventArtAssetKey);
+}
+
+function getShelterCurrentSubtitleLine(talk) {
+  const segments = getShelterDialogueSegments(talk?.line || "");
+  if (!segments.length) {
+    return talk?.pending ? "......" : "……";
+  }
+  const lineIndex = clamp(Math.floor(talk?.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return segments[lineIndex] || segments[0] || "……";
+}
+
+function isShelterSubtitleComplete(talk) {
+  const segments = getShelterDialogueSegments(talk?.line || "");
+  const lineIndex = clamp(Math.floor(talk?.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return lineIndex >= segments.length - 1;
+}
+
+const SHELTER_CINEMATIC_SERIF_FONT = "'Noto Serif KR', 'KoPubBatang', 'KoPub Batang', 'NanumMyeongjo', 'Nanum Myeongjo', 'HCR Batang', Batang, serif";
+const SHELTER_CHOICE_REVEAL_DELAY_SECONDS = 0.42;
+const SHELTER_CHOICE_REVEAL_SECONDS = 0.22;
+const SHELTER_CHOICE_REACTION_SECONDS = 0.48;
+const SHELTER_SUBTITLE_TYPE_MIN_SECONDS = 0.18;
+const SHELTER_SUBTITLE_TYPE_MAX_SECONDS = 2.6;
+
+function getShelterTalkPulseAge(state, startedAt = 0) {
+  return Math.max(0, (state?.pulse || 0) - (Number.isFinite(startedAt) ? startedAt : 0));
+}
+
+function getShelterLineTypeDuration(line) {
+  const length = Array.from(String(line || "").trim()).length;
+  if (!length) {
+    return 0;
+  }
+  return clamp(
+    length / getShelterSubtitleCharsPerSecond(),
+    SHELTER_SUBTITLE_TYPE_MIN_SECONDS,
+    SHELTER_SUBTITLE_TYPE_MAX_SECONDS,
+  );
+}
+
+function getShelterSubtitleTypeProgress(talk, state) {
+  const line = getShelterCurrentSubtitleLine(talk);
+  const duration = getShelterLineTypeDuration(line);
+  if (!isShelterCinematicTalk(talk) || talk?.pending || duration <= 0) {
+    return 1;
+  }
+  const lineShownAt = Number.isFinite(talk?.lineShownAt) ? talk.lineShownAt : -999;
+  return clamp(getShelterTalkPulseAge(state, lineShownAt) / duration, 0, 1);
+}
+
+function isShelterSubtitleTypingComplete(talk, state) {
+  return getShelterSubtitleTypeProgress(talk, state) >= 1;
+}
+
+function getVisibleShelterTypedText(line, progress) {
+  const letters = Array.from(String(line || ""));
+  if (!letters.length) {
+    return "";
+  }
+  const visibleCount = clamp(Math.ceil(letters.length * progress), 1, letters.length);
+  return letters.slice(0, visibleCount).join("");
+}
+
+function getShelterVisibleSubtitleLine(talk, state) {
+  const line = getShelterCurrentSubtitleLine(talk);
+  if (!line) {
+    return "";
+  }
+  return getVisibleShelterTypedText(line, getShelterSubtitleTypeProgress(talk, state));
+}
+
+function isShelterChoiceReactionActive(talk, state) {
+  const reaction = talk?.choiceReaction && typeof talk.choiceReaction === "object" ? talk.choiceReaction : null;
+  if (!reaction) {
+    return false;
+  }
+  const duration = Number.isFinite(reaction.duration) ? reaction.duration : SHELTER_CHOICE_REACTION_SECONDS;
+  return getShelterTalkPulseAge(state, reaction.startedAt) < duration;
+}
+
+function getShelterChoiceRevealProgress(talk, state) {
+  if (
+    talk?.pending
+    || isShelterChoiceReactionActive(talk, state)
+    || !talk?.event?.eventId
+    || !isShelterSubtitleComplete(talk)
+    || !isShelterSubtitleTypingComplete(talk, state)
+  ) {
+    return 0;
+  }
+  const lineShownAt = Number.isFinite(talk?.lineShownAt) ? talk.lineShownAt : -999;
+  const age = getShelterTalkPulseAge(state, lineShownAt)
+    - getShelterLineTypeDuration(getShelterCurrentSubtitleLine(talk))
+    - SHELTER_CHOICE_REVEAL_DELAY_SECONDS;
+  return clamp(age / SHELTER_CHOICE_REVEAL_SECONDS, 0, 1);
+}
+
+function drawCinematicSingleLine(ctx, text, x, y, maxWidth, options = {}) {
+  const color = options.color || "#f8f6ed";
+  const stroke = options.stroke || "rgba(0,0,0,0.86)";
+  const weight = options.weight || 700;
+  const baseSize = options.size || 27;
+  const minSize = options.minSize || 18;
+  const family = options.family || SHELTER_CINEMATIC_SERIF_FONT;
+  const style = options.style || "normal";
+  const measureText = options.measureText || text;
+  let size = baseSize;
+  ctx.font = `${style} ${weight} ${size}px ${family}`;
+  while (size > minSize && ctx.measureText(measureText).width > maxWidth) {
+    size -= 1;
+    ctx.font = `${style} ${weight} ${size}px ${family}`;
+  }
+  ctx.textAlign = "center";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = options.shadowColor || "rgba(0,0,0,0.62)";
+  ctx.shadowBlur = options.shadowBlur ?? 10;
+  ctx.shadowOffsetY = options.shadowOffsetY ?? 2;
+  ctx.lineWidth = options.lineWidth || Math.max(4, Math.round(size * 0.18));
+  ctx.strokeStyle = stroke;
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+  return size;
+}
+
+function drawShelterCinematicChoices(ctx, theme, talk, state) {
+  const revealProgress = getShelterChoiceRevealProgress(talk, state);
+  if (revealProgress <= 0) {
+    return;
+  }
+  const choices = Array.isArray(talk?.choices) ? talk.choices.slice(0, 3) : [];
+  if (!choices.length) {
+    return;
+  }
+  const selectedChoice = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, choices.length - 1));
+  const x = 74;
+  const y = 506;
+  const lineHeight = 31;
+  const maxWidth = 420;
+  ctx.save();
+  ctx.globalAlpha = revealProgress;
+  const revealOffset = (1 - revealProgress) * 10;
+  const choiceShade = ctx.createRadialGradient(188, y + 26, 22, 188, y + 26, 260);
+  choiceShade.addColorStop(0, "rgba(0,0,0,0.46)");
+  choiceShade.addColorStop(0.42, "rgba(0,0,0,0.25)");
+  choiceShade.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = choiceShade;
+  ctx.fillRect(0, y - 76, 496, 196);
+  const leftShade = ctx.createLinearGradient(0, y - 72, 430, y - 72);
+  leftShade.addColorStop(0, "rgba(1,5,8,0.36)");
+  leftShade.addColorStop(0.55, "rgba(1,5,8,0.13)");
+  leftShade.addColorStop(1, "rgba(1,5,8,0)");
+  ctx.fillStyle = leftShade;
+  ctx.fillRect(0, y - 74, 462, 184);
+  choices.forEach((choice, index) => {
+    const selected = index === selectedChoice;
+    ctx.globalAlpha = revealProgress * (selected ? 1 : 0.5);
+    const label = selected ? `> ${choice?.label || ""}` : `  ${choice?.label || ""}`;
+    ctx.textAlign = "left";
+    ctx.font = `${selected ? 700 : 500} ${selected ? 18 : 16}px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+    if (selected) {
+      const markerGlow = ctx.createLinearGradient(x - 19, 0, x + 2, 0);
+      markerGlow.addColorStop(0, "rgba(147,234,255,0)");
+      markerGlow.addColorStop(1, "rgba(147,234,255,0.82)");
+      ctx.strokeStyle = markerGlow;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x - 17, y + revealOffset + index * lineHeight - 18);
+      ctx.lineTo(x - 17, y + revealOffset + index * lineHeight + 5);
+      ctx.stroke();
+    }
+    drawCinematicSingleLine(ctx, label, x + ctx.measureText(label).width / 2, y + revealOffset + index * lineHeight, maxWidth, {
+      color: selected ? theme.textMain : "rgba(245,248,251,0.68)",
+      stroke: "rgba(0,0,0,0.72)",
+      weight: selected ? 700 : 500,
+      size: selected ? 18 : 16,
+      minSize: 12,
+      lineWidth: selected ? 4 : 3,
+      shadowBlur: selected ? 8 : 5,
+    });
+  });
+  ctx.restore();
+}
+
+function getShelterEventResultRevealProgress(talk, state) {
+  if (
+    !talk?.eventResult
+    || !isShelterSubtitleComplete(talk)
+    || !isShelterSubtitleTypingComplete(talk, state)
+    || isShelterChoiceReactionActive(talk, state)
+  ) {
+    return 0;
+  }
+  const lineShownAt = Number.isFinite(talk?.lineShownAt) ? talk.lineShownAt : -999;
+  const age = getShelterTalkPulseAge(state, lineShownAt)
+    - getShelterLineTypeDuration(getShelterCurrentSubtitleLine(talk))
+    - 0.28;
+  return clamp(age / 0.24, 0, 1);
+}
+
+function drawShelterCinematicResult(ctx, theme, talk, state) {
+  const revealProgress = getShelterEventResultRevealProgress(talk, state);
+  if (revealProgress <= 0) {
+    return;
+  }
+  const result = talk?.eventResult && typeof talk.eventResult === "object" ? talk.eventResult : {};
+  const lines = Array.isArray(result.lines) ? result.lines.filter(Boolean).slice(0, 3) : [];
+  const x = 74;
+  const y = 488;
+  const revealOffset = (1 - revealProgress) * 8;
+  ctx.save();
+  ctx.globalAlpha = revealProgress;
+  const resultShade = ctx.createRadialGradient(172, y + 28, 18, 172, y + 28, 250);
+  resultShade.addColorStop(0, "rgba(0,0,0,0.5)");
+  resultShade.addColorStop(0.48, "rgba(0,0,0,0.28)");
+  resultShade.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = resultShade;
+  ctx.fillRect(0, y - 58, 456, 152);
+
+  ctx.textAlign = "left";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(0,0,0,0.62)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
+  ctx.strokeStyle = "rgba(0,0,0,0.78)";
+  ctx.lineWidth = 4;
+  ctx.font = `700 18px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+  ctx.fillStyle = theme.textMain || "#fffaf1";
+  ctx.strokeText(result.title || "대화 종료", x, y + revealOffset);
+  ctx.fillText(result.title || "대화 종료", x, y + revealOffset);
+
+  ctx.font = `500 15px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+  ctx.fillStyle = "rgba(245,248,251,0.72)";
+  lines.forEach((line, index) => {
+    const text = `- ${line}`;
+    const lineY = y + 30 + index * 24 + revealOffset;
+    ctx.strokeText(text, x, lineY);
+    ctx.fillText(text, x, lineY);
+  });
+  ctx.restore();
+}
+
+function drawShelterCinematicKeyHint(ctx, theme, talk, state) {
+  if (isShelterChoiceReactionActive(talk, state)) {
+    return;
+  }
+  if (getShelterEventResultRevealProgress(talk, state) >= 1) {
+    const label = "Z / Enter    닫기";
+    ctx.save();
+    ctx.textAlign = "left";
+    ctx.font = `600 13px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+    ctx.fillStyle = "rgba(245,248,251,0.66)";
+    ctx.strokeStyle = "rgba(0,0,0,0.72)";
+    ctx.lineWidth = 3;
+    ctx.shadowColor = "rgba(0,0,0,0.56)";
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
+    ctx.strokeText(label, 42, 676);
+    ctx.fillText(label, 42, 676);
+    ctx.restore();
+    return;
+  }
+  const choicesReady = getShelterChoiceRevealProgress(talk, state) >= 1;
+  const hasChoices = Boolean(talk?.event?.eventId && isShelterSubtitleComplete(talk) && choicesReady);
+  const lineComplete = isShelterSubtitleComplete(talk);
+  const typingComplete = isShelterSubtitleTypingComplete(talk, state);
+  if (lineComplete && typingComplete && talk?.event?.eventId && !choicesReady) {
+    return;
+  }
+  const label = !typingComplete
+    ? "Z / Enter    문장 채우기"
+    : !lineComplete
+      ? "Z / Enter    다음"
+      : hasChoices
+        ? "W / S    선택    Z / Enter    결정"
+        : "Esc    돌아가기";
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.font = `600 13px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+  ctx.fillStyle = "rgba(245,248,251,0.66)";
+  ctx.strokeStyle = "rgba(0,0,0,0.72)";
+  ctx.lineWidth = 3;
+  ctx.shadowColor = "rgba(0,0,0,0.56)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
+  ctx.strokeText(label, 42, 676);
+  ctx.fillText(label, 42, 676);
+  ctx.restore();
+}
+
+function getShelterTalkDoorTransition(talk, state) {
+  const transition = talk?.transition && typeof talk.transition === "object" ? talk.transition : null;
+  if (!transition) {
+    return null;
+  }
+  const duration = Number.isFinite(transition.duration) ? Math.max(0.2, Number(transition.duration)) : 0.62;
+  const startedAt = Number.isFinite(transition.startedAt) ? Number(transition.startedAt) : (state.pulse || 0);
+  const progress = clamp(((state.pulse || 0) - startedAt) / duration, 0, 1);
+  return {
+    direction: transition.direction === "out" ? "out" : "in",
+    progress,
+  };
+}
+
+function easeShelterDoorTransition(value) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function drawShelterDoorPanel(ctx, x, y, width, height, side, cover) {
+  if (width <= 0.5) {
+    return;
+  }
+  const edgeX = side === "left" ? x + width : x;
+  const gradient = ctx.createLinearGradient(x, y, x + width, y);
+  if (side === "left") {
+    gradient.addColorStop(0, "rgba(0,4,7,0.98)");
+    gradient.addColorStop(0.76, "rgba(7,15,20,0.98)");
+    gradient.addColorStop(1, "rgba(20,34,42,0.98)");
+  } else {
+    gradient.addColorStop(0, "rgba(20,34,42,0.98)");
+    gradient.addColorStop(0.24, "rgba(7,15,20,0.98)");
+    gradient.addColorStop(1, "rgba(0,4,7,0.98)");
+  }
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, width, height);
+
+  ctx.save();
+  ctx.globalAlpha = clamp(cover * 0.72, 0, 0.72);
+  ctx.strokeStyle = "rgba(255,255,255,0.045)";
+  ctx.lineWidth = 1;
+  const lineStep = 74;
+  const offset = side === "left" ? x + width - lineStep : x + lineStep;
+  for (let i = 0; i < 6; i += 1) {
+    const lineX = side === "left" ? offset - i * lineStep : offset + i * lineStep;
+    if (lineX > x + 8 && lineX < x + width - 8) {
+      ctx.beginPath();
+      ctx.moveTo(lineX, y + 36);
+      ctx.lineTo(lineX, y + height - 36);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  const edgeGradient = ctx.createLinearGradient(edgeX - 12, 0, edgeX + 12, 0);
+  edgeGradient.addColorStop(0, "rgba(96,214,255,0)");
+  edgeGradient.addColorStop(0.5, `rgba(116,224,255,${0.1 + cover * 0.18})`);
+  edgeGradient.addColorStop(1, "rgba(96,214,255,0)");
+  ctx.fillStyle = edgeGradient;
+  ctx.fillRect(edgeX - 12, y, 24, height);
+  ctx.restore();
+}
+
+function drawShelterTalkDoorTransition(ctx, state, talk) {
+  const transition = getShelterTalkDoorTransition(talk, state);
+  if (!transition) {
+    return;
+  }
+  const eased = easeShelterDoorTransition(transition.progress);
+  const cover = transition.direction === "out" ? eased : 1 - eased;
+  const fadeAlpha = transition.direction === "out" ? eased * 0.66 : (1 - eased) * 0.72;
+  if (cover <= 0.01 && fadeAlpha <= 0.01) {
+    return;
+  }
+
+  ctx.save();
+  ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const panelWidth = Math.ceil((SCREEN_WIDTH / 2) * cover);
+  drawShelterDoorPanel(ctx, 0, 0, panelWidth, SCREEN_HEIGHT, "left", cover);
+  drawShelterDoorPanel(ctx, SCREEN_WIDTH - panelWidth, 0, panelWidth, SCREEN_HEIGHT, "right", cover);
+
+  const frameAlpha = clamp(cover * 0.48, 0, 0.48);
+  ctx.fillStyle = `rgba(0,0,0,${frameAlpha})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, 44);
+  ctx.fillRect(0, SCREEN_HEIGHT - 44, SCREEN_WIDTH, 44);
+
+  if (cover > 0.86) {
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = clamp((cover - 0.86) / 0.14, 0, 1) * 0.2;
+    ctx.fillStyle = "rgba(126,225,255,0.62)";
+    ctx.fillRect(SCREEN_WIDTH / 2 - 1, 0, 2, SCREEN_HEIGHT);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawShelterCinematicTalkOverlay(ctx, state, data, theme, talk) {
+  drawShelterEmotionPortrait(ctx, state, data, theme, talk);
+  ctx.save();
+  const bottomShade = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.52, 0, SCREEN_HEIGHT);
+  bottomShade.addColorStop(0, "rgba(0,0,0,0)");
+  bottomShade.addColorStop(0.55, "rgba(0,0,0,0.34)");
+  bottomShade.addColorStop(1, "rgba(0,0,0,0.72)");
+  ctx.fillStyle = bottomShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  const fullLine = getShelterCurrentSubtitleLine(talk);
+  const line = getShelterVisibleSubtitleLine(talk, state);
+  const reactionPause = isShelterChoiceReactionActive(talk, state);
+  drawShelterCinematicChoices(ctx, theme, talk, state);
+  drawShelterCinematicResult(ctx, theme, talk, state);
+  if (!reactionPause && line) {
+    drawCinematicSingleLine(ctx, line, SCREEN_WIDTH / 2, 640, 1000, {
+      measureText: fullLine,
+      color: "#fffaf1",
+      stroke: "rgba(0,0,0,0.82)",
+      weight: 700,
+      size: 25,
+      minSize: 17,
+      lineWidth: 4,
+      shadowBlur: 12,
+      shadowOffsetY: 3,
+    });
+  }
+  drawShelterCinematicKeyHint(ctx, theme, talk, state);
+  ctx.restore();
+}
+
+function drawShelterAutoEventBridgeOverlay(ctx, state, data, theme, bridge) {
+  const line = String(bridge?.line || "").trim();
+  if (!line) {
+    drawShelterSceneV3(ctx, state, data);
+    return;
+  }
+  const baseDuration = Number.isFinite(bridge?.duration) ? Math.max(0.45, Number(bridge.duration)) : 1.15;
+  const duration = Math.max(baseDuration, getShelterLineTypeDuration(line) + 0.2);
+  const startedAt = Number.isFinite(bridge?.startedAt) ? Number(bridge.startedAt) : (state.pulse || 0);
+  const progress = clamp(((state.pulse || 0) - startedAt) / duration, 0, 1);
+  const fadeIn = clamp(progress / 0.28, 0, 1);
+  const fadeOut = clamp((1 - progress) / 0.22, 0, 1);
+  const alpha = Math.min(fadeIn, fadeOut);
+  const typeProgress = clamp(((state.pulse || 0) - startedAt) / Math.max(0.01, getShelterLineTypeDuration(line)), 0, 1);
+  const visibleLine = getVisibleShelterTypedText(line, typeProgress);
+  const talk = {
+    line,
+    lineIndex: 0,
+    emotion: typeof bridge?.emotion === "string" ? bridge.emotion : "neutral",
+    eventArtAssetKey: typeof bridge?.artAssetKey === "string" ? bridge.artAssetKey.trim() : "",
+    lastChoice: bridge?.eventId ? { eventId: bridge.eventId } : null,
+  };
+  preloadShelterEmotionPortraits(data, talk);
+  drawShelterEmotionPortrait(ctx, state, data, theme, talk);
+
+  ctx.save();
+  ctx.fillStyle = `rgba(0,0,0,${0.18 + alpha * 0.22})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.fillStyle = `rgba(0,0,0,${0.28 + alpha * 0.34})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, 86);
+  ctx.fillRect(0, SCREEN_HEIGHT - 96, SCREEN_WIDTH, 96);
+  const bottomShade = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.48, 0, SCREEN_HEIGHT);
+  bottomShade.addColorStop(0, "rgba(0,0,0,0)");
+  bottomShade.addColorStop(1, `rgba(0,0,0,${0.48 + alpha * 0.18})`);
+  ctx.fillStyle = bottomShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.globalAlpha = alpha;
+  drawCinematicSingleLine(ctx, visibleLine, SCREEN_WIDTH / 2, 640, 980, {
+    measureText: line,
+    color: "#fffaf1",
+    stroke: "rgba(0,0,0,0.84)",
+    weight: 600,
+    size: 21,
+    minSize: 15,
+    style: "italic",
+    lineWidth: 4,
+    shadowBlur: 12,
+    shadowOffsetY: 3,
+  });
+
+  ctx.globalAlpha = alpha * 0.72;
+  ctx.textAlign = "left";
+  ctx.font = `600 12px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+  ctx.fillStyle = "rgba(245,248,251,0.68)";
+  ctx.strokeStyle = "rgba(0,0,0,0.72)";
+  ctx.lineWidth = 3;
+  ctx.strokeText("Z / Enter    넘기기", 42, 676);
+  ctx.fillText("Z / Enter    넘기기", 42, 676);
+  ctx.restore();
+}
+
+function drawShelterMemorialTalkOverlay(ctx, state, data, theme, rest) {
+  drawShelterRestBackground(ctx, state, data, theme, 1);
+  const talk = rest?.talk || state.shelter?.talk || {};
+  preloadShelterEmotionPortraits(data, talk);
+  const day = Math.max(1, Math.floor(state.run?.day || state.meta?.completedRuns || 1));
+
+  if (isShelterCinematicTalk(talk)) {
+    drawShelterCinematicTalkOverlay(ctx, state, data, theme, talk);
+    return;
+  }
+
+  drawShelterEmotionPortrait(ctx, state, data, theme, talk);
+
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.shadowColor = "rgba(0,0,0,0.58)";
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText(`DAY ${day}`, 42, 36);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 25px 'Segoe UI', sans-serif";
+  ctx.fillText("메모리얼 로비", 42, 66);
+  ctx.fillStyle = "rgba(245,248,251,0.54)";
+  ctx.font = "800 12px 'Segoe UI', sans-serif";
+  ctx.fillText("TYPE-07A / 침수된 해운대 임시 거점", 42, 88);
+  ctx.restore();
+
+  drawShelterMemorialTopButton(ctx, theme, "기록", 1018, 28, 94, false);
+  drawShelterMemorialTopButton(ctx, theme, "출격", 1126, 28, 102, true);
+
+  const dialogueX = 64;
+  const dialogueW = 784;
+  const rawDialogueLine = talk.line || "";
+  const explicitLineCount = rawDialogueLine ? rawDialogueLine.split("\n").length : 1;
+  const longDialogue = rawDialogueLine.length > 130 || explicitLineCount > 2;
+  const dialogueY = longDialogue ? 420 : 568;
+  const dialogueH = longDialogue ? 270 : 116;
+  const dialogueTextY = dialogueY + (longDialogue ? 58 : 62);
+  const dialogueLineHeight = longDialogue ? 21 : 26;
+  const dialogueFont = longDialogue ? "900 17px 'Segoe UI', sans-serif" : "900 21px 'Segoe UI', sans-serif";
+
+  if (!talk.pending) {
+    const choices = Array.isArray(talk.choices) ? talk.choices.slice(0, 3) : [];
+    const selectedChoice = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, choices.length - 1));
+    const choiceGap = 12;
+    const choiceW = (dialogueW - choiceGap * 2) / 3;
+    const choiceY = dialogueY - 44;
+    choices.forEach((choice, index) => {
+      drawShelterMemorialChoice(
+        ctx,
+        theme,
+        choice,
+        dialogueX + index * (choiceW + choiceGap),
+        choiceY,
+        choiceW,
+        index === selectedChoice
+      );
+    });
+  }
+
+  drawBeveledPanel(ctx, theme, dialogueX, dialogueY, dialogueW, dialogueH, {
+    cut: 18,
+    fill: "rgba(5, 12, 17, 0.68)",
+    stroke: "rgba(245,248,251,0.18)",
+    innerLines: false,
+    glow: true,
+  });
+
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText("TYPE-07A", dialogueX + 26, dialogueY + 27);
+  const line = talk.line || (talk.pending ? "......" : "괜찮아. 네가 여기 있으면 조금은 버틸 수 있어.");
+  wrapText(ctx, line, dialogueX + 26, dialogueTextY, dialogueW - 52, dialogueLineHeight, theme.textMain, dialogueFont);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = talk.pending ? theme.accentSecondary : theme.accent;
+  ctx.font = "900 12px 'Segoe UI', sans-serif";
+  ctx.fillText(talk.pending ? "응답 대기 중..." : "W/S 선택   Z/Enter 듣기   Esc 돌아가기", dialogueX + dialogueW - 24, dialogueY + dialogueH - 18);
+  ctx.textAlign = "left";
+}
+
+function drawShelterTalkOverlay(ctx, state, data, theme, rest) {
+  drawShelterMemorialTalkOverlay(ctx, state, data, theme, rest);
+  drawShelterTalkDoorTransition(ctx, state, rest?.talk || state.shelter?.talk || {});
+  return;
+  drawShelterRestBackground(ctx, state, data, theme, 1);
+  drawShelterRestHeader(ctx, theme, state, "쉘터 대화");
+  const talk = rest?.talk || state.shelter?.talk || {};
+  const panelX = 158;
+  const panelY = 170;
+  const panelW = 964;
+  const panelH = 318;
+  drawBeveledPanel(ctx, theme, panelX, panelY, panelW, panelH, {
+    cut: 16,
+    fill: "rgba(5, 12, 16, 0.72)",
+    stroke: "rgba(147,234,255,0.28)",
+    glow: true,
+    innerLines: false,
+  });
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText("LOCAL AI", panelX + 32, panelY + 44);
+  ctx.fillStyle = theme.textMain;
+  ctx.font = "900 23px 'Segoe UI', sans-serif";
+  ctx.fillText("피난처의 목소리", panelX + 32, panelY + 78);
+
+  const line = talk.line || (talk.pending ? "......" : "Z를 눌러 말을 건다.");
+  wrapText(ctx, line, panelX + 42, panelY + 142, panelW - 84, 30, theme.textMain, "800 24px 'Segoe UI', sans-serif");
+
+  const history = Array.isArray(talk.history) ? talk.history.slice(-3) : [];
+  history.forEach((entry, index) => {
+    ctx.fillStyle = "rgba(245,248,251,0.48)";
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    const speaker = entry.speaker === "drone" ? "당신: " : "";
+    ctx.fillText(`${speaker}${entry.text || ""}`, panelX + 42, panelY + 218 + index * 22);
+  });
+
+  if (!talk.pending) {
+    const choices = Array.isArray(talk.choices) ? talk.choices.slice(0, 3) : [];
+    const selectedChoice = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, choices.length - 1));
+    choices.forEach((choice, index) => {
+      const choiceX = panelX + 42 + index * 292;
+      const choiceY = panelY + panelH - 76;
+      const selected = index === selectedChoice;
+      drawBeveledPanel(ctx, theme, choiceX, choiceY, 268, 36, {
+        cut: 8,
+        fill: selected ? "rgba(29, 52, 60, 0.82)" : "rgba(7, 15, 20, 0.52)",
+        stroke: selected ? "rgba(147,234,255,0.58)" : "rgba(255,255,255,0.12)",
+        innerLines: false,
+      });
+      ctx.fillStyle = selected ? theme.textMain : theme.textDim;
+      ctx.font = "900 14px 'Segoe UI', sans-serif";
+      ctx.fillText(choice.label || "", choiceX + 18, choiceY + 23);
+    });
+  }
+
+  ctx.fillStyle = talk.pending ? theme.accentSecondary : theme.accent;
+  ctx.font = "900 14px 'Segoe UI', sans-serif";
+  ctx.fillText(talk.pending ? "응답 대기 중..." : "W/S 선택    Z/Enter 말하기    Esc 돌아가기", panelX + 32, panelY + panelH - 28);
 }
 
 function drawShelterPhotoOverlay(ctx, state, data, theme, rest) {
@@ -9132,8 +11065,12 @@ function drawShelterRestOverlay(ctx, state, data, theme) {
     return false;
   }
   preloadShelterPhotoSceneAssets(data);
-  if (rest.phase === "arrival") {
+  if (rest.autoEventBridge) {
+    drawShelterAutoEventBridgeOverlay(ctx, state, data, theme, rest.autoEventBridge);
+  } else if (rest.phase === "arrival") {
     drawShelterArrivalOverlay(ctx, state, data, theme, rest);
+  } else if (rest.phase === "talk") {
+    drawShelterTalkOverlay(ctx, state, data, theme, rest);
   } else if (rest.phase === "photo" || rest.phase === "photoPreview") {
     drawShelterPhotoOverlay(ctx, state, data, theme, rest);
   } else if (rest.phase === "records") {
@@ -9233,13 +11170,18 @@ function drawObjectiveCardV3(ctx, state, data, theme, layout) {
   });
 }
 
+function getHeatHudColor(run, activeColor = "#87e1ff", idleColor = "#729cff") {
+  return run?.focusDepleted ? "#ff5d78" : (run?.focusActive ? activeColor : idleColor);
+}
+
 function drawStatusBarsV3(ctx, run, data, theme, layout) {
   const shotValue = getRecoilShotUiState(run, data);
   const focusValue = clamp((run.focus ?? run.focusMax ?? 100) / Math.max(1, run.focusMax ?? 100), 0, 1);
+  const heatColor = getHeatHudColor(run, "#87e1ff", "#729cff");
   const bars = [
     { label: "HP", value: run.hp / data.player.maxHp, color: "#fbfefe" },
     { label: "BAT", value: run.battery / data.player.maxBattery, color: theme.accentSecondary },
-    { label: "FOCUS", value: focusValue, color: run.focusActive ? "#87e1ff" : "#729cff" },
+    { label: "HEAT", value: focusValue, color: heatColor },
     { label: "SHOT", value: shotValue, color: run.player.recoilFocusActive ? "#e7f47e" : theme.accent },
   ];
 
@@ -9293,7 +11235,7 @@ function getCharacterHudStatus(run) {
     return { label: "RECOIL", color: "#87e1ff" };
   }
   if (player.recoilFocusActive || (player.recoilFocusBlend ?? 0) > 0.18) {
-    return { label: "FOCUS", color: "#87e1ff" };
+    return { label: "HEAT", color: "#87e1ff" };
   }
   if (player.hoverActive && !player.onGround) {
     return { label: "HOVER", color: "#93eaff" };
@@ -9584,10 +11526,10 @@ function drawCharacterStatusHudV3(ctx, state, data) {
 function drawActionClusterV3(ctx, theme, layout) {
   const labels = [
     { x: layout.actions.moveX, y: layout.actions.moveY, text: "A D" },
-    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Space" },
-    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "W" },
-    { x: layout.actions.crouchX, y: layout.actions.crouchY, text: "↓" },
-    { x: layout.actions.useX, y: layout.actions.useY, text: "Z" },
+    { x: layout.actions.dashX, y: layout.actions.dashY, text: "Shift" },
+    { x: layout.actions.jumpX, y: layout.actions.jumpY, text: "Space" },
+    { x: layout.actions.crouchX, y: layout.actions.crouchY, text: "S / ↓" },
+    { x: layout.actions.useX, y: layout.actions.useY, text: "↑ / E" },
   ];
 
   labels.forEach((label) => {
@@ -9768,6 +11710,7 @@ function drawOperatorHudV4(ctx, state, data, theme) {
   const portraitSize = 84;
   const status = getCharacterHudStatus(run);
   const focusValue = clamp((run.focus ?? run.focusMax ?? 100) / Math.max(1, run.focusMax ?? 100), 0, 1);
+  const heatColor = getHeatHudColor(run, "#87e1ff", "#729cff");
 
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 14,
@@ -9789,8 +11732,8 @@ function drawOperatorHudV4(ctx, state, data, theme) {
   drawMeterBarV4(ctx, theme, x + 124, y + 76, 224, "HP", run.hp / maxHp, "#fbfefe", {
     active: run.hp / maxHp <= 0.3,
   });
-  drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#729cff", {
-    active: run.focusActive,
+  drawMeterBarV4(ctx, theme, x + 124, y + 104, 224, "HEAT", focusValue, heatColor, {
+    active: run.focusActive || run.focusDepleted,
   });
   drawMeterBarV4(ctx, theme, x + 124, y + 132, 152, "BAT", run.battery / maxBattery, theme.accentSecondary);
 }
@@ -9801,9 +11744,6 @@ function drawWeaponHudV4(ctx, run, data, theme) {
   const y = 556;
   const width = 330;
   const height = 138;
-  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
-    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
-    : 1;
 
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 14,
@@ -9817,19 +11757,19 @@ function drawWeaponHudV4(ctx, run, data, theme) {
   ctx.font = "900 18px 'Segoe UI', sans-serif";
   ctx.fillText(hud.stats.label, x + 20, y + 50);
 
-  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.fillStyle = "#f5f8fb";
   ctx.font = "900 34px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.magazine}/${hud.stats.magazineSize}`, x + 20, y + 92);
+  ctx.fillText("∞", x + 20, y + 92);
 
   ctx.fillStyle = theme.textDim;
   ctx.font = "800 12px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} RES ${hud.reserve}`, x + 122, y + 78);
-  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOADING" : "R RELOAD", x + 122, y + 96);
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} HEAT`, x + 122, y + 78);
+  ctx.fillText("NO MAG", x + 122, y + 96);
 
   ctx.fillStyle = "rgba(255,255,255,0.1)";
   ctx.fillRect(x + 122, y + 104, 176, 8);
-  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
-  ctx.fillRect(x + 122, y + 104, 176 * reloadRatio, 8);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.fillRect(x + 122, y + 104, 176, 8);
 
   drawArmSlotChip(ctx, theme, "1 LEFT", hud.side === "left", x + 194, y + 20);
   drawArmSlotChip(ctx, theme, "2 RIGHT", hud.side === "right", x + 262, y + 20);
@@ -10007,7 +11947,10 @@ function drawOperatorHudV5(ctx, state, data, theme) {
   const hpRatio = clamp(run.hp / maxHp, 0, 1);
   const focusMax = Math.max(1, run.focusMax ?? 100);
   const focusValue = clamp((run.focus ?? focusMax) / focusMax, 0, 1);
-  const batteryRatio = 1;
+  const heatColor = getHeatHudColor(run, "#87e1ff", "#68d8ec");
+  const batteryRatio = clamp(run.battery / data.player.maxBattery, 0, 1);
+  const momentum = clamp(run.player?.verticalMomentum ?? 0, 0, 1);
+  const momentumStage = Math.max(0, Math.floor(run.player?.verticalMomentumStage ?? 0));
 
   drawBeveledPanel(ctx, theme, x, y, 376, 78, {
     cut: 14,
@@ -10027,16 +11970,27 @@ function drawOperatorHudV5(ctx, state, data, theme) {
     active: hpRatio <= 0.3,
     valueText: `${Math.max(0, Math.round(run.hp))}/${maxHp}`,
   });
-  drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "FOCUS", focusValue, run.focusActive ? "#87e1ff" : "#68d8ec", {
-    active: run.focusActive,
+  drawMeterBarV5(ctx, theme, x + 76, y + 52, 118, "HEAT", focusValue, heatColor, {
+    active: run.focusActive || run.focusDepleted,
     valueText: `${Math.round(run.focus ?? focusMax)}/${focusMax}`,
   });
   drawMeterBarV5(ctx, theme, x + 76, y + 72, 92, "LIGHT", batteryRatio, run.player.lightActive ? theme.accent : theme.accentSecondary, {
     active: run.player.lightActive,
     valueText: "INF",
   });
+  if (momentum > 0.01) {
+    const momentumColor = momentumStage >= 3
+      ? "#f6e98a"
+      : momentumStage >= 2
+        ? "#93eaff"
+        : "#8fe1ff";
+    drawMeterBarV5(ctx, theme, x + 184, y + 72, 58, "MOM", momentum, momentumColor, {
+      active: (run.player?.verticalMomentumFlashTimer ?? 0) > 0,
+      valueText: `M${momentumStage}`,
+    });
+  }
 
-  drawQuickSlotsHudV5(ctx, run, theme, x + 224, y + 34);
+  drawQuickSlotsHudV5(ctx, run, theme, x + 258, y + 34);
 }
 
 function drawWeaponSilhouetteV5(ctx, x, y, scale, color) {
@@ -10082,9 +12036,9 @@ function drawWeaponHudV5(ctx, run, data, theme) {
   const y = 626;
   const width = 216;
   const height = 70;
-  const reloadRatio = (hud.arm.reloadTimer ?? 0) > 0
-    ? 1 - clamp((hud.arm.reloadTimer ?? 0) / Math.max(0.001, hud.arm.reloadDuration || hud.stats.reloadDuration), 0, 1)
-    : 1;
+  const heatMax = Math.max(1, run.focusMax ?? 100);
+  const heatRatio = clamp((run.focus ?? heatMax) / heatMax, 0, 1);
+  const heatColor = getHeatHudColor(run, theme.accentSecondary, theme.accentSecondary);
 
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 12,
@@ -10105,25 +12059,25 @@ function drawWeaponHudV5(ctx, run, data, theme) {
   const weaponLabel = String(hud.stats.label || "WEAPON").toUpperCase();
   ctx.fillText(weaponLabel.length > 13 ? `${weaponLabel.slice(0, 12)}.` : weaponLabel, x + 88, y + 32);
 
-  drawWeaponSilhouetteV5(ctx, x + 156, y + 22, 0.5, hud.magazine > 0 ? "rgba(245,248,251,0.8)" : "rgba(255,159,180,0.82)");
+  drawWeaponSilhouetteV5(ctx, x + 156, y + 22, 0.5, heatRatio > 0.08 ? "rgba(245,248,251,0.8)" : "rgba(255,159,180,0.82)");
 
-  ctx.fillStyle = hud.magazine > 0 ? "#f5f8fb" : "#ff9fb4";
+  ctx.fillStyle = "#f5f8fb";
   ctx.font = "900 22px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.magazine}`, x + 14, y + 62);
+  ctx.fillText("∞", x + 14, y + 62);
   ctx.fillStyle = theme.textMute;
   ctx.font = "900 11px 'Segoe UI', sans-serif";
-  ctx.fillText(`/${hud.stats.magazineSize}`, x + 42, y + 61);
+  ctx.fillText("HEAT", x + 42, y + 61);
 
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "800 8px 'Segoe UI', sans-serif";
-  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} ${hud.reserve}`, x + 88, y + 50);
-  ctx.fillStyle = theme.textDim;
-  ctx.fillText((hud.arm.reloadTimer ?? 0) > 0 ? "RELOADING" : "R RELOAD", x + 88, y + 63);
+  ctx.fillText(`${hud.stats.ammoType.toUpperCase()} NO MAG`, x + 88, y + 50);
+  ctx.fillStyle = run.focusDepleted ? heatColor : theme.textDim;
+  ctx.fillText(`HEAT ${Math.round(run.focus ?? heatMax)}/${heatMax}`, x + 88, y + 63);
 
   ctx.fillStyle = "rgba(255,255,255,0.08)";
   ctx.fillRect(x + 154, y + 58, 42, 4);
-  ctx.fillStyle = (hud.arm.reloadTimer ?? 0) > 0 ? theme.accent : theme.accentSecondary;
-  ctx.fillRect(x + 154, y + 58, 42 * reloadRatio, 4);
+  ctx.fillStyle = run.focusDepleted ? heatColor : (heatRatio > 0.08 ? theme.accentSecondary : "#ff9fb4");
+  ctx.fillRect(x + 154, y + 58, 42 * heatRatio, 4);
 }
 
 function drawCompassHudV5(ctx, state, data, theme) {
@@ -10206,7 +12160,7 @@ function drawPromptHudV5(ctx, state, theme) {
   if (!text && !run.focusActive && !run.focusDepleted) {
     return;
   }
-  const label = text || (run.focusDepleted ? "FOCUS RECOVERING" : "RMB FOCUS");
+  const label = text || (run.focusDepleted ? "HEAT FAILURE" : "RMB HEAT");
   const x = 544;
   const y = 662;
   drawBeveledPanel(ctx, theme, x, y, 192, 28, {
@@ -11256,6 +13210,85 @@ function drawHudV4(ctx, state, data) {
   drawRunMapOverlay(ctx, state, data, theme);
 }
 
+function drawVaultEscapeHud(ctx, state, theme) {
+  const vault = state.run?.vaultEscape;
+  if (!vault?.active && !vault?.lockdownActive) {
+    return;
+  }
+  const timeLeft = vault.lockdownActive
+    ? Math.max(0, vault.lockdownTimer ?? 0)
+    : Math.max(0, vault.timeLeft ?? 0);
+  const ratio = vault.duration > 0 ? clamp(timeLeft / vault.duration, 0, 1) : 0;
+  const lootText = `${vault.collected ?? 0}/${vault.totalLoot ?? 0}`;
+  const x = 462;
+  const y = 28;
+  const width = 356;
+  drawBeveledPanel(ctx, theme, x, y, width, 70, {
+    cut: 12,
+    fill: "rgba(36, 12, 16, 0.72)",
+    stroke: "rgba(255,122,102,0.54)",
+    innerLines: false,
+  });
+  ctx.fillStyle = "rgba(255,122,102,0.92)";
+  ctx.font = "900 13px 'Segoe UI', sans-serif";
+  ctx.fillText(vault.lockdownActive ? "LOCKDOWN SEALING" : "VAULT LOCKDOWN", x + 18, y + 24);
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.font = "900 24px 'Segoe UI', sans-serif";
+  ctx.fillText(`${Math.ceil(timeLeft)}s`, x + 18, y + 54);
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.font = "800 13px 'Segoe UI', sans-serif";
+  ctx.fillText(`SUPPLIES ${lootText}`, x + 112, y + 53);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(x + 224, y + 43, 108, 7);
+  ctx.fillStyle = ratio < 0.25 ? "rgba(255,122,102,0.95)" : "rgba(231,244,126,0.9)";
+  ctx.fillRect(x + 224, y + 43, 108 * (vault.lockdownActive ? 1 - clamp(timeLeft / Math.max(0.1, vault.lockdownDuration ?? 1.6), 0, 1) : ratio), 7);
+}
+
+function drawVaultLockdownOverlay(ctx, run, pulse = 0) {
+  const vault = run?.vaultEscape;
+  if (!vault?.lockdownActive) {
+    return;
+  }
+  const duration = Math.max(0.1, vault.lockdownDuration ?? 1.6);
+  const progress = 1 - clamp((vault.lockdownTimer ?? 0) / duration, 0, 1);
+  const flash = 0.45 + Math.sin(pulse * 18) * 0.18;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(120, 12, 18, ${0.22 + progress * 0.28})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  const vignette = ctx.createRadialGradient(
+    SCREEN_WIDTH * 0.5,
+    SCREEN_HEIGHT * 0.5,
+    80,
+    SCREEN_WIDTH * 0.5,
+    SCREEN_HEIGHT * 0.5,
+    SCREEN_WIDTH * 0.7,
+  );
+  vignette.addColorStop(0, "rgba(255, 122, 102, 0.04)");
+  vignette.addColorStop(1, `rgba(20, 0, 4, ${0.42 + progress * 0.2})`);
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.fillStyle = `rgba(255, 122, 102, ${flash})`;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, 8);
+  ctx.fillRect(0, SCREEN_HEIGHT - 8, SCREEN_WIDTH, 8);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(255, 245, 235, 0.96)";
+  ctx.font = "900 54px 'Segoe UI', sans-serif";
+  ctx.fillText("LOCKDOWN", SCREEN_WIDTH / 2, 292);
+  ctx.fillStyle = "rgba(255, 190, 180, 0.84)";
+  ctx.font = "800 17px 'Segoe UI', sans-serif";
+  ctx.fillText("All exits sealed. Containment sequence engaged.", SCREEN_WIDTH / 2, 328);
+
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fillRect(SCREEN_WIDTH / 2 - 160, 352, 320, 8);
+  ctx.fillStyle = "rgba(255,122,102,0.92)";
+  ctx.fillRect(SCREEN_WIDTH / 2 - 160, 352, 320 * progress, 8);
+  ctx.restore();
+}
+
 function drawHudV5(ctx, state, data) {
   if (state.scene !== SCENES.EXPEDITION || !state.run) {
     return;
@@ -11265,6 +13298,7 @@ function drawHudV5(ctx, state, data) {
   drawCompassHudV5(ctx, state, data, theme);
   drawOperatorHudV5(ctx, state, data, theme);
   drawWeaponHudV5(ctx, state.run, data, theme);
+  drawVaultEscapeHud(ctx, state, theme);
   drawPromptHudV5(ctx, state, theme);
   drawRunMapOverlay(ctx, state, data, theme);
 }
@@ -11312,6 +13346,43 @@ function getResultObjectiveLines(summary) {
     lines.push(`${objective.complete ? "완료" : "미완"} · ${objective.label} ${current}/${objective.target}`);
   });
   return lines;
+}
+
+function formatVaultRate(value) {
+  return `${Math.round(clamp(value ?? 0, 0, 1) * 100)}%`;
+}
+
+function getVaultResultLines(vault, isFailure = false) {
+  if (!vault?.attempted) {
+    return [];
+  }
+  const supplies = `${vault.collected ?? 0}/${vault.totalLoot ?? 0}`;
+  const value = `${Math.round(vault.valueCollected ?? 0)}/${Math.round(vault.totalValue ?? 0)}`;
+  const rate = formatVaultRate(vault.recoveryRate);
+  const status = vault.lockedDown || isFailure
+    ? "LOCKDOWN"
+    : vault.perfect
+      ? "FULL CLEAR"
+      : "ESCAPED";
+  const timeLeft = vault.completed && Number.isFinite(vault.timeLeft)
+    ? ` · ${Math.ceil(vault.timeLeft)}s left`
+    : "";
+  return [
+    `Vault ${status}: supplies ${supplies} · value ${value} · ${rate}${timeLeft}`,
+    vault.perfect
+      ? "Vault bonus: all supplies secured."
+      : "Vault bonus: partial haul secured.",
+  ];
+}
+
+function getFailureReasonLabel(reason) {
+  if (reason === "sanity") {
+    return "정신 붕괴";
+  }
+  if (reason === "vaultLockdown") {
+    return "Vault lockdown";
+  }
+  return "체력 소진";
 }
 
 function drawResultsSceneV3(ctx, state, data, isFailure = false) {
@@ -11370,6 +13441,8 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
     chips.push({ label: "손실", value: String(state.resultSummary?.lostMaterials || 0) });
     chips.push({ label: "분실품", value: String(state.resultSummary?.lostLoot?.itemCount || 0) });
     chips.push({ label: "원인", value: state.resultSummary?.reason === "sanity" ? "정신 붕괴" : "체력 소진" });
+    chips.push({ label: "분실품", value: String(state.resultSummary?.lostLoot?.itemCount || 0) });
+    chips.push({ label: "원인", value: getFailureReasonLabel(state.resultSummary?.reason) });
   } else {
     chips.push({ label: "자재", value: String(state.resultSummary?.materials || 0) });
     chips.push({ label: "확보품", value: String(state.resultSummary?.securedLoot?.itemCount || 0) });
@@ -11400,6 +13473,7 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
     ctx.fillText(chip.value, x + 14, 326);
   });
 
+  const vaultLines = getVaultResultLines(state.resultSummary?.vault, isFailure);
   const detailLines = isMovementLab(data)
     ? [
       isFailure ? "이동 실험이 초기화되었다." : "이번 세션의 이동 감각을 정리한다.",
@@ -11420,9 +13494,13 @@ function drawResultsSceneV3(ctx, state, data, isFailure = false) {
     detailLines.unshift(...getResultLootLines(state.resultSummary, false), ...getResultObjectiveLines(state.resultSummary));
   }
 
+  if (vaultLines.length > 0) {
+    detailLines.unshift(...vaultLines);
+  }
+
   detailLines.slice(0, 5).forEach((line, index) => {
     ctx.fillStyle = index === 0 ? theme.textMain : theme.textDim;
-    ctx.font = "17px 'Segoe UI', sans-serif";
+    ctx.font = index < vaultLines.length ? "700 15px 'Segoe UI', sans-serif" : "17px 'Segoe UI', sans-serif";
     ctx.fillText(line, 192, 392 + index * 34);
   });
 
@@ -11455,7 +13533,16 @@ export function renderGame(dom, state, data) {
   if (state.scene === SCENES.TITLE) {
     drawTitleSceneV3(ctx, state, data);
   } else if (state.scene === SCENES.SHELTER) {
-    drawShelterSceneV3(ctx, state, data);
+    const restTalk = state.run?.shelterRest?.active && state.run.shelterRest.phase === "talk"
+      ? state.run.shelterRest.talk
+      : null;
+    if (state.shelter?.talk?.active || restTalk) {
+      drawShelterTalkOverlay(ctx, state, data, getUiTheme(data), { talk: restTalk || state.shelter.talk });
+    } else if (state.shelter?.autoEventBridge) {
+      drawShelterAutoEventBridgeOverlay(ctx, state, data, getUiTheme(data), state.shelter.autoEventBridge);
+    } else {
+      drawShelterSceneV3(ctx, state, data);
+    }
   } else if (state.scene === SCENES.EXPEDITION && state.run) {
     renderExpedition(ctx, state, data);
   } else if (state.scene === SCENES.RESULTS) {

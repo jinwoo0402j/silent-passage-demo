@@ -12,8 +12,8 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260526-sfx-v1";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260526-sfx-v1";
+} from "./state.js?v=20260619-shelter-voice-v9";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260619-shelter-voice-v9";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -23,6 +23,17 @@ import {
   startNewSavedRun,
   updateAutoSave,
 } from "./save-game.js?v=20260526-sfx-v1";
+import {
+  getAudioChannelVolume,
+  registerAudioElement,
+} from "./audio-options.js?v=20260619-shelter-voice-v9";
+import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
+import { requestFaceOffLine } from "./ai-client.js?v=20260618-direct-chat-v7";
+import {
+  speakFaceOffLine,
+  speakShelterLine,
+  stopTtsPlayback,
+} from "./tts-client.js?v=20260619-shelter-voice-v9";
 import {
   approach,
   clamp,
@@ -45,29 +56,61 @@ const CAMERA_USER_ZOOM_OUT_KEYS = ["Minus", "NumpadSubtract"];
 const CAMERA_USER_ZOOM_MIN = 0.5;
 const CAMERA_USER_ZOOM_MAX = 2;
 const CAMERA_USER_ZOOM_STEP = 1.12;
-const CAMERA_ABSOLUTE_ZOOM_MIN = 0.5;
+const CAMERA_ABSOLUTE_ZOOM_MIN = 0.35;
 const CAMERA_ABSOLUTE_ZOOM_MAX = 5;
 const CAMERA_MAX_LERP_STEP_SECONDS = 1 / 30;
 const CAMERA_ACTION_ZOOM_OUT_SCALE = 0.5;
 const MOVE_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const MOVE_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const CROUCH_KEYS = ["ArrowDown", "KeyS"];
-const JUMP_KEYS = ["Space", "KeyW"];
-const ZIPLINE_MOUNT_KEYS = ["Space"];
-const DASH_KEYS = ["ShiftLeft", "ShiftRight", "KeyX"];
+const JUMP_KEYS = ["Space", "KeyW", "KeyZ"];
+const ZIPLINE_MOUNT_KEYS = ["ArrowUp"];
+const DASH_KEYS = ["ShiftLeft", "ShiftRight"];
 const SPRINT_KEYS = ["ShiftLeft", "ShiftRight"];
+const LEGACY_MOVE_LEFT_KEYS = MOVE_LEFT_KEYS;
+const LEGACY_MOVE_RIGHT_KEYS = MOVE_RIGHT_KEYS;
+const LEGACY_CROUCH_KEYS = CROUCH_KEYS;
+const LEGACY_JUMP_KEYS = JUMP_KEYS;
+const LEGACY_ZIPLINE_MOUNT_KEYS = ZIPLINE_MOUNT_KEYS;
+const LEGACY_DASH_KEYS = DASH_KEYS;
+const LEGACY_INTERACT_KEYS = ["ArrowUp", "KeyE", "KeyZ"];
+const LEGACY_ARM_SWITCH_KEYS = ["MouseMiddle"];
+const LEGACY_RELOAD_KEYS = ["KeyR"];
 const CAPSLOCK_DASH_TAP_SECONDS = 0.28;
 const BULLET_TIME_KEYS = [];
+const FOCUS_KEYS = ["KeyC"];
+const INTERACTION_HOLD_SECONDS = 0.25;
+const FIRE_KEYS = ["KeyX"];
+const ARM_SWITCH_RELOAD_KEY = "KeyS";
+const ARM_SWITCH_RELOAD_HOLD_SECONDS = 0.35;
 const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
-const FOCUS_DRAIN_PER_SECOND = 36;
+const FOCUS_DRAIN_PER_SECOND = 18;
 const FOCUS_RECOVER_PER_SECOND = 22;
 const FOCUS_MIN_TO_START = 8;
-const FOCUS_REENTRY_RATIO = 0.5;
 const FOCUS_TIME_SCALE = 0.22;
-const INTERACT_KEYS = ["KeyZ", "KeyF"];
-const ATTACK_KEYS = ["KeyV"];
-const CONFIRM_KEYS = ["KeyC", "Enter"];
+const WEAPON_HEAT_EMPTY_RATIO = 0.08;
+const RECOIL_CHARGE_GRAVITY_MULTIPLIER = 0.32;
+const RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND = 0.35;
+const RECOIL_JUMP_CHARGE_HOLD_SECONDS = 0;
+const RECOIL_JUMP_CHARGE_STEPS = 5;
+const RECOIL_JUMP_CHARGE_COST_FALLOFF = 0.5;
+const RECOIL_JUMP_CHARGE_MAX_MULTIPLIER = 2;
+const RECOIL_JUMP_FOCUS_COST_SCALE = 0.5;
+const RECOIL_JUMP_FOCUS_DRAIN_MULTIPLIER = 4.63;
+const RECOIL_JUMP_INPUT_START_STEP_RATIO = 0.12;
+const RECOIL_JUMP_FORCE_MULTIPLIER = 0.75;
+const RECOIL_JUMP_MIN_STAGE_FORCE_RATIO = 0.5;
+const RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER = 1.2;
+const RECOIL_CHARGE_CAMERA_ZOOM_MIN = 0.36;
+const RECOIL_FLIGHT_CAMERA_ZOOM_MIN = 0.44;
+const RECOIL_FLIGHT_CAMERA_MIN_SECONDS = 0.34;
+const RECOIL_FLIGHT_CAMERA_MAX_SECONDS = 0.72;
+const RECOIL_CAMERA_RETURN_ZOOM_PER_SECOND = 0.72;
+const INTERACT_KEYS = ["KeyZ", "KeyF", "KeyE"];
+const WORLD_INTERACT_KEYS = ["ArrowUp", "KeyE", "KeyZ"];
+const ATTACK_KEYS = ["KeyV", "KeyF"];
+const CONFIRM_KEYS = ["KeyC", "Enter", "KeyZ"];
 const INVENTORY_KEYS = ["Tab"];
 const NEW_RUN_KEYS = ["KeyN"];
 const TITLE_MENU_ITEMS = ["new", "continue"];
@@ -109,20 +152,175 @@ const INVENTORY_TAB_Y = INVENTORY_RIGHT_Y + 14;
 const INVENTORY_TAB_W = (INVENTORY_RIGHT_W - 34) / INVENTORY_CATEGORY_KEYS.length;
 const MAP_EXPLORE_CELL_SIZE = 320;
 const MAP_EXPLORE_RADIUS_CELLS = 1;
-const SHELTER_MENU_ITEMS = ["photo", "records", "background", "rest", "exit"];
+const SHELTER_MENU_ITEMS = ["talk", "photo", "records", "background", "rest", "exit"];
+const SHELTER_HOME_MENU_ITEMS = ["talk", "upgrade", "exit"];
 const SHELTER_HUB_MENU_ITEMS = ["upgrade", "exit"];
+const SHELTER_CHAT_SUBMIT_EVENT = "silent-passage-shelter-chat-submit";
+const SHELTER_TALK_HISTORY_LIMIT = 40;
+const SHELTER_TALK_EMOTIONS = new Set(["neutral", "anxious", "warm", "tired", "hurt", "angry"]);
+const SHELTER_HOME_EMOTION_ART_ASSETS = {
+  neutral: "shelterHomeNeutralCg",
+  anxious: "shelterHomeAnxiousCg",
+  warm: "shelterHomeWarmCg",
+  tired: "shelterHomeTiredCg",
+  hurt: "shelterHomeHurtCg",
+  angry: "shelterHomeAngryCg",
+};
+const SHELTER_HOME_BASE_ART_ASSET_KEYS = new Set([
+  "shelterFirstArrivalCg",
+  "shelterHomeCharmCg",
+  ...Object.values(SHELTER_HOME_EMOTION_ART_ASSETS),
+]);
+const SHELTER_TALK_TOPICS = [
+  "오늘 피난처의 분위기를 말한다",
+  "다음 원정에 대해 조용히 조언한다",
+  "Type-07A의 몸 상태를 걱정한다",
+  "잃어버린 기억에 대해 짧게 묻는다",
+  "창밖 풍경을 보고 떠오른 생각을 말한다",
+  "정비 중인 장비 소리를 듣고 한마디 한다",
+  "잠깐 쉬어도 된다고 조심스럽게 말한다",
+  "내일도 돌아오라는 말을 돌려서 한다",
+  "드론 신호가 곁에 있을 때 느끼는 안정감을 숨기듯 말한다",
+  "반복되는 부활의 피로를 짧게 인정한다",
+  "장산역 심층으로 가야 하는 이유를 희미하게 떠올린다",
+  "자신이 병기인지 사람인지 모르는 혼란을 낮게 말한다",
+];
+const SHELTER_TALK_VARIATIONS = [
+  "one sensory detail",
+  "one quiet question",
+  "one practical warning",
+  "one memory fragment",
+  "one soft joke",
+  "one unfinished thought",
+];
+const SHELTER_TALK_CHOICES = [
+  {
+    label: "상태는 괜찮아?",
+    intent: "드론이 몸 상태와 손상 부위를 조심스럽게 확인한다",
+    emotion: "hurt",
+    reply: "괜찮다고 말하면 거짓말이야. 그래도 아직 움직일 수 있어.",
+  },
+  {
+    label: "기억나는 게 있어?",
+    intent: "관리자가 잃어버린 이름과 기억에 대해 낮게 묻는다",
+    emotion: "tired",
+    reply: "파도 소리랑 흰 방 조각뿐이야. 이름은 아직 떠오르지 않아.",
+  },
+  {
+    label: "조금 쉬자.",
+    intent: "드론이 출격보다 휴식을 먼저 권한다",
+    emotion: "warm",
+    reply: "응. 명령이 아니라 쉬자는 말이라서, 조금 숨이 놓여.",
+  },
+  {
+    label: "난 여기 있어.",
+    intent: "당신이 곁을 떠나지 않겠다고 짧게 말한다",
+    emotion: "warm",
+    reply: "그 말, 신호보다 더 잘 들려. 그러면 아직 혼자는 아니네.",
+  },
+  {
+    label: "무서웠어?",
+    intent: "드론이 반복되는 죽음과 부활의 공포를 묻는다",
+    emotion: "anxious",
+    reply: "무서웠어. 깨어날 때마다 내가 어디까지 남았는지 먼저 확인하게 돼.",
+  },
+  {
+    label: "이번엔 네가 골라.",
+    intent: "관리자가 명령이 아니라 선택을 맡긴다",
+    emotion: "neutral",
+    reply: "내가 골라도 된다면, 오늘은 무모하게 뛰어들고 싶지 않아.",
+  },
+  {
+    label: "아버지 생각이 나?",
+    intent: "당신이 아버지의 잔향을 조심스럽게 건드린다",
+    emotion: "tired",
+    reply: "얼굴은 흐릿한데, 기다리던 목소리만 남아 있어. 그래서 더 아파.",
+  },
+  {
+    label: "나가면 내가 볼게.",
+    intent: "드론이 다음 탐색에서 그녀를 지켜보겠다고 말한다",
+    emotion: "warm",
+    reply: "그럼 뒤를 맡길게. 네 신호가 있으면 발을 헛디디진 않을 것 같아.",
+  },
+  {
+    label: "이름을 찾아보자.",
+    intent: "관리자가 잃어버린 이름을 함께 찾자고 말한다",
+    emotion: "tired",
+    reply: "응. 번호 말고, 누가 불러주던 이름이 있었는지 알고 싶어.",
+  },
+  {
+    label: "무리하지 마.",
+    intent: "드론이 임무보다 그녀의 손상을 먼저 걱정한다",
+    emotion: "hurt",
+    reply: "알겠어. 부품보다 마음이 먼저 삐걱거릴 때가 있거든.",
+  },
+  {
+    label: "장산역이 신경 쓰여?",
+    intent: "관리자가 심층으로 향해야 하는 이유를 조심스럽게 묻는다",
+    emotion: "angry",
+    reply: "응. 아래에서 날 부르는 신호가 있어. 싫은데도 눈을 돌릴 수 없어.",
+  },
+  {
+    label: "오늘은 여기서 멈추자.",
+    intent: "당신이 반복되는 출격을 끊고 쉘터의 온기를 붙잡는다",
+    emotion: "warm",
+    reply: "좋아. 멈춰도 된다는 말이 이렇게 낯설 줄은 몰랐어.",
+  },
+  {
+    label: "네가 사람이라면?",
+    intent: "드론이 병기와 인간 사이의 정체성 혼란을 건드린다",
+    emotion: "tired",
+    reply: "사람이면 이런 질문에 바로 대답할 수 있었을까. 나는 아직 모르겠어.",
+  },
+  {
+    label: "신호 계속 보낼게.",
+    intent: "드론이 어둠 속에서도 연결을 유지하겠다고 약속한다",
+    emotion: "anxious",
+    reply: "끊기지 않게 해줘. 어둠 속에서는 그 소리 하나로 방향을 잡아.",
+  },
+  {
+    label: "아픈 곳부터 말해줘.",
+    intent: "관리자가 전투 보고가 아니라 통증을 먼저 묻는다",
+    emotion: "hurt",
+    reply: "오른쪽 어깨랑 목 뒤가 둔해. 하지만 제일 아픈 건 깨어난 직후야.",
+  },
+  {
+    label: "이번엔 지켜보자.",
+    intent: "드론이 성급한 전투보다 관찰과 생존을 권한다",
+    emotion: "neutral",
+    reply: "응. 싸우기 전에 먼저 보자. 이번엔 살아서 돌아오는 쪽을 고를래.",
+  },
+];
 const SHELTER_ARRIVAL_SECONDS = 2.4;
 const SHELTER_EXIT_COOLDOWN_SECONDS = 1.2;
-const SHELTER_NIGHT_LOCK_MESSAGE = "밤에만 피난처로 이동 가능.";
-const SHELTER_COOLDOWN_MESSAGE = "피난처 문이 닫히는 중.";
+const SHELTER_EVENT_BRIDGE_SECONDS = 1.15;
+const SHELTER_CHOICE_REVEAL_DELAY_SECONDS = 0.42;
+const SHELTER_CHOICE_REACTION_SECONDS = 0.48;
+const SHELTER_TALK_DOOR_TRANSITION_SECONDS = 0.62;
+const SHELTER_SUBTITLE_TYPE_MIN_SECONDS = 0.18;
+const SHELTER_SUBTITLE_TYPE_MAX_SECONDS = 2.6;
+const SHELTER_TYPING_SOUND_MAX_CATCHUP = 4;
+const SHELTER_TYPING_SOUND_DEFAULT_INTERVAL = 0.045;
+const SHELTER_TYPING_SOUND_GAIN = 12;
+const SHELTER_TYPING_SOUND_PRESETS = {
+  neutral: { base: 520, step: 13, volume: 0.036, interval: 0.045, duration: 0.034, tone: "triangle", filter: 1900 },
+  warm: { base: 460, step: 10, volume: 0.04, interval: 0.052, duration: 0.04, tone: "sine", filter: 1500 },
+  anxious: { base: 650, step: 18, volume: 0.029, interval: 0.038, duration: 0.028, tone: "triangle", filter: 2500 },
+  tired: { base: 380, step: 8, volume: 0.028, interval: 0.07, duration: 0.046, tone: "sine", filter: 1200 },
+  hurt: { base: 430, step: 9, volume: 0.026, interval: 0.085, duration: 0.042, tone: "triangle", filter: 1350 },
+  angry: { base: 700, step: 22, volume: 0.033, interval: 0.04, duration: 0.028, tone: "square", filter: 3000 },
+};
+const SHELTER_NIGHT_LOCK_MESSAGE = "피난처는 밤에만 열려.";
+const SHELTER_COOLDOWN_MESSAGE = "피난처 문이 아직 닫히는 중이야.";
 const SHELTER_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
 const SHELTER_MENU_DOWN_KEYS = ["ArrowDown", "KeyS"];
 const SHELTER_VIEW_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const SHELTER_VIEW_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const SHELTER_EXIT_KEYS = ["KeyC"];
 const SHELTER_BACK_KEYS = ["Escape"];
+const SHELTER_TALK_CONFIRM_KEYS = ["KeyZ", "Enter"];
 const CG_PHOTO_LIMIT = 12;
-const FACE_OFF_ENTRY_KEYS = ["KeyZ"];
+const FACE_OFF_ENTRY_KEYS = ["ArrowUp", "KeyE", "KeyZ"];
 const FACE_OFF_DIALOGUE_KEYS = ["KeyW", "KeyA", "KeyD", "KeyS"];
 const FACE_OFF_MENU_UP_KEYS = ["KeyW", "ArrowUp"];
 const FACE_OFF_MENU_DOWN_KEYS = ["KeyS", "ArrowDown"];
@@ -146,6 +344,16 @@ const shelterCgImageCache = new Map();
 const RECOIL_FOCUS_AFTERIMAGE_INTERVAL = LOW_PERFORMANCE_MODE ? 0.14 : 0.08;
 const RECOIL_FOCUS_AFTERIMAGE_LIFE = 1;
 const RECOIL_FOCUS_AFTERIMAGE_MAX = LOW_PERFORMANCE_MODE ? 6 : 12;
+const AIR_DASH_HOVER_SECONDS = 0.5;
+const AIR_DASH_HOVER_RISE_SPEED = 35;
+const AIR_DASH_HOVER_BRAKE = 420;
+const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
+const SHELTER_MUSIC_SRC = "./assets/audio/bloom-through-concrete.mp3";
+const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
+const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
+const AIR_DASH_DISTANCE_MULTIPLIER = 1.25;
+const AIR_DASH_INERTIA_RETAIN_RATIO = 0.25;
+const CELESTE_END_DASH_SPEED_RATIO = 2 / 3;
 const LOOT_RARITY_RANKS = {
   common: 0,
   uncommon: 1,
@@ -170,6 +378,50 @@ function isEitherPressed(state, codes) {
   return codes.some((code) => isPressed(state, code));
 }
 
+function useLegacyControls(state) {
+  return Boolean(state.capsLockActive);
+}
+
+function getMoveLeftKeys(state) {
+  return useLegacyControls(state) ? LEGACY_MOVE_LEFT_KEYS : MOVE_LEFT_KEYS;
+}
+
+function getMoveRightKeys(state) {
+  return useLegacyControls(state) ? LEGACY_MOVE_RIGHT_KEYS : MOVE_RIGHT_KEYS;
+}
+
+function getCrouchKeys(state) {
+  return useLegacyControls(state) ? LEGACY_CROUCH_KEYS : CROUCH_KEYS;
+}
+
+function getJumpKeys(state) {
+  return useLegacyControls(state) ? LEGACY_JUMP_KEYS : JUMP_KEYS;
+}
+
+function getZipLineMountKeys(state) {
+  return useLegacyControls(state) ? LEGACY_ZIPLINE_MOUNT_KEYS : ZIPLINE_MOUNT_KEYS;
+}
+
+function getDashKeys(state) {
+  return useLegacyControls(state) ? LEGACY_DASH_KEYS : DASH_KEYS;
+}
+
+function getInteractKeys(state) {
+  return useLegacyControls(state) ? LEGACY_INTERACT_KEYS : WORLD_INTERACT_KEYS;
+}
+
+function getFaceOffEntryKeys(state) {
+  return useLegacyControls(state) ? LEGACY_INTERACT_KEYS : FACE_OFF_ENTRY_KEYS;
+}
+
+function getArmSwitchKeys(state) {
+  return useLegacyControls(state) ? LEGACY_ARM_SWITCH_KEYS : ARM_SWITCH_KEYS;
+}
+
+function getReloadKeys(state) {
+  return useLegacyControls(state) ? LEGACY_RELOAD_KEYS : RELOAD_KEYS;
+}
+
 function consumePress(state, code) {
   if (state.justPressed.has(code)) {
     state.justPressed.delete(code);
@@ -188,6 +440,41 @@ function consumeRelease(state, code) {
     return true;
   }
   return false;
+}
+
+function consumeEitherRelease(state, codes) {
+  return codes.some((code) => consumeRelease(state, code));
+}
+
+function getKeyHoldSeconds(state, code) {
+  return Number(state.keyHoldSeconds?.get(code) ?? 0);
+}
+
+function consumeReleasedKeyHoldSeconds(state, code) {
+  const duration = Number(state.releasedKeyHoldSeconds?.get(code) ?? 0);
+  state.releasedKeyHoldSeconds?.delete(code);
+  return duration;
+}
+
+function consumeShortReleasedKey(state, codes, maxSeconds = INTERACTION_HOLD_SECONDS) {
+  const code = codes.find((entry) => state.justReleased?.has(entry));
+  if (!code) {
+    return false;
+  }
+  consumeRelease(state, code);
+  return consumeReleasedKeyHoldSeconds(state, code) <= maxSeconds;
+}
+
+function updateKeyHoldDurations(state, dt) {
+  if (!state.keyHoldSeconds) {
+    state.keyHoldSeconds = new Map();
+  }
+  if (!state.releasedKeyHoldSeconds) {
+    state.releasedKeyHoldSeconds = new Map();
+  }
+  state.pressed.forEach((code) => {
+    state.keyHoldSeconds.set(code, Number(state.keyHoldSeconds.get(code) ?? 0) + dt);
+  });
 }
 
 function updateCapsLockDashInput(state, player, dt, moveLeft, moveRight) {
@@ -694,6 +981,102 @@ function spawnDirectedParticles(run, x, y, amount, color, directionX, directionY
   }
 }
 
+function spawnConcreteBlockShards(run, block, originX, originY, directionX, directionY, amount = 14) {
+  const dirLength = Math.max(0.001, Math.hypot(directionX, directionY));
+  const dirX = directionX / dirLength;
+  const dirY = directionY / dirLength;
+  const baseAngle = Math.atan2(dirY, dirX);
+  const palette = ["#8b8d86", "#74776f", "#62665f", "#9a9b92", "#515650"];
+  const left = block.x;
+  const right = block.x + block.width;
+  const top = block.y;
+  const bottom = block.y + block.height;
+  for (let index = 0; index < amount; index += 1) {
+    const edgeBias = Math.random();
+    const sourceX = edgeBias < 0.62
+      ? clamp(originX + (Math.random() - 0.5) * block.width * 0.62, left, right)
+      : left + Math.random() * block.width;
+    const sourceY = edgeBias < 0.62
+      ? clamp(originY + (Math.random() - 0.5) * block.height * 0.62, top, bottom)
+      : top + Math.random() * block.height;
+    const angle = baseAngle + (Math.random() - 0.5) * 1.22;
+    const velocity = 260 + Math.random() * 520;
+    const size = 10 + Math.random() * 24;
+    const life = 0.55 + Math.random() * 0.42;
+    run.particles.push({
+      shape: "concreteShard",
+      x: sourceX,
+      y: sourceY,
+      vx: Math.cos(angle) * velocity + dirX * 120,
+      vy: Math.sin(angle) * velocity + dirY * 120 - Math.random() * 120,
+      life,
+      maxLife: life,
+      color: palette[index % palette.length],
+      radius: size * 0.5,
+      width: size * (0.8 + Math.random() * 0.9),
+      height: size * (0.45 + Math.random() * 0.7),
+      rotation: Math.random() * Math.PI,
+      spin: (Math.random() - 0.5) * 14,
+    });
+  }
+}
+
+function getParticleCollisionRect(particle) {
+  const width = Math.max(2, particle.width ?? particle.radius * 2);
+  const height = Math.max(2, particle.height ?? particle.radius * 2);
+  return createRect(particle.x - width * 0.5, particle.y - height * 0.5, width, height);
+}
+
+function resolveConcreteShardCollision(particle, data, previousX, previousY) {
+  if (particle.shape !== "concreteShard" || !data) {
+    return;
+  }
+  const platforms = getSolidLevelPlatforms(data);
+  if (!platforms.length) {
+    return;
+  }
+  const rect = getParticleCollisionRect(particle);
+  for (const platform of platforms) {
+    if (!rectsOverlap(rect, platform)) {
+      continue;
+    }
+    const previousRect = {
+      ...rect,
+      x: previousX - rect.width * 0.5,
+      y: previousY - rect.height * 0.5,
+    };
+    if (previousRect.y + previousRect.height <= platform.y && particle.vy > 0) {
+      particle.y = platform.y - rect.height * 0.5 - 0.1;
+      particle.vy *= -0.16;
+      particle.vx *= 0.48;
+      particle.spin *= 0.42;
+    } else if (previousRect.y >= platform.y + platform.height && particle.vy < 0) {
+      particle.y = platform.y + platform.height + rect.height * 0.5 + 0.1;
+      particle.vy *= -0.12;
+      particle.vx *= 0.62;
+      particle.spin *= 0.5;
+    } else if (previousRect.x + previousRect.width <= platform.x && particle.vx > 0) {
+      particle.x = platform.x - rect.width * 0.5 - 0.1;
+      particle.vx *= -0.18;
+      particle.vy *= 0.72;
+      particle.spin *= 0.55;
+    } else if (previousRect.x >= platform.x + platform.width && particle.vx < 0) {
+      particle.x = platform.x + platform.width + rect.width * 0.5 + 0.1;
+      particle.vx *= -0.18;
+      particle.vy *= 0.72;
+      particle.spin *= 0.55;
+    } else {
+      particle.x = previousX;
+      particle.y = previousY;
+      particle.vx *= -0.12;
+      particle.vy *= -0.12;
+      particle.spin *= 0.35;
+    }
+    particle.life = Math.min(particle.life, Math.max(0.22, (particle.maxLife ?? particle.life) * 0.58));
+    return;
+  }
+}
+
 function spawnDamageNumber(run, x, y, amount, color = "#f5f8fb", label = null, options = {}) {
   run.damageNumbers = run.damageNumbers || [];
   run.damageNumbers.push({
@@ -875,11 +1258,22 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
 
   run.particles = run.particles.filter((particle) => {
     particle.life -= dt;
+    const previousX = particle.x;
+    const previousY = particle.y;
     particle.x += particle.vx * dt;
     particle.y += particle.vy * dt;
     particle.vy += 360 * dt;
+    particle.rotation = (particle.rotation ?? 0) + (particle.spin ?? 0) * dt;
+    resolveConcreteShardCollision(particle, data, previousX, previousY);
     return particle.life > 0;
   });
+
+  if ((run.screenShakeTimer ?? 0) > 0) {
+    run.screenShakeTimer = Math.max(0, run.screenShakeTimer - visualDt);
+    if (run.screenShakeTimer === 0) {
+      run.screenShakeIntensity = 0;
+    }
+  }
 
   if (run.noticeTimer > 0) {
     run.noticeTimer = Math.max(0, run.noticeTimer - dt);
@@ -899,12 +1293,83 @@ function getCameraConfig(data) {
   return data.world.camera || {};
 }
 
+function getActiveCameraZone(run, data) {
+  const player = run?.player;
+  if (!player || !Array.isArray(data.cameraZones)) {
+    return null;
+  }
+  const centerX = player.x + player.width * 0.5;
+  const centerY = player.y + player.height * 0.5;
+  let activeZone = null;
+  let activePriority = Number.NEGATIVE_INFINITY;
+  data.cameraZones.forEach((zone) => {
+    if (
+      !zone ||
+      zone.enabled === false ||
+      centerX < zone.x ||
+      centerX > zone.x + zone.width ||
+      centerY < zone.y ||
+      centerY > zone.y + zone.height
+    ) {
+      return;
+    }
+    const priority = Number(zone.priority ?? 0);
+    if (priority >= activePriority) {
+      activeZone = zone;
+      activePriority = priority;
+    }
+  });
+  return activeZone;
+}
+
+function getCameraZoneFrame(zone) {
+  if (!zone) {
+    return null;
+  }
+  const width = Math.max(24, Number(zone.width ?? CAMERA_SCREEN_WIDTH));
+  const height = Math.max(24, Number(zone.height ?? CAMERA_SCREEN_HEIGHT));
+  const fitZoom = Math.min(CAMERA_SCREEN_WIDTH / width, CAMERA_SCREEN_HEIGHT / height);
+  const zoomScale = Math.max(0.1, Number(zone.zoom ?? 1));
+  const minZoomScale = Math.max(0.1, Number(zone.minZoom ?? zoomScale));
+  const zoom = clamp(fitZoom * zoomScale, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  return {
+    x: Number(zone.x ?? 0),
+    y: Number(zone.y ?? 0),
+    width,
+    height,
+    zoom,
+    minZoom: clamp(fitZoom * minZoomScale, CAMERA_ABSOLUTE_ZOOM_MIN, zoom),
+  };
+}
+
 function getEffectiveCameraConfig(data, run) {
   const config = getCameraConfig(data);
-  const baseZoom = config.zoom ?? 1;
+  const activeZone = getActiveCameraZone(run, data);
+  const zoneFrame = getCameraZoneFrame(activeZone);
+  const zoneConfig = activeZone
+    ? {
+      zoom: zoneFrame.zoom,
+      minZoom: zoneFrame.minZoom,
+      neutralFocusX: activeZone.focusX,
+      neutralFocusY: activeZone.focusY,
+      zoomLerp: activeZone.zoomLerp,
+      focusLerp: activeZone.focusLerp,
+      cameraZoneFrame: zoneFrame,
+    }
+    : null;
+  const mergedConfig = zoneConfig
+    ? Object.fromEntries(
+      Object.entries({ ...config, ...zoneConfig }).filter(([, value]) => value !== undefined && value !== null),
+    )
+    : config;
+  const baseZoom = mergedConfig.zoom ?? 1;
   const userZoom = clamp(run?.cameraUserZoom ?? 1, CAMERA_USER_ZOOM_MIN, CAMERA_USER_ZOOM_MAX);
+  if (run) {
+    run.activeCameraZoneId = activeZone?.id || null;
+    run.activeCameraZoneLabel = activeZone?.label || null;
+  }
   return {
-    ...config,
+    ...mergedConfig,
     zoom: clamp(baseZoom * userZoom, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX),
   };
 }
@@ -1217,10 +1682,19 @@ function getReducedCameraZoomRatio(value, fallback) {
   return 1 - (1 - zoomRatio) * CAMERA_ACTION_ZOOM_OUT_SCALE;
 }
 
+function updateRecoilCameraTimers(player, dt) {
+  const previousTimer = Math.max(0, Number(player.recoilCameraTimer ?? 0));
+  player.recoilCameraTimer = Math.max(0, previousTimer - dt);
+  if (previousTimer > 0 && player.recoilCameraTimer === 0) {
+    player.recoilCameraReturning = true;
+  }
+}
+
 function getCameraTargetZoom(player, config, fallCamera = null) {
   const baseZoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
   let targetZoom = baseZoom;
   let sprintZoomFloor = null;
+  let actionZoomFloor = baseZoom * getReducedCameraZoomRatio(config.minZoom ?? config.speedZoomMin, 0.88);
   if (player.wallRunActive || player.wallRunBoostActive) {
     targetZoom = getCameraScaledZoom(baseZoom, config.wallRunZoom, 0.94);
   } else if (player.dashTimer > 0 && config.dashAffectsCamera !== false) {
@@ -1235,6 +1709,21 @@ function getCameraTargetZoom(player, config, fallCamera = null) {
       ? getCameraScaledZoom(baseZoom, config.sprintZoom, 0.96)
       : getCameraScaledZoom(baseZoom, config.sprintJumpZoom, 0.92);
     sprintZoomFloor = targetZoom;
+  }
+
+  if (player.recoilJumpChargeActive) {
+    const chargeProgress = clamp(
+      ((player.recoilJumpChargeMultiplier ?? 1) - 1) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - 1),
+      0,
+      1,
+    );
+    const chargeZoom = baseZoom * lerp(0.9, RECOIL_CHARGE_CAMERA_ZOOM_MIN, chargeProgress);
+    targetZoom = Math.min(targetZoom, chargeZoom);
+    actionZoomFloor = Math.min(actionZoomFloor, baseZoom * RECOIL_CHARGE_CAMERA_ZOOM_MIN);
+  } else if (player.recoilCameraTimer > 0) {
+    const flightZoom = baseZoom * RECOIL_FLIGHT_CAMERA_ZOOM_MIN;
+    targetZoom = Math.min(targetZoom, flightZoom);
+    actionZoomFloor = Math.min(actionZoomFloor, flightZoom);
   }
 
   const fallRatio = fallCamera?.ratio ?? 0;
@@ -1252,7 +1741,7 @@ function getCameraTargetZoom(player, config, fallCamera = null) {
   }
 
   const minZoom = clamp(
-    baseZoom * getReducedCameraZoomRatio(config.minZoom ?? config.speedZoomMin, 0.88),
+    actionZoomFloor,
     CAMERA_ABSOLUTE_ZOOM_MIN,
     baseZoom,
   );
@@ -1290,9 +1779,10 @@ function constrainCameraToPlayer(cameraX, cameraY, run, data, viewportWidth, vie
     maxCameraY = centeredY;
   }
 
+  const minWorldCameraY = Math.min(0, minCameraY, maxCameraY);
   return {
     x: clamp(clamp(cameraX, minCameraX, maxCameraX), 0, maxX),
-    y: clamp(clamp(cameraY, minCameraY, maxCameraY), 0, maxY),
+    y: clamp(clamp(cameraY, minCameraY, maxCameraY), minWorldCameraY, maxY),
   };
 }
 
@@ -1302,12 +1792,17 @@ function syncCamera(run, data, dt) {
     Math.max(0, dt),
     config.maxLerpStepSeconds ?? CAMERA_MAX_LERP_STEP_SECONDS,
   );
+  const zoneFrame = config.cameraZoneFrame || null;
   if (!config.lookAheadEnabled) {
     const zoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
     const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
     const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
-    const targetX = run.player.x - viewportWidth * CAMERA_FOCUS_X;
-    const targetY = run.player.y - viewportHeight * CAMERA_FOCUS_Y;
+    const targetX = zoneFrame
+      ? zoneFrame.x + zoneFrame.width * 0.5 - viewportWidth * 0.5
+      : run.player.x - viewportWidth * CAMERA_FOCUS_X;
+    const targetY = zoneFrame
+      ? zoneFrame.y + zoneFrame.height * 0.5 - viewportHeight * 0.5
+      : run.player.y - viewportHeight * CAMERA_FOCUS_Y;
     const maxX = Math.max(0, data.world.width - viewportWidth);
     const maxY = Math.max(0, data.world.height - viewportHeight);
     run.cameraZoom = zoom;
@@ -1318,15 +1813,19 @@ function syncCamera(run, data, dt) {
     run.cameraTargetZoom = zoom;
     run.cameraLookAhead = 0;
     run.cameraSpeedRatio = 0;
-    const camera = constrainCameraToPlayer(
-      clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX),
-      clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY),
-      run,
-      data,
-      viewportWidth,
-      viewportHeight,
-      config,
-    );
+    const nextX = clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX);
+    const nextY = clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY);
+    const camera = zoneFrame
+      ? { x: nextX, y: nextY }
+      : constrainCameraToPlayer(
+        nextX,
+        nextY,
+        run,
+        data,
+        viewportWidth,
+        viewportHeight,
+        config,
+      );
     run.cameraX = camera.x;
     run.cameraY = camera.y;
     return;
@@ -1357,14 +1856,18 @@ function syncCamera(run, data, dt) {
     : recoilCamera
       ? Math.abs(recoilCamera.directionX) * recoilCamera.horizontalLookAhead
       : getCameraLookAhead(player, config);
-  const targetFocusX = freezeActionCamera
+  const targetFocusX = zoneFrame
+    ? 0.5
+    : freezeActionCamera
     ? clamp(run.cameraFocusX ?? (config.neutralFocusX ?? 0.5), 0.24, 0.76)
     : clamp(
       (config.neutralFocusX ?? 0.5) - focusLookDirection * lookAhead,
       0.24,
       0.76,
     );
-  const targetFocusY = freezeActionCamera
+  const targetFocusY = zoneFrame
+    ? 0.5
+    : freezeActionCamera
     ? clamp(run.cameraFocusY ?? (config.neutralFocusY ?? 0.5), 0.28, 0.72)
     : recoilCamera
       ? clamp(
@@ -1391,8 +1894,17 @@ function syncCamera(run, data, dt) {
     ? { ratio: 0, zoom: targetZoom }
     : getSpeedZoomState(player, config);
   const zoomLerp = Math.min(1, cameraDt * (config.zoomLerp ?? 4.2));
+  const linearRecoilCameraReturn = !freezeActionCamera && Boolean(player.recoilCameraReturning);
+  const currentZoom = clamp(run.cameraZoom ?? (config.zoom ?? 1), CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  let nextZoom = linearRecoilCameraReturn
+    ? Math.min(targetZoom, currentZoom + RECOIL_CAMERA_RETURN_ZOOM_PER_SECOND * cameraDt)
+    : lerp(currentZoom, targetZoom, zoomLerp);
+  if (linearRecoilCameraReturn && nextZoom >= targetZoom - 0.001) {
+    nextZoom = targetZoom;
+    player.recoilCameraReturning = false;
+  }
   const zoom = clamp(
-    lerp(run.cameraZoom ?? (config.zoom ?? 1), targetZoom, zoomLerp),
+    nextZoom,
     CAMERA_ABSOLUTE_ZOOM_MIN,
     CAMERA_ABSOLUTE_ZOOM_MAX,
   );
@@ -1400,10 +1912,16 @@ function syncCamera(run, data, dt) {
 
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
-  const aimPan = updateAimCameraPan(run, config, viewportWidth, viewportHeight, cameraDt, freezeActionCamera);
-  const targetX = player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
+  const aimPan = zoneFrame
+    ? { x: 0, y: 0 }
+    : updateAimCameraPan(run, config, viewportWidth, viewportHeight, cameraDt, freezeActionCamera);
+  const targetX = zoneFrame
+    ? zoneFrame.x + zoneFrame.width * 0.5 - viewportWidth * 0.5
+    : player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
   const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
-  const targetY = player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
+  const targetY = zoneFrame
+    ? zoneFrame.y + zoneFrame.height * 0.5 - viewportHeight * 0.5
+    : player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
   const maxX = Math.max(0, data.world.width - viewportWidth);
   const maxY = Math.max(0, data.world.height - viewportHeight);
   run.cameraTargetX = targetX;
@@ -1411,15 +1929,19 @@ function syncCamera(run, data, dt) {
   run.cameraTargetZoom = targetZoom;
   run.cameraLookAhead = lookAhead;
   run.cameraSpeedRatio = speedZoom.ratio;
-  const camera = constrainCameraToPlayer(
-    clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX),
-    clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY),
-    run,
-    data,
-    viewportWidth,
-    viewportHeight,
-    config,
-  );
+  const nextX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
+  const nextY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
+  const camera = zoneFrame
+    ? { x: nextX, y: nextY }
+    : constrainCameraToPlayer(
+      nextX,
+      nextY,
+      run,
+      data,
+      viewportWidth,
+      viewportHeight,
+      config,
+    );
   run.cameraX = camera.x;
   run.cameraY = camera.y;
 }
@@ -1473,6 +1995,12 @@ function lockCameraToFaceOffTarget(run, data, dt = 0, instant = true) {
 
 function getMovementConfig(data) {
   return data.player.movement;
+}
+
+function getJumpMaxHeight(data, config) {
+  const jumpVelocity = Math.abs(config.jumpVelocity ?? data.player.jumpVelocity ?? 0);
+  const gravity = Math.max(1, Number(data.world?.gravity ?? 1));
+  return (jumpVelocity * jumpVelocity) / (2 * gravity);
 }
 
 function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
@@ -1550,6 +2078,32 @@ function getTemporaryBlockSolidRect(block) {
   };
 }
 
+function isEscapeBarrierActive(run, barrier) {
+  const vault = run?.vaultEscape;
+  const trigger = barrier?.trigger || "vaultEscape";
+  if (trigger === "lockdown") {
+    return Boolean(vault?.lockdownActive);
+  }
+  return Boolean(vault?.active || vault?.lockdownActive);
+}
+
+function getEscapeBarrierSolidRect(run, barrier) {
+  if (!barrier || !isEscapeBarrierActive(run, barrier)) {
+    return null;
+  }
+  return {
+    id: barrier.id,
+    type: "escapeBarrier",
+    x: barrier.x,
+    y: barrier.y,
+    width: barrier.width,
+    height: barrier.height,
+    dynamicEntityId: barrier.id,
+    dynamicEntity: barrier,
+    dynamicBraceTarget: false,
+  };
+}
+
 function getDynamicCollisionSolids(run) {
   const droneSolids = (run?.hostileDrones || [])
     .map((entity) => getHostileAirborneSolidRect(entity))
@@ -1557,7 +2111,10 @@ function getDynamicCollisionSolids(run) {
   const temporaryBlockSolids = (run?.temporaryBlocks || [])
     .map((block) => getTemporaryBlockSolidRect(block))
     .filter(Boolean);
-  return [...droneSolids, ...temporaryBlockSolids];
+  const escapeBarrierSolids = (run?.escapeBarriers || [])
+    .map((barrier) => getEscapeBarrierSolidRect(run, barrier))
+    .filter(Boolean);
+  return [...droneSolids, ...temporaryBlockSolids, ...escapeBarrierSolids];
 }
 
 function isSlopePlatform(platform) {
@@ -1654,7 +2211,12 @@ function getSlopePlatforms(data) {
 }
 
 function getSolidLevelPlatforms(data) {
-  return (data.platforms || []).filter((platform) => !isSlopePlatform(platform) && !isWaterPlatform(platform));
+  return (data.platforms || []).filter((platform) => (
+    !isSlopePlatform(platform) &&
+    !isWaterPlatform(platform) &&
+    platform.kind !== "damage" &&
+    platform.kind !== "recallDamage"
+  ));
 }
 
 function getCollisionPlatforms(data, run = null) {
@@ -1669,6 +2231,28 @@ function collidesWithPlatforms(rect, data, run = null, collisionPlatforms = null
   return (collisionPlatforms || getCollisionPlatforms(data, run)).some((platform) => rectsOverlap(rect, platform));
 }
 
+function moveEntityHorizontallyWithWalls(entity, data, deltaX, run = null) {
+  if (!entity || deltaX === 0) {
+    return false;
+  }
+  const direction = Math.sign(deltaX);
+  const maxX = Math.max(0, (data.world?.width ?? entity.x + entity.width) - entity.width);
+  entity.x = clamp(entity.x + deltaX, 0, maxX);
+
+  let blocked = false;
+  for (const platform of getCollisionPlatforms(data, run)) {
+    if (!rectsOverlap(entity, platform)) {
+      continue;
+    }
+    blocked = true;
+    entity.x = direction > 0
+      ? Math.min(entity.x, platform.x - entity.width)
+      : Math.max(entity.x, platform.x + platform.width);
+  }
+  entity.x = clamp(entity.x, 0, maxX);
+  return blocked;
+}
+
 function getPlayerSlopeProbeXs(player) {
   const centerX = player.x + player.width * 0.5;
   const direction = Math.sign(player.vx || player.facing || 1);
@@ -1681,7 +2265,6 @@ function getPlayerSlopeProbeXs(player) {
 function canOccupyRect(rect, data, run = null, collisionPlatforms = null) {
   return (
     rect.x >= 0 &&
-    rect.y >= 0 &&
     rect.x + rect.width <= data.world.width &&
     rect.y + rect.height <= data.world.height &&
     !collidesWithPlatforms(rect, data, run, collisionPlatforms)
@@ -1722,7 +2305,7 @@ function canResizePlayer(player, data, targetHeight) {
     width: player.width,
     height: targetHeight,
   };
-  return nextRect.y >= 0 && !collidesWithPlatforms(nextRect, data);
+  return !collidesWithPlatforms(nextRect, data);
 }
 
 function getActiveBraceWall(player, data, run = null) {
@@ -2234,11 +2817,6 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
     }
   }
 
-  if (player.y < 0) {
-    player.y = 0;
-    player.vy = 0;
-    contacts.hitHead = true;
-  }
   if (player.y + player.height > data.world.height) {
     contacts.landingSpeed = player.vy;
     player.y = data.world.height - player.height;
@@ -2313,7 +2891,7 @@ function damagePlayer(run, amount, direction, sourceText) {
     (run.player.dashTimer > 0 && run.player.dashInvulnerable) ||
     (run.player.slideTimer > 0 && run.player.slideInvulnerable)
   ) {
-    return;
+    return false;
   }
   if (run.loot?.active) {
     closeLootCrate(run);
@@ -2328,6 +2906,7 @@ function damagePlayer(run, amount, direction, sourceText) {
   pushNotice(run, sourceText);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + 20, 8, "#ffad8f");
   playGameSfx("damage", { cooldownMs: 120 });
+  return true;
 }
 
 function getWaterPlatforms(data) {
@@ -2580,6 +3159,75 @@ function damagePlayerBodyPart(run, amount, direction = 0) {
   part.recentHit = 1.2;
 }
 
+function getPlayerHazardBlockContact(player, data) {
+  const probe = {
+    x: player.x - 1,
+    y: player.y - 1,
+    width: player.width + 2,
+    height: player.height + 2,
+  };
+  return (data.platforms || []).find((platform) => (
+    (platform.kind === "damage" || platform.kind === "recallDamage") &&
+    rectsOverlap(probe, platform)
+  )) || null;
+}
+
+function updatePlayerLastSafeGround(player, data) {
+  if (!player?.onGround || getPlayerHazardBlockContact(player, data)) {
+    return;
+  }
+  player.lastSafeGroundX = player.x;
+  player.lastSafeGroundY = player.y;
+}
+
+function recallPlayerToLastSafeGround(run, data) {
+  const player = run.player;
+  const fallback = (data.entrances || []).find((entry) => entry.id === "start")
+    || (data.entrances || [])[0]
+    || data.player.spawn;
+  player.x = Number.isFinite(player.lastSafeGroundX) ? player.lastSafeGroundX : fallback.x;
+  player.y = Number.isFinite(player.lastSafeGroundY) ? player.lastSafeGroundY : fallback.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = true;
+  player.wasOnGround = true;
+  player.dashTimer = 0;
+  player.dashWindupTimer = 0;
+  player.dashCarryTimer = 0;
+  player.dashCarrySpeed = 0;
+  player.sprintJumpCarryTimer = 0;
+  player.sprintJumpCarrySpeed = 0;
+  player.wallDirection = 0;
+  player.wallSliding = false;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.canInteract = true;
+  clearAirDashHover(player);
+  clearHover(player);
+  clearWallRun(player);
+  clearBraceHold(player);
+  clearZipLine(player);
+  spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.5, 14, "#5ebeff");
+}
+
+function updateDamageBlockContact(run, data) {
+  const block = getPlayerHazardBlockContact(run.player, data);
+  if (!block) {
+    return false;
+  }
+  const playerCenter = getCenter(run.player);
+  const blockCenter = getCenter(block);
+  const direction = Math.sign(playerCenter.x - blockCenter.x) || run.player.facing || 1;
+  const damaged = damagePlayer(run, block.damage ?? 10, direction, block.kind === "recallDamage" ? "Recall damage block contact." : "Damage block contact.");
+  if (damaged && block.kind === "recallDamage") {
+    recallPlayerToLastSafeGround(run, data);
+    return true;
+  }
+  return false;
+}
+
 function isPlayerDashDodging(player) {
   return Boolean(player.dashTimer > 0 && player.dashInvulnerable);
 }
@@ -2784,24 +3432,61 @@ function getFaceOffEnemyLine(data, key, fallback) {
   return typeof line === "string" && line.length ? line : fallback;
 }
 
-function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback) {
+function applyFaceOffLineText(faceOff, text) {
+  faceOff.enemyLine = text;
+  faceOff.enemyLineVisible = "";
+  faceOff.enemyLineIndex = 0;
+  faceOff.enemyLineTimer = 0;
+  faceOff.spokenLine = "";
+}
+
+function queueFaceOffLocalAiLine(run, data, enemy, encounterState, lineKey, fallback, option = null) {
+  const faceOff = run.faceOff;
+  if (!faceOff?.active) {
+    return;
+  }
+  const requestId = (faceOff.aiRequestId ?? 0) + 1;
+  faceOff.aiRequestId = requestId;
+  faceOff.aiPending = true;
+  requestFaceOffLine({ data, enemy, encounterState, lineKey, fallback, option }).then((reply) => {
+    if (!reply || !run.faceOff?.active || run.faceOff.aiRequestId !== requestId) {
+      return;
+    }
+    run.faceOff.aiPending = false;
+    applyFaceOffLineText(run.faceOff, reply);
+    run.faceOff.message = "local AI";
+  }).catch(() => {
+    if (run.faceOff?.aiRequestId === requestId) {
+      run.faceOff.aiPending = false;
+    }
+  });
+}
+
+function setFaceOffEnemyLine(run, data, encounterState, lineKey, fallback, option = null) {
   const faceOff = run.faceOff;
   if (!faceOff) {
     return;
   }
   faceOff.encounterState = encounterState;
-  faceOff.enemyLineQueue = null;
-  faceOff.enemyLineQueueIndex = 0;
-  faceOff.enemyLine = getFaceOffEnemyLine(data, lineKey, fallback);
-  faceOff.enemyLineVisible = "";
-  faceOff.enemyLineIndex = 0;
-  faceOff.enemyLineTimer = 0;
+  applyFaceOffLineText(faceOff, getFaceOffEnemyLine(data, lineKey, fallback));
   faceOff.enemyLineCharDelay = getFaceOffConfig(data).enemyLineCharDelay ?? 0.035;
   faceOff.choiceRevealTimer = 0;
   faceOff.choiceRevealHold = getFaceOffConfig(data).enemyLineHoldDuration ?? 0.35;
   faceOff.choiceRevealDuration = getFaceOffConfig(data).choiceSlideDuration ?? 0.26;
   faceOff.choiceRevealProgress = 0;
   faceOff.choicesReady = false;
+  queueFaceOffLocalAiLine(run, data, getFaceOffTarget(run), encounterState, lineKey, faceOff.enemyLine, option);
+}
+
+function updateFaceOffLineTts(faceOff) {
+  if (!faceOff?.enemyLine || faceOff.enemyLineIndex < faceOff.enemyLine.length) {
+    return;
+  }
+  if (faceOff.spokenLine === faceOff.enemyLine) {
+    return;
+  }
+  faceOff.spokenLine = faceOff.enemyLine;
+  speakFaceOffLine(faceOff.enemyLine);
 }
 
 function getFaceOffSelectedOption(faceOff, data) {
@@ -2940,8 +3625,9 @@ function playFaceOffBeep(faceOff) {
     const pitchSeed = (faceOff.enemyLineIndex ?? 0) % 5;
     oscillator.type = "square";
     oscillator.frequency.setValueAtTime(330 + pitchSeed * 18, now);
+    const volume = getAudioChannelVolume("sfx", 0.035);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.035, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + 0.006);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
     oscillator.connect(gain);
     gain.connect(context.destination);
@@ -2984,8 +3670,9 @@ function playFaceOffShotSound() {
     noiseFilter.frequency.setValueAtTime(1200, now);
     noiseFilter.frequency.exponentialRampToValueAtTime(180, now + duration);
     const noiseGain = context.createGain();
+    const sfxVolume = getAudioChannelVolume("sfx", 1);
     noiseGain.gain.setValueAtTime(0.0001, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.16, now + 0.006);
+    noiseGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.16 * sfxVolume), now + 0.006);
     noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     noise.connect(noiseFilter);
     noiseFilter.connect(noiseGain);
@@ -2999,7 +3686,7 @@ function playFaceOffShotSound() {
     thump.frequency.setValueAtTime(92, now);
     thump.frequency.exponentialRampToValueAtTime(42, now + 0.12);
     thumpGain.gain.setValueAtTime(0.0001, now);
-    thumpGain.gain.exponentialRampToValueAtTime(0.18, now + 0.004);
+    thumpGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.18 * sfxVolume), now + 0.004);
     thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
     thump.connect(thumpGain);
     thumpGain.connect(context.destination);
@@ -3068,7 +3755,7 @@ function playFaceOffBladeSound() {
   }
 }
 
-function getShotAudioContext() {
+function getGameAudioContext() {
   if (typeof window === "undefined") {
     return null;
   }
@@ -3084,6 +3771,10 @@ function getShotAudioContext() {
   return context;
 }
 
+function getShotAudioContext() {
+  return getGameAudioContext();
+}
+
 function createNoiseBuffer(context, duration, curve = 1.8) {
   const bufferSize = Math.max(1, Math.floor(context.sampleRate * duration));
   const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
@@ -3091,6 +3782,37 @@ function createNoiseBuffer(context, duration, curve = 1.8) {
   for (let index = 0; index < bufferSize; index += 1) {
     const progress = index / bufferSize;
     channel[index] = (Math.random() * 2 - 1) * Math.pow(1 - progress, curve);
+  }
+  return buffer;
+}
+
+function getAudioClockSeconds() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now() / 1000;
+  }
+  return Date.now() / 1000;
+}
+
+function getShelterTypingSoundPreset(emotion) {
+  return SHELTER_TYPING_SOUND_PRESETS[normalizeShelterTalkEmotion(emotion, "neutral")]
+    || SHELTER_TYPING_SOUND_PRESETS.neutral;
+}
+
+function shouldSkipShelterTypingChar(char) {
+  return !String(char || "").trim();
+}
+
+function isShelterTypingPunctuation(char) {
+  return /[.!?。！？…]$/u.test(String(char || ""));
+}
+
+function createShelterTypingNoiseBuffer(context, duration) {
+  const sampleCount = Math.max(1, Math.floor(context.sampleRate * duration));
+  const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < sampleCount; index += 1) {
+    const decay = 1 - index / sampleCount;
+    channel[index] = (Math.random() * 2 - 1) * decay * decay;
   }
   return buffer;
 }
@@ -3305,6 +4027,491 @@ function triggerWeaponShotFeedback(run, state, weaponStats, aim) {
       0,
       CAMERA_SCREEN_HEIGHT,
     );
+  }
+}
+
+function playShelterTypingSound(emotion, char, visibleCount = 0) {
+  if (shouldSkipShelterTypingChar(char)) {
+    return;
+  }
+  try {
+    const context = getGameAudioContext();
+    if (!context) {
+      return;
+    }
+    const preset = getShelterTypingSoundPreset(emotion);
+    const punctuation = isShelterTypingPunctuation(char);
+    const seed = ((String(char).codePointAt(0) || 0) + visibleCount * 17) % 7;
+    const volume = getAudioChannelVolume(
+      "typing",
+      preset.volume * SHELTER_TYPING_SOUND_GAIN * (punctuation ? 0.82 : 1),
+    );
+    if (volume <= 0.0001) {
+      return;
+    }
+    const now = context.currentTime;
+    const toneDuration = preset.duration * (punctuation ? 1.28 : 1);
+    const oscillator = context.createOscillator();
+    const toneFilter = context.createBiquadFilter();
+    const toneGain = context.createGain();
+    oscillator.type = preset.tone;
+    oscillator.frequency.setValueAtTime(
+      (punctuation ? preset.base * 0.78 : preset.base) + seed * preset.step,
+      now,
+    );
+    toneFilter.type = "bandpass";
+    toneFilter.frequency.setValueAtTime(preset.filter, now);
+    toneFilter.Q.setValueAtTime(punctuation ? 2.4 : 3.2, now);
+    toneGain.gain.setValueAtTime(0.0001, now);
+    toneGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + 0.004);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + toneDuration);
+    oscillator.connect(toneFilter);
+    toneFilter.connect(toneGain);
+    toneGain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + toneDuration + 0.012);
+
+    const noiseDuration = Math.min(0.018, toneDuration);
+    const noise = context.createBufferSource();
+    const noiseFilter = context.createBiquadFilter();
+    const noiseGain = context.createGain();
+    noise.buffer = createShelterTypingNoiseBuffer(context, noiseDuration);
+    noiseFilter.type = "highpass";
+    noiseFilter.frequency.setValueAtTime(punctuation ? 720 : 1100, now);
+    noiseGain.gain.setValueAtTime(0.0001, now);
+    noiseGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume * 0.72), now + 0.003);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDuration);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(context.destination);
+    noise.start(now);
+    noise.stop(now + noiseDuration + 0.004);
+  } catch {
+    // Typing feedback is optional; browsers may block audio until a user gesture.
+  }
+}
+
+function getShelterVisibleTypedCharacterCount(line, progress) {
+  const letters = Array.from(String(line || ""));
+  if (!letters.length) {
+    return 0;
+  }
+  return clamp(Math.ceil(letters.length * progress), 1, letters.length);
+}
+
+function updateShelterTypingSoundForLine(host, line, progress, emotion, lineKey) {
+  if (!host || typeof line !== "string" || !line) {
+    return;
+  }
+  const letters = Array.from(line);
+  const visibleCount = getShelterVisibleTypedCharacterCount(line, progress);
+  host.typingSound = host.typingSound && typeof host.typingSound === "object" ? host.typingSound : {};
+  if (host.typingSound.lineKey !== lineKey) {
+    host.typingSound = {
+      lineKey,
+      visibleCount: 0,
+      lastPlayedAt: 0,
+    };
+  }
+  const previousCount = clamp(Math.floor(host.typingSound.visibleCount || 0), 0, letters.length);
+  if (visibleCount <= previousCount) {
+    host.typingSound.visibleCount = visibleCount;
+    return;
+  }
+  const delta = visibleCount - previousCount;
+  host.typingSound.visibleCount = visibleCount;
+  if (delta > SHELTER_TYPING_SOUND_MAX_CATCHUP) {
+    return;
+  }
+  const newLetters = letters.slice(previousCount, visibleCount);
+  const audibleChar = [...newLetters].reverse().find((char) => !shouldSkipShelterTypingChar(char));
+  if (!audibleChar) {
+    return;
+  }
+  const now = getAudioClockSeconds();
+  const preset = getShelterTypingSoundPreset(emotion);
+  const minInterval = Number.isFinite(preset.interval)
+    ? preset.interval
+    : SHELTER_TYPING_SOUND_DEFAULT_INTERVAL;
+  if (now - Number(host.typingSound.lastPlayedAt || 0) < minInterval) {
+    return;
+  }
+  host.typingSound.lastPlayedAt = now;
+  playShelterTypingSound(emotion, audibleChar, visibleCount);
+}
+
+function setAudioElementFadeVolume(element, fadeVolume = 1) {
+  if (!element?.dataset) {
+    return;
+  }
+  element.dataset.fadeVolume = String(clamp(Number(fadeVolume), 0, 1));
+}
+
+function applyLoopingAudioTrackVolume(track) {
+  const element = track?.element;
+  if (!element) {
+    return;
+  }
+  const fadeVolume = clamp(Number(track.fadeVolume ?? 1), 0, 1);
+  setAudioElementFadeVolume(element, fadeVolume);
+  element.volume = getAudioChannelVolume("bgm", Number(track.baseVolume ?? 1) * fadeVolume);
+}
+
+function fadeLoopingAudioTrack(track, targetFadeVolume, duration = 0.7, options = {}) {
+  if (!track?.element) {
+    return;
+  }
+  const now = getAudioClockSeconds();
+  updateLoopingAudioTrackFade(track, now);
+  track.fade = {
+    from: clamp(Number(track.fadeVolume ?? 1), 0, 1),
+    to: clamp(Number(targetFadeVolume), 0, 1),
+    startedAt: now,
+    duration: Math.max(0.02, Number(duration) || 0.02),
+    stopWhenDone: Boolean(options.stopWhenDone),
+    resetWhenStopped: Boolean(options.resetWhenStopped),
+  };
+  applyLoopingAudioTrackVolume(track);
+}
+
+function updateLoopingAudioTrackFade(track, now = getAudioClockSeconds()) {
+  if (!track?.element || !track.fade) {
+    if (track?.element) {
+      applyLoopingAudioTrackVolume(track);
+    }
+    return;
+  }
+  const fade = track.fade;
+  const progress = clamp((now - fade.startedAt) / Math.max(0.02, fade.duration), 0, 1);
+  track.fadeVolume = lerp(fade.from, fade.to, progress);
+  applyLoopingAudioTrackVolume(track);
+  if (progress < 1) {
+    return;
+  }
+  const stopWhenDone = fade.stopWhenDone;
+  const resetWhenStopped = fade.resetWhenStopped;
+  track.fade = null;
+  track.fadeVolume = fade.to;
+  applyLoopingAudioTrackVolume(track);
+  if (stopWhenDone) {
+    try {
+      track.element.pause();
+      if (resetWhenStopped) {
+        track.element.currentTime = 0;
+      }
+      track.pending = false;
+    } catch {
+      // Music should never affect gameplay.
+    }
+  }
+}
+
+function updateLoopingAudioFades() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  ["__searchMusic", "__shelterMusic", "__vaultEscapeMusic"].forEach((slotName) => {
+    const track = window[slotName];
+    if (track?.kind === "file") {
+      updateLoopingAudioTrackFade(track);
+    }
+  });
+}
+
+function getLoopingAudioTrack(slotName, src, volume = 0.45) {
+  if (typeof window === "undefined" || typeof window.Audio === "undefined") {
+    return null;
+  }
+  const existing = window[slotName];
+  if (existing?.kind === "file" && existing.src === src && existing.element) {
+    return existing;
+  }
+  const element = new window.Audio(src);
+  element.loop = true;
+  element.preload = "auto";
+  setAudioElementFadeVolume(element, 1);
+  registerAudioElement(element, "bgm", volume);
+  const track = {
+    kind: "file",
+    src,
+    element,
+    baseVolume: volume,
+    fadeVolume: 1,
+    fade: null,
+    pending: false,
+    blocked: false,
+    lastPlayAttemptAt: 0,
+  };
+  window[slotName] = track;
+  return track;
+}
+
+function playLoopingAudioTrack(slotName, src, volume = 0.45, playbackRate = 1, options = {}) {
+  const track = getLoopingAudioTrack(slotName, src, volume);
+  const element = track?.element;
+  if (!element) {
+    return null;
+  }
+  const fadeSeconds = Math.max(0, Number(options.fadeSeconds ?? 0) || 0);
+  const wasPaused = element.paused;
+  track.baseVolume = volume;
+  if (wasPaused && fadeSeconds > 0) {
+    track.fadeVolume = 0;
+    track.fade = null;
+    setAudioElementFadeVolume(element, 0);
+  } else if (wasPaused) {
+    track.fadeVolume = 1;
+    track.fade = null;
+    setAudioElementFadeVolume(element, 1);
+  }
+  registerAudioElement(element, "bgm", volume);
+  element.playbackRate = playbackRate;
+  applyLoopingAudioTrackVolume(track);
+  if (!element.paused || track.pending) {
+    if (fadeSeconds > 0 && track.fade?.to === 0) {
+      fadeLoopingAudioTrack(track, 1, fadeSeconds);
+    }
+    return track;
+  }
+  const now = Date.now();
+  if (track.blocked && now - (track.lastPlayAttemptAt || 0) < 1000) {
+    return track;
+  }
+  track.lastPlayAttemptAt = now;
+  track.pending = true;
+  track.blocked = false;
+  const playPromise = element.play();
+  if (playPromise?.then) {
+    playPromise
+      .then(() => {
+        track.pending = false;
+        track.blocked = false;
+        if (fadeSeconds > 0) {
+          fadeLoopingAudioTrack(track, 1, fadeSeconds);
+        } else {
+          track.fadeVolume = 1;
+          track.fade = null;
+          applyLoopingAudioTrackVolume(track);
+        }
+      })
+      .catch(() => {
+        track.pending = false;
+        track.blocked = true;
+      });
+  } else {
+    track.pending = false;
+    if (fadeSeconds > 0) {
+      fadeLoopingAudioTrack(track, 1, fadeSeconds);
+    }
+  }
+  return track;
+}
+
+function stopLoopingAudioTrack(slotName, reset = false, fadeSeconds = 0) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const track = window[slotName];
+  const element = track?.element;
+  if (!element) {
+    return;
+  }
+  if (!element.paused && fadeSeconds > 0) {
+    fadeLoopingAudioTrack(track, 0, fadeSeconds, {
+      stopWhenDone: true,
+      resetWhenStopped: reset,
+    });
+    return;
+  }
+  try {
+    element.pause();
+    if (reset) {
+      element.currentTime = 0;
+    }
+    track.pending = false;
+    track.fade = null;
+    track.fadeVolume = 0;
+    applyLoopingAudioTrackVolume(track);
+  } catch {
+    // Music should never affect gameplay.
+  }
+}
+
+function updateSearchMusic(run) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const vault = run?.vaultEscape;
+  if (!run || vault?.active || vault?.lockdownActive || run.faceOff?.active) {
+    stopLoopingAudioTrack("__searchMusic", false, 0.75);
+    return;
+  }
+  stopLoopingAudioTrack("__shelterMusic", false, 0.9);
+  playLoopingAudioTrack("__searchMusic", SEARCH_MUSIC_SRC, 0.34, 1, { fadeSeconds: 0.9 });
+}
+
+function stopSearchMusic(reset = false, fadeSeconds = 0.75) {
+  stopLoopingAudioTrack("__searchMusic", reset, fadeSeconds);
+}
+
+function updateShelterMusic(state) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (state?.scene !== SCENES.SHELTER) {
+    stopLoopingAudioTrack("__shelterMusic", false, 1.1);
+    return;
+  }
+  stopSearchMusic(false, 0.85);
+  stopVaultEscapeMusic(0.55);
+  playLoopingAudioTrack("__shelterMusic", SHELTER_MUSIC_SRC, 0.44, 1, { fadeSeconds: 1.45 });
+}
+
+function playVaultPulse(audio, frequency, duration, gainValue, type = "square") {
+  const context = audio?.context;
+  const master = audio?.master;
+  if (!context || !master) {
+    return;
+  }
+  const now = context.currentTime;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, now);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  oscillator.connect(gain);
+  gain.connect(master);
+  oscillator.start(now);
+  oscillator.stop(now + duration + 0.02);
+}
+
+function startVaultEscapeMusic(run) {
+  if (!run?.vaultEscape || typeof window === "undefined") {
+    return;
+  }
+  stopSearchMusic(false, 0.3);
+  stopLoopingAudioTrack("__shelterMusic", false, 0.45);
+  const fileTrack = playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, 0.58, 1, { fadeSeconds: 0.18 });
+  if (fileTrack) {
+    return;
+  }
+  try {
+    const context = getGameAudioContext();
+    if (!context) {
+      return;
+    }
+    stopVaultEscapeMusic(0.02);
+    const master = context.createGain();
+    const bass = context.createOscillator();
+    const bassFilter = context.createBiquadFilter();
+    const bassGain = context.createGain();
+    const now = context.currentTime;
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(getAudioChannelVolume("bgm", 0.055), now + 0.08);
+    bass.type = "sawtooth";
+    bass.frequency.setValueAtTime(55, now);
+    bassFilter.type = "lowpass";
+    bassFilter.frequency.setValueAtTime(210, now);
+    bassGain.gain.setValueAtTime(0.028, now);
+    bass.connect(bassFilter);
+    bassFilter.connect(bassGain);
+    bassGain.connect(master);
+    master.connect(context.destination);
+    bass.start(now);
+    window.__vaultEscapeMusic = {
+      context,
+      master,
+      bass,
+      bassFilter,
+      bassGain,
+      nextBeatAt: now,
+      step: 0,
+    };
+  } catch {
+    // Music is optional; browsers may block audio until a user gesture.
+  }
+}
+
+function stopVaultEscapeMusic(fadeSeconds = 0.16) {
+  if (typeof window === "undefined" || !window.__vaultEscapeMusic) {
+    return;
+  }
+  const audio = window.__vaultEscapeMusic;
+  if (audio.kind === "file") {
+    stopLoopingAudioTrack("__vaultEscapeMusic", true, fadeSeconds);
+    return;
+  }
+  window.__vaultEscapeMusic = null;
+  try {
+    const now = audio.context.currentTime;
+    audio.master?.gain.cancelScheduledValues(now);
+    audio.master?.gain.setValueAtTime(Math.max(0.0001, audio.master.gain.value || 0.0001), now);
+    audio.master?.gain.exponentialRampToValueAtTime(0.0001, now + fadeSeconds);
+    audio.bass?.stop(now + fadeSeconds + 0.02);
+    window.setTimeout(() => {
+      try {
+        audio.master?.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+    }, Math.ceil((fadeSeconds + 0.05) * 1000));
+  } catch {
+    // Audio shutdown should never affect gameplay.
+  }
+}
+
+function updateVaultEscapeMusic(run) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const vault = run?.vaultEscape;
+  if (!vault?.active && !vault?.lockdownActive) {
+    stopVaultEscapeMusic();
+    return;
+  }
+  let audio = window.__vaultEscapeMusic;
+  if (!audio) {
+    startVaultEscapeMusic(run);
+    audio = window.__vaultEscapeMusic;
+  }
+  if (audio?.kind === "file") {
+    const duration = Math.max(1, Number(vault.duration ?? 45));
+    const timeLeft = Math.max(0, Number(vault.timeLeft ?? 0));
+    const urgency = vault.lockdownActive ? 1 : clamp(1 - timeLeft / duration, 0, 1);
+    const volume = vault.lockdownActive ? 0.68 : lerp(0.52, 0.62, urgency);
+    const playbackRate = vault.lockdownActive ? 1.08 : lerp(1, 1.04, urgency);
+    playLoopingAudioTrack("__vaultEscapeMusic", VAULT_ESCAPE_MUSIC_SRC, volume, playbackRate, { fadeSeconds: 0.18 });
+    return;
+  }
+  if (!audio?.context) {
+    return;
+  }
+  try {
+    const now = audio.context.currentTime;
+    const duration = Math.max(1, Number(vault.duration ?? 45));
+    const timeLeft = Math.max(0, Number(vault.timeLeft ?? 0));
+    const urgency = vault.lockdownActive ? 1 : clamp(1 - timeLeft / duration, 0, 1);
+    const interval = vault.lockdownActive ? 0.115 : lerp(0.34, 0.15, urgency);
+    const bassFrequency = vault.lockdownActive ? 42 : lerp(52, 76, urgency);
+    audio.master.gain.setTargetAtTime(getAudioChannelVolume("bgm", vault.lockdownActive ? 0.075 : 0.055), now, 0.04);
+    audio.bass.frequency.setTargetAtTime(bassFrequency, now, 0.05);
+    audio.bassFilter.frequency.setTargetAtTime(vault.lockdownActive ? 440 : lerp(190, 340, urgency), now, 0.05);
+    if (now < audio.nextBeatAt) {
+      return;
+    }
+    const pattern = [0, 3, 7, 10, 12, 10, 7, 3];
+    const note = pattern[audio.step % pattern.length];
+    const frequency = 220 * 2 ** (note / 12);
+    playVaultPulse(audio, frequency, 0.075, vault.lockdownActive ? 0.06 : 0.038, "square");
+    if (audio.step % 4 === 0 || vault.lockdownActive) {
+      playVaultPulse(audio, vault.lockdownActive ? 76 : 62, 0.11, 0.052, "triangle");
+    }
+    audio.step += 1;
+    audio.nextBeatAt = now + interval;
+  } catch {
+    stopVaultEscapeMusic(0.02);
   }
 }
 
@@ -3728,8 +4935,8 @@ function applyFaceOffAttack(run, data, enemy) {
   }
 
   const weaponContext = getSelectedArmContext(run, data);
-  if ((weaponContext.arm.reloadTimer ?? 0) > 0) {
-    faceOff.message = `${weaponContext.stats.label}: reloading`;
+  if ((weaponContext.arm.fireCooldownTimer ?? 0) > 0) {
+    faceOff.message = `${weaponContext.stats.label}: cooling`;
     return;
   }
   if ((weaponContext.arm.magazine ?? 0) <= 0) {
@@ -3737,8 +4944,20 @@ function applyFaceOffAttack(run, data, enemy) {
     setFaceOffEnemyLine(run, data, "knockdown", "failed", "珥앸룄 鍮꾩뿀??");
     return;
   }
+  if (!hasWeaponHeat(run, weaponContext)) {
+    faceOff.message = `${weaponContext.stats.label}: heat low`;
+    setFaceOffEnemyLine(run, data, "knockdown", "failed", "珥앸룄 鍮꾩뿀??");
+    return;
+  }
 
-  weaponContext.arm.magazine = Math.max(0, Math.floor(weaponContext.arm.magazine ?? 0) - 1);
+  const parts = getFaceOffBodyParts(data);
+  const part = parts.find((entry) => entry.id === faceOff.selectedPart) || parts.find((entry) => entry.id === "torso");
+  if (!part) {
+    return;
+  }
+
+  spendWeaponHeat(run, weaponContext);
+  weaponContext.arm.magazine = weaponContext.stats.magazineSize;
   weaponContext.arm.fireCooldownTimer = weaponContext.stats.fireCooldown;
   run.player.recoilShotCooldownTimer = weaponContext.arm.fireCooldownTimer;
 
@@ -3846,24 +5065,24 @@ function applyFaceOffDialogue(state, run, data, enemy, option) {
   const faceOff = run.faceOff;
   const chance = getDialogueChance(enemy, option);
   faceOff.selectedDialogueKey = option.key;
-  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "留먮줈 ?앸궡怨??띕떎硫?鍮⑤━ 留먰빐.");
+  setFaceOffEnemyLine(run, data, "dialogue", "dialogue", "留먮줈 ?앸궡怨??띕떎硫?鍮⑤━ 留먰빐.", option);
 
   if (Math.random() <= chance) {
     if (option.successEffect === "dealProgress") {
       enemy.dialogueStage = (enemy.dialogueStage ?? 0) + 1;
       if (enemy.dialogueStage >= 2) {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "醫뗭븘. 猷⑦듃 ?섎굹???뚮젮二쇱?.");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeDeal", "醫뗭븘. 猷⑦듃 ?섎굹???뚮젮二쇱?.", option);
         finishFaceOff(run, enemy, "deal", "deal");
       } else {
-        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "?뺣낫? ?ㅺ? 萸?以????덈뒗??");
+        setFaceOffEnemyLine(run, data, "dialogue", "persuadeLead", "?뺣낫? ?ㅺ? 萸?以????덈뒗??", option);
         faceOff.message = "deal lead";
       }
       return;
     }
     if (option.type === "threaten") {
-      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "?뚯븯?? 珥??대젮?볦쓣寃?");
+      setFaceOffEnemyLine(run, data, "dialogue", "threatenSuccess", "?뚯븯?? 珥??대젮?볦쓣寃?", option);
     } else if (option.type === "deescalate") {
-      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "醫뗭븘... ?좉퉸 硫덉텛吏.");
+      setFaceOffEnemyLine(run, data, "dialogue", "deescalateSuccess", "醫뗭븘... ?좉퉸 硫덉텛吏.", option);
     }
     finishFaceOff(run, enemy, "surrender", "surrender");
     return;
@@ -3876,11 +5095,11 @@ function applyFaceOffDialogue(state, run, data, enemy, option) {
   social.fear = clamp(Number(social.fear ?? 0.5) + 0.04, 0, 1);
   social.aggression = clamp(Number(social.aggression ?? 0.5) + 0.03, 0, 1);
   if (option.type === "threaten") {
-    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "洹??묐컯? ???듯빐.");
+    setFaceOffEnemyLine(run, data, "dialogue", "threatenFail", "洹??묐컯? ???듯빐.", option);
   } else if (option.type === "deescalate") {
-    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "硫덉텛??嫄???履쎌씠??");
+    setFaceOffEnemyLine(run, data, "dialogue", "deescalateFail", "硫덉텛??嫄???履쎌씠??", option);
   } else {
-    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "移쒓뎄 媛숈? ?뚮━ ?섏? 留?");
+    setFaceOffEnemyLine(run, data, "dialogue", "persuadeFail", "移쒓뎄 媛숈? ?뚮━ ?섏? 留?", option);
   }
   faceOff.message = "dialogue failed";
 }
@@ -3917,7 +5136,7 @@ function updateFaceOffArmSelection(run, data, state) {
 
 function updateFaceOffWeaponRuntime(run, data, state, dt) {
   updateFaceOffArmSelection(run, data, state);
-  if (consumeEitherPress(state, RELOAD_KEYS)) {
+  if (consumeEitherPress(state, getReloadKeys(state))) {
     startReloadSelectedArm(run, data);
   }
   updateWeaponTimers(run, data, dt);
@@ -3973,6 +5192,7 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
 
   updateFaceOffWeaponRuntime(run, data, state, dt);
   updateFaceOffEnemyLine(faceOff, dt);
+  updateFaceOffLineTts(faceOff);
   updateFaceOffChoiceReveal(faceOff, data, dt);
 
   if (!isHumanoidFaceOffCandidate(enemy)) {
@@ -4086,6 +5306,14 @@ function clearHover(player) {
   player.hoverParticleTimer = 0;
 }
 
+function clearAirDashHover(player) {
+  player.airDashHoverTimer = 0;
+  player.airDashDirectionGraceTimer = 0;
+  player.airDashDirectionPending = false;
+  player.airDashPendingDirX = 0;
+  player.airDashPendingDirY = 0;
+}
+
 function clearRecoilSpin(player) {
   player.recoilSpinTimer = 0;
   player.recoilSpinDuration = 0;
@@ -4119,6 +5347,7 @@ function refillDashFromGround(player, config) {
   syncDashCapacity(player, config);
   player.dashCharges = player.dashMaxCount;
   player.dashAvailable = player.dashCharges > 0 && player.dashCooldownTimer === 0;
+  player.airDashHoverConsumed = false;
 }
 
 function refillDashFromWall(player, config) {
@@ -4126,6 +5355,7 @@ function refillDashFromWall(player, config) {
   player.dashCharges = player.dashMaxCount;
   player.dashAvailable = true;
   player.dashCooldownTimer = 0;
+  player.airDashHoverConsumed = false;
   player.dashResetActive = true;
 }
 
@@ -4171,6 +5401,32 @@ function getSelectedArmContext(run, data) {
     arm,
     stats,
   };
+}
+
+function getShotgunArmContext(run, data) {
+  const weapons = ensureWeaponLoadoutState(run, data);
+  const side = ["left", "right"].find((candidate) => {
+    const stats = computeArmWeaponStats(data, weapons.arms[candidate]);
+    return stats.type === "shotgun";
+  }) || "left";
+  const arm = weapons.arms[side];
+  const stats = computeArmWeaponStats(data, arm);
+  return {
+    weapons,
+    side,
+    arm,
+    stats,
+  };
+}
+
+function resetShotgunFireCooldown(run, data) {
+  const shotgunContext = getShotgunArmContext(run, data);
+  shotgunContext.arm.fireCooldownTimer = 0;
+  const selected = getSelectedArmContext(run, data);
+  run.player.recoilShotCooldownTimer = Math.max(
+    selected.arm.fireCooldownTimer ?? 0,
+    0,
+  );
 }
 
 function setSelectedArm(run, data, side) {
@@ -4238,10 +5494,6 @@ function cycleSelectedWeaponSlot(run, data, direction = 1) {
   }
 }
 
-function getReserveAmmo(context) {
-  return Math.max(0, Math.floor(Number(context.weapons.reserveAmmo?.[context.stats.ammoType] ?? 0)));
-}
-
 function isAutomaticWeaponContext(context) {
   return context?.stats?.fireMode === "auto";
 }
@@ -4272,6 +5524,79 @@ function canFireWeaponPose(player) {
   );
 }
 
+function getWeaponHeatCost(context) {
+  if (!context?.stats) {
+    return 6;
+  }
+  if (Number.isFinite(context.stats.heatCost)) {
+    return Math.max(0, Number(context.stats.heatCost));
+  }
+  if (context.stats.type === "shotgun") {
+    return 10;
+  }
+  if (context.stats.type === "machinegun") {
+    return 1.6;
+  }
+  return 6;
+}
+
+function clearRecoilJumpChargeState(player, clearPending = false) {
+  if (!player) {
+    return;
+  }
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargeEffectStep = 0;
+  if (clearPending) {
+    player.recoilJumpChargePendingMultiplier = 1;
+    player.recoilJumpChargePendingShot = false;
+  }
+}
+
+function triggerHeatManagementFailure(run, player = run?.player) {
+  if (!run) {
+    return;
+  }
+  const alreadyLocked = Boolean(run.focusDepleted);
+  run.focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  run.focus = 0;
+  run.focusActive = false;
+  run.focusDepleted = true;
+  run.heatFailureNotified = true;
+  clearRecoilJumpChargeState(player, true);
+  if (!alreadyLocked) {
+    pushNotice(run, "Heat management failure.", 1.8);
+  }
+}
+
+function refreshHeatManagementLock(run) {
+  if (!run?.focusDepleted) {
+    return;
+  }
+  if (run.focus >= run.focusMax) {
+    run.focusDepleted = false;
+    run.heatFailureNotified = false;
+  }
+}
+
+function hasWeaponHeat(run, context, multiplier = 1) {
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const available = clamp(Number(run.focus ?? focusMax), 0, focusMax);
+  const minimum = Math.max(focusMax * WEAPON_HEAT_EMPTY_RATIO, getWeaponHeatCost(context) * multiplier);
+  return !run.focusDepleted && available >= minimum;
+}
+
+function spendWeaponHeat(run, context, multiplier = 1) {
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const cost = getWeaponHeatCost(context) * multiplier;
+  run.focusMax = focusMax;
+  run.focus = Math.max(0, clamp(Number(run.focus ?? focusMax), 0, focusMax) - cost);
+  if (run.focus <= 0) {
+    triggerHeatManagementFailure(run);
+  }
+}
+
 function canFireSelectedWeapon(run, data, player) {
   if (isMeleeSlotSelected(run, data)) {
     return false;
@@ -4283,14 +5608,73 @@ function canFireSelectedWeapon(run, data, player) {
   if (!context.stats.equipped) {
     return false;
   }
-  if ((context.arm.reloadTimer ?? 0) > 0 || (context.arm.fireCooldownTimer ?? 0) > 0) {
+  if ((context.arm.fireCooldownTimer ?? 0) > 0) {
     return false;
   }
-  if ((context.arm.magazine ?? 0) <= 0) {
+  return hasWeaponHeat(run, context);
+}
+
+function canChargeRecoilJumpWeapon(run, data, player) {
+  if (!canFireWeaponPose(player)) {
     return false;
   }
-  const airActionCost = player.onGround ? 0 : context.stats.airActionCost;
-  return (player.recoilShotCharges ?? 0) >= airActionCost;
+  const context = getSelectedArmContext(run, data);
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  const availableHeat = clamp(Number(run.focus ?? focusMax), 0, focusMax);
+  const chargeAlreadyActive = Boolean(
+    player.recoilJumpChargeActive ||
+    (player.recoilJumpChargeFocusSpent ?? 0) > 0
+  );
+  const recoilJumpInProgress = Boolean(
+    player.recoilShotActive ||
+    player.recoilShotTimer > 0 ||
+    player.recoilSpinTimer > 0 ||
+    player.recoilCameraTimer > 0
+  );
+  const hasChargeHeat = chargeAlreadyActive
+    ? !run.focusDepleted && availableHeat > 0
+    : hasWeaponHeat(run, context);
+  return Boolean(
+    context.stats.type === "shotgun" &&
+    (recoilJumpInProgress || (context.arm.fireCooldownTimer ?? 0) === 0) &&
+    hasChargeHeat
+  );
+}
+
+function clearRecoilJumpForce(player) {
+  const hadRecoilJumpForce = Boolean(
+    player.recoilShotActive ||
+    player.recoilShotTimer > 0 ||
+    player.recoilSpinTimer > 0 ||
+    player.recoilCameraTimer > 0 ||
+    Math.abs(player.vx ?? 0) > 0 ||
+    Math.abs(player.vy ?? 0) > 0
+  );
+  player.recoilShotTimer = 0;
+  player.recoilShotActive = false;
+  player.recoilSpinTimer = 0;
+  player.recoilSpinDuration = 0;
+  player.recoilCameraTimer = 0;
+  player.recoilCameraReturning = false;
+  player.recoilCameraDirX = 0;
+  player.recoilCameraDirY = -1;
+  player.dashCarryTimer = 0;
+  player.dashCarrySpeed = 0;
+  player.sprintJumpCarryTimer = 0;
+  player.sprintJumpCarrySpeed = 0;
+  return hadRecoilJumpForce;
+}
+
+function startReloadArmContext(run, context) {
+  if (!context?.stats?.equipped) {
+    pushNotice(run, "No weapon equipped", 1.2);
+    return false;
+  }
+  context.arm.magazine = context.stats.magazineSize;
+  context.arm.reloadTimer = 0;
+  context.arm.reloadDuration = 0;
+  pushNotice(run, `${context.stats.label} uses heat`, 1.2);
+  return true;
 }
 
 function startReloadSelectedArm(run, data) {
@@ -4298,41 +5682,7 @@ function startReloadSelectedArm(run, data) {
     pushNotice(run, "Breach tool does not reload", 1.2);
     return false;
   }
-  const context = getSelectedArmContext(run, data);
-  if (!context.stats.equipped) {
-    pushNotice(run, "No weapon equipped", 1.2);
-    return false;
-  }
-  const reserve = getReserveAmmo(context);
-  const currentMagazine = Math.max(0, Math.floor(context.arm.magazine ?? 0));
-  if ((context.arm.reloadTimer ?? 0) > 0) {
-    pushNotice(run, `${context.stats.label} reloading`, 1.2);
-    return false;
-  }
-  if (currentMagazine >= context.stats.magazineSize) {
-    pushNotice(run, `${context.stats.label} magazine full`, 1.2);
-    return false;
-  }
-  if (reserve <= 0) {
-    pushNotice(run, `No ${context.stats.ammoType} reserve`, 1.2);
-    return false;
-  }
-
-  const bodyEffects = getPlayerBodyCombatEffects(run, context.side);
-  const reloadDuration = context.stats.reloadDuration * bodyEffects.reloadDurationMultiplier;
-  context.arm.reloadTimer = reloadDuration;
-  context.arm.reloadDuration = reloadDuration;
-  pushNotice(run, `Reloading ${context.stats.label}`, 1.2);
-  return true;
-}
-
-function completeArmReload(weapons, arm, stats) {
-  const reserve = Math.max(0, Math.floor(Number(weapons.reserveAmmo?.[stats.ammoType] ?? 0)));
-  const currentMagazine = Math.max(0, Math.floor(arm.magazine ?? 0));
-  const needed = Math.max(0, stats.magazineSize - currentMagazine);
-  const loaded = Math.min(needed, reserve);
-  arm.magazine = currentMagazine + loaded;
-  weapons.reserveAmmo[stats.ammoType] = reserve - loaded;
+  return startReloadArmContext(run, getSelectedArmContext(run, data));
 }
 
 function updateWeaponTimers(run, data, dt) {
@@ -4347,19 +5697,15 @@ function updateWeaponTimers(run, data, dt) {
       return;
     }
     arm.fireCooldownTimer = Math.max(0, (arm.fireCooldownTimer ?? 0) - dt);
-    if ((arm.reloadTimer ?? 0) > 0) {
-      arm.reloadTimer = Math.max(0, arm.reloadTimer - dt);
-      if (arm.reloadTimer === 0) {
-        completeArmReload(weapons, arm, stats);
-      }
-    }
-    arm.magazine = clamp(Math.floor(arm.magazine ?? stats.magazineSize), 0, stats.magazineSize);
+    arm.reloadTimer = 0;
+    arm.reloadDuration = 0;
+    arm.magazine = stats.magazineSize;
   });
 
   const selected = getSelectedArmContext(run, data);
   run.player.recoilShotCooldownTimer = Math.max(
     selected.arm.fireCooldownTimer ?? 0,
-    selected.arm.reloadTimer ?? 0,
+    0,
   );
 }
 
@@ -4382,10 +5728,198 @@ function updateWeaponRuntime(run, data, state, dt) {
   if (consumeEitherPress(state, ARM_WHEEL_NEXT_KEYS)) {
     cycleSelectedWeaponSlot(run, data, 1);
   }
-  if (consumeEitherPress(state, RELOAD_KEYS)) {
+  if (consumeEitherPress(state, getArmSwitchKeys(state))) {
+    switchSelectedArm(run, data);
+  }
+  if (consumeEitherPress(state, getReloadKeys(state))) {
     startReloadSelectedArm(run, data);
   }
+  if (!useLegacyControls(state)) {
+    updateArmSwitchReloadInput(run, data, state);
+  }
   updateWeaponTimers(run, data, dt);
+}
+
+function updateArmSwitchReloadInput(run, data, state) {
+  const player = run.player;
+  const switchHeld = isPressed(state, ARM_SWITCH_RELOAD_KEY);
+  const holdSeconds = getKeyHoldSeconds(state, ARM_SWITCH_RELOAD_KEY);
+  if (
+    switchHeld &&
+    holdSeconds >= ARM_SWITCH_RELOAD_HOLD_SECONDS &&
+    !player.armSwitchReloadHoldConsumed
+  ) {
+    player.armSwitchReloadHoldConsumed = true;
+    startReloadSelectedArm(run, data);
+    return;
+  }
+
+  if (!state.justReleased?.has(ARM_SWITCH_RELOAD_KEY)) {
+    return;
+  }
+
+  consumeRelease(state, ARM_SWITCH_RELOAD_KEY);
+  const releasedHoldSeconds = consumeReleasedKeyHoldSeconds(state, ARM_SWITCH_RELOAD_KEY);
+  if (releasedHoldSeconds < ARM_SWITCH_RELOAD_HOLD_SECONDS && !player.armSwitchReloadHoldConsumed) {
+    switchSelectedArm(run, data);
+  }
+  player.armSwitchReloadHoldConsumed = false;
+}
+
+function shouldChargeRecoilJump(run, data, state) {
+  if (useLegacyControls(state)) {
+    return false;
+  }
+  const player = run.player;
+  if (!player) {
+    return false;
+  }
+  if (!FIRE_KEYS.some((code) => isPressed(state, code))) {
+    return false;
+  }
+  const fireHoldSeconds = Math.max(...FIRE_KEYS.map((code) => getKeyHoldSeconds(state, code)), 0);
+  if (fireHoldSeconds < RECOIL_JUMP_CHARGE_HOLD_SECONDS) {
+    return false;
+  }
+  return Boolean(
+    canAimWeapon(player) &&
+    canChargeRecoilJumpWeapon(run, data, player)
+  );
+}
+
+function getRecoilJumpEffectiveFocusMax(run) {
+  const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
+  return focusMax * RECOIL_JUMP_FOCUS_COST_SCALE;
+}
+
+function getRecoilJumpChargeStageCostWeight(step) {
+  const steps = Math.max(1, RECOIL_JUMP_CHARGE_STEPS);
+  const clampedStep = clamp(Math.floor(step), 1, steps);
+  return Math.pow(RECOIL_JUMP_CHARGE_COST_FALLOFF, clampedStep - 1);
+}
+
+function getRecoilJumpChargeTotalCostWeight() {
+  let total = 0;
+  for (let step = 1; step <= RECOIL_JUMP_CHARGE_STEPS; step += 1) {
+    total += getRecoilJumpChargeStageCostWeight(step);
+  }
+  return Math.max(0.001, total);
+}
+
+function getRecoilJumpChargeStageCost(run, step) {
+  return getRecoilJumpEffectiveFocusMax(run)
+    * (getRecoilJumpChargeStageCostWeight(step) / getRecoilJumpChargeTotalCostWeight());
+}
+
+function getRecoilJumpChargeStageThreshold(run, step) {
+  const steps = Math.max(1, RECOIL_JUMP_CHARGE_STEPS);
+  const clampedStep = clamp(Math.floor(step), 1, steps);
+  let threshold = 0;
+  for (let index = 1; index <= clampedStep; index += 1) {
+    threshold += getRecoilJumpChargeStageCost(run, index);
+  }
+  return threshold;
+}
+
+function getRecoilJumpChargeDrainMultiplier(run, player) {
+  const spentStep = getRecoilJumpChargeStepFromSpent(run, player.recoilJumpChargeFocusSpent);
+  const currentStep = clamp(spentStep, 1, RECOIL_JUMP_CHARGE_STEPS);
+  const averageStepCost = getRecoilJumpEffectiveFocusMax(run) / Math.max(1, RECOIL_JUMP_CHARGE_STEPS);
+  return getRecoilJumpChargeStageCost(run, currentStep) / Math.max(0.001, averageStepCost);
+}
+
+function getRecoilJumpChargeStepFromSpent(run, spent) {
+  const effectiveFocusMax = getRecoilJumpEffectiveFocusMax(run);
+  const safeSpent = clamp(Number(spent ?? 0), 0, effectiveFocusMax);
+  if (safeSpent <= 0) {
+    return 0;
+  }
+  for (let step = 1; step <= RECOIL_JUMP_CHARGE_STEPS; step += 1) {
+    if (safeSpent <= getRecoilJumpChargeStageThreshold(run, step)) {
+      return step;
+    }
+  }
+  return RECOIL_JUMP_CHARGE_STEPS;
+}
+
+function getRecoilJumpChargeMultiplier(run, player) {
+  const spentStep = getRecoilJumpChargeStepFromSpent(run, player.recoilJumpChargeFocusSpent);
+  if (spentStep <= 0) {
+    return 1;
+  }
+  const progress = spentStep / RECOIL_JUMP_CHARGE_STEPS;
+  return lerp(1, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER, progress);
+}
+
+function getRecoilJumpChargeStep(run, player) {
+  return getRecoilJumpChargeStepFromSpent(run, player.recoilJumpChargeFocusSpent);
+}
+
+function updateRecoilJumpLastDirection(player, state, forceFallback = false) {
+  const pressedDirection = getKeyboardDirectionPressedVector(state);
+  if (pressedDirection) {
+    player.recoilJumpLastDirX = pressedDirection.x;
+    player.recoilJumpLastDirY = pressedDirection.y;
+    return;
+  }
+  if (forceFallback || !Number.isFinite(player.recoilJumpLastDirX) || !Number.isFinite(player.recoilJumpLastDirY)) {
+    player.recoilJumpLastDirX = Math.sign(player.facing || 1) || 1;
+    player.recoilJumpLastDirY = 0;
+  }
+}
+
+function spawnRecoilJumpChargeEffect(run, player, step) {
+  const progress = clamp(step / RECOIL_JUMP_CHARGE_STEPS, 0, 1);
+  const color = progress >= 0.8 ? "#f5fbff" : progress >= 0.45 ? "#93eaff" : "#62d6ff";
+  const centerX = player.x + player.width * 0.5;
+  const centerY = player.y + player.height * 0.5;
+  const radius = Math.max(player.width, player.height) * (0.58 + progress * 0.18);
+  run.recoilFx.push({
+    x: centerX,
+    y: centerY,
+    dirX: 0,
+    dirY: -1,
+    color,
+    radius,
+    life: 0.22 + progress * 0.16,
+    duration: 0.22 + progress * 0.16,
+    weaponType: "recoil-charge",
+    scale: 0.85 + progress * 0.7,
+    progress,
+  });
+}
+
+function updateWeaponFireReloadInput(run, data, state) {
+  if (useLegacyControls(state)) {
+    return false;
+  }
+  const player = run.player;
+  const fireReleasedCode = FIRE_KEYS.find((code) => state.justReleased?.has(code));
+  if (!fireReleasedCode) {
+    return false;
+  }
+
+  consumeRelease(state, fireReleasedCode);
+  consumeReleasedKeyHoldSeconds(state, fireReleasedCode);
+  const releasedRecoilCharge = Boolean(player.recoilJumpChargeActive || player.recoilJumpChargeFocusSpent > 0);
+  player.recoilJumpChargePendingMultiplier = releasedRecoilCharge
+    ? getRecoilJumpChargeMultiplier(run, player)
+    : 1;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargeEffectStep = 0;
+  player.recoilJumpChargePendingShot = releasedRecoilCharge;
+  const selectedContext = getSelectedArmContext(run, data);
+  const shouldFire = selectedContext.stats.type === "shotgun"
+    ? releasedRecoilCharge
+    : !player.weaponReloadHoldConsumed;
+  player.weaponReloadHoldConsumed = false;
+  return shouldFire;
+}
+
+function isDashInputQueued(state) {
+  return getDashKeys(state).some((code) => state.justPressed.has(code));
 }
 
 function getMouseWorld(state, run) {
@@ -4395,6 +5929,126 @@ function getMouseWorld(state, run) {
     x: (mouse.screenX ?? CAMERA_SCREEN_WIDTH / 2) / zoom + run.cameraX,
     y: (mouse.screenY ?? CAMERA_SCREEN_HEIGHT / 2) / zoom + run.cameraY,
   };
+}
+
+function getKeyboardAimVector(state, player) {
+  const left = isPressed(state, "ArrowLeft");
+  const right = isPressed(state, "ArrowRight");
+  const up = isPressed(state, "ArrowUp");
+  const down = isPressed(state, "ArrowDown");
+  let dirX = (right ? 1 : 0) - (left ? 1 : 0);
+  let dirY = (down ? 1 : 0) - (up ? 1 : 0);
+
+  if (dirX === 0 && dirY === 0) {
+    dirX = Math.sign(player.recoilAimX || player.facing || 1) || 1;
+    dirY = 0;
+  }
+
+  const length = Math.max(0.001, Math.hypot(dirX, dirY));
+  return {
+    x: dirX / length,
+    y: dirY / length,
+  };
+}
+
+function getKeyboardDirectionVector(state, player, fallbackX = player?.facing || 1) {
+  const left = isPressed(state, "ArrowLeft");
+  const right = isPressed(state, "ArrowRight");
+  const up = isPressed(state, "ArrowUp");
+  const down = isPressed(state, "ArrowDown");
+  let dirX = (right ? 1 : 0) - (left ? 1 : 0);
+  let dirY = (down ? 1 : 0) - (up ? 1 : 0);
+
+  if (dirX === 0 && dirY === 0) {
+    dirX = Math.sign(fallbackX || 1) || 1;
+    dirY = 0;
+  }
+
+  const length = Math.max(0.001, Math.hypot(dirX, dirY));
+  return {
+    x: dirX / length,
+    y: dirY / length,
+  };
+}
+
+function getKeyboardDirectionPressedVector(state) {
+  const left = isPressed(state, "ArrowLeft");
+  const right = isPressed(state, "ArrowRight");
+  const up = isPressed(state, "ArrowUp");
+  const down = isPressed(state, "ArrowDown");
+  const dirX = (right ? 1 : 0) - (left ? 1 : 0);
+  const dirY = (down ? 1 : 0) - (up ? 1 : 0);
+  if (dirX === 0 && dirY === 0) {
+    return null;
+  }
+  const length = Math.max(0.001, Math.hypot(dirX, dirY));
+  return {
+    x: dirX / length,
+    y: dirY / length,
+  };
+}
+
+function getKeyboardAimWorldTarget(state, run, origin, player) {
+  const keyboardAim = getKeyboardAimVector(state, player);
+  const range = 640;
+  return {
+    x: origin.x + keyboardAim.x * range,
+    y: origin.y + keyboardAim.y * range,
+  };
+}
+
+function getRecoilAimFromShotDirection(player, shotDirX, shotDirY, options = {}) {
+  const origin = getRecoilShotOrigin(player);
+  const length = Math.max(0.001, Math.hypot(shotDirX, shotDirY));
+  const shotX = shotDirX / length;
+  const shotY = shotDirY / length;
+  const recoilX = -shotX;
+  const recoilY = -shotY;
+  const range = options.range ?? 640;
+  const aimFacing = Math.abs(shotX) > 0.08
+    ? Math.sign(shotX)
+    : (player.recoilAimFacing || player.facing || 1);
+  const aimPitch = shotY < -0.45
+    ? -1
+    : shotY > 0.45
+      ? 1
+      : 0;
+  return {
+    active: Boolean(options.active),
+    aiming: Boolean(options.aiming),
+    focusBlend: player.recoilFocusBlend ?? 0,
+    canFire: true,
+    originX: origin.x,
+    originY: origin.y,
+    targetX: origin.x + shotX * range,
+    targetY: origin.y + shotY * range,
+    aimFacing,
+    aimPitch,
+    edgePanX: 0,
+    edgePanY: 0,
+    shotDirX: shotX,
+    shotDirY: shotY,
+    recoilDirX: recoilX,
+    recoilDirY: recoilY,
+  };
+}
+
+function getRecoilJumpShotAim(player, run, state) {
+  let selectedDirection = {
+    x: Number(player.recoilJumpLastDirX),
+    y: Number(player.recoilJumpLastDirY),
+  };
+  if (!Number.isFinite(selectedDirection.x) || !Number.isFinite(selectedDirection.y) || Math.hypot(selectedDirection.x, selectedDirection.y) < 0.001) {
+    selectedDirection = getKeyboardDirectionVector(state, player, player.facing || 1);
+  } else {
+    const length = Math.max(0.001, Math.hypot(selectedDirection.x, selectedDirection.y));
+    selectedDirection.x /= length;
+    selectedDirection.y /= length;
+  }
+  return getRecoilAimFromShotDirection(player, -selectedDirection.x, -selectedDirection.y, {
+    active: Boolean(run.focusActive),
+    aiming: true,
+  });
 }
 
 function getRecoilShotOrigin(player) {
@@ -4409,7 +6063,6 @@ function canUseRecoilShot(player) {
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0 &&
-    player.recoilShotCharges > 0 &&
     player.recoilShotCooldownTimer === 0
   );
 }
@@ -4496,10 +6149,9 @@ function updateHumanoidStaggerState(enemy, data, dt) {
     enemy.trigger = 0;
     const knockback = enemy.staggerKnockbackVx ?? 0;
     if (Math.abs(knockback) > 0.5) {
-      const maxX = Math.max(0, (data.world?.width ?? enemy.x + enemy.width) - enemy.width);
-      enemy.x = clamp(enemy.x + knockback * dt, 0, maxX);
+      const blocked = moveEntityHorizontallyWithWalls(enemy, data, knockback * dt);
       enemy.staggerKnockbackVx = approach(
-        knockback,
+        blocked ? 0 : knockback,
         0,
         Math.max(0, enemy.staggerKnockbackFriction ?? 860) * dt,
       );
@@ -4666,11 +6318,18 @@ function getHumanoidBulletHitZones(enemy) {
 
 function spawnPlayerBullet(run, weaponStats, aim) {
   const speed = weaponStats.projectileSpeed ?? (weaponStats.type === "shotgun" ? 2050 : 2450);
-  const range = weaponStats.range ?? 520;
+  const baseRange = weaponStats.range ?? 520;
+  const aimDistance = distanceBetween(
+    { x: aim.originX, y: aim.originY },
+    { x: aim.targetX ?? aim.originX, y: aim.targetY ?? aim.originY },
+  );
+  const range = Math.max(baseRange, aimDistance + (weaponStats.aimOvershootRange ?? 320));
   const startOffset = 18;
   run.playerBullets = run.playerBullets || [];
   run.playerBullets.push({
     id: `player-bullet-${Math.round((run.time ?? 0) * 1000)}-${run.playerBullets.length}`,
+    originX: aim.originX,
+    originY: aim.originY,
     x: aim.originX + aim.shotDirX * startOffset,
     y: aim.originY + aim.shotDirY * startOffset,
     prevX: aim.originX,
@@ -4690,6 +6349,246 @@ function spawnPlayerBullet(run, weaponStats, aim) {
     duration: Math.max(0.08, range / speed + 0.12),
     color: weaponStats.type === "shotgun" ? "#ffd6ba" : "#e9f7ff",
   });
+}
+
+function isPointInSector(originX, originY, dirX, dirY, pointX, pointY, range, angle) {
+  const dx = pointX - originX;
+  const dy = pointY - originY;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= EPSILON) {
+    return true;
+  }
+  if (distance > range) {
+    return false;
+  }
+  const dirLength = Math.max(0.001, Math.hypot(dirX, dirY));
+  const dot = ((dx / distance) * (dirX / dirLength)) + ((dy / distance) * (dirY / dirLength));
+  return dot >= Math.cos(angle * 0.5);
+}
+
+function isRectInSector(originX, originY, dirX, dirY, rect, range, angle) {
+  const nearestX = clamp(originX, rect.x, rect.x + rect.width);
+  const nearestY = clamp(originY, rect.y, rect.y + rect.height);
+  const samples = [
+    [rect.x + rect.width * 0.5, rect.y + rect.height * 0.5],
+    [nearestX, nearestY],
+    [rect.x, rect.y],
+    [rect.x + rect.width, rect.y],
+    [rect.x, rect.y + rect.height],
+    [rect.x + rect.width, rect.y + rect.height],
+    [rect.x + rect.width * 0.5, rect.y],
+    [rect.x + rect.width * 0.5, rect.y + rect.height],
+    [rect.x, rect.y + rect.height * 0.5],
+    [rect.x + rect.width, rect.y + rect.height * 0.5],
+  ];
+  return samples.some(([pointX, pointY]) => (
+    isPointInSector(originX, originY, dirX, dirY, pointX, pointY, range, angle)
+  ));
+}
+
+function getHumanoidBulletDamage(run, bullet, enemy) {
+  const baseDamage = bullet.humanoidDamage ?? 50;
+  if (bullet.weaponStats?.type !== "shotgun") {
+    return baseDamage;
+  }
+  const closeRange = Math.max(0, Number(bullet.weaponStats.closeRange ?? 0));
+  const closeRangeAngle = Math.max(0.1, Number(bullet.weaponStats.closeRangeAngle ?? 1.35));
+  const closeRangeDamageMultiplier = Math.max(1, Number(bullet.weaponStats.closeRangeDamageMultiplier ?? 1));
+  if (closeRange <= 0 || closeRangeDamageMultiplier <= 1) {
+    return baseDamage;
+  }
+  const originX = Number.isFinite(bullet.originX) ? bullet.originX : run.player.x + run.player.width * 0.5;
+  const originY = Number.isFinite(bullet.originY) ? bullet.originY : run.player.y + run.player.height * 0.46;
+  return isRectInSector(originX, originY, bullet.dirX, bullet.dirY, enemy, closeRange, closeRangeAngle)
+    ? baseDamage * closeRangeDamageMultiplier
+    : baseDamage;
+}
+
+function getBlastRectHit(blastX, blastY, radius, rect) {
+  const nearestX = clamp(blastX, rect.x, rect.x + rect.width);
+  const nearestY = clamp(blastY, rect.y, rect.y + rect.height);
+  const distance = Math.hypot(nearestX - blastX, nearestY - blastY);
+  if (distance > radius) {
+    return null;
+  }
+  return {
+    nearestX,
+    nearestY,
+    distance,
+    falloff: clamp(1 - distance / Math.max(1, radius), 0, 1),
+  };
+}
+
+function pushBlastKnockback(entity, blastX, blastY, force, lift = 0) {
+  const centerX = entity.x + entity.width * 0.5;
+  const centerY = entity.y + entity.height * 0.5;
+  const dx = centerX - blastX;
+  const dy = centerY - blastY;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  entity.vx = (entity.vx ?? 0) + (dx / length) * force;
+  entity.vy = (entity.vy ?? 0) + (dy / length) * force - lift;
+}
+
+function pushScreenShake(run, duration, intensity, dirX = 0, dirY = 0) {
+  const nextIntensity = Math.max(0, Number(intensity ?? 0));
+  const currentIntensity = Math.max(0, Number(run.screenShakeIntensity ?? 0));
+  if (nextIntensity < currentIntensity && (run.screenShakeTimer ?? 0) > 0) {
+    return;
+  }
+  run.screenShakeDuration = Math.max(0.001, Number(duration ?? 0.16));
+  run.screenShakeTimer = run.screenShakeDuration;
+  run.screenShakeIntensity = nextIntensity;
+  run.screenShakeDirX = Number.isFinite(dirX) ? dirX : 0;
+  run.screenShakeDirY = Number.isFinite(dirY) ? dirY : 0;
+}
+
+function isRecoilJumpStage5Block(block) {
+  return block?.breakRule === "recoilJumpStage5" || block?.requiresRecoilJumpStage5 === true;
+}
+
+function isRecoilJumpStage5Charge(chargeLevel) {
+  return Number(chargeLevel ?? 0) >= 0.99;
+}
+
+function destroyTemporaryBlock(run, block, x, y, label = "OPEN") {
+  block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
+  block.hp = 0;
+  block.hitFlash = 0.2;
+  block.destroyed = true;
+  block.hiddenTimer = 0;
+  spawnDamageNumber(run, x, y - 12, 0, "#93eaff", label);
+}
+
+function spawnRecoilBlast(run, data, weaponStats, aim, recoilChargeMultiplier = 1, visualChargeLevel = null) {
+  const chargeLevel = Number.isFinite(visualChargeLevel)
+    ? clamp(visualChargeLevel, 0, 1)
+    : clamp((recoilChargeMultiplier - 1) / 0.5, 0, 1);
+  const baseRadius = weaponStats.explosionRadius
+    ?? weaponStats.blastRadius
+    ?? (weaponStats.type === "shotgun" ? 112 : 82);
+  const radius = Math.max(36, baseRadius * clamp(0.92 + chargeLevel * 0.9, 0.85, 1.85));
+  const blastOffset = Math.max(34, weaponStats.explosionOffset ?? weaponStats.blastOffset ?? (weaponStats.type === "shotgun" ? 72 : 58));
+  const blastX = aim.originX + aim.shotDirX * blastOffset;
+  const blastY = aim.originY + aim.shotDirY * blastOffset;
+  const aimContext = {
+    shotDirX: aim.shotDirX,
+    shotDirY: aim.shotDirY,
+  };
+
+  run.recoilFx.push({
+    type: "weapon-blast",
+    x: blastX,
+    y: blastY,
+    originX: aim.originX,
+    originY: aim.originY,
+    dirX: aim.shotDirX,
+    dirY: aim.shotDirY,
+    radius,
+    life: 0.34,
+    duration: 0.34,
+    weaponType: weaponStats.type,
+    charge: recoilChargeMultiplier,
+    chargeLevel,
+  });
+
+  if (chargeLevel > 0.01) {
+    const shakeStep = Math.ceil(chargeLevel * RECOIL_JUMP_CHARGE_STEPS);
+    const earlyShake = 2 + chargeLevel * 4;
+    const lateShake = 10 + chargeLevel * 18;
+    const shakeIntensity = shakeStep <= 3 ? earlyShake : lateShake;
+    const shakeDuration = shakeStep <= 3
+      ? 0.08 + chargeLevel * 0.08
+      : 0.14 + chargeLevel * 0.22;
+    pushScreenShake(run, shakeDuration, shakeIntensity, aim.shotDirX, aim.shotDirY);
+  }
+
+  for (const block of run.temporaryBlocks || []) {
+    if (isTemporaryBlockHidden(block)) {
+      continue;
+    }
+    const hit = getBlastRectHit(blastX, blastY, radius * 0.92, block);
+    if (!hit) {
+      continue;
+    }
+    if (isRecoilJumpStage5Block(block)) {
+      if (!isRecoilJumpStage5Charge(chargeLevel)) {
+        block.hitFlash = 0.16;
+        spawnDamageNumber(run, hit.nearestX, hit.nearestY - 12, 0, "#93eaff", "LV5");
+        spawnDirectedParticles(run, hit.nearestX, hit.nearestY, 7, "#93eaff", aim.shotDirX, aim.shotDirY, 360, 0.72);
+        continue;
+      }
+      destroyTemporaryBlock(run, block, hit.nearestX, hit.nearestY, "LV5 OPEN");
+      spawnConcreteBlockShards(run, block, hit.nearestX, hit.nearestY, aim.shotDirX, aim.shotDirY, 17);
+      spawnDirectedParticles(run, hit.nearestX, hit.nearestY, 22, "#f5fbff", aim.shotDirX, aim.shotDirY, 620, 1);
+      continue;
+    }
+    const damage = Math.max(1, Number(weaponStats.damage ?? 1)) * lerp(0.65, 1.25, hit.falloff);
+    block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
+    block.hp = Math.max(0, Number(block.hp ?? block.maxHp) - damage);
+    block.hitFlash = 0.2;
+    spawnDamageNumber(run, hit.nearestX, hit.nearestY - 12, damage, "#93eaff", block.hp <= 0 ? "OPEN" : "BLAST");
+    spawnDirectedParticles(run, hit.nearestX, hit.nearestY, block.hp <= 0 ? 18 : 10, "#93eaff", aim.shotDirX, aim.shotDirY, 500, 0.95);
+    if (block.hp <= 0) {
+      spawnConcreteBlockShards(run, block, hit.nearestX, hit.nearestY, aim.shotDirX, aim.shotDirY, 14);
+      block.destroyed = true;
+      block.hiddenTimer = 0;
+    }
+  }
+
+  for (const drone of run.hostileDrones || []) {
+    if (isEntityDisabled(drone) || drone.dead) {
+      continue;
+    }
+    const hit = getBlastRectHit(blastX, blastY, radius, drone);
+    if (!hit) {
+      continue;
+    }
+    const damage = Math.max(1, Number(weaponStats.droneDamage ?? weaponStats.damage ?? 2)) * lerp(0.48, 1.1, hit.falloff);
+    const centerX = drone.x + drone.width * 0.5;
+    const centerY = drone.y + drone.height * 0.5;
+    drone.active = true;
+    drone.hp = Math.max(0, drone.hp - damage);
+    drone.hitFlash = 0.2;
+    pushBlastKnockback(drone, blastX, blastY, 120 + hit.falloff * 260, 60);
+    spawnDamageNumber(run, centerX, centerY - 10, damage, "#87e1ff", "BLAST");
+    spawnDirectedParticles(run, centerX, centerY, 13, "#87e1ff", centerX - blastX, centerY - blastY, 460, 0.85);
+    if (drone.hp === 0) {
+      spawnDamageNumber(run, centerX, centerY - 28, 0, "#f5f8fb", "DOWN");
+      destroyHostileDrone(run, drone);
+    }
+  }
+
+  for (const enemy of run.humanoidEnemies || []) {
+    if (!isHumanoidFaceOffAvailable(enemy) || !isHumanoidInFaceOffScope(enemy)) {
+      continue;
+    }
+    const hit = getBlastRectHit(blastX, blastY, radius, enemy);
+    if (!hit) {
+      continue;
+    }
+    const centerX = enemy.x + enemy.width * 0.5;
+    const centerY = enemy.y + enemy.height * 0.5;
+    if (enemy.state === "knockedDown") {
+      applyKnockedDownRecoilHit(run, enemy, aimContext);
+      spawnDamageNumber(run, centerX, centerY - 16, weaponStats.humanoidDamage ?? 0, "#ffd6ba", "BLAST");
+      continue;
+    }
+
+    const damage = Math.max(1, Number(weaponStats.humanoidDamage ?? 50)) * lerp(0.48, 1.05, hit.falloff);
+    enemy.active = true;
+    enemy.state = enemy.state === "patrol" ? "combat" : enemy.state;
+    enemy.hp = Math.max(0, (enemy.hp ?? enemy.maxHp ?? 100) - damage);
+    enemy.hitFlash = 0.24;
+    enemy.trigger = 0;
+    pushBlastKnockback(enemy, blastX, blastY, 90 + hit.falloff * 210, 72);
+    spawnDamageNumber(run, centerX, centerY - 8, damage, "#ffd6ba", "BLAST");
+    spawnDirectedParticles(run, centerX, centerY, 16, "#ffd6ba", centerX - blastX, centerY - blastY, 430, 0.82);
+    if (enemy.hp <= 0) {
+      knockDownHumanoidEnemy(run, data, enemy);
+      continue;
+    }
+    applyHumanoidStaggerDamage(run, enemy, weaponStats || {}, aimContext);
+  }
 }
 
 function findPlayerBulletHit(run, data, bullet, startX, startY, endX, endY) {
@@ -4791,11 +6690,23 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
 
   if (hit.type === "temporaryBlock") {
     const block = hit.target;
-    block.destroyed = true;
-    block.hiddenTimer = 0;
+    if (isRecoilJumpStage5Block(block)) {
+      block.hitFlash = 0.16;
+      spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "LV5");
+      spawnDirectedParticles(run, hitX, hitY, 7, "#93eaff", -bullet.dirX, -bullet.dirY, 320, 0.7);
+      return;
+    }
+    const damage = Math.max(1, Number(bullet.damage ?? 1));
+    block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
+    block.hp = Math.max(0, Number(block.hp ?? block.maxHp) - damage);
     block.hitFlash = 0.18;
-    spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "OPEN");
-    spawnDirectedParticles(run, hitX, hitY, 16, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
+    spawnDamageNumber(run, hitX, hitY - 12, damage, "#93eaff", block.hp <= 0 ? "OPEN" : null);
+    spawnDirectedParticles(run, hitX, hitY, block.hp <= 0 ? 16 : 8, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
+    if (block.hp <= 0) {
+      spawnConcreteBlockShards(run, block, hitX, hitY, bullet.dirX, bullet.dirY, 13);
+      block.destroyed = true;
+      block.hiddenTimer = 0;
+    }
     return;
   }
 
@@ -4836,7 +6747,7 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
       return;
     }
 
-    const baseDamage = bullet.humanoidDamage ?? 50;
+    const baseDamage = getHumanoidBulletDamage(run, bullet, enemy);
     const headshotMultiplier = bullet.weaponStats?.headshotMultiplier ?? 2;
     const damage = critical ? baseDamage * headshotMultiplier : baseDamage;
     const damageColor = critical ? "#ff334f" : "#ffd6ba";
@@ -4873,18 +6784,19 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
   }
 }
 
-function updateFocusState(run, state, dt) {
+function updateFocusState(run, data, state, dt) {
   const player = run.player;
   run.focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
   run.focus = clamp(Number(run.focus ?? run.focusMax), 0, run.focusMax);
   run.focusDepleted = Boolean(run.focusDepleted);
-  if (run.focusDepleted && run.focus >= run.focusMax * FOCUS_REENTRY_RATIO) {
-    run.focusDepleted = false;
-  }
+  refreshHeatManagementLock(run);
 
+  const recoilJumpChargeRequested = shouldChargeRecoilJump(run, data, state);
   const requested =
     BULLET_TIME_KEYS.some((key) => isPressed(state, key)) ||
-    Boolean(state.mouse?.secondaryDown && canAimWeapon(player));
+    recoilJumpChargeRequested ||
+    (!useLegacyControls(state) && FOCUS_KEYS.some((key) => isPressed(state, key))) ||
+    Boolean(useLegacyControls(state) && state.mouse?.secondaryDown && canAimWeapon(player));
   const wasActive = Boolean(run.focusActive);
   const canStart = (
     !run.focusDepleted &&
@@ -4893,13 +6805,54 @@ function updateFocusState(run, state, dt) {
   const active = Boolean(requested && canStart);
 
   if (active) {
-    run.focus = Math.max(0, run.focus - FOCUS_DRAIN_PER_SECOND * dt);
+    const focusBefore = run.focus;
+    const focusDrainPerSecond = FOCUS_DRAIN_PER_SECOND * (
+      recoilJumpChargeRequested
+        ? RECOIL_JUMP_FOCUS_DRAIN_MULTIPLIER * getRecoilJumpChargeDrainMultiplier(run, player)
+        : 1
+    );
+    run.focus = Math.max(0, run.focus - focusDrainPerSecond * dt);
+    if (recoilJumpChargeRequested) {
+      if (!player.recoilJumpChargeActive) {
+        const clearedPreviousRecoilJump = clearRecoilJumpForce(player);
+        if (clearedPreviousRecoilJump) {
+          const context = getSelectedArmContext(run, data);
+          if (context.stats.type === "shotgun") {
+            context.arm.fireCooldownTimer = 0;
+            player.recoilShotCooldownTimer = 0;
+          }
+        }
+        const firstInputCharge = getRecoilJumpChargeStageThreshold(run, 1)
+          * RECOIL_JUMP_INPUT_START_STEP_RATIO;
+        player.recoilJumpChargeFocusSpent = firstInputCharge;
+        updateRecoilJumpLastDirection(player, state, true);
+      }
+      player.recoilJumpChargeActive = true;
+      updateRecoilJumpLastDirection(player, state);
+      player.recoilJumpChargeFocusSpent = clamp(
+        (player.recoilJumpChargeFocusSpent ?? 0) + Math.max(0, focusBefore - run.focus),
+        0,
+        getRecoilJumpEffectiveFocusMax(run)
+      );
+      player.recoilJumpChargeMultiplier = getRecoilJumpChargeMultiplier(run, player);
+      const chargeStep = getRecoilJumpChargeStep(run, player);
+      if (
+        chargeStep > (player.recoilJumpChargeEffectStep ?? 0) &&
+        player.recoilJumpChargeMultiplier >= RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER
+      ) {
+        spawnRecoilJumpChargeEffect(run, player, chargeStep);
+      }
+      player.recoilJumpChargeEffectStep = Math.max(player.recoilJumpChargeEffectStep ?? 0, chargeStep);
+    }
     if (run.focus <= 0) {
-      run.focus = 0;
-      run.focusDepleted = true;
+      triggerHeatManagementFailure(run, player);
     }
   } else {
     run.focus = Math.min(run.focusMax, run.focus + FOCUS_RECOVER_PER_SECOND * dt);
+    refreshHeatManagementLock(run);
+    if (!recoilJumpChargeRequested || !active) {
+      clearRecoilJumpChargeState(player);
+    }
   }
 
   run.focusActive = Boolean(active && run.focus > 0);
@@ -5174,7 +7127,9 @@ function updateRecoilAim(run, data, state, dt) {
   ensureWeaponLoadoutState(run, data);
 
   const origin = getRecoilShotOrigin(player);
-  const target = getMouseWorld(state, run);
+  const target = useLegacyControls(state)
+    ? getMouseWorld(state, run)
+    : getKeyboardAimWorldTarget(state, run, origin, player);
   let dx = target.x - origin.x;
   let dy = target.y - origin.y;
   const length = Math.hypot(dx, dy);
@@ -5187,7 +7142,10 @@ function updateRecoilAim(run, data, state, dt) {
   const shotDirY = dy / safeLength;
   const recoilDirX = -shotDirX;
   const recoilDirY = -shotDirY;
-  const aiming = Boolean(state.mouse?.secondaryDown && canAimWeapon(player));
+  const aiming = Boolean((
+    (!useLegacyControls(state) && FOCUS_KEYS.some((key) => isPressed(state, key))) ||
+    (useLegacyControls(state) && state.mouse?.secondaryDown)
+  ) && canAimWeapon(player));
   const active = Boolean(run.focusActive);
   const edgePan = getAimCameraEdgePan(state.mouse);
   const aimFacing = Math.abs(shotDirX) > 0.08
@@ -5235,24 +7193,25 @@ function updateRecoilAim(run, data, state, dt) {
   };
 }
 
-function performRecoilShot(player, run, data, config, state = null) {
-  if (isMeleeSlotSelected(run, data)) {
+function performRecoilShot(player, run, data, config, state = null, options = {}) {
+  const aim = options.aimOverride || run.recoilAim;
+  if (!options.contextOverride && isMeleeSlotSelected(run, data)) {
     if (state) {
       pushInputTrace(state, "shotBlock:melee", {});
     }
     return false;
   }
-  if (!run.recoilAim || !canFireWeaponPose(player)) {
+  if (!aim || !canFireWeaponPose(player)) {
     if (state) {
       pushInputTrace(state, "shotBlock:aim", {
-        hasAim: Number(Boolean(run.recoilAim)),
+        hasAim: Number(Boolean(aim)),
         canAim: Number(canFireWeaponPose(player)),
       });
     }
     return false;
   }
 
-  const context = getSelectedArmContext(run, data);
+  const context = options.contextOverride || getSelectedArmContext(run, data);
   if (!context.stats.equipped) {
     if (state) {
       pushInputTrace(state, "shotBlock:empty", { side: context.side });
@@ -5260,22 +7219,10 @@ function performRecoilShot(player, run, data, config, state = null) {
     pushNotice(run, "No weapon equipped", 1.1);
     return false;
   }
-  if ((context.arm.magazine ?? 0) <= 0) {
-    if (state) {
-      pushInputTrace(state, "shotBlock:mag", { mag: context.arm.magazine ?? 0 });
-    }
-    startReloadSelectedArm(run, data);
-    spawnParticles(run, run.recoilAim.originX, run.recoilAim.originY, 3, "#d5e7ef");
+  if (options.requireWeaponType && context.stats.type !== options.requireWeaponType) {
     return false;
   }
-  if ((context.arm.reloadTimer ?? 0) > 0) {
-    if (state) {
-      pushInputTrace(state, "shotBlock:reload", { reload: (context.arm.reloadTimer ?? 0).toFixed(2) });
-    }
-    pushNotice(run, `${context.stats.label} reloading`, 1.1);
-    return false;
-  }
-  const airActionCost = player.onGround ? 0 : context.stats.airActionCost;
+  const recoilJumpShot = Boolean(player.recoilJumpChargePendingShot);
   if (!canFireWeaponPose(player) || (context.arm.fireCooldownTimer ?? 0) > 0) {
     if (state) {
       pushInputTrace(state, "shotBlock:cool", {
@@ -5285,23 +7232,22 @@ function performRecoilShot(player, run, data, config, state = null) {
     }
     return false;
   }
-  if ((player.recoilShotCharges ?? 0) < airActionCost) {
+  if (!recoilJumpShot && !hasWeaponHeat(run, context)) {
     if (state) {
-      pushInputTrace(state, "shotBlock:charge", {
-        charges: player.recoilShotCharges ?? 0,
-        cost: airActionCost,
+      pushInputTrace(state, "shotBlock:heat", {
+        heat: Math.round(run.focus ?? run.focusMax ?? FOCUS_MAX),
+        cost: getWeaponHeatCost(context),
       });
     }
-    pushNotice(run, "No air action charge.", 1.1);
+    pushNotice(run, "Heat too low.", 1.1);
     return false;
   }
 
-  const aim = run.recoilAim;
   if (state) {
     pushInputTrace(state, "shotGo", {
       aim: Number(Boolean(aim.aiming)),
       focus: Number(Boolean(run.focusActive)),
-      mag: context.arm.magazine ?? 0,
+      heat: Math.round(run.focus ?? run.focusMax ?? FOCUS_MAX),
       cd: (context.arm.fireCooldownTimer ?? 0).toFixed(2),
     });
   }
@@ -5309,20 +7255,39 @@ function performRecoilShot(player, run, data, config, state = null) {
   const bodyEffects = getPlayerBodyCombatEffects(run, context.side);
   const spreadMultiplier = (aimed ? 0.65 : 2.65) * (run.focusActive ? 0.75 : 1) * bodyEffects.spreadMultiplier;
   const spread = (context.stats.spread ?? 0) * spreadMultiplier;
+  const recoilX = aim.recoilDirX;
+  const recoilY = aim.recoilDirY;
   if (spread > 0.001) {
     const shotAngle = Math.atan2(aim.shotDirY, aim.shotDirX) + (Math.random() - 0.5) * spread;
     aim.shotDirX = Math.cos(shotAngle);
     aim.shotDirY = Math.sin(shotAngle);
-    aim.recoilDirX = -aim.shotDirX;
-    aim.recoilDirY = -aim.shotDirY;
   }
-  const force = context.stats.recoil ?? config.recoilShotForce ?? 840;
-  const maxHorizontal = config.recoilShotMaxHorizontalSpeed ?? 1180;
-  const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180);
-  const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760);
-  const recoilX = aim.recoilDirX;
-  const recoilY = aim.recoilDirY;
   const firedAirborne = !player.onGround;
+  const pendingChargeMultiplier = Math.max(1, Number(player.recoilJumpChargePendingMultiplier ?? 1));
+  player.recoilJumpChargePendingMultiplier = 1;
+  const firstStageMultiplier = lerp(1, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER, 1 / RECOIL_JUMP_CHARGE_STEPS);
+  const maxStageForceMultiplier = RECOIL_JUMP_CHARGE_MAX_MULTIPLIER * RECOIL_JUMP_FORCE_MULTIPLIER;
+  const minStageForceMultiplier = firstStageMultiplier
+    * RECOIL_JUMP_FORCE_MULTIPLIER
+    * RECOIL_JUMP_MIN_STAGE_FORCE_RATIO;
+  const chargeStageProgress = clamp(
+    (pendingChargeMultiplier - firstStageMultiplier) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - firstStageMultiplier),
+    0,
+    1
+  );
+  const recoilChargeMultiplier = pendingChargeMultiplier > 1
+    ? lerp(minStageForceMultiplier, maxStageForceMultiplier, chargeStageProgress)
+    : 1;
+  const force = (context.stats.recoil ?? config.recoilShotForce ?? 840)
+    * recoilChargeMultiplier
+    * (1 + (firedAirborne ? getVerticalMomentumBoost(player, config, "verticalMomentumRecoilBoost", 0.14) : 0));
+  const maxHorizontal = (config.recoilShotMaxHorizontalSpeed ?? 1180) * recoilChargeMultiplier;
+  const maxUp = Math.abs(config.recoilShotMaxUpSpeed ?? 1180) * recoilChargeMultiplier;
+  const maxFall = Math.abs(config.recoilShotMaxFallSpeed ?? 760) * recoilChargeMultiplier;
+  const stackSpeedMultiplier = Math.max(1, Number(config.recoilShotStackSpeedMultiplier ?? 3));
+  const stackMaxHorizontal = maxHorizontal * stackSpeedMultiplier;
+  const stackMaxUp = maxUp * stackSpeedMultiplier;
+  const stackMaxFall = maxFall * stackSpeedMultiplier;
   const verticalPoseThreshold = config.recoilAimVerticalPoseThreshold ?? 0.45;
   const shotFacing = Math.abs(aim.shotDirX) > 0.08
     ? Math.sign(aim.shotDirX)
@@ -5336,18 +7301,24 @@ function performRecoilShot(player, run, data, config, state = null) {
   clearBraceHold(player);
   clearWallRun(player);
   clearHover(player);
-  context.arm.magazine = Math.max(0, Math.floor(context.arm.magazine ?? 0) - 1);
-  context.arm.fireCooldownTimer = context.stats.fireCooldown * bodyEffects.fireCooldownMultiplier;
-  if (context.arm.magazine <= 0) {
-    startReloadSelectedArm(run, data);
+  if (!recoilJumpShot) {
+    spendWeaponHeat(run, context, firedAirborne ? 1.12 : 1);
   }
-  player.recoilShotCharges = Math.max(0, player.recoilShotCharges - (firedAirborne ? airActionCost : 0));
-  player.recoilShotCooldownTimer = Math.max(context.arm.fireCooldownTimer ?? 0, context.arm.reloadTimer ?? 0);
+  context.arm.magazine = context.stats.magazineSize;
+  context.arm.reloadTimer = 0;
+  context.arm.reloadDuration = 0;
+  context.arm.fireCooldownTimer = context.stats.fireCooldown * bodyEffects.fireCooldownMultiplier;
+  player.recoilShotCooldownTimer = Math.max(context.arm.fireCooldownTimer ?? 0, 0);
   player.recoilShotTimer = Math.max(0.04, (config.recoilAirShotPoseMs ?? 160) / 1000);
   player.recoilShotActive = true;
   player.recoilShotAirborne = firedAirborne;
   player.recoilShotFacing = shotFacing;
   player.recoilShotPitch = shotPitch;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargeEffectStep = 0;
+  player.recoilJumpChargePendingShot = false;
   if (firedAirborne) {
     const spinLoopCount = Math.max(1, Math.floor(config.recoilSpinLoopCount ?? 1));
     player.recoilSpinDuration = ((config.recoilSpinDurationMs ?? 220) / 1000) * spinLoopCount;
@@ -5358,11 +7329,18 @@ function performRecoilShot(player, run, data, config, state = null) {
   } else {
     clearRecoilSpin(player);
   }
-  player.recoilCameraTimer = (config.recoilShotCameraHoldMs ?? 240) / 1000;
+  const visualChargeLevel = pendingChargeMultiplier > 1
+    ? clamp((pendingChargeMultiplier - 1) / Math.max(0.001, RECOIL_JUMP_CHARGE_MAX_MULTIPLIER - 1), 0.2, 1)
+    : 0;
+  player.recoilCameraTimer = Math.max(
+    (config.recoilShotCameraHoldMs ?? 240) / 1000,
+    lerp(RECOIL_FLIGHT_CAMERA_MIN_SECONDS, RECOIL_FLIGHT_CAMERA_MAX_SECONDS, visualChargeLevel),
+  );
+  player.recoilCameraReturning = false;
   player.recoilCameraDirX = recoilX;
   player.recoilCameraDirY = recoilY;
-  player.vx = clamp(player.vx + recoilX * force, -maxHorizontal, maxHorizontal);
-  player.vy = clamp(player.vy + recoilY * force, -maxUp, maxFall);
+  player.vx = clamp(player.vx + recoilX * force, -stackMaxHorizontal, stackMaxHorizontal);
+  player.vy = clamp(player.vy + recoilY * force, -stackMaxUp, stackMaxFall);
   player.onGround = false;
   player.coyoteTimer = 0;
   player.jumpBufferTimer = 0;
@@ -5378,6 +7356,9 @@ function performRecoilShot(player, run, data, config, state = null) {
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.canInteract = false;
+  if (firedAirborne && Math.abs(recoilY) > 0.2) {
+    grantVerticalMomentum(player, run, config, 0.18, "recoil");
+  }
 
   run.recoilFx.push({
     x: aim.originX,
@@ -5393,6 +7374,7 @@ function performRecoilShot(player, run, data, config, state = null) {
     recoil: context.stats.recoil * bodyEffects.recoilKickMultiplier,
   }, aim);
   spawnPlayerBullet(run, context.stats, aim);
+  spawnRecoilBlast(run, data, context.stats, aim, recoilChargeMultiplier, visualChargeLevel);
   spawnWeaponModuleEffects(run, data, aim, context.stats);
   pushAfterimage(run, player);
   for (let index = 0; index < 4; index += 1) {
@@ -5405,13 +7387,25 @@ function performRecoilShot(player, run, data, config, state = null) {
   }
   spawnDirectedParticles(run, aim.originX, aim.originY, 12, "#e9f7ff", aim.shotDirX, aim.shotDirY, 520, 0.68);
   spawnDirectedParticles(run, aim.originX, aim.originY, 7, "#93eaff", recoilX, recoilY, 260, 0.9);
+  if (recoilChargeMultiplier >= RECOIL_JUMP_CHARGE_EFFECT_MIN_MULTIPLIER) {
+    const chargeProgress = chargeStageProgress;
+    spawnDirectedParticles(run, aim.originX, aim.originY, 8 + Math.round(chargeProgress * 14), "#f5fbff", recoilX, recoilY, 520 + chargeProgress * 420, 1.05);
+    spawnDirectedParticles(run, aim.originX, aim.originY, 5 + Math.round(chargeProgress * 8), "#62d6ff", aim.shotDirX, aim.shotDirY, 640 + chargeProgress * 360, 0.72);
+  }
   pushNotice(run, `${context.stats.label} fired`, 1.15);
-  run.recoilAim.active = Boolean(run.focusActive);
+  if (options.aimOverride) {
+    run.recoilAim = {
+      ...aim,
+      active: Boolean(run.focusActive),
+    };
+  } else {
+    run.recoilAim.active = Boolean(run.focusActive);
+  }
   player.recoilFocusActive = Boolean(run.focusActive);
   return true;
 }
 
-function startDash(player, run, config, direction) {
+function startAirDashHover(player, run, config) {
   clearBraceHold(player);
   clearWallRun(player);
   clearSlide(player);
@@ -5420,9 +7414,66 @@ function startDash(player, run, config, direction) {
   syncDashCapacity(player, config);
   player.dashCharges = Math.max(0, player.dashCharges - 1);
   player.dashAvailable = false;
-  player.dashDirection = direction;
+  player.dashCooldownTimer = config.dashCooldownMs / 1000;
+  player.airDashHoverTimer = AIR_DASH_HOVER_SECONDS;
+  player.airDashDirectionGraceTimer = 0;
+  player.airDashDirectionPending = false;
+  player.airDashPendingDirX = 0;
+  player.airDashPendingDirY = 0;
+  player.airDashHoverConsumed = true;
+  player.hoverActive = true;
+  player.hoverBoostActive = true;
+  player.hoverParticleTimer = 0;
+  player.jumpBufferTimer = 0;
+  player.coyoteTimer = 0;
+  player.onGround = false;
+  player.canInteract = false;
+  player.vy = Math.min(player.vy, -AIR_DASH_HOVER_RISE_SPEED);
+  spawnDirectedParticles(
+    run,
+    player.x + player.width * 0.5,
+    player.y + player.height + 4,
+    10,
+    "#93eaff",
+    0,
+    1,
+    280,
+    0.5
+  );
+}
+
+function getDashDurationSeconds(config) {
+  return Math.max(0.001, (config.dashDurationMs ?? 0) / 1000);
+}
+
+function getDashSpeed(config, player) {
+  const duration = getDashDurationSeconds(config);
+  const distance = (config.dashDistance ?? 0) * (player.dashDistanceScale ?? 1);
+  return (distance / duration) * getMomentumSpeedMultiplier(player, config);
+}
+
+function startDash(player, run, config, direction, directionY = 0, distanceScale = 1, consumeDashCharge = true) {
+  clearBraceHold(player);
+  clearWallRun(player);
+  clearSlide(player);
+  clearHover(player);
+  clearAirDashHover(player);
+  clearRecoilSpin(player);
+  const length = Math.max(0.001, Math.hypot(direction, directionY));
+  const dashX = direction / length;
+  const dashY = directionY / length;
+  syncDashCapacity(player, config);
+  if (consumeDashCharge) {
+    player.dashCharges = Math.max(0, player.dashCharges - 1);
+  }
+  player.dashAvailable = false;
+  player.dashDirection = Math.sign(dashX) || player.facing || 1;
+  player.dashVectorX = dashX;
+  player.dashVectorY = dashY;
+  player.dashDistanceScale = Math.max(0.05, Number(distanceScale) || 1);
+  player.dashStartedAirborne = !player.onGround;
   player.dashWindupTimer = (config.dashWindupMs ?? 0) / 1000;
-  player.dashTimer = player.dashWindupTimer > 0 ? 0 : config.dashDurationMs / 1000;
+  player.dashTimer = player.dashWindupTimer > 0 ? 0 : getDashDurationSeconds(config);
   player.dashCooldownTimer = config.dashCooldownMs / 1000;
   player.dashCarryTimer = 0;
   player.dashCarrySpeed = 0;
@@ -5430,9 +7481,10 @@ function startDash(player, run, config, direction) {
   player.retainedSpeed = 0;
   player.wallJumpLockTimer = 0;
   player.wallJumpLockDirection = 0;
-  player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * direction;
-  player.vy = 0;
-  player.facing = direction;
+  const speed = getDashSpeed(config, player);
+  player.vx = speed * dashX;
+  player.vy = speed * dashY;
+  player.facing = Math.sign(dashX) || player.facing || 1;
   player.canInteract = false;
   player.dashTrailTimer = 0;
   pushAfterimage(run, player);
@@ -5442,9 +7494,29 @@ function startDash(player, run, config, direction) {
 
 function startDashBurst(player, config) {
   player.dashWindupTimer = 0;
-  player.dashTimer = config.dashDurationMs / 1000;
-  player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * player.dashDirection;
-  player.vy = 0;
+  player.dashTimer = getDashDurationSeconds(config);
+  const speed = getDashSpeed(config, player);
+  player.vx = speed * (player.dashVectorX ?? player.dashDirection ?? 1);
+  player.vy = speed * (player.dashVectorY ?? 0);
+}
+
+function retainAirDashInertia(value) {
+  return Number.isFinite(value) ? value * AIR_DASH_INERTIA_RETAIN_RATIO : 0;
+}
+
+function stopAirDashOnTerrainCollision(player) {
+  player.dashTimer = 0;
+  player.dashWindupTimer = 0;
+  player.vx = retainAirDashInertia(player.vx);
+  player.vy = retainAirDashInertia(player.vy);
+  player.dashCarrySpeed = retainAirDashInertia(player.dashCarrySpeed);
+  player.retainedSpeed = retainAirDashInertia(player.retainedSpeed);
+  player.sprintJumpCarrySpeed = retainAirDashInertia(player.sprintJumpCarrySpeed);
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
+  player.dashStartedAirborne = false;
 }
 
 function getStopInertiaDecel(player, config, baseDecel) {
@@ -5455,12 +7527,36 @@ function getStopInertiaDecel(player, config, baseDecel) {
   return baseDecel * lerp(initialMultiplier, maxMultiplier, progress * progress);
 }
 
-function armDashCarry(player, config, speed) {
-  if (!Number.isFinite(speed) || speed === 0) {
+function armDashCarry(player, config, speed, dashDirection) {
+  const carryDirection = Math.sign(speed);
+  const expectedDirection = Math.sign(dashDirection);
+  if (!Number.isFinite(speed) || speed === 0 || (expectedDirection !== 0 && carryDirection !== expectedDirection)) {
+    player.dashCarryTimer = 0;
+    player.dashCarrySpeed = 0;
     return;
   }
   player.dashCarryTimer = (config.dashCarryWindowMs ?? 0) / 1000;
   player.dashCarrySpeed = speed;
+}
+
+function armSprintAfterAirDash(player, config, moveAxis = 0) {
+  const dashDirection = Math.sign(player.dashVectorX ?? player.dashDirection ?? 0);
+  if (dashDirection === 0) {
+    return;
+  }
+  const heldDirection = Math.sign(moveAxis);
+  const sprintDirection = heldDirection !== 0 && heldDirection === dashDirection
+    ? heldDirection
+    : dashDirection;
+  const sprintSpeed = Math.max(config.runSpeed ?? 0, config.sprintSpeed ?? config.runSpeed ?? 0);
+  player.sprintPrimed = true;
+  player.sprintDirection = sprintDirection;
+  player.sprintCharge = 1;
+  player.sprintActive = true;
+  player.facing = sprintDirection;
+  if (sprintSpeed > 0 && Math.abs(player.vx) < sprintSpeed) {
+    player.vx = sprintSpeed * sprintDirection;
+  }
 }
 
 function armSpeedRetention(player, config, speed) {
@@ -5512,16 +7608,110 @@ function applySprintJumpCarry(player) {
   return true;
 }
 
-function performJump(player, run, velocity) {
+function getVerticalMomentumRatio(player) {
+  return clamp(Number(player.verticalMomentum ?? 0), 0, 1);
+}
+
+function getVerticalMomentumStage(value) {
+  if (value >= 0.7) {
+    return 3;
+  }
+  if (value >= 0.35) {
+    return 2;
+  }
+  if (value > 0.04) {
+    return 1;
+  }
+  return 0;
+}
+
+function getVerticalMomentumBoost(player, config, field, fallback = 0) {
+  return getVerticalMomentumRatio(player) * Math.max(0, Number(config[field] ?? fallback));
+}
+
+function getMomentumSpeedMultiplier(player, config) {
+  const speedBoost = Math.max(0, Number(config.verticalMomentumSpeedBoost ?? 0.22));
+  return 1 + getVerticalMomentumRatio(player) * speedBoost;
+}
+
+function getMomentumSpeedBuildRatio(player, config) {
+  const runSpeed = Math.max(1, Number(config.runSpeed ?? 300));
+  const sprintSpeed = Math.max(runSpeed + 1, Number(config.sprintSpeed ?? runSpeed * 1.7));
+  const speed = Math.hypot(player.vx ?? 0, player.vy ?? 0);
+  const startSpeed = runSpeed * 0.8;
+  const fullSpeed = Math.max(startSpeed + 1, sprintSpeed * 1.2);
+  return clamp((speed - startSpeed) / (fullSpeed - startSpeed), 0, 1);
+}
+
+function shouldBuildMomentumFromSpeed(player) {
+  return !player.onGround
+    || player.dashTimer > 0
+    || player.slideTimer > 0
+    || player.wallRunActive
+    || player.recoilShotActive
+    || player.sprintCharge > 0.15
+    || Math.abs(player.vx ?? 0) > 1;
+}
+
+function getBoostedUpVelocity(player, config, velocity, field, fallback = 0) {
+  const sign = Math.sign(velocity) || -1;
+  const magnitude = Math.abs(velocity) * (1 + getVerticalMomentumBoost(player, config, field, fallback));
+  return sign < 0 ? -magnitude : magnitude;
+}
+
+function grantVerticalMomentum(player, run, config, amount, action) {
+  const gain = Math.max(0, Number(amount) || 0);
+  if (gain <= 0) {
+    return;
+  }
+  const previousStage = getVerticalMomentumStage(player.verticalMomentum ?? 0);
+  player.verticalMomentum = clamp((player.verticalMomentum ?? 0) + gain, 0, 1);
+  player.verticalMomentumTimer = Math.max(
+    player.verticalMomentumTimer ?? 0,
+    Math.max(0.05, (config.verticalMomentumComboMs ?? 900) / 1000),
+  );
+  player.verticalMomentumStage = getVerticalMomentumStage(player.verticalMomentum);
+  player.verticalMomentumFlashTimer = 0.18;
+  player.verticalMomentumLastAction = action;
+  player.verticalMomentumBoostActive = true;
+  if (player.verticalMomentumStage > previousStage && player.verticalMomentumStage >= 2) {
+    spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 4 + player.verticalMomentumStage * 2, "#93eaff");
+  }
+}
+
+function updateVerticalMomentum(player, config, dt) {
+  player.verticalMomentumFlashTimer = Math.max(0, (player.verticalMomentumFlashTimer ?? 0) - dt);
+  player.verticalMomentumBoostActive = false;
+  player.verticalMomentumTimer = Math.max(0, (player.verticalMomentumTimer ?? 0) - dt);
+  const speedBuildRatio = shouldBuildMomentumFromSpeed(player)
+    ? getMomentumSpeedBuildRatio(player, config)
+    : 0;
+  if (speedBuildRatio > 0) {
+    const speedBuild = Math.max(0, Number(config.verticalMomentumSpeedBuild ?? 0.24));
+    player.verticalMomentum = clamp((player.verticalMomentum ?? 0) + speedBuildRatio * speedBuild * dt, 0, 1);
+    player.verticalMomentumTimer = Math.max(player.verticalMomentumTimer ?? 0, 0.18);
+  }
+  const decayMs = player.onGround
+    ? (config.verticalMomentumGroundDecayMs ?? Math.min(config.verticalMomentumDecayMs ?? 1150, 520))
+    : (config.verticalMomentumDecayMs ?? 1150);
+  if (player.verticalMomentumTimer <= 0) {
+    player.verticalMomentum = Math.max(0, (player.verticalMomentum ?? 0) - dt / Math.max(0.05, decayMs / 1000));
+  }
+  player.verticalMomentumStage = getVerticalMomentumStage(player.verticalMomentum ?? 0);
+}
+
+function performJump(player, run, velocity, config = null) {
   clearBraceHold(player);
   clearWallRun(player);
   clearSlide(player);
   clearHover(player);
   clearRecoilSpin(player);
-  player.vy = velocity;
+  const movementConfig = config || {};
+  player.vy = getBoostedUpVelocity(player, movementConfig, velocity, "verticalMomentumJumpBoost", 0.1);
   player.onGround = false;
   player.jumpBufferTimer = 0;
   player.coyoteTimer = 0;
+  grantVerticalMomentum(player, run, movementConfig, 0.12, "jump");
   spawnParticles(run, player.x + player.width / 2, player.y + player.height, 6, "#d8ebff");
   playGameSfx("jump", { cooldownMs: 60 });
 }
@@ -5535,18 +7725,20 @@ function performWallJump(player, run, config, wallDirection) {
   const direction = -wallDirection || -player.facing;
   player.wallJumpLockDirection = direction;
   player.wallJumpLockTimer = config.wallJumpLockMs / 1000;
-  player.vx = direction * config.wallJumpHorizontal;
-  player.vy = -config.wallJumpVertical;
+  const wallBoost = 1 + getVerticalMomentumBoost(player, config, "verticalMomentumWallBoost", 0.16);
+  player.vx = direction * config.wallJumpHorizontal * wallBoost;
+  player.vy = -config.wallJumpVertical * wallBoost;
   player.facing = direction;
   player.jumpBufferTimer = 0;
   player.onGround = false;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  grantVerticalMomentum(player, run, config, 0.22, "wallJump");
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#cde9ff");
   playGameSfx("wallJump", { cooldownMs: 60 });
 }
 
-function enterBraceHold(player, run, config, wall, moveAxis) {
+function enterBraceHold(player, run, data, config, wall, moveAxis) {
   clearWallRun(player);
   clearSlide(player);
   clearHover(player);
@@ -5582,6 +7774,7 @@ function enterBraceHold(player, run, config, wall, moveAxis) {
   player.braceHoldActive = true;
   refillDashFromWall(player, config);
   refillRecoilShot(player, config);
+  resetShotgunFireCooldown(run, data);
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 6, "#8fe1ff");
   playGameSfx("wallJump", { cooldownMs: 80 });
   pushNotice(run, "踰?怨좎젙");
@@ -5610,7 +7803,7 @@ function updateBraceHold(player, data, config, wall, dt, moveAxis) {
   player.braceHoldActive = true;
 }
 
-function enterWallRun(player, run, config, wallDirection) {
+function enterWallRun(player, run, data, config, wallDirection) {
   clearBraceHold(player);
   clearSlide(player);
   clearHover(player);
@@ -5626,25 +7819,28 @@ function enterWallRun(player, run, config, wallDirection) {
   player.onGround = false;
   refillDashFromWall(player, config);
   refillRecoilShot(player, config);
+  resetShotgunFireCooldown(run, data);
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.45, 4, "#b8f0ff");
   playGameSfx("wallJump", { cooldownMs: 90 });
 }
 
 function updateWallRun(player, config, dt) {
+  const wallBoost = 1 + getVerticalMomentumBoost(player, config, "verticalMomentumWallBoost", 0.16);
   player.wallRunSpeed = Math.min(
-    (config.wallRunMaxSpeed ?? 0),
+    (config.wallRunMaxSpeed ?? 0) * wallBoost,
     player.wallRunSpeed + (config.wallRunAccel ?? 0) * dt
   );
   player.vy = -player.wallRunSpeed;
-  player.vx = player.wallRunDirection * Math.max((config.runSpeed ?? 0) * 0.22, 88);
+  player.vx = player.wallRunDirection * Math.max((config.runSpeed ?? 0) * 0.22 * wallBoost, 88);
   player.onGround = false;
 }
 
 function launchFromWallRun(player, run, config) {
   const direction = player.wallRunDirection || player.wallDirection || 0;
   const exitDirection = direction === 0 ? player.facing || 1 : -direction;
-  player.vx = exitDirection * Math.max(Math.abs(player.vx), config.wallRunExitHorizontal ?? 0);
-  player.vy = -Math.max(player.wallRunSpeed, config.wallRunExitMinBoost ?? 0);
+  const wallBoost = 1 + getVerticalMomentumBoost(player, config, "verticalMomentumWallBoost", 0.16);
+  player.vx = exitDirection * Math.max(Math.abs(player.vx), (config.wallRunExitHorizontal ?? 0) * wallBoost);
+  player.vy = -Math.max(player.wallRunSpeed, (config.wallRunExitMinBoost ?? 0) * wallBoost);
   player.facing = exitDirection;
   player.jumpBufferTimer = 0;
   player.wallGraceTimer = 0;
@@ -5652,6 +7848,7 @@ function launchFromWallRun(player, run, config) {
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.wallRunBoostActive = true;
+  grantVerticalMomentum(player, run, config, 0.2, "wallRun");
   spawnParticles(run, player.x + player.width * 0.5, player.y + player.height * 0.35, 10, "#b8f0ff");
   playGameSfx("braceVault", { cooldownMs: 80 });
   pushNotice(run, "踰???諛쒖궗");
@@ -5664,6 +7861,11 @@ function startHover(player, run, config) {
   player.hoverParticleTimer = 0;
   player.jumpBufferTimer = 0;
   player.coyoteTimer = 0;
+  const hoverLift = getVerticalMomentumRatio(player) * Math.max(0, config.verticalMomentumHoverLift ?? 0);
+  if (hoverLift > 0) {
+    player.vy = Math.min(player.vy, -hoverLift);
+  }
+  grantVerticalMomentum(player, run, config, 0.1, "hover");
   if (player.vy > (config.hoverStartMaxFallSpeed ?? config.hoverFallSpeed ?? 180)) {
     player.vy = config.hoverStartMaxFallSpeed ?? config.hoverFallSpeed ?? 180;
   }
@@ -5696,6 +7898,7 @@ function performBraceVault(player, run, config, wall, moveAxis) {
   player.wallSlideGraceDirection = 0;
   player.braceReleaseTimer = 0.16;
   player.braceActive = true;
+  grantVerticalMomentum(player, run, config, 0.18, "brace");
   spawnParticles(run, wall.x + wall.width * 0.5, player.y + player.height * 0.45, 10, "#8fe1ff");
   playGameSfx("braceVault", { cooldownMs: 80 });
   pushNotice(run, "踰?諛섎룞");
@@ -5785,26 +7988,25 @@ function updatePlayer(run, data, state, dt, input) {
   const meleeToolActive = Boolean(input?.meleeToolActive);
   const interactionPressed = Boolean(input?.interactionPressed);
   const recoilShotPressed = Boolean(input?.recoilShotPressed);
-  const moveLeft = isEitherPressed(state, MOVE_LEFT_KEYS);
-  const moveRight = isEitherPressed(state, MOVE_RIGHT_KEYS);
-  const moveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
-  const crouchHeld = isEitherPressed(state, CROUCH_KEYS);
-  const crouchPressed = consumeEitherPress(state, CROUCH_KEYS);
-  const jumpPressed = consumeEitherPress(state, JUMP_KEYS);
-  const jumpHeld = isEitherPressed(state, JUMP_KEYS);
-  const wReleased = consumeRelease(state, "KeyW");
+  const jumpKeys = getJumpKeys(state);
+  const moveLeft = isEitherPressed(state, getMoveLeftKeys(state));
+  const moveRight = isEitherPressed(state, getMoveRightKeys(state));
+  const rawMoveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
+  const airDashDirection = useLegacyControls(state) ? null : getKeyboardDirectionPressedVector(state);
+  let moveAxis = rawMoveAxis;
+  const crouchHeld = isEitherPressed(state, getCrouchKeys(state));
+  const crouchPressed = consumeEitherPress(state, getCrouchKeys(state));
+  const jumpPressed = consumeEitherPress(state, jumpKeys);
+  const jumpHeld = isEitherPressed(state, jumpKeys);
+  const jumpKeyReleased = consumeEitherRelease(state, jumpKeys);
   const capsDashInput = updateCapsLockDashInput(state, player, dt, moveLeft, moveRight);
-  const dashPressed = consumeEitherPress(state, DASH_KEYS) || capsDashInput.dashPressed;
+  let dashPressed = consumeEitherPress(state, getDashKeys(state)) || capsDashInput.dashPressed;
   const sprintPressed = consumeEitherPress(state, SPRINT_KEYS);
   const sprintHeld = isEitherPressed(state, SPRINT_KEYS) || capsDashInput.sprintHeld;
   const activeBraceWall = getActiveBraceWall(player, data, run);
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
-  const wasWallSliding = player.wallSliding;
   const wasSprintActive = Boolean(player.sprintActive || player.sprintCharge > 0.55);
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
-  player.noMoveInputTimer = moveAxis === 0
-    ? (player.noMoveInputTimer ?? 0) + dt
-    : 0;
 
   player.dashInvulnerable = config.dashInvulnerable;
   player.slideInvulnerable = config.slideInvulnerable ?? true;
@@ -5815,6 +8017,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (player.attackWindow <= 0) {
     player.attackToolActive = false;
   }
+  player.attackAirHoldTimer = Math.max(0, (player.attackAirHoldTimer ?? 0) - dt);
   player.invulnTimer = Math.max(0, player.invulnTimer - dt);
   player.waterHazardCooldown = Math.max(0, Number(player.waterHazardCooldown || 0) - dt);
   Object.values(ensurePlayerBodyStatus(run)).forEach((part) => {
@@ -5825,11 +8028,18 @@ function updatePlayer(run, data, state, dt, input) {
   player.wallJumpLockTimer = Math.max(0, player.wallJumpLockTimer - dt);
   player.dashCooldownTimer = Math.max(0, player.dashCooldownTimer - dt);
   player.dashCarryTimer = Math.max(0, player.dashCarryTimer - dt);
+  const wasAirDashHovering = (player.airDashHoverTimer ?? 0) > 0;
+  player.airDashHoverTimer = Math.max(0, (player.airDashHoverTimer ?? 0) - dt);
+  player.airDashDirectionGraceTimer = Math.max(0, (player.airDashDirectionGraceTimer ?? 0) - dt);
+  if (wasAirDashHovering && player.airDashHoverTimer === 0) {
+    clearHover(player);
+  }
   player.recoilShotCooldownTimer = Math.max(0, player.recoilShotCooldownTimer - dt);
   player.recoilShotTimer = Math.max(0, player.recoilShotTimer - dt);
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
-  player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
+  updateRecoilCameraTimers(player, dt);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
+  updateVerticalMomentum(player, config, dt);
   decaySlideTimer(player, config, dt);
   player.slideGroundGraceTimer = Math.max(0, (player.slideGroundGraceTimer ?? 0) - dt);
   player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
@@ -5852,11 +8062,24 @@ function updatePlayer(run, data, state, dt, input) {
   player.bufferedLandingJumpActive = false;
   player.wallSlideGraceActive = false;
   player.braceActive = false;
+  player.verticalMomentumBoostActive = player.verticalMomentumFlashTimer > 0;
   player.braceHoldActive = false;
   player.wallRunBoostActive = false;
   player.dashResetActive = false;
   player.hoverBoostActive = Boolean(player.hoverActive && !player.onGround);
   player.recoilShotActive = player.recoilShotTimer > 0;
+  const recoilMovementLocked = Boolean(
+    player.recoilShotActive ||
+    player.recoilSpinTimer > 0 ||
+    player.recoilJumpChargeActive
+  );
+  if (recoilMovementLocked) {
+    moveAxis = 0;
+    dashPressed = false;
+  }
+  player.noMoveInputTimer = moveAxis === 0
+    ? (player.noMoveInputTimer ?? 0) + dt
+    : 0;
 
   syncDashCapacity(player, config);
   syncRecoilShotCapacity(player, config);
@@ -5877,6 +8100,9 @@ function updatePlayer(run, data, state, dt, input) {
   }
   if (player.attackWindow === 0) {
     player.attackHits.clear();
+  }
+  if (player.onGround) {
+    player.attackAirHoldTimer = 0;
   }
 
   if (player.zipLineActive) {
@@ -5918,8 +8144,10 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (
     player.dashCarryTimer > 0 &&
-    moveAxis !== 0 &&
-    Math.sign(moveAxis) !== Math.sign(player.dashCarrySpeed)
+    (
+      (moveAxis !== 0 && Math.sign(moveAxis) !== Math.sign(player.dashCarrySpeed)) ||
+      (Math.abs(player.vx) > EPSILON && Math.sign(player.vx) !== Math.sign(player.dashCarrySpeed))
+    )
   ) {
     player.dashCarryTimer = 0;
     player.dashCarrySpeed = 0;
@@ -5961,9 +8189,19 @@ function updatePlayer(run, data, state, dt, input) {
       moveAxis === 0 ||
       Math.sign(moveAxis) === Math.sign(player.sprintJumpCarrySpeed)
     );
+  const airDashSprintCompatible =
+    player.sprintPrimed &&
+    !player.onGround &&
+    player.height === player.standHeight &&
+    player.sprintCharge > 0 &&
+    moveAxis !== 0 &&
+    (
+      player.sprintDirection === 0 ||
+      player.sprintDirection === moveAxis
+    );
   const preserveAirSprint =
-    (sprintInputHeld || sprintJumpCarryCompatible) &&
-    (player.sprintPrimed || sprintJumpCarryCompatible) &&
+    (sprintInputHeld || sprintJumpCarryCompatible || airDashSprintCompatible) &&
+    (player.sprintPrimed || sprintJumpCarryCompatible || airDashSprintCompatible) &&
     !player.onGround &&
     player.height === player.standHeight &&
     player.sprintCharge > 0 &&
@@ -6030,7 +8268,16 @@ function updatePlayer(run, data, state, dt, input) {
       face: Number(Boolean(run.faceOff?.active)),
     });
     const keepPrimaryHeld = isSelectedWeaponAutomatic(run, data);
-    const firedRecoilShot = performRecoilShot(player, run, data, config, state);
+    const recoilJumpAimOverride = player.recoilJumpChargePendingShot
+      ? getRecoilJumpShotAim(player, run, state)
+      : null;
+    const firedRecoilShot = performRecoilShot(player, run, data, config, state, {
+      aimOverride: recoilJumpAimOverride,
+    });
+    if (!firedRecoilShot) {
+      player.recoilJumpChargePendingMultiplier = 1;
+      player.recoilJumpChargePendingShot = false;
+    }
     if (firedRecoilShot && state.mouse && !keepPrimaryHeld) {
       state.mouse.primaryDown = false;
       state.mouse.primaryJustPressed = false;
@@ -6038,19 +8285,20 @@ function updatePlayer(run, data, state, dt, input) {
   }
 
   const wallJumpSourceDirection =
-    player.wallDirection !== 0
+    player.wallRunActive && player.wallRunDirection !== 0
+      ? player.wallRunDirection
+      : player.wallDirection !== 0
       ? player.wallDirection
       : player.wallGraceTimer > 0
         ? player.wallGraceDirection
         : 0;
-  const holdingWallRunLine =
+  const pressingTowardWall =
     wallJumpSourceDirection !== 0 &&
-    (moveAxis === 0 || moveAxis === wallJumpSourceDirection);
+    moveAxis === wallJumpSourceDirection;
   const wantsWallRun =
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
-    holdingWallRunLine &&
-    jumpHeld &&
+    pressingTowardWall &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0 &&
@@ -6058,8 +8306,52 @@ function updatePlayer(run, data, state, dt, input) {
     !player.braceHolding;
 
   if (
+    (player.airDashHoverTimer ?? 0) > 0 &&
+    !airDashDirection &&
+    Math.hypot(player.airDashPendingDirX || 0, player.airDashPendingDirY || 0) <= 0.001
+  ) {
+    player.airDashDirectionPending = false;
+    player.airDashDirectionGraceTimer = 0;
+  }
+
+  if (
+    (player.airDashHoverTimer ?? 0) > 0 &&
+    player.dashTimer === 0 &&
+    player.dashWindupTimer === 0 &&
+    player.wallJumpLockTimer === 0 &&
+    player.height === player.standHeight
+  ) {
+    if (airDashDirection) {
+      player.airDashPendingDirX = airDashDirection.x;
+      player.airDashPendingDirY = airDashDirection.y;
+    }
+    const pendingDashX = player.airDashPendingDirX || 0;
+    const pendingDashY = player.airDashPendingDirY || 0;
+    const hasPendingAirDashDirection = Math.hypot(pendingDashX, pendingDashY) > 0.001;
+    const airDashDiagonalReady = Math.abs(pendingDashX) > 0.001 && Math.abs(pendingDashY) > 0.001;
+    if (hasPendingAirDashDirection && !player.airDashDirectionPending && !airDashDiagonalReady) {
+      player.airDashDirectionPending = true;
+      player.airDashDirectionGraceTimer = Math.min(
+        AIR_DASH_DIAGONAL_GRACE_SECONDS,
+        player.airDashHoverTimer ?? AIR_DASH_DIAGONAL_GRACE_SECONDS
+      );
+    }
+    if (
+      hasPendingAirDashDirection &&
+      (
+        airDashDiagonalReady ||
+        (player.airDashDirectionPending && (player.airDashDirectionGraceTimer ?? 0) === 0)
+      )
+    ) {
+      const airDashDistanceScale = (getJumpMaxHeight(data, config) * AIR_DASH_DISTANCE_MULTIPLIER) / Math.max(1, Number(config.dashDistance ?? 1));
+      startDash(player, run, config, pendingDashX, pendingDashY, airDashDistanceScale, false);
+    }
+  }
+
+  if (
     dashPressed &&
     !wantsWallRun &&
+    !player.airDashHoverConsumed &&
     player.dashAvailable &&
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0 &&
@@ -6067,9 +8359,17 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallJumpLockTimer === 0 &&
     player.height === player.standHeight
   ) {
-    const direction = moveAxis || player.facing;
-    if (direction !== 0) {
-      startDash(player, run, config, direction);
+    if (!player.onGround) {
+      startAirDashHover(player, run, config);
+      if (airDashDirection) {
+        player.airDashPendingDirX = airDashDirection.x;
+        player.airDashPendingDirY = airDashDirection.y;
+      }
+    } else {
+      const direction = moveAxis || player.facing;
+      if (direction !== 0) {
+        startDash(player, run, config, direction, 0, 1);
+      }
     }
   }
 
@@ -6078,7 +8378,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.vx = 0;
     player.vy = 0;
     player.canInteract = false;
-    player.facing = player.dashDirection || player.facing;
+    player.facing = Math.sign(player.dashVectorX || player.dashDirection || 0) || player.facing;
     player.onGround = false;
     player.wallSliding = false;
     player.wallDirection = 0;
@@ -6093,40 +8393,65 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (player.dashTimer > 0) {
     player.dashTimer = Math.max(0, player.dashTimer - dt);
-    player.vx = (config.dashDistance / (config.dashDurationMs / 1000)) * player.dashDirection;
-    player.vy = 0;
-    player.facing = player.dashDirection;
+    const dashSpeed = getDashSpeed(config, player);
+    player.vx = dashSpeed * (player.dashVectorX ?? player.dashDirection ?? 1);
+    player.vy = dashSpeed * (player.dashVectorY ?? 0);
+    player.facing = Math.sign(player.dashVectorX || player.dashDirection || 0) || player.facing;
     player.canInteract = false;
 
     const contacts = resolvePlayerCollisions(player, data, dt, config, run);
+    if (updateDamageBlockContact(run, data)) {
+      updateMovementVfx(run, data, dt);
+      player.jumpHeldLastFrame = jumpHeld;
+      setMovementState(player);
+      return;
+    }
     const landed = !player.wasOnGround && contacts.onGround;
     player.dashCornerCorrected = contacts.dashCornerCorrected;
-    if (contacts.dashBlocked) {
+    const dashStartedAirborne = Boolean(player.dashStartedAirborne);
+    const airDashHitTerrain = Boolean(
+      dashStartedAirborne &&
+      (contacts.dashBlocked || contacts.hitHead || contacts.onGround)
+    );
+    if (airDashHitTerrain) {
+      stopAirDashOnTerrainCollision(player);
+      armSprintAfterAirDash(player, config, moveAxis);
+      player.onGround = contacts.onGround;
+      player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
+      player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+      player.wallSliding = false;
+      updateMovementVfx(run, data, dt);
+      player.jumpHeldLastFrame = jumpHeld;
+      setMovementState(player);
+      return;
+    } else if (contacts.dashBlocked) {
       player.dashTimer = 0;
     }
     if (landed) {
       refillDashFromGround(player, config);
       refillRecoilShot(player, config);
+      clearAirDashHover(player);
       clearHover(player);
       clearRecoilSpin(player);
       player.coyoteTimer = config.coyoteTimeMs / 1000;
       playGameSfx("land", { intensity: contacts.landingSpeed, cooldownMs: 70 });
+      updatePlayerLastSafeGround(player, data);
     }
     player.onGround = contacts.onGround;
     player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
     player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
     player.wallSliding = false;
-    if (!player.onGround && player.wallDirection !== 0) {
+    if (!airDashHitTerrain && !player.onGround && player.wallDirection !== 0) {
       player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
       player.wallGraceDirection = player.wallDirection;
-    } else if (player.onGround) {
+    } else if (player.onGround || airDashHitTerrain) {
       player.wallGraceTimer = 0;
       player.wallGraceDirection = 0;
       player.wallSlideGraceTimer = 0;
       player.wallSlideGraceDirection = 0;
     }
 
-    if (player.onGround) {
+    if (player.onGround && !dashStartedAirborne) {
       if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
         playGameSfx("slide", { cooldownMs: 140 });
         // Slide startup already resized the player and preserved the incoming speed.
@@ -6141,20 +8466,38 @@ function updatePlayer(run, data, state, dt, input) {
 
     if (player.dashTimer === 0) {
       player.canInteract = true;
+    } else if (player.onGround) {
+      player.crouchBlocked = false;
     }
 
-    if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && player.dashDirection !== 0) {
-      const dashSpeed = (config.dashDistance / (config.dashDurationMs / 1000))
-        * (config.dashCarrySpeedMultiplier ?? 1)
-        * player.dashDirection;
-      armDashCarry(player, config, dashSpeed);
+    const dashCarryDirection = player.dashVectorX ?? player.dashDirection ?? 0;
+    if ((landed || player.dashTimer === 0) && dashStartedAirborne) {
+      player.vx = retainAirDashInertia(player.vx);
+      player.vy = retainAirDashInertia(player.vy);
+      player.dashCarrySpeed = retainAirDashInertia(player.dashCarrySpeed);
+      player.retainedSpeed = retainAirDashInertia(player.retainedSpeed);
+      player.sprintJumpCarrySpeed = retainAirDashInertia(player.sprintJumpCarrySpeed);
+      armSprintAfterAirDash(player, config, moveAxis);
+    } else if ((landed || player.dashTimer === 0) && !contacts.dashBlocked && !airDashHitTerrain && dashCarryDirection !== 0) {
+      const resolvedVelocityDirection = Math.sign(player.vx);
+      const expectedCarryDirection = Math.sign(dashCarryDirection);
+      if (resolvedVelocityDirection === 0 || resolvedVelocityDirection !== expectedCarryDirection) {
+        player.dashCarryTimer = 0;
+        player.dashCarrySpeed = 0;
+      } else {
+        const dashCarrySpeed = player.vx * CELESTE_END_DASH_SPEED_RATIO;
+        armDashCarry(player, config, dashCarrySpeed, dashCarryDirection);
+      }
+    }
+    if (player.dashTimer === 0) {
+      player.dashStartedAirborne = false;
     }
 
-    if (landed && player.jumpBufferTimer > 0 && player.height === player.standHeight) {
+    if (!dashStartedAirborne && landed && player.jumpBufferTimer > 0 && player.height === player.standHeight) {
       if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
         armSprintJumpCarry(player, config);
       }
-      performJump(player, run, config.jumpVelocity);
+      performJump(player, run, config.jumpVelocity, config);
       applySprintJumpCarry(player);
       applyDashJumpCarry(player, config);
       player.bufferedLandingJumpActive = true;
@@ -6171,9 +8514,9 @@ function updatePlayer(run, data, state, dt, input) {
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
     player.height === player.standHeight &&
-    !wantsWallRun &&
-    !player.wallRunActive;
-  const canWallRun = wantsWallRun;
+    player.wallJumpLockTimer === 0 &&
+    !player.braceHolding;
+  const canWallRun = wantsWallRun && !canWallJump;
   const canGroundJump =
     player.jumpBufferTimer > 0 &&
     player.coyoteTimer > 0 &&
@@ -6194,7 +8537,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (canWallJump) {
     performWallJump(player, run, config, wallJumpSourceDirection);
   } else if (canBrace) {
-    enterBraceHold(player, run, config, activeBraceWall, moveAxis);
+    enterBraceHold(player, run, data, config, activeBraceWall, moveAxis);
   }
 
   if (player.braceHolding) {
@@ -6203,9 +8546,12 @@ function updatePlayer(run, data, state, dt, input) {
       Math.sign(moveAxis) !== Math.sign(player.braceHoldLaunchDirection || player.facing || 1);
     if (braceDirectionReversed) {
       endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
-    } else if (!braceWall || !isPlayerInsideBraceWall(player, braceWall) || player.height !== player.standHeight) {
+    } else if (!braceWall || player.height !== player.standHeight) {
       endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
-    } else if (jumpReleased || wReleased) {
+    } else if (!isPlayerInsideBraceWall(player, braceWall)) {
+      performBraceVault(player, run, config, braceWall, moveAxis);
+      applySprintJumpCarry(player);
+    } else if (jumpReleased || jumpKeyReleased) {
       performBraceVault(player, run, config, braceWall, moveAxis);
       applySprintJumpCarry(player);
     } else if (jumpHeld) {
@@ -6219,14 +8565,30 @@ function updatePlayer(run, data, state, dt, input) {
       player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
       player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
       player.wallSliding = false;
+      const braceHitCollision = Boolean(
+        contacts.hitHead ||
+        contacts.onGround ||
+        contacts.wallLeft ||
+        contacts.wallRight ||
+        contacts.dashBlocked
+      );
 
       if (landed) {
         refillDashFromGround(player, config);
         player.coyoteTimer = config.coyoteTimeMs / 1000;
       }
 
-      if (!isPlayerInsideBraceWall(player, braceWall)) {
+      if (braceHitCollision) {
         endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
+        updateMovementVfx(run, data, dt);
+        player.jumpHeldLastFrame = jumpHeld;
+        setMovementState(player);
+        return;
+      }
+
+      if (!isPlayerInsideBraceWall(player, braceWall)) {
+        performBraceVault(player, run, config, braceWall, moveAxis);
+        applySprintJumpCarry(player);
         updateMovementVfx(run, data, dt);
         player.jumpHeldLastFrame = jumpHeld;
         setMovementState(player);
@@ -6253,11 +8615,11 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (canWallRun) {
     if (!player.wallRunActive || player.wallRunDirection !== wallJumpSourceDirection) {
-      enterWallRun(player, run, config, wallJumpSourceDirection);
+      enterWallRun(player, run, data, config, wallJumpSourceDirection);
     }
   } else if (player.wallRunActive && jumpReleased) {
     launchFromWallRun(player, run, config);
-  } else if (player.wallRunActive && (!jumpHeld || !holdingWallRunLine)) {
+  } else if (player.wallRunActive && !pressingTowardWall) {
     clearWallRun(player);
   }
 
@@ -6279,24 +8641,12 @@ function updatePlayer(run, data, state, dt, input) {
     const jumpVelocity = slideJumping
       ? -Math.abs(config.jumpVelocity ?? data.player.jumpVelocity ?? -900) * (slideJumpBoostReady ? (config.slideJumpVerticalMultiplier ?? 1.18) : 1)
       : config.jumpVelocity;
-    performJump(player, run, jumpVelocity);
+    performJump(player, run, jumpVelocity, config);
     applySprintJumpCarry(player);
     applyDashJumpCarry(player, config);
   }
 
-  const canStartHover =
-    jumpPressed &&
-    !player.onGround &&
-    player.height === player.standHeight &&
-    player.dashTimer === 0 &&
-    player.wallJumpLockTimer === 0 &&
-    !player.wallRunActive &&
-    !player.braceHolding &&
-    !player.wallSliding &&
-    !canWallJump &&
-    !canBrace &&
-    !canGroundJump &&
-    player.vy >= (config.hoverStartMinVy ?? -40);
+  const canStartHover = false;
 
   if (canStartHover) {
     startHover(player, run, config);
@@ -6309,6 +8659,8 @@ function updatePlayer(run, data, state, dt, input) {
     player.facing = player.wallRunDirection === 0 ? player.facing : player.wallRunDirection;
   } else if (player.slideTimer > 0 && player.onGround && updateSlide(player, config, dt)) {
     player.crouchBlocked = false;
+  } else if (recoilMovementLocked) {
+    // Preserve weapon recoil velocity while its inertia window is active.
   } else {
     const downhillSprintActive = isMovingDownhillOnSlope(player, moveAxis);
     const baseTargetSpeed = player.height === player.crouchHeight && player.onGround
@@ -6321,20 +8673,40 @@ function updatePlayer(run, data, state, dt, input) {
     const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
       ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
       : baseTargetSpeed;
+    const momentumTargetSpeed = targetSpeed * getMomentumSpeedMultiplier(player, config);
 
-    const airControl = (config.airControlMultiplier ?? 1)
-      * (player.hoverActive ? (config.hoverAirControlMultiplier ?? 1) : 1);
+    const airControl = config.airControlMultiplier ?? 1;
     const accel = player.onGround
       ? config.groundAccel
       : config.groundAccel * airControl;
     const decel = player.onGround
       ? config.groundDecel
       : config.groundDecel * airControl;
+    const currentDirection = Math.sign(player.vx);
+    const targetDirection = Math.sign(momentumTargetSpeed);
+    const preservingAirInertia = (
+      !player.onGround &&
+      Math.abs(player.vx) > Math.abs(momentumTargetSpeed) &&
+      (moveAxis === 0 || currentDirection === targetDirection)
+    );
+    const reversingAirDirection = (
+      !player.onGround &&
+      moveAxis !== 0 &&
+      currentDirection !== 0 &&
+      targetDirection !== 0 &&
+      currentDirection !== targetDirection
+    );
 
     const stopDecel = moveAxis === 0 && player.onGround
       ? getStopInertiaDecel(player, config, decel)
       : decel;
-    player.vx = approach(player.vx, targetSpeed, (moveAxis !== 0 ? accel : stopDecel) * dt);
+    let horizontalChangeRate = moveAxis !== 0 ? accel : stopDecel;
+    if (preservingAirInertia) {
+      horizontalChangeRate = decel * (config.airInertiaDecelMultiplier ?? 0.18);
+    } else if (reversingAirDirection) {
+      horizontalChangeRate = decel * (config.airTurnDecelMultiplier ?? 0.52);
+    }
+    player.vx = approach(player.vx, momentumTargetSpeed, horizontalChangeRate * dt);
 
     if (
       player.onGround &&
@@ -6343,12 +8715,18 @@ function updatePlayer(run, data, state, dt, input) {
       (moveAxis === 0 || Math.sign(moveAxis) === Math.sign(player.dashCarrySpeed)) &&
       Math.abs(player.vx) < Math.abs(player.dashCarrySpeed)
     ) {
-      player.vx = approach(
-        player.vx,
-        player.dashCarrySpeed,
-        config.groundAccel * 1.2 * dt
-      );
-      player.dashCarryActive = true;
+      const dashCarryExpectedDirection = Math.sign(player.dashVectorX ?? player.dashDirection ?? 0);
+      if (dashCarryExpectedDirection !== 0 && Math.sign(player.dashCarrySpeed) !== dashCarryExpectedDirection) {
+        player.dashCarryTimer = 0;
+        player.dashCarrySpeed = 0;
+      } else {
+        player.vx = approach(
+          player.vx,
+          player.dashCarrySpeed,
+          config.groundAccel * 1.2 * dt
+        );
+        player.dashCarryActive = true;
+      }
     }
 
     if (
@@ -6373,7 +8751,7 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (
     player.sprintCharge > 0.12 &&
-    (canBuildSprint || (!player.onGround && sprintJumpCarryCompatible))
+    (canBuildSprint || (!player.onGround && (sprintJumpCarryCompatible || airDashSprintCompatible)))
   ) {
     player.sprintActive = true;
   }
@@ -6382,7 +8760,7 @@ function updatePlayer(run, data, state, dt, input) {
     run.battery = Math.max(0, run.battery - data.player.lightDrainPerSecond * dt);
     if (run.battery === 0) {
       player.lightActive = false;
-      pushNotice(run, "배터리 소진.");
+      pushNotice(run, "諛고꽣由??뚯쭊.");
     }
   }
 
@@ -6391,6 +8769,13 @@ function updatePlayer(run, data, state, dt, input) {
     player.attackCooldown = data.player.attackCooldown * (meleeToolActive ? meleeEffects.meleeCooldownMultiplier : 1);
     player.attackWindow = 0.12;
     player.attackToolActive = meleeToolActive;
+    player.attackToolActive = meleeToolActive;
+    if (!player.onGround) {
+      player.attackAirHoldTimer = (config.attackAirHoldMs ?? 160) / 1000;
+      if (player.vy > 0) {
+        player.vy = 0;
+      }
+    }
     player.attackHits.clear();
     run.attackFx.push({
       x: player.x + player.width / 2,
@@ -6400,20 +8785,6 @@ function updatePlayer(run, data, state, dt, input) {
     });
     playGameSfx("melee", { cooldownMs: 100 });
   }
-
-  const wallSlideSourceDirection =
-    player.wallDirection !== 0
-      ? player.wallDirection
-      : player.wallSlideGraceTimer > 0
-        ? player.wallSlideGraceDirection
-        : 0;
-
-  const wantsWallSlide =
-    !player.onGround &&
-    wallSlideSourceDirection !== 0 &&
-    (((wallSlideSourceDirection === -1) && moveAxis < 0) || ((wallSlideSourceDirection === 1) && moveAxis > 0)) &&
-    player.wallJumpLockTimer === 0 &&
-    player.vy > 0;
 
   if (
     !player.onGround &&
@@ -6428,7 +8799,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (
     player.hoverActive &&
     (
-      !jumpHeld ||
+      (!jumpHeld && (player.airDashHoverTimer ?? 0) === 0) ||
       player.onGround ||
       player.height !== player.standHeight ||
       player.wallRunActive ||
@@ -6440,23 +8811,39 @@ function updatePlayer(run, data, state, dt, input) {
     clearHover(player);
   }
 
-  const gravityMultiplier = player.hoverActive
+  if ((player.airDashHoverTimer ?? 0) > 0) {
+    player.vy = approach(player.vy, 0, AIR_DASH_HOVER_BRAKE * dt);
+  }
+
+  const gravityMultiplier = player.recoilJumpChargeActive
+    ? RECOIL_CHARGE_GRAVITY_MULTIPLIER
+    : (player.airDashHoverTimer ?? 0) > 0
+    ? 0
+    : player.hoverActive
     ? (config.hoverGravityMultiplier ?? 0.18)
+    : player.attackAirHoldTimer > 0
+      ? 0
     : player.apexGravityActive
       ? (config.apexGravityMultiplier ?? 1)
       : 1;
   if (!player.wallRunActive) {
     player.vy += data.world.gravity * gravityMultiplier * dt;
   }
+  if (player.attackAirHoldTimer > 0) {
+    player.vy = approach(player.vy, 0, (config.attackAirHoldBrake ?? 4200) * dt);
+  }
   if (player.hoverActive) {
     player.vy = Math.min(player.vy, config.hoverFallSpeed ?? 160);
-  }
-  if (wantsWallSlide && !player.wallRunActive) {
-    player.vy = Math.min(player.vy, Math.abs(config.jumpVelocity) * config.wallSlideFallMultiplier);
   }
 
   const vxBeforeResolve = player.vx;
   const contacts = resolvePlayerCollisions(player, data, dt, config, run);
+  if (updateDamageBlockContact(run, data)) {
+    updateMovementVfx(run, data, dt);
+    player.jumpHeldLastFrame = jumpHeld;
+    setMovementState(player);
+    return;
+  }
   const landed = !player.wasOnGround && contacts.onGround;
   player.jumpCornerCorrected = contacts.jumpCornerCorrected;
   player.dashCornerCorrected = contacts.dashCornerCorrected;
@@ -6464,13 +8851,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.onGround = contacts.onGround;
   player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
   player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
-  player.wallSliding =
-    !player.wallRunActive &&
-    !player.onGround &&
-    player.wallDirection !== 0 &&
-    ((player.wallDirection === -1 && moveAxis < 0) || (player.wallDirection === 1 && moveAxis > 0)) &&
-    player.vy > 0 &&
-    player.wallJumpLockTimer === 0;
+  player.wallSliding = false;
 
   if (player.wallRunActive) {
     if (player.wallDirection === 0 || player.onGround || contacts.hitHead) {
@@ -6481,25 +8862,8 @@ function updatePlayer(run, data, state, dt, input) {
     }
   }
 
-  if (player.wallSliding && !wasWallSliding) {
-    refillDashFromWall(player, config);
-    refillRecoilShot(player, config);
-  }
-
-  if (player.wallSliding) {
-    player.wallSlideGraceTimer = (config.wallSlideGraceMs ?? 0) / 1000;
-    player.wallSlideGraceDirection = player.wallDirection;
-  } else if (
-    !player.onGround &&
-    player.wallSlideGraceTimer > 0 &&
-    player.wallSlideGraceDirection !== 0 &&
-    (((player.wallSlideGraceDirection === -1) && moveAxis < 0) || ((player.wallSlideGraceDirection === 1) && moveAxis > 0)) &&
-    player.vy > 0 &&
-    player.wallJumpLockTimer === 0
-  ) {
-    player.wallSliding = true;
-    player.wallSlideGraceActive = true;
-  }
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
 
   if (
     !player.onGround &&
@@ -6524,6 +8888,7 @@ function updatePlayer(run, data, state, dt, input) {
   if (landed) {
     refillDashFromGround(player, config);
     refillRecoilShot(player, config);
+    clearAirDashHover(player);
     clearHover(player);
     clearRecoilSpin(player);
     const burstSize = contacts.landingSpeed > 480 ? 10 : 5;
@@ -6533,7 +8898,7 @@ function updatePlayer(run, data, state, dt, input) {
       if (player.sprintCharge >= 0.55 && Math.abs(player.vx) >= config.runSpeed * 0.92) {
         armSprintJumpCarry(player, config);
       }
-      performJump(player, run, config.jumpVelocity);
+      performJump(player, run, config.jumpVelocity, config);
       applySprintJumpCarry(player);
       applyDashJumpCarry(player, config);
       player.bufferedLandingJumpActive = true;
@@ -6547,10 +8912,12 @@ function updatePlayer(run, data, state, dt, input) {
     player.wallSlideGraceTimer = 0;
     player.wallSlideGraceDirection = 0;
     clearBraceHold(player);
+    clearAirDashHover(player);
     clearHover(player);
     clearRecoilSpin(player);
     refillDashFromGround(player, config);
     refillRecoilShot(player, config);
+    updatePlayerLastSafeGround(player, data);
     if (crouchPressed && tryStartSlide(player, data, config, moveAxis)) {
       playGameSfx("slide", { cooldownMs: 140 });
       // Slide startup already resized the player and preserved the incoming speed.
@@ -6628,15 +8995,6 @@ function updateTimePhase(run, data, dt) {
       run.nightTransitionTimer = NIGHT_TRANSITION_SECONDS;
       pushNotice(run, "?쇨컙 ?꾪삊 ?쒖꽦.");
       pushClue(run, "phase-night", "諛ㅼ뿏 洹??鍮꾩슜??而ㅼ쭊??");
-    }
-  }
-
-  if (previousPhase !== run.timePhase) {
-    if (run.timePhase === "dusk") {
-      run.nightTransitionTimer = Math.max(run.nightTransitionTimer || 0, NIGHT_TRANSITION_SECONDS * 0.72);
-      pushNotice(run, "?⑺샎 吏꾩엯. ?쒖빞媛 醫곸븘吏꾨떎.");
-    } else if (run.timePhase === "night") {
-      pushNotice(run, "?쇨컙 ?꾪삊 ?쒖꽦. ?쒖빞媛 ?ш쾶 以꾩뼱?좊떎.");
     }
   }
 
@@ -6783,7 +9141,9 @@ function updateGuard(run, data, dt) {
   const canInspect = run.inventory.badge && inCheckpoint && canSeePlayer && !isMoving && !player.lightActive;
 
   if (guard.state === "patrol") {
-    guard.x += guard.patrolDirection * guard.speed * dt;
+    if (moveEntityHorizontallyWithWalls(guard, data, guard.patrolDirection * guard.speed * dt, run)) {
+      guard.patrolDirection *= -1;
+    }
     if (guard.x <= guard.patrol.left) {
       guard.x = guard.patrol.left;
       guard.patrolDirection = 1;
@@ -6822,7 +9182,7 @@ function updateGuard(run, data, dt) {
     const direction = playerCenter.x >= guardCenter.x ? 1 : -1;
     if (inDetection) {
       guard.facing = direction;
-      guard.x += direction * guard.chaseSpeed * dt;
+      moveEntityHorizontallyWithWalls(guard, data, direction * guard.chaseSpeed * dt, run);
     }
 
     if (canInspect) {
@@ -6945,7 +9305,9 @@ function updateRitualist(run, data, dt) {
     } else {
       const direction = dx > 0 ? 1 : -1;
       ritualist.facing = direction;
-      ritualist.x += direction * ritualist.speed * dt;
+      if (moveEntityHorizontallyWithWalls(ritualist, data, direction * ritualist.speed * dt, run)) {
+        ritualist.patrolIndex = (ritualist.patrolIndex + 1) % ritualist.patrolPoints.length;
+      }
     }
 
     if (inArea && canSeePlayer && player.lightActive) {
@@ -6961,7 +9323,7 @@ function updateRitualist(run, data, dt) {
     const direction = playerCenter.x >= ritualCenter.x ? 1 : -1;
     if (canSeePlayer) {
       ritualist.facing = direction;
-      ritualist.x += direction * ritualist.chaseSpeed * dt;
+      moveEntityHorizontallyWithWalls(ritualist, data, direction * ritualist.chaseSpeed * dt, run);
     }
 
     if (canSeePlayer && distance < ritualist.attackRange && ritualist.attackCooldown === 0) {
@@ -7004,14 +9366,16 @@ function updateThreats(run, data, dt) {
     if (canSeePlayer && distance < 340) {
       const direction = playerCenter.x >= threatCenter.x ? 1 : -1;
       threat.facing = direction;
-      threat.x += direction * threat.chaseSpeed * dt;
+      moveEntityHorizontallyWithWalls(threat, data, direction * threat.chaseSpeed * dt, run);
 
       if (distance < threat.attackRange && threat.attackCooldown === 0) {
         threat.attackCooldown = 1;
         damagePlayer(run, threat.damage, direction, "?대몺 ???꾪삊????튇??");
       }
     } else {
-      threat.x += threat.patrolDirection * threat.speed * dt;
+      if (moveEntityHorizontallyWithWalls(threat, data, threat.patrolDirection * threat.speed * dt, run)) {
+        threat.patrolDirection *= -1;
+      }
       if (threat.x <= threat.patrol.left) {
         threat.x = threat.patrol.left;
         threat.patrolDirection = 1;
@@ -7245,7 +9609,7 @@ function carryPlayerOnDynamicSolid(run, entity, previousX, previousY, data) {
     return;
   }
   player.x = clamp(player.x + dx, 0, data.world.width - player.width);
-  player.y = clamp(player.y + dy, 0, data.world.height - player.height);
+  player.y = Math.min(player.y + dy, data.world.height - player.height);
 }
 
 function updateCrowDive(run, data, drone, dt) {
@@ -7586,12 +9950,23 @@ function updateKnockedDownHumanoid(run, data, enemy, dt) {
     : enemy.x + fallbackDirection * (enemy.escapeDistance ?? 360);
   const direction = Math.sign(targetX - enemy.x) || fallbackDirection;
   const speed = Math.max(0, enemy.crawlSpeed ?? 34);
-  const nextX = enemy.x + direction * speed * dt;
-  const reached = direction > 0 ? nextX >= targetX : nextX <= targetX;
   const maxX = Math.max(0, (data.world?.width ?? targetX + enemy.width) - enemy.width);
   enemy.knockdownFacing = direction;
   enemy.facing = direction;
-  enemy.x = clamp(reached ? targetX : nextX, 0, maxX);
+  const previousX = enemy.x;
+  const nextX = enemy.x + direction * speed * dt;
+  const reached = direction > 0 ? nextX >= targetX : nextX <= targetX;
+  const blocked = moveEntityHorizontallyWithWalls(
+    enemy,
+    data,
+    (reached ? targetX : nextX) - enemy.x,
+    run,
+  );
+
+  if (blocked) {
+    enemy.escapeTargetX = previousX;
+    return;
+  }
 
   if (reached || enemy.x <= 0 || enemy.x >= maxX) {
     markHumanoidEscaped(run, enemy);
@@ -7724,7 +10099,7 @@ function hasHumanoidGroundAhead(enemy, data, direction) {
   return getHumanoidGroundYAt(data, edgeX + direction * probeDistance, footY, maxDrop) !== null;
 }
 
-function isHumanoidWallAhead(enemy, data, direction) {
+function isHumanoidWallAhead(enemy, data, direction, run = null) {
   if (direction === 0) {
     return false;
   }
@@ -7735,13 +10110,13 @@ function isHumanoidWallAhead(enemy, data, direction) {
     width: enemy.width,
     height: Math.max(1, enemy.height - 8),
   };
-  return getCollisionPlatforms(data).some((platform) => (
+  return getCollisionPlatforms(data, run).some((platform) => (
     !isSlopePlatform(platform) &&
     rectsOverlap(probe, platform)
   ));
 }
 
-function getHumanoidPatrolDirection(enemy, data) {
+function getHumanoidPatrolDirection(enemy, data, run = null) {
   ensureHumanoidGroundState(enemy);
   let direction = Math.sign(enemy.patrolDirection || enemy.facing || 1) || 1;
   const centerX = enemy.x + enemy.width * 0.5;
@@ -7754,7 +10129,7 @@ function getHumanoidPatrolDirection(enemy, data) {
     direction = -1;
   }
 
-  if (isHumanoidWallAhead(enemy, data, direction) || !hasHumanoidGroundAhead(enemy, data, direction)) {
+  if (isHumanoidWallAhead(enemy, data, direction, run) || !hasHumanoidGroundAhead(enemy, data, direction)) {
     direction *= -1;
   }
 
@@ -7762,7 +10137,7 @@ function getHumanoidPatrolDirection(enemy, data) {
   return direction;
 }
 
-function updateHumanoidGroundPhysics(enemy, data, dt, direction = 0) {
+function updateHumanoidGroundPhysics(enemy, data, dt, direction = 0, run = null) {
   ensureHumanoidGroundState(enemy);
   const config = getMovementConfig(data);
   const desiredDirection = Math.sign(direction) || 0;
@@ -7772,7 +10147,7 @@ function updateHumanoidGroundPhysics(enemy, data, dt, direction = 0) {
   enemy.vx = enemy.onGround ? desiredDirection * speed : 0;
   enemy.vy = Math.min(maxFallSpeed, (enemy.vy ?? 0) + (data.world?.gravity ?? 0) * dt);
 
-  const contacts = resolvePlayerCollisions(enemy, data, dt, config, null);
+  const contacts = resolvePlayerCollisions(enemy, data, dt, config, run);
   enemy.onGround = contacts.onGround;
   enemy.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
   if (contacts.onGround) {
@@ -7824,12 +10199,12 @@ function updateHumanoidEnemies(run, data, dt) {
     }
 
     if (!enemy.active) {
-      const direction = getHumanoidPatrolDirection(enemy, data);
-      updateHumanoidGroundPhysics(enemy, data, dt, direction);
+      const direction = getHumanoidPatrolDirection(enemy, data, run);
+      updateHumanoidGroundPhysics(enemy, data, dt, direction, run);
       continue;
     }
 
-    updateHumanoidGroundPhysics(enemy, data, dt, 0);
+    updateHumanoidGroundPhysics(enemy, data, dt, 0, run);
 
     if (canSeePlayer && distance < (enemy.fireRange ?? 620)) {
       enemy.trigger = clamp((enemy.trigger ?? 0) + (enemy.triggerRate ?? 1) * dt * 0.35, 0, getFaceOffConfig(data).triggerLimit ?? 4.5);
@@ -8142,9 +10517,18 @@ function openLootCrate(run, crate) {
   if (!crate || crate.searched) {
     return;
   }
-  if (spillLootCrate(run, crate, { broken: false, directionX: Math.sign(run.player?.facing ?? 1) || 1 })) {
-    playGameSfx("lootOpen", { cooldownMs: 160 });
-  }
+  const selectedIndex = findNextLootIndex(crate, 0, 1);
+  crate.opened = true;
+  crate.scanComplete = crate.scanComplete || crate.items.every((item) => item.revealed || item.looted);
+  run.loot.active = true;
+  run.loot.crateId = crate.id;
+  run.loot.selectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+  run.loot.holdItemId = null;
+  run.loot.holdProgress = 0;
+  run.loot.lastRarity = null;
+  pushNotice(run, `${crate.label} 媛쒕큺.`);
+  spawnParticles(run, crate.x + crate.width / 2, crate.y + 8, 8, "#93eaff");
+  playGameSfx("lootOpen", { cooldownMs: 160 });
 }
 
 function moveLootSelection(crate, loot, delta) {
@@ -8333,7 +10717,7 @@ function updateLootLockedPlayer(run, dt) {
   player.recoilShotCooldownTimer = Math.max(0, player.recoilShotCooldownTimer - dt);
   player.recoilShotTimer = Math.max(0, player.recoilShotTimer - dt);
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
-  player.recoilCameraTimer = Math.max(0, player.recoilCameraTimer - dt);
+  updateRecoilCameraTimers(player, dt);
   player.slideTimer = Math.max(0, player.slideTimer - dt);
   player.vx = approach(player.vx, 0, 2400 * dt);
   player.vy = approach(player.vy, 0, 2600 * dt);
@@ -8393,7 +10777,7 @@ function updateLootInteraction(state, data, dt) {
   }
 
   const item = getSelectedLootItem(crate, loot);
-  if (isSelectableLootItem(item) && isEitherPressed(state, INTERACT_KEYS)) {
+  if (isSelectableLootItem(item) && isEitherPressed(state, getInteractKeys(state))) {
     if (loot.holdItemId !== item.id) {
       loot.holdItemId = item.id;
       loot.holdProgress = item.transferProgress;
@@ -8424,6 +10808,7 @@ function updateLootInteraction(state, data, dt) {
 function getInteractionTargets(run, data) {
   const playerCenter = getCenter(run.player);
   const targets = [];
+  const escapeActive = isVaultEscapeActive(run);
 
   const faceOffEnemy = findFaceOffInteractionCandidate(run, data);
   if (faceOffEnemy) {
@@ -8439,7 +10824,7 @@ function getInteractionTargets(run, data) {
   }
 
   const gate = data.extractionGate;
-  if (gate) {
+  if (gate && !escapeActive) {
     const gateRect = createRect(gate.x, gate.y, gate.width, gate.height);
     if (distanceBetween(playerCenter, getCenter(gateRect)) < 110) {
       targets.push({
@@ -8452,7 +10837,27 @@ function getInteractionTargets(run, data) {
     }
   }
 
+  for (const exit of run.escapeExits || []) {
+    if (!escapeActive) {
+      continue;
+    }
+    const exitRect = createRect(exit.x, exit.y, exit.width, exit.height);
+    if (distanceBetween(playerCenter, getCenter(exitRect)) < 118) {
+      targets.push({
+        id: exit.id,
+        kind: "escapeExit",
+        escapeExit: exit,
+        text: normalizeInteractionPrompt(exit.prompt || "E: Escape"),
+        x: exit.x + exit.width / 2,
+        y: exit.y - 12,
+      });
+    }
+  }
+
   for (const routeExit of data.routeExits || []) {
+    if (escapeActive) {
+      continue;
+    }
     const exitRect = createRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
     if (isTouchRouteExit(routeExit)) {
       if (distanceBetween(playerCenter, getCenter(exitRect)) < 118) {
@@ -8512,6 +10917,38 @@ function getInteractionTargets(run, data) {
     }
   }
 
+  for (const door of run.vaultDoors || []) {
+    if (door.hacked || run.vaultEscape?.completed) {
+      continue;
+    }
+    if (distanceBetween(playerCenter, getCenter(door)) < 112) {
+      targets.push({
+        id: door.id,
+        kind: "vaultDoor",
+        vaultDoor: door,
+        text: normalizeInteractionPrompt(door.prompt || "E: Hack vault"),
+        x: door.x + door.width / 2,
+        y: door.y - 12,
+      });
+    }
+  }
+
+  for (const loot of run.vaultLoot || []) {
+    if (loot.collected || !escapeActive) {
+      continue;
+    }
+    if (distanceBetween(playerCenter, getCenter(loot)) < 86) {
+      targets.push({
+        id: loot.id,
+        kind: "vaultLoot",
+        vaultLoot: loot,
+        text: normalizeInteractionPrompt(loot.prompt || "E: Take supplies"),
+        x: loot.x + loot.width / 2,
+        y: loot.y - 12,
+      });
+    }
+  }
+
   for (const crate of run.lootCrates || []) {
     if (crate.searched || crate.spilled) {
       continue;
@@ -8521,7 +10958,7 @@ function getInteractionTargets(run, data) {
         id: crate.id,
         kind: "lootCrate",
         crate,
-        text: normalizeInteractionPrompt(crate.prompt || "F: ?곸옄 ?닿린"),
+        text: normalizeInteractionPrompt(crate.opened ? "Z: ?곸옄 ?뺤씤" : crate.prompt),
         x: crate.x + crate.width / 2,
         y: crate.y - 12,
       });
@@ -8554,16 +10991,116 @@ function getInteractionTargets(run, data) {
 }
 
 function getZipLinePrompt(zipLine) {
-  const prompt = zipLine?.prompt || "E: Zipline";
-  return prompt.replace(/^(?:Space\/D|D\/Z|D|E)\s*:/i, "Space/Z:");
+  const prompt = zipLine?.prompt || "Up: Zipline";
+  return prompt.replace(/^(?:Space\/D|Space\/Z|D\/Z|D|C|E|Z|Up)\s*:/i, "Up:");
 }
 
 function normalizeInteractionPrompt(prompt) {
-  return (prompt || "").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
+  return (prompt || "").replace(/^(?:D\/Z|D|C|E|Z|Up)\s*:/i, "Up:");
 }
 
 function normalizeExtractionPrompt(prompt) {
-  return (prompt || "Z: 異붿텧").replace(/^(?:D\/Z|D|E)\s*:/i, "Z:");
+  return (prompt || "Z: Exit").replace(/^(?:D\/Z|D|C|E|Z|Up)\s*:/i, "Z:");
+}
+
+function isVaultEscapeActive(run) {
+  return Boolean(run?.vaultEscape?.active && !run.vaultEscape.completed && !run.vaultEscape.failed);
+}
+
+function isVaultLockdownActive(run) {
+  return Boolean(run?.vaultEscape?.lockdownActive && !run.vaultEscape.completed);
+}
+
+export function beginVaultEscape(run, door) {
+  if (!run?.vaultEscape || !door || isVaultEscapeActive(run) || run.vaultEscape.completed) {
+    return false;
+  }
+  door.hacked = true;
+  const duration = Math.max(1, Number(door.duration ?? run.vaultEscape.duration ?? 60));
+  run.vaultEscape.active = true;
+  run.vaultEscape.failed = false;
+  run.vaultEscape.lockdownActive = false;
+  run.vaultEscape.lockdownTimer = 0;
+  run.vaultEscape.completed = false;
+  run.vaultEscape.doorId = door.id;
+  run.vaultEscape.duration = duration;
+  run.vaultEscape.timeLeft = duration;
+  run.vaultEscape.collected = (run.vaultLoot || []).filter((loot) => loot.collected).length;
+  run.vaultEscape.valueCollected = (run.vaultLoot || []).reduce((sum, loot) => (
+    sum + (loot.collected ? Math.max(0, Number(loot.value ?? 25)) : 0)
+  ), 0);
+  run.vaultEscape.totalLoot = (run.vaultLoot || []).length;
+  run.vaultEscape.totalValue = (run.vaultLoot || []).reduce((sum, loot) => sum + Math.max(0, Number(loot.value ?? 25)), 0);
+  closeLootCrate(run);
+  pushNotice(run, "Vault alarm armed. Grab supplies and escape.");
+  spawnParticles(run, door.x + door.width / 2, door.y + door.height / 2, 18, "#ff7a66");
+  startVaultEscapeMusic(run);
+  return true;
+}
+
+function beginVaultLockdown(run) {
+  if (!run?.vaultEscape || isVaultLockdownActive(run)) {
+    return false;
+  }
+  run.vaultEscape.active = false;
+  run.vaultEscape.failed = true;
+  run.vaultEscape.lockdownActive = true;
+  run.vaultEscape.lockdownDuration = Math.max(0.4, Number(run.vaultEscape.lockdownDuration ?? 1.6));
+  run.vaultEscape.lockdownTimer = run.vaultEscape.lockdownDuration;
+  run.vaultEscape.timeLeft = 0;
+  closeLootCrate(run);
+  run.message = "LOCKDOWN. All exits sealed.";
+  run.noticeTimer = Math.max(run.noticeTimer ?? 0, run.vaultEscape.lockdownDuration);
+  pushNotice(run, run.message);
+  spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + run.player.height / 2, 24, "#ff7a66");
+  updateVaultEscapeMusic(run);
+  return true;
+}
+
+function collectVaultLoot(run, loot) {
+  if (!run?.vaultEscape || !loot || loot.collected || !isVaultEscapeActive(run)) {
+    return false;
+  }
+  const value = Math.max(0, Number(loot.value ?? 25));
+  loot.collected = true;
+  loot.collectedAt = run.time ?? 0;
+  run.materials += value;
+  run.vaultEscape.collected = Math.min(
+    run.vaultEscape.totalLoot,
+    (run.vaultEscape.collected ?? 0) + 1,
+  );
+  run.vaultEscape.valueCollected = Math.min(
+    run.vaultEscape.totalValue,
+    (run.vaultEscape.valueCollected ?? 0) + value,
+  );
+  pushNotice(run, `${loot.label || "Supplies"} secured.`);
+  spawnParticles(run, loot.x + loot.width / 2, loot.y + loot.height / 2, 12, "#e7f47e");
+  return true;
+}
+
+function updateVaultEscapeTimer(state, data, dt) {
+  const run = state.run;
+  if (isVaultLockdownActive(run)) {
+    updateLootLockedPlayer(run, dt);
+    run.vaultEscape.lockdownTimer = Math.max(0, (run.vaultEscape.lockdownTimer ?? 0) - dt);
+    updateVaultEscapeMusic(run);
+    if (run.vaultEscape.lockdownTimer > 0) {
+      return true;
+    }
+    run.vaultEscape.lockdownActive = false;
+    applyFailure(state, data, "vaultLockdown");
+    return true;
+  }
+  if (!isVaultEscapeActive(run)) {
+    return false;
+  }
+  run.vaultEscape.timeLeft = Math.max(0, (run.vaultEscape.timeLeft ?? 0) - dt);
+  updateVaultEscapeMusic(run);
+  if (run.vaultEscape.timeLeft > 0) {
+    return false;
+  }
+  beginVaultLockdown(run);
+  return true;
 }
 
 function getNearestZipLineInteractionTarget(run, data) {
@@ -8609,7 +11146,11 @@ function tryBeginZipLineRideFromMountInput(state, data) {
   }
 
   const nearest = getNearestZipLineInteractionTarget(run, data);
-  if (!nearest || !consumeEitherPress(state, ZIPLINE_MOUNT_KEYS)) {
+  if (!nearest) {
+    return false;
+  }
+  const mountPressed = consumeEitherPress(state, getZipLineMountKeys(state));
+  if (!mountPressed) {
     return false;
   }
 
@@ -8730,10 +11271,60 @@ function summarizeRunObjectives(run, securedLoot = summarizeSecuredLoot(run)) {
   };
 }
 
+function getVaultResultSummary(run) {
+  const vault = run?.vaultEscape;
+  const loot = run?.vaultLoot || [];
+  const doors = run?.vaultDoors || [];
+  const attempted = Boolean(
+    vault?.active ||
+    vault?.completed ||
+    vault?.failed ||
+    vault?.doorId ||
+    doors.some((door) => door.hacked) ||
+    loot.some((item) => item.collected),
+  );
+  if (!attempted && loot.length === 0 && doors.length === 0) {
+    return null;
+  }
+
+  const totalLoot = Math.max(0, Number(vault?.totalLoot ?? loot.length) || 0);
+  const totalValue = Math.max(0, Number(vault?.totalValue ?? loot.reduce((sum, item) => (
+    sum + Math.max(0, Number(item.value ?? 25))
+  ), 0)) || 0);
+  const collected = Math.max(0, Number(vault?.collected ?? loot.filter((item) => item.collected).length) || 0);
+  const valueCollected = Math.max(0, Number(vault?.valueCollected ?? loot.reduce((sum, item) => (
+    sum + (item.collected ? Math.max(0, Number(item.value ?? 25)) : 0)
+  ), 0)) || 0);
+  const recoveryRate = totalValue > 0
+    ? valueCollected / totalValue
+    : totalLoot > 0
+      ? collected / totalLoot
+      : 0;
+
+  return {
+    attempted,
+    completed: Boolean(vault?.completed),
+    failed: Boolean(vault?.failed),
+    lockedDown: Boolean(vault?.failed || vault?.lockdownActive),
+    doorId: vault?.doorId || null,
+    collected,
+    totalLoot,
+    valueCollected,
+    totalValue,
+    recoveryRate,
+    perfect: totalLoot > 0 && collected >= totalLoot,
+    duration: Math.max(0, Number(vault?.duration ?? 0) || 0),
+    timeLeft: Math.max(0, Number(vault?.timeLeft ?? 0) || 0),
+  };
+}
+
 function applyExtraction(state, data) {
   const run = state.run;
   const securedLoot = summarizeSecuredLoot(run);
   const objectives = summarizeRunObjectives(run, securedLoot);
+  const vaultSummary = getVaultResultSummary(run);
+  stopVaultEscapeMusic();
+  stopSearchMusic();
   if (isMovementLab(data)) {
     state.resultSummary = {
       success: true,
@@ -8742,6 +11333,7 @@ function applyExtraction(state, data) {
       securedLoot,
       objectives,
       timePhase: run.timePhase,
+      vault: vaultSummary,
     };
     clearSavedGame();
     state.run = null;
@@ -8792,6 +11384,7 @@ function applyExtraction(state, data) {
         rarityCounts: securedLoot.rarityCounts,
       },
       nightReached: run.nightActive,
+      vault: vaultSummary,
     },
   };
   saveMetaState(state.meta);
@@ -8806,6 +11399,7 @@ function applyExtraction(state, data) {
     objectiveRewardMaterials: objectives.rewardMaterials,
     objectives,
     securedLoot,
+    vault: vaultSummary,
     newUnlocks,
     newStories: data.encounters
       .filter((encounter) => newStories.includes(encounter.storyFlag))
@@ -8824,6 +11418,9 @@ function applyExtraction(state, data) {
 function applyFailure(state, data, reason) {
   const lostLoot = summarizeSecuredLoot(state.run);
   const objectives = summarizeRunObjectives(state.run, lostLoot);
+  const vaultSummary = getVaultResultSummary(state.run);
+  stopVaultEscapeMusic();
+  stopSearchMusic();
   if (isMovementLab(data)) {
     state.resultSummary = {
       success: false,
@@ -8832,6 +11429,7 @@ function applyFailure(state, data, reason) {
       lostMaterials: 0,
       lostLoot,
       objectives,
+      vault: vaultSummary,
     };
     clearSavedGame();
     state.run = null;
@@ -8847,6 +11445,7 @@ function applyFailure(state, data, reason) {
     lostMaterials: state.run.materials,
     lostLoot,
     objectives,
+    vault: vaultSummary,
   };
   clearSavedGame();
   state.run = null;
@@ -8856,6 +11455,8 @@ function applyFailure(state, data, reason) {
 }
 
 function restartCurrentRun(state, data) {
+  stopVaultEscapeMusic();
+  stopSearchMusic(true);
   clearSavedGame();
   state.run = createRunState(data, state.meta);
   state.scene = SCENES.EXPEDITION;
@@ -8872,6 +11473,11 @@ function restartCurrentRun(state, data) {
 const LEVEL_STATE_KEYS = [
   "interactables",
   "lootCrates",
+  "vaultDoors",
+  "vaultLoot",
+  "escapeExits",
+  "escapeBarriers",
+  "vaultEscape",
   "encounters",
   "threats",
   "hostileDrones",
@@ -8910,6 +11516,8 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
 
   player.x = Number.isFinite(entrance?.x) ? entrance.x : data.player.spawn.x;
   player.y = Number.isFinite(entrance?.y) ? entrance.y : data.player.spawn.y;
+  player.lastSafeGroundX = player.x;
+  player.lastSafeGroundY = player.y;
   player.vx = 0;
   player.vy = 0;
   player.facing = Math.sign(entrance?.facing ?? player.facing ?? 1) || 1;
@@ -8919,13 +11527,26 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.attackCooldown = 0;
   player.attackWindow = 0;
   player.attackToolActive = false;
+  player.attackAirHoldTimer = 0;
   player.attackHits = new Set();
   player.lightActive = false;
   player.dashTimer = 0;
   player.dashWindupTimer = 0;
   player.dashCooldownTimer = 0;
   player.dashDirection = 0;
+  player.dashVectorX = 1;
+  player.dashVectorY = 0;
+  player.dashDistanceScale = 1;
+  player.dashStartedAirborne = false;
+  player.verticalMomentum = 0;
+  player.verticalMomentumTimer = 0;
+  player.verticalMomentumStage = 0;
+  player.verticalMomentumFlashTimer = 0;
+  player.verticalMomentumLastAction = null;
+  player.verticalMomentumBoostActive = false;
   player.slideTimer = 0;
+  clearAirDashHover(player);
+  player.airDashHoverConsumed = false;
   player.hoverActive = false;
   player.hoverBoostActive = false;
   player.wallSliding = false;
@@ -8946,6 +11567,15 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.recoilShotPitch = 0;
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
+  player.armSwitchReloadHoldConsumed = false;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargePendingMultiplier = 1;
+  player.recoilJumpChargePendingShot = false;
+  player.recoilJumpLastDirX = player.facing || 1;
+  player.recoilJumpLastDirY = 0;
+  player.recoilJumpChargeEffectStep = 0;
   clearZipLine(player);
   run.waterRespawnPoint = {
     levelId: run.currentLevelId || data.currentLevelId || data.defaultLevelId || "movement-lab-01",
@@ -8977,6 +11607,8 @@ function clearLevelTransitionEffects(run) {
   run.afterimages = [];
   run.recoilFocusAfterimages = [];
   run.recoilFocusAfterimageTimer = 0;
+  run.screenShakeTimer = 0;
+  run.screenShakeIntensity = 0;
   run.loot = {
     active: false,
     crateId: null,
@@ -9010,7 +11642,7 @@ function snapCameraToPlayer(run, data) {
   run.cameraFocusX = focusX;
   run.cameraFocusY = focusY;
   run.cameraX = clamp(targetX, 0, maxX);
-  run.cameraY = clamp(targetY, 0, maxY);
+  run.cameraY = clamp(targetY, Math.min(0, targetY), maxY);
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   run.cameraTargetZoom = zoom;
@@ -9030,6 +11662,675 @@ function getShelterConfig(data) {
       ? data.shelter.arrivalCutsceneSeconds
       : SHELTER_ARRIVAL_SECONDS,
   };
+}
+
+function getShelterScriptedEvents(data) {
+  return Array.isArray(data.shelter?.events)
+    ? data.shelter.events.filter((event) => event && typeof event === "object" && typeof event.id === "string")
+    : [];
+}
+
+function getShelterScriptedEvent(data, eventId) {
+  return getShelterScriptedEvents(data).find((event) => event.id === eventId) || null;
+}
+
+function getShelterScriptedEventNode(event, nodeId = "") {
+  const nodes = Array.isArray(event?.nodes) ? event.nodes : [];
+  const targetId = nodeId || event?.startNodeId || nodes[0]?.id || "";
+  return nodes.find((node) => node && typeof node === "object" && node.id === targetId) || nodes[0] || null;
+}
+
+function getShelterEventCompletionFlag(event) {
+  return event?.completionFlag || (event?.id ? `shelter-event:${event.id}` : "");
+}
+
+function getShelterEventBridgeConfig(event) {
+  const transition = event?.transition && typeof event.transition === "object" ? event.transition : {};
+  const node = getShelterScriptedEventNode(event, event?.startNodeId);
+  const line = String(transition.line || event?.transitionLine || event?.bridgeLine || "").trim();
+  const rawDuration = Number(transition.seconds ?? event?.transitionSeconds ?? event?.bridgeSeconds);
+  const duration = Number.isFinite(rawDuration)
+    ? clamp(rawDuration, 0.45, 3)
+    : SHELTER_EVENT_BRIDGE_SECONDS;
+  return {
+    line,
+    duration,
+    emotion: normalizeShelterTalkEmotion(
+      transition.emotion || event?.transitionEmotion,
+      normalizeShelterTalkEmotion(node?.emotion, normalizeShelterTalkEmotion(event?.emotion, "neutral")),
+    ),
+    artAssetKey: normalizeShelterArtAssetKey(transition.backgroundAssetKey)
+      || normalizeShelterArtAssetKey(transition.artAssetKey)
+      || normalizeShelterArtAssetKey(event?.transitionAssetKey)
+      || getShelterEventStartArtAssetKey(event, node),
+  };
+}
+
+function hasMetaStoryFlag(state, flag) {
+  return Boolean(flag && Array.isArray(state?.meta?.storyFlags) && state.meta.storyFlags.includes(flag));
+}
+
+function addMetaStoryFlag(state, flag) {
+  if (!flag) {
+    return false;
+  }
+  state.meta = state.meta && typeof state.meta === "object" ? state.meta : {};
+  state.meta.storyFlags = Array.isArray(state.meta.storyFlags) ? state.meta.storyFlags : [];
+  if (state.meta.storyFlags.includes(flag)) {
+    return false;
+  }
+  state.meta.storyFlags.push(flag);
+  return true;
+}
+
+function canStartShelterScriptedEvent(state, event) {
+  if (!event?.id) {
+    return false;
+  }
+  const trigger = event.trigger && typeof event.trigger === "object" ? event.trigger : {};
+  const completionFlag = getShelterEventCompletionFlag(event);
+  if (event.once !== false && hasMetaStoryFlag(state, completionFlag)) {
+    return false;
+  }
+  if (trigger.requiredStoryFlag && !hasMetaStoryFlag(state, trigger.requiredStoryFlag)) {
+    return false;
+  }
+  if (trigger.missingStoryFlag && hasMetaStoryFlag(state, trigger.missingStoryFlag)) {
+    return false;
+  }
+  return true;
+}
+
+function getNextShelterScriptedEvent(state, data) {
+  return getShelterScriptedEvents(data).find((event) => canStartShelterScriptedEvent(state, event)) || null;
+}
+
+function getNextAutoShelterScriptedEvent(state, data) {
+  return getShelterScriptedEvents(data).find((event) => {
+    const trigger = event.trigger && typeof event.trigger === "object" ? event.trigger : {};
+    return trigger.autoStart === true && canStartShelterScriptedEvent(state, event);
+  }) || null;
+}
+
+function normalizeShelterAutoEventBridge(host) {
+  const bridge = host?.autoEventBridge;
+  if (!bridge || typeof bridge !== "object" || !bridge.eventId) {
+    if (host && bridge) {
+      host.autoEventBridge = null;
+    }
+    return null;
+  }
+  bridge.line = String(bridge.line || "").trim();
+  bridge.duration = Number.isFinite(bridge.duration)
+    ? clamp(Number(bridge.duration), 0.45, 3)
+    : SHELTER_EVENT_BRIDGE_SECONDS;
+  bridge.startedAt = Number.isFinite(bridge.startedAt) ? Number(bridge.startedAt) : 0;
+  bridge.emotion = normalizeShelterTalkEmotion(bridge.emotion, "neutral");
+  bridge.artAssetKey = normalizeShelterArtAssetKey(bridge.artAssetKey);
+  return bridge;
+}
+
+function beginShelterAutoEventBridge(host, state, event) {
+  if (!host || !event?.id) {
+    return false;
+  }
+  const bridge = getShelterEventBridgeConfig(event);
+  if (!bridge.line) {
+    return false;
+  }
+  host.autoEventBridge = {
+    eventId: event.id,
+    line: bridge.line,
+    duration: bridge.duration,
+    startedAt: Number.isFinite(state?.pulse) ? state.pulse : 0,
+    emotion: bridge.emotion,
+    artAssetKey: bridge.artAssetKey,
+    voiceLineKey: "",
+  };
+  return true;
+}
+
+function stepShelterAutoEventBridge(talk, state, data, host) {
+  const bridge = normalizeShelterAutoEventBridge(host);
+  if (!bridge) {
+    return "none";
+  }
+  const event = getShelterScriptedEvent(data, bridge.eventId);
+  if (!event || !canStartShelterScriptedEvent(state, event)) {
+    host.autoEventBridge = null;
+    return "none";
+  }
+  const bridgeDuration = Math.max(
+    bridge.duration,
+    getShelterLineTypeDuration(bridge.line) + 0.2,
+  );
+  const elapsed = Math.max(0, (Number.isFinite(state?.pulse) ? state.pulse : 0) - bridge.startedAt);
+  const skip = consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS);
+  if (!skip) {
+    playShelterBridgeVoiceLine(bridge, state);
+    updateShelterBridgeTypingSound(bridge, state);
+  }
+  if (elapsed < bridgeDuration && !skip) {
+    setStatus(state, "Shelter scene.");
+    return "bridging";
+  }
+  host.autoEventBridge = null;
+  stopTtsPlayback();
+  talk.blockScriptedEventStart = false;
+  return startShelterScriptedEvent(talk, event, state) ? "started" : "none";
+}
+
+function normalizeShelterTalkEmotion(emotion, fallback = "neutral") {
+  return SHELTER_TALK_EMOTIONS.has(emotion) ? emotion : fallback;
+}
+
+function normalizeShelterArtAssetKey(assetKey = "") {
+  return typeof assetKey === "string" ? assetKey.trim() : "";
+}
+
+function getShelterDialogueArtAssetKey(emotion, fallbackAssetKey = "") {
+  const fallback = normalizeShelterArtAssetKey(fallbackAssetKey);
+  if (fallback && !SHELTER_HOME_BASE_ART_ASSET_KEYS.has(fallback)) {
+    return fallback;
+  }
+  const emotionKey = normalizeShelterArtAssetKey(
+    SHELTER_HOME_EMOTION_ART_ASSETS[normalizeShelterTalkEmotion(emotion, "neutral")],
+  );
+  return emotionKey || fallback;
+}
+
+function getShelterDialogueSegments(text = "") {
+  return String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function isShelterScriptedTalk(talk) {
+  return Boolean(talk?.event?.eventId || talk?.lastChoice?.eventId || talk?.eventArtAssetKey);
+}
+
+function getShelterPulseTime(state) {
+  return Number.isFinite(state?.pulse) ? state.pulse : 0;
+}
+
+function normalizeShelterTalkTransition(talk) {
+  const transition = talk?.transition;
+  if (!transition || typeof transition !== "object") {
+    return null;
+  }
+  const direction = transition.direction === "out" ? "out" : "in";
+  transition.direction = direction;
+  transition.startedAt = Number.isFinite(transition.startedAt) ? Number(transition.startedAt) : 0;
+  transition.duration = Number.isFinite(transition.duration)
+    ? clamp(Number(transition.duration), 0.2, 1.4)
+    : SHELTER_TALK_DOOR_TRANSITION_SECONDS;
+  return transition;
+}
+
+function beginShelterTalkTransition(talk, state = null, direction = "in") {
+  if (!talk) {
+    return;
+  }
+  talk.transition = {
+    direction: direction === "out" ? "out" : "in",
+    startedAt: getShelterPulseTime(state),
+    duration: SHELTER_TALK_DOOR_TRANSITION_SECONDS,
+  };
+}
+
+function updateShelterTalkTransition(talk, state = null) {
+  const transition = normalizeShelterTalkTransition(talk);
+  if (!transition) {
+    return "none";
+  }
+  const elapsed = Math.max(0, getShelterPulseTime(state) - transition.startedAt);
+  if (elapsed < transition.duration) {
+    setStatus(state, "Shelter scene.");
+    return "running";
+  }
+  const direction = transition.direction;
+  talk.transition = null;
+  return direction === "out" ? "exit-complete" : "done";
+}
+
+function markShelterLineShown(talk, state = null) {
+  if (talk) {
+    talk.lineShownAt = getShelterPulseTime(state);
+  }
+}
+
+function resetShelterLineProgress(talk, state = null) {
+  if (talk) {
+    talk.lineIndex = 0;
+    talk.typingSound = null;
+    talk.voiceLineKey = "";
+    markShelterLineShown(talk, state);
+  }
+}
+
+function canAdvanceShelterLine(talk) {
+  if (!isShelterScriptedTalk(talk) || talk?.pending) {
+    return false;
+  }
+  const segments = getShelterDialogueSegments(talk.line);
+  const lineIndex = clamp(Math.floor(talk.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return segments.length > 1 && lineIndex < segments.length - 1;
+}
+
+function advanceShelterLine(talk, state = null) {
+  if (!canAdvanceShelterLine(talk)) {
+    return false;
+  }
+  const segments = getShelterDialogueSegments(talk.line);
+  talk.lineIndex = clamp(Math.floor(talk.lineIndex || 0) + 1, 0, Math.max(0, segments.length - 1));
+  talk.typingSound = null;
+  markShelterLineShown(talk, state);
+  playShelterCurrentVoiceLine(talk, state);
+  return true;
+}
+
+function isShelterLineComplete(talk) {
+  if (!isShelterScriptedTalk(talk)) {
+    return true;
+  }
+  const segments = getShelterDialogueSegments(talk.line);
+  const lineIndex = clamp(Math.floor(talk.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return lineIndex >= segments.length - 1;
+}
+
+function getShelterCurrentLineAge(talk, state = null) {
+  const shownAt = Number.isFinite(talk?.lineShownAt) ? talk.lineShownAt : -999;
+  return Math.max(0, getShelterPulseTime(state) - shownAt);
+}
+
+function getShelterCurrentDialogueSegment(talk) {
+  const segments = getShelterDialogueSegments(talk?.line || "");
+  if (!segments.length) {
+    return "";
+  }
+  const lineIndex = clamp(Math.floor(talk?.lineIndex || 0), 0, Math.max(0, segments.length - 1));
+  return segments[lineIndex] || segments[0] || "";
+}
+
+function extractShelterQuotedDialogue(line = "") {
+  const text = String(line || "").trim();
+  if (!text) {
+    return "";
+  }
+  const matches = [];
+  const quotePattern = /[“"「『‘']([^”"」』’']+)[”"」』’']/gu;
+  let match = quotePattern.exec(text);
+  while (match) {
+    const quoted = String(match[1] || "").trim();
+    if (quoted) {
+      matches.push(quoted);
+    }
+    match = quotePattern.exec(text);
+  }
+  return matches.join(" ").trim();
+}
+
+function isShelterScriptedVoiceContext(talk) {
+  return Boolean(talk?.event?.eventId || talk?.lastChoice?.eventId || talk?.eventResult);
+}
+
+function getShelterCharacterVoiceText(line = "", options = {}) {
+  const text = String(line || "").trim();
+  if (!text) {
+    return "";
+  }
+  const quoted = extractShelterQuotedDialogue(text);
+  if (quoted) {
+    return quoted;
+  }
+  return options.allowUnquoted ? text : "";
+}
+
+function getShelterCurrentLineIndex(talk) {
+  return clamp(
+    Math.floor(talk?.lineIndex || 0),
+    0,
+    Math.max(0, getShelterDialogueSegments(talk?.line || "").length - 1),
+  );
+}
+
+function getShelterVoiceLineKey(talk, line, emotion) {
+  return [
+    "shelter",
+    talk?.event?.eventId || "free",
+    talk?.event?.nodeId || "",
+    talk?.requestId || 0,
+    getShelterCurrentLineIndex(talk),
+    emotion || talk?.emotion || "neutral",
+    line,
+  ].join("|");
+}
+
+function playShelterCurrentVoiceLine(talk, state = null, options = {}) {
+  const line = getShelterCurrentDialogueSegment(talk);
+  if (!line || talk?.pending || talk?.choiceReaction) {
+    return;
+  }
+  const voiceText = getShelterCharacterVoiceText(line, {
+    allowUnquoted: !isShelterScriptedVoiceContext(talk),
+  });
+  if (!voiceText) {
+    return;
+  }
+  const emotion = normalizeShelterTalkEmotion(talk?.emotion, "neutral");
+  const lineKey = getShelterVoiceLineKey(talk, voiceText, emotion);
+  if (talk.voiceLineKey === lineKey) {
+    return;
+  }
+  talk.voiceLineKey = lineKey;
+  speakShelterLine(voiceText, {
+    emotion,
+    topic: options.topic || talk?.lastChoice?.intent || "",
+    choice: talk?.lastChoice?.label || "",
+    eventId: talk?.event?.eventId || "",
+    nodeId: talk?.event?.nodeId || "",
+    lineIndex: getShelterCurrentLineIndex(talk),
+    startedAt: getShelterPulseTime(state),
+  });
+}
+
+function playShelterBridgeVoiceLine(bridge, state = null) {
+  const line = String(bridge?.line || "").trim();
+  if (!line) {
+    return;
+  }
+  const voiceText = getShelterCharacterVoiceText(line, { allowUnquoted: false });
+  if (!voiceText) {
+    return;
+  }
+  const emotion = normalizeShelterTalkEmotion(bridge?.emotion, "neutral");
+  const lineKey = `bridge|${bridge?.eventId || ""}|${emotion}|${voiceText}`;
+  if (bridge.voiceLineKey === lineKey) {
+    return;
+  }
+  bridge.voiceLineKey = lineKey;
+  speakShelterLine(voiceText, {
+    emotion,
+    eventId: bridge?.eventId || "",
+    topic: "bridge",
+    startedAt: getShelterPulseTime(state),
+  });
+}
+
+function getShelterLineTypeDuration(line) {
+  const length = Array.from(String(line || "").trim()).length;
+  if (!length) {
+    return 0;
+  }
+  return clamp(
+    length / getShelterSubtitleCharsPerSecond(),
+    SHELTER_SUBTITLE_TYPE_MIN_SECONDS,
+    SHELTER_SUBTITLE_TYPE_MAX_SECONDS,
+  );
+}
+
+function getShelterCurrentLineTypeProgress(talk, state = null) {
+  if (!isShelterScriptedTalk(talk) || talk?.pending) {
+    return 1;
+  }
+  const duration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  if (duration <= 0) {
+    return 1;
+  }
+  return clamp(getShelterCurrentLineAge(talk, state) / duration, 0, 1);
+}
+
+function updateShelterTalkTypingSound(talk, state = null) {
+  if (!isShelterScriptedTalk(talk) || talk?.pending || talk?.choiceReaction || normalizeShelterTalkTransition(talk)) {
+    return;
+  }
+  const line = getShelterCurrentDialogueSegment(talk);
+  const duration = getShelterLineTypeDuration(line);
+  if (!line || duration <= 0) {
+    return;
+  }
+  const lineIndex = clamp(Math.floor(talk?.lineIndex || 0), 0, Math.max(0, getShelterDialogueSegments(talk.line).length - 1));
+  const progress = clamp(getShelterCurrentLineAge(talk, state) / duration, 0, 1);
+  const lineKey = `talk:${talk.requestId || 0}:${lineIndex}:${line}`;
+  updateShelterTypingSoundForLine(talk, line, progress, talk.emotion, lineKey);
+}
+
+function updateShelterBridgeTypingSound(bridge, state = null) {
+  const line = String(bridge?.line || "").trim();
+  const duration = getShelterLineTypeDuration(line);
+  if (!line || duration <= 0) {
+    return;
+  }
+  const startedAt = Number.isFinite(bridge?.startedAt) ? bridge.startedAt : getShelterPulseTime(state);
+  const progress = clamp((getShelterPulseTime(state) - startedAt) / duration, 0, 1);
+  const lineKey = `bridge:${bridge.eventId || ""}:${startedAt}:${line}`;
+  updateShelterTypingSoundForLine(bridge, line, progress, bridge.emotion, lineKey);
+}
+
+function isShelterCurrentLineTypedComplete(talk, state = null) {
+  return getShelterCurrentLineTypeProgress(talk, state) >= 1;
+}
+
+function completeShelterCurrentLineTyping(talk, state = null) {
+  if (!isShelterScriptedTalk(talk) || !talk) {
+    return false;
+  }
+  const duration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  talk.lineShownAt = getShelterPulseTime(state) - duration;
+  return true;
+}
+
+function isShelterChoiceRevealReady(talk, state = null) {
+  if (!isShelterScriptedTalk(talk)) {
+    return true;
+  }
+  const currentLineTypeDuration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  return isShelterLineComplete(talk)
+    && isShelterCurrentLineTypedComplete(talk, state)
+    && getShelterCurrentLineAge(talk, state) >= currentLineTypeDuration + SHELTER_CHOICE_REVEAL_DELAY_SECONDS;
+}
+
+function canSelectShelterTalkChoice(talk, state = null) {
+  if (!isShelterScriptedTalk(talk)) {
+    return true;
+  }
+  return Boolean(talk?.event?.eventId)
+    && !talk?.choiceReaction
+    && isShelterChoiceRevealReady(talk, state);
+}
+
+function getShelterEventStartArtAssetKey(event, node = null) {
+  return normalizeShelterArtAssetKey(node?.backgroundAssetKey)
+    || normalizeShelterArtAssetKey(node?.artAssetKey)
+    || normalizeShelterArtAssetKey(event?.backgroundAssetKey)
+    || normalizeShelterArtAssetKey(event?.artAssetKey);
+}
+
+function getShelterChoiceReplyArtAssetKey(choice) {
+  return normalizeShelterArtAssetKey(choice?.backgroundAssetKey)
+    || normalizeShelterArtAssetKey(choice?.artAssetKey);
+}
+
+function normalizeShelterEventChoice(choice, event) {
+  if (!choice || typeof choice !== "object") {
+    return null;
+  }
+  const label = String(choice.label || "").trim();
+  if (!label) {
+    return null;
+  }
+  return {
+    ...choice,
+    label,
+    intent: String(choice.intent || event?.title || event?.id || "scripted shelter event"),
+    reply: String(choice.reply || "").trim(),
+    emotion: normalizeShelterTalkEmotion(choice.emotion, normalizeShelterTalkEmotion(event?.emotion, "neutral")),
+    eventId: event?.id || "",
+  };
+}
+
+function getShelterActiveEventNode(data, talk) {
+  const eventId = talk?.event?.eventId || "";
+  const event = getShelterScriptedEvent(data, eventId);
+  if (!event) {
+    return null;
+  }
+  return {
+    event,
+    node: getShelterScriptedEventNode(event, talk.event.nodeId),
+  };
+}
+
+function getShelterEventChoices(data, talk) {
+  const active = getShelterActiveEventNode(data, talk);
+  if (!active?.node) {
+    return null;
+  }
+  const choices = Array.isArray(active.node.choices)
+    ? active.node.choices.map((choice) => normalizeShelterEventChoice(choice, active.event)).filter(Boolean)
+    : [];
+  return choices.length ? choices.slice(0, 3) : null;
+}
+
+function startShelterScriptedEvent(talk, event, state = null) {
+  const node = getShelterScriptedEventNode(event, event?.startNodeId);
+  if (!event?.id || !node) {
+    return false;
+  }
+  talk.event = {
+    eventId: event.id,
+    nodeId: node.id,
+  };
+  talk.line = String(node.line || event.title || "").trim() || "……";
+  talk.emotion = normalizeShelterTalkEmotion(node.emotion, normalizeShelterTalkEmotion(event.emotion, "neutral"));
+  talk.eventBaseArtAssetKey = getShelterEventStartArtAssetKey(event, node);
+  talk.eventArtAssetKey = getShelterDialogueArtAssetKey(talk.emotion, talk.eventBaseArtAssetKey);
+  talk.lastChoice = null;
+  talk.reaction = null;
+  talk.choiceReaction = null;
+  talk.eventResult = null;
+  talk.pending = false;
+  talk.blockScriptedEventStart = false;
+  resetShelterLineProgress(talk, state);
+  playShelterCurrentVoiceLine(talk, state, { topic: event.title || event.id || "" });
+  return true;
+}
+
+function prepareShelterScriptedEvent(talk, state, data) {
+  if (!talk || !state || !data) {
+    return false;
+  }
+  if (talk.event?.eventId && getShelterActiveEventNode(data, talk)?.node) {
+    return true;
+  }
+  talk.event = null;
+  if (talk.blockScriptedEventStart) {
+    return false;
+  }
+  const event = getNextShelterScriptedEvent(state, data);
+  return event ? startShelterScriptedEvent(talk, event, state) : false;
+}
+
+function prepareShelterAutoEvent(talk, state, data) {
+  return updateShelterAutoEvent(talk, state, data) === "started";
+}
+
+function updateShelterAutoEvent(talk, state, data, bridgeHost = null) {
+  if (!talk || !state || !data || talk.event?.eventId) {
+    return "none";
+  }
+  if (talk.blockScriptedEventStart) {
+    return "none";
+  }
+  if (bridgeHost) {
+    const bridgeState = stepShelterAutoEventBridge(talk, state, data, bridgeHost);
+    if (bridgeState !== "none") {
+      return bridgeState;
+    }
+  }
+  const event = getNextAutoShelterScriptedEvent(state, data);
+  if (!event) {
+    return "none";
+  }
+  if (bridgeHost && beginShelterAutoEventBridge(bridgeHost, state, event)) {
+    setStatus(state, "Shelter scene.");
+    return "bridging";
+  }
+  return startShelterScriptedEvent(talk, event, state) ? "started" : "none";
+}
+
+function applyShelterEventChoiceEffects(state, data, playerChoice) {
+  if (!state || !playerChoice?.eventId) {
+    return false;
+  }
+  let changed = false;
+  const effects = playerChoice.effects && typeof playerChoice.effects === "object" ? playerChoice.effects : {};
+  if (Number.isFinite(effects.trust)) {
+    state.meta = state.meta && typeof state.meta === "object" ? state.meta : {};
+    state.meta.trust = clamp(Number(state.meta.trust || 0) + effects.trust, -1, 1);
+    changed = true;
+  }
+  if (Array.isArray(effects.storyFlags)) {
+    effects.storyFlags.forEach((flag) => {
+      changed = addMetaStoryFlag(state, String(flag || "")) || changed;
+    });
+  }
+
+  const event = getShelterScriptedEvent(data, playerChoice.eventId);
+  if (event && playerChoice.endEvent !== false && !playerChoice.nextNodeId) {
+    changed = addMetaStoryFlag(state, getShelterEventCompletionFlag(event)) || changed;
+  }
+  if (changed) {
+    saveMetaState(state.meta);
+  }
+  return changed;
+}
+
+function createShelterEventResult(playerChoice, event) {
+  if (!playerChoice?.eventId || !event) {
+    return null;
+  }
+  const effects = playerChoice.effects && typeof playerChoice.effects === "object" ? playerChoice.effects : {};
+  const lines = [];
+  if (Number.isFinite(effects.trust) && Number(effects.trust) !== 0) {
+    const trustDelta = Math.round(Number(effects.trust) * 100);
+    lines.push(`신뢰도 ${trustDelta > 0 ? "+" : ""}${trustDelta}`);
+  }
+  const recordsUpdated = playerChoice.endEvent !== false
+    || (Array.isArray(effects.storyFlags) && effects.storyFlags.length > 0);
+  if (recordsUpdated) {
+    lines.push("기록 갱신");
+  }
+  if (!lines.length) {
+    lines.push("변화 없음");
+  }
+  return {
+    title: "대화 종료",
+    lines,
+    choiceLabel: typeof playerChoice.label === "string" ? playerChoice.label : "",
+  };
+}
+
+function isShelterEventResultReady(talk, state = null) {
+  const currentLineTypeDuration = getShelterLineTypeDuration(getShelterCurrentDialogueSegment(talk));
+  return Boolean(talk?.eventResult)
+    && !talk.pending
+    && !talk.choiceReaction
+    && isShelterLineComplete(talk)
+    && isShelterCurrentLineTypedComplete(talk, state)
+    && getShelterCurrentLineAge(talk, state) >= currentLineTypeDuration + 0.24;
+}
+
+function beginShelterTalkExit(talk, state = null) {
+  if (!talk) {
+    return;
+  }
+  stopTtsPlayback();
+  talk.pending = false;
+  talk.choiceReaction = null;
+  beginShelterTalkTransition(talk, state, "out");
+  setStatus(state, "Shelter scene.");
 }
 
 function isShelterRouteExit(routeExit, data) {
@@ -9060,12 +12361,12 @@ function setRunNotice(run, message, duration = 1.8) {
 
 function getRunTimePhaseLabel(run) {
   if (run?.timePhase === "night") {
-    return "밤";
+    return "night";
   }
   if (run?.timePhase === "dusk") {
-    return "황혼";
+    return "dusk";
   }
-  return "주간";
+  return "day";
 }
 
 function setDebugNightPhase(state, data) {
@@ -9100,9 +12401,325 @@ function createActiveShelterRestState(returnLevelId, returnEntranceId) {
       capturedImage: null,
       flashTimer: 0,
     },
+    talk: {
+      requestId: 0,
+      pending: false,
+      topicIndex: 0,
+      line: "",
+      history: [],
+      choices: [],
+      choiceIndex: 0,
+      lastChoice: null,
+      reaction: null,
+      error: "",
+      lineIndex: 0,
+      lineShownAt: 0,
+      choiceReaction: null,
+      transition: null,
+      eventResult: null,
+      blockScriptedEventStart: false,
+    },
+    autoEventBridge: null,
     recordsIndex: 0,
     backgroundIndex: 0,
   };
+}
+
+function ensureShelterTalkState(rest) {
+  rest.talk = rest.talk && typeof rest.talk === "object" ? rest.talk : {};
+  rest.talk.requestId = Number.isFinite(rest.talk.requestId) ? rest.talk.requestId : 0;
+  rest.talk.pending = Boolean(rest.talk.pending);
+  rest.talk.topicIndex = Number.isFinite(rest.talk.topicIndex) ? Math.max(0, Math.floor(rest.talk.topicIndex)) : 0;
+  rest.talk.line = typeof rest.talk.line === "string" ? rest.talk.line : "";
+  rest.talk.history = Array.isArray(rest.talk.history) ? rest.talk.history.slice(-SHELTER_TALK_HISTORY_LIMIT) : [];
+  rest.talk.choices = Array.isArray(rest.talk.choices) ? rest.talk.choices.slice(0, 3) : [];
+  rest.talk.choiceIndex = Number.isFinite(rest.talk.choiceIndex) ? clamp(Math.floor(rest.talk.choiceIndex), 0, Math.max(0, rest.talk.choices.length - 1)) : 0;
+  rest.talk.lastChoice = rest.talk.lastChoice && typeof rest.talk.lastChoice === "object" ? rest.talk.lastChoice : null;
+  rest.talk.reaction = rest.talk.reaction && typeof rest.talk.reaction === "object" ? rest.talk.reaction : null;
+  rest.talk.error = typeof rest.talk.error === "string" ? rest.talk.error : "";
+  rest.talk.emotion = typeof rest.talk.emotion === "string" ? rest.talk.emotion : "neutral";
+  rest.talk.lineIndex = Number.isFinite(rest.talk.lineIndex) ? Math.max(0, Math.floor(rest.talk.lineIndex)) : 0;
+  rest.talk.lineShownAt = Number.isFinite(rest.talk.lineShownAt) ? Number(rest.talk.lineShownAt) : 0;
+  rest.talk.choiceReaction = rest.talk.choiceReaction && typeof rest.talk.choiceReaction === "object" ? rest.talk.choiceReaction : null;
+  rest.talk.transition = rest.talk.transition && typeof rest.talk.transition === "object" ? rest.talk.transition : null;
+  rest.talk.eventResult = rest.talk.eventResult && typeof rest.talk.eventResult === "object" ? rest.talk.eventResult : null;
+  rest.talk.event = rest.talk.event && typeof rest.talk.event === "object" ? rest.talk.event : null;
+  rest.talk.eventBaseArtAssetKey = normalizeShelterArtAssetKey(rest.talk.eventBaseArtAssetKey);
+  rest.talk.eventArtAssetKey = normalizeShelterArtAssetKey(rest.talk.eventArtAssetKey);
+  rest.talk.voiceLineKey = typeof rest.talk.voiceLineKey === "string" ? rest.talk.voiceLineKey : "";
+  rest.talk.blockScriptedEventStart = Boolean(rest.talk.blockScriptedEventStart);
+  return rest.talk;
+}
+
+function getShelterTalkChoices(talk, state = null, data = null) {
+  if (state && data) {
+    prepareShelterScriptedEvent(talk, state, data);
+  }
+  const eventChoices = data ? getShelterEventChoices(data, talk) : null;
+  if (eventChoices) {
+    return eventChoices;
+  }
+  const start = (Math.floor(talk.topicIndex || 0) + Math.floor(talk.requestId || 0)) % SHELTER_TALK_CHOICES.length;
+  return [0, 1, 2].map((offset) => SHELTER_TALK_CHOICES[(start + offset) % SHELTER_TALK_CHOICES.length]);
+}
+
+function prepareShelterTalkChoices(talk, state = null, data = null) {
+  talk.choices = getShelterTalkChoices(talk, state, data);
+  talk.choiceIndex = clamp(Math.floor(talk.choiceIndex || 0), 0, Math.max(0, talk.choices.length - 1));
+  if (!talk.line) {
+    talk.line = "……말해도 돼. 듣고 있어.";
+  }
+}
+
+function inferShelterTalkEmotion(text = "", playerChoice = null) {
+  const source = `${playerChoice?.label || ""} ${playerChoice?.intent || ""} ${text || ""}`;
+  if (/무서|두려|불안|가지 마|곁에|버려|혼자|떨|신호가 흐려|이어지지/.test(source)) {
+    return "anxious";
+  }
+  if (/아버지|그리|기억|이름|사람이었|병기|왜 계속|모르겠/.test(source)) {
+    return "tired";
+  }
+  if (/괜찮|고마|덜 무서|믿|옆에|따뜻|쉬|안도|좋아/.test(source)) {
+    return "warm";
+  }
+  if (/망가|아파|상처|피|파손|고장|죽|닳/.test(source)) {
+    return "hurt";
+  }
+  if (/도망치지|선택|지킬|명령|위험|전투|원인|가야/.test(source)) {
+    return "angry";
+  }
+  return "neutral";
+}
+
+function getSelectedShelterTalkChoice(talk, state = null, data = null) {
+  prepareShelterTalkChoices(talk, state, data);
+  return talk.choices[clamp(Math.floor(talk.choiceIndex || 0), 0, talk.choices.length - 1)] || talk.choices[0] || null;
+}
+
+function getShelterChoiceReply(playerChoice, talk) {
+  if (!playerChoice) {
+    return "……말해도 돼. 듣고 있어.";
+  }
+  if (Array.isArray(playerChoice.replies) && playerChoice.replies.length) {
+    const index = Math.abs(Math.floor(talk?.requestId || 0)) % playerChoice.replies.length;
+    return String(playerChoice.replies[index] || "").trim();
+  }
+  if (playerChoice.nextNodeId && !String(playerChoice.reply || "").trim()) {
+    return "";
+  }
+  return String(playerChoice.reply || "").trim() || "응. 들었어. 그 말은 놓치지 않을게.";
+}
+
+function getShelterChoiceEmotion(playerChoice, reply = "") {
+  const emotion = typeof playerChoice?.emotion === "string" ? playerChoice.emotion : "";
+  return ["neutral", "anxious", "warm", "tired", "hurt", "angry"].includes(emotion)
+    ? emotion
+    : inferShelterTalkEmotion(reply, playerChoice);
+}
+
+function getShelterChoiceDisplay(talk, playerChoice, data = null) {
+  const reply = getShelterChoiceReply(playerChoice, talk);
+  const emotion = getShelterChoiceEmotion(playerChoice, reply);
+  const event = playerChoice?.eventId ? getShelterScriptedEvent(data, playerChoice.eventId) : null;
+  const nextNode = playerChoice?.nextNodeId ? getShelterScriptedEventNode(event, playerChoice.nextNodeId) : null;
+  const nextNodeLine = String(nextNode?.line || "").trim();
+  const showNextNode = Boolean(nextNode && !reply && nextNodeLine);
+  const displayLine = showNextNode ? nextNodeLine : reply;
+  const displayEmotion = showNextNode
+    ? normalizeShelterTalkEmotion(nextNode.emotion, emotion)
+    : emotion;
+  const inheritedArtAssetKey = normalizeShelterArtAssetKey(talk?.eventBaseArtAssetKey)
+    || normalizeShelterArtAssetKey(talk?.eventArtAssetKey)
+    || getShelterEventStartArtAssetKey(event, nextNode);
+  const baseArtAssetKey = showNextNode
+    ? (getShelterEventStartArtAssetKey(event, nextNode) || inheritedArtAssetKey)
+    : inheritedArtAssetKey;
+  const eventArtAssetKey = getShelterChoiceReplyArtAssetKey(playerChoice)
+    || getShelterDialogueArtAssetKey(displayEmotion, baseArtAssetKey);
+  return {
+    reply,
+    emotion,
+    event,
+    nextNode,
+    showNextNode,
+    displayLine,
+    displayEmotion,
+    eventArtAssetKey,
+  };
+}
+
+function normalizeShelterChoiceReaction(talk) {
+  const reaction = talk?.choiceReaction;
+  if (!reaction || typeof reaction !== "object" || !reaction.playerChoice) {
+    if (talk && reaction) {
+      talk.choiceReaction = null;
+    }
+    return null;
+  }
+  reaction.duration = Number.isFinite(reaction.duration)
+    ? clamp(Number(reaction.duration), 0.18, 1.4)
+    : SHELTER_CHOICE_REACTION_SECONDS;
+  reaction.startedAt = Number.isFinite(reaction.startedAt) ? reaction.startedAt : 0;
+  reaction.topic = typeof reaction.topic === "string" ? reaction.topic : "";
+  return reaction;
+}
+
+function beginShelterChoiceReaction(talk, playerChoice, topic = "", state = null, data = null) {
+  if (!talk || !playerChoice?.eventId) {
+    return false;
+  }
+  stopTtsPlayback();
+  const display = getShelterChoiceDisplay(talk, playerChoice, data);
+  const event = display.event;
+  const rawDuration = Number(event?.choiceReactionSeconds ?? playerChoice.choiceReactionSeconds);
+  const duration = Number.isFinite(rawDuration)
+    ? clamp(rawDuration, 0.18, 1.4)
+    : SHELTER_CHOICE_REACTION_SECONDS;
+  talk.choiceReaction = {
+    playerChoice,
+    topic,
+    startedAt: getShelterPulseTime(state),
+    duration,
+  };
+  talk.pending = true;
+  talk.error = "";
+  talk.eventResult = null;
+  talk.lastChoice = playerChoice;
+  talk.emotion = display.displayEmotion;
+  talk.eventArtAssetKey = display.eventArtAssetKey || talk.eventArtAssetKey;
+  talk.reaction = {
+    emotion: display.displayEmotion,
+    startedAt: getShelterPulseTime(state),
+    requestId: talk.requestId,
+    choice: playerChoice?.label || "",
+  };
+  return true;
+}
+
+function stepShelterChoiceReaction(talk, state = null, data = null) {
+  const reaction = normalizeShelterChoiceReaction(talk);
+  if (!reaction) {
+    return false;
+  }
+  const elapsed = Math.max(0, getShelterPulseTime(state) - reaction.startedAt);
+  if (elapsed < reaction.duration) {
+    setStatus(state, "Shelter scene.");
+    return true;
+  }
+  const playerChoice = reaction.playerChoice;
+  const topic = reaction.topic;
+  talk.choiceReaction = null;
+  commitShelterChoiceReply(talk, playerChoice, topic, state, data);
+  return true;
+}
+
+function commitShelterChoiceReply(talk, playerChoice, topic = "", state = null, data = null) {
+  const display = getShelterChoiceDisplay(talk, playerChoice, data);
+  const { event, nextNode, displayLine, displayEmotion, eventArtAssetKey } = display;
+  talk.pending = false;
+  talk.error = "";
+  talk.line = displayLine;
+  talk.lastChoice = playerChoice;
+  talk.emotion = displayEmotion;
+  talk.choiceReaction = null;
+  talk.eventResult = null;
+  resetShelterLineProgress(talk, state);
+  talk.eventArtAssetKey = eventArtAssetKey;
+  talk.reaction = {
+    emotion: displayEmotion,
+    startedAt: getShelterPulseTime(state),
+    requestId: talk.requestId,
+    choice: playerChoice?.label || "",
+  };
+  if (playerChoice?.eventId) {
+    applyShelterEventChoiceEffects(state, data, playerChoice);
+    if (playerChoice.nextNodeId) {
+      talk.event = {
+        eventId: playerChoice.eventId,
+        nodeId: playerChoice.nextNodeId,
+      };
+      talk.eventBaseArtAssetKey = getShelterEventStartArtAssetKey(event, nextNode) || talk.eventBaseArtAssetKey;
+      talk.eventArtAssetKey = talk.eventArtAssetKey || getShelterEventStartArtAssetKey(event, nextNode);
+    } else if (playerChoice.endEvent !== false) {
+      talk.event = null;
+      talk.blockScriptedEventStart = true;
+      talk.eventResult = createShelterEventResult(playerChoice, event);
+    }
+  }
+  if (playerChoice?.label) {
+    talk.history.push({ speaker: "drone", text: playerChoice.label });
+  }
+  if (displayLine) {
+    talk.history.push({ speaker: "shelter", text: displayLine });
+  }
+  talk.history = talk.history.slice(-SHELTER_TALK_HISTORY_LIMIT);
+  prepareShelterTalkChoices(talk, state, data);
+  playShelterCurrentVoiceLine(talk, state, { topic: playerChoice?.intent || topic });
+}
+
+function submitShelterChatText() {
+  return false;
+}
+
+function queueShelterTalkLine(state, data, playerChoice = null) {
+  const run = state.run;
+  const rest = run?.shelterRest;
+  if (!rest?.active) {
+    return;
+  }
+  const talk = ensureShelterTalkState(rest);
+  const topic = SHELTER_TALK_TOPICS[talk.topicIndex % SHELTER_TALK_TOPICS.length];
+  talk.topicIndex = (talk.topicIndex + 1) % SHELTER_TALK_TOPICS.length;
+  talk.requestId += 1;
+  if (beginShelterChoiceReaction(talk, playerChoice, topic, state, data)) {
+    setStatus(state, "Shelter scene.");
+    return;
+  }
+  commitShelterChoiceReply(talk, playerChoice, topic, state, data);
+  setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+}
+
+function ensureHomeShelterTalkState(state) {
+  state.shelter = state.shelter && typeof state.shelter === "object" ? state.shelter : {};
+  state.shelter.talk = state.shelter.talk && typeof state.shelter.talk === "object" ? state.shelter.talk : {};
+  const talk = state.shelter.talk;
+  talk.active = Boolean(talk.active);
+  talk.requestId = Number.isFinite(talk.requestId) ? talk.requestId : 0;
+  talk.pending = Boolean(talk.pending);
+  talk.topicIndex = Number.isFinite(talk.topicIndex) ? Math.max(0, Math.floor(talk.topicIndex)) : 0;
+  talk.line = typeof talk.line === "string" ? talk.line : "";
+  talk.history = Array.isArray(talk.history) ? talk.history.slice(-SHELTER_TALK_HISTORY_LIMIT) : [];
+  talk.choices = Array.isArray(talk.choices) ? talk.choices.slice(0, 3) : [];
+  talk.choiceIndex = Number.isFinite(talk.choiceIndex) ? clamp(Math.floor(talk.choiceIndex), 0, Math.max(0, talk.choices.length - 1)) : 0;
+  talk.lastChoice = talk.lastChoice && typeof talk.lastChoice === "object" ? talk.lastChoice : null;
+  talk.reaction = talk.reaction && typeof talk.reaction === "object" ? talk.reaction : null;
+  talk.error = typeof talk.error === "string" ? talk.error : "";
+  talk.emotion = typeof talk.emotion === "string" ? talk.emotion : "neutral";
+  talk.lineIndex = Number.isFinite(talk.lineIndex) ? Math.max(0, Math.floor(talk.lineIndex)) : 0;
+  talk.lineShownAt = Number.isFinite(talk.lineShownAt) ? Number(talk.lineShownAt) : 0;
+  talk.choiceReaction = talk.choiceReaction && typeof talk.choiceReaction === "object" ? talk.choiceReaction : null;
+  talk.transition = talk.transition && typeof talk.transition === "object" ? talk.transition : null;
+  talk.eventResult = talk.eventResult && typeof talk.eventResult === "object" ? talk.eventResult : null;
+  talk.event = talk.event && typeof talk.event === "object" ? talk.event : null;
+  talk.eventBaseArtAssetKey = normalizeShelterArtAssetKey(talk.eventBaseArtAssetKey);
+  talk.eventArtAssetKey = normalizeShelterArtAssetKey(talk.eventArtAssetKey);
+  talk.voiceLineKey = typeof talk.voiceLineKey === "string" ? talk.voiceLineKey : "";
+  talk.blockScriptedEventStart = Boolean(talk.blockScriptedEventStart);
+  return talk;
+}
+
+function queueHomeShelterTalkLine(state, data, playerChoice = null) {
+  const talk = ensureHomeShelterTalkState(state);
+  const topic = SHELTER_TALK_TOPICS[talk.topicIndex % SHELTER_TALK_TOPICS.length];
+  talk.topicIndex = (talk.topicIndex + 1) % SHELTER_TALK_TOPICS.length;
+  talk.active = true;
+  talk.requestId += 1;
+  if (beginShelterChoiceReaction(talk, playerChoice, topic, state, data)) {
+    setStatus(state, "Shelter scene.");
+    return;
+  }
+  commitShelterChoiceReply(talk, playerChoice, topic, state, data);
+  setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
 }
 
 function resetShelterPhoto(rest) {
@@ -9270,6 +12887,7 @@ function applyShelterRestRecovery(run, data) {
   run.focus = run.focusMax;
   run.focusActive = false;
   run.focusDepleted = false;
+  run.heatFailureNotified = false;
   run.time = 0;
   run.timePhase = "day";
   run.nightActive = false;
@@ -9547,6 +13165,17 @@ function leaveShelterRest(state, data) {
       capturedImage: null,
       flashTimer: 0,
     },
+    talk: {
+      requestId: 0,
+      pending: false,
+      topicIndex: 0,
+      line: "",
+      history: [],
+      choices: [],
+      choiceIndex: 0,
+      lastChoice: null,
+      error: "",
+    },
     recordsIndex: 0,
     backgroundIndex: 0,
   };
@@ -9727,7 +13356,7 @@ function updateZipLineRide(player, data, run, config, dt, jumpPressed) {
   player.zipLineProgress = clamp(player.zipLineProgress + direction * (speed * dt / length), 0, 1);
   const point = getZipLinePoint(zipLine, player.zipLineProgress);
   player.x = clamp(point.x - player.width * 0.5, 0, data.world.width - player.width);
-  player.y = clamp(point.y - player.height * 0.38, 0, data.world.height - player.height);
+  player.y = Math.min(point.y - player.height * 0.38, data.world.height - player.height);
   player.vx = (point.x - previousPoint.x) / Math.max(dt, 0.001);
   player.vy = (point.y - previousPoint.y) / Math.max(dt, 0.001);
   player.facing = Math.sign(player.vx) || direction;
@@ -9829,18 +13458,33 @@ function updateInteractions(state, data, canInteract) {
   }
 
   if (nearest.kind === "faceOff") {
-    if (!consumeEitherPress(state, FACE_OFF_ENTRY_KEYS)) {
+    const faceOffPressed = consumeEitherPress(state, getFaceOffEntryKeys(state))
+      || isEitherPressed(state, getFaceOffEntryKeys(state));
+    if (!faceOffPressed) {
       return;
     }
     enterFaceOff(run, data, nearest.enemy, state);
     return;
   }
 
-  if (!consumeEitherPress(state, INTERACT_KEYS)) {
+  const interactPressed = consumeEitherPress(state, getInteractKeys(state));
+  if (!interactPressed) {
     return;
   }
 
   if (nearest.kind === "extract") {
+    applyExtraction(state, data);
+    return;
+  }
+
+  if (nearest.kind === "escapeExit") {
+    if (run.vaultEscape) {
+      run.vaultEscape.active = false;
+      run.vaultEscape.completed = true;
+      run.vaultEscape.lockdownActive = false;
+      run.vaultEscape.lockdownTimer = 0;
+    }
+    pushNotice(run, "Escaped before lockdown.");
     applyExtraction(state, data);
     return;
   }
@@ -9868,6 +13512,16 @@ function updateInteractions(state, data, canInteract) {
 
   if (nearest.kind === "lootCrate") {
     openLootCrate(run, nearest.crate);
+    return;
+  }
+
+  if (nearest.kind === "vaultDoor") {
+    beginVaultEscape(run, nearest.vaultDoor);
+    return;
+  }
+
+  if (nearest.kind === "vaultLoot") {
+    collectVaultLoot(run, nearest.vaultLoot);
     return;
   }
 
@@ -9928,6 +13582,17 @@ function updateShelterRestMode(state, data, dt) {
       rest.timer = 0;
       rest.menuIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1);
       setStatus(state, "?쇰궃泥??湲?");
+      const talk = ensureShelterTalkState(rest);
+      const autoEventState = updateShelterAutoEvent(talk, state, data, rest);
+      if (autoEventState === "started") {
+        rest.phase = "talk";
+        rest.timer = 0;
+        prepareShelterTalkChoices(talk, state, data);
+        beginShelterTalkTransition(talk, state, "in");
+        setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      } else if (autoEventState === "bridging") {
+        setStatus(state, "Shelter scene.");
+      }
       saveCurrentGame(state, data);
     } else {
       setStatus(state, "?쇰궃泥??먯뇙 以?");
@@ -9937,6 +13602,22 @@ function updateShelterRestMode(state, data, dt) {
   }
 
   if (rest.phase === "menu") {
+    const talk = ensureShelterTalkState(rest);
+    const autoEventState = updateShelterAutoEvent(talk, state, data, rest);
+    if (autoEventState === "started") {
+      rest.phase = "talk";
+      rest.timer = 0;
+      prepareShelterTalkChoices(talk, state, data);
+      beginShelterTalkTransition(talk, state, "in");
+      setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (autoEventState === "bridging") {
+      setStatus(state, "Shelter scene.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
     if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
       rest.menuIndex = (Math.max(0, Math.floor(rest.menuIndex || 0)) + SHELTER_MENU_ITEMS.length - 1) % SHELTER_MENU_ITEMS.length;
     }
@@ -9949,7 +13630,18 @@ function updateShelterRestMode(state, data, dt) {
     }
     if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, CONFIRM_KEYS)) {
       const item = SHELTER_MENU_ITEMS[clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1)];
-      if (item === "photo") {
+      if (item === "talk") {
+        rest.phase = "talk";
+        rest.timer = 0;
+        const talk = ensureShelterTalkState(rest);
+        talk.blockScriptedEventStart = false;
+        prepareShelterTalkChoices(talk, state, data);
+        if (!talk.line) {
+          talk.line = "……말해도 돼. 듣고 있어.";
+        }
+        beginShelterTalkTransition(talk, state, "in");
+        setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      } else if (item === "photo") {
         rest.phase = "photo";
         rest.timer = 0;
         resetShelterPhoto(rest);
@@ -9976,6 +13668,76 @@ function updateShelterRestMode(state, data, dt) {
     } else {
       setStatus(state, "피난처 · Z 선택 · C 나가기");
     }
+    updateAutoSave(state, data, dt);
+    return true;
+  }
+
+  if (rest.phase === "talk") {
+    const talk = ensureShelterTalkState(rest);
+    prepareShelterTalkChoices(talk, state, data);
+    const transitionState = updateShelterTalkTransition(talk, state);
+    if (transitionState === "running") {
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (transitionState === "exit-complete") {
+      rest.phase = "menu";
+      rest.timer = 0;
+      talk.pending = false;
+      talk.choiceReaction = null;
+      talk.eventResult = null;
+      setStatus(state, "Shelter menu.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (stepShelterChoiceReaction(talk, state, data)) {
+      setStatus(state, "Shelter scene.");
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (isShelterEventResultReady(talk, state)) {
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+        beginShelterTalkExit(talk, state);
+      } else {
+        setStatus(state, "Shelter result. Z close.");
+      }
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      beginShelterTalkExit(talk, state);
+      updateAutoSave(state, data, dt);
+      return true;
+    }
+    updateShelterTalkTypingSound(talk, state);
+    if (!talk.line) {
+      talk.line = "……말해도 돼. 듣고 있어.";
+    }
+    if (!talk.pending) {
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
+        if (!isShelterCurrentLineTypedComplete(talk, state)) {
+          completeShelterCurrentLineTyping(talk, state);
+          updateAutoSave(state, data, dt);
+          return true;
+        }
+        if (advanceShelterLine(talk, state)) {
+          updateAutoSave(state, data, dt);
+          return true;
+        }
+        if (canSelectShelterTalkChoice(talk, state)) {
+          const playerChoice = getSelectedShelterTalkChoice(talk, state, data);
+          queueShelterTalkLine(state, data, playerChoice);
+        }
+      } else if (isShelterLineComplete(talk) && canSelectShelterTalkChoice(talk, state)) {
+        if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+        }
+        if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+        }
+      }
+    }
+    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z listen. Esc back.");
     updateAutoSave(state, data, dt);
     return true;
   }
@@ -10115,6 +13877,7 @@ function updateExpedition(state, data, dt) {
     return;
   }
 
+  updateSearchMusic(run);
   updateMapExploration(run, data);
 
   if (updateInventoryOverlayInput(state, data)) {
@@ -10140,6 +13903,9 @@ function updateExpedition(state, data, dt) {
     updateWeaponRuntime(run, data, state, dt);
   }
   const meleeSlotSelected = !lootWasActive && isMeleeSlotSelected(run, data);
+  const keyboardRecoilShotPressed = !lootWasActive && !run.faceOff?.active && !meleeSlotSelected
+    ? updateWeaponFireReloadInput(run, data, state)
+    : false;
   if (lootWasActive) {
     if (run.recoilAim) {
       run.recoilAim.active = false;
@@ -10157,9 +13923,10 @@ function updateExpedition(state, data, dt) {
   }
   const selectedWeaponAutomatic = !lootWasActive && !meleeSlotSelected && isSelectedWeaponAutomatic(run, data);
   const heldAutoFire = selectedWeaponAutomatic
+    && useLegacyControls(state)
     && Boolean(state.mouse?.primaryDown)
     && canFireWeaponPose(run.player);
-  const queuedRecoilShotPressed = !lootWasActive && !meleeSlotSelected && (Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
+  const queuedRecoilShotPressed = !lootWasActive && !meleeSlotSelected && (keyboardRecoilShotPressed || Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
   const reserveRecoilShotForWeapon = queuedRecoilShotPressed
     && (Boolean(run.recoilAim?.aiming) || selectedWeaponAutomatic);
   if (queuedRecoilShotPressed || state.mouse?.secondaryDown || run.recoilAim?.aiming || run.focusActive) {
@@ -10192,17 +13959,43 @@ function updateExpedition(state, data, dt) {
     setStatus(state, run.faceOff?.message ? `Face-off: ${run.faceOff.message}` : "Face-off");
     return;
   }
-  const focusActive = updateFocusState(run, state, dt);
+  const focusActive = updateFocusState(run, data, state, dt);
+  if (run.player.recoilJumpChargeActive) {
+    const chargeDrag = Math.min(1, RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND * dt);
+    run.player.vx = approach(run.player.vx, 0, Math.abs(run.player.vx) * chargeDrag);
+    run.player.vy = approach(run.player.vy, 0, Math.abs(run.player.vy) * chargeDrag * 0.45);
+    run.player.dashCarryTimer = 0;
+    run.player.dashCarrySpeed = 0;
+    run.player.sprintJumpCarryTimer = 0;
+    run.player.sprintJumpCarrySpeed = 0;
+  }
   const focusTimeScale = focusActive
     ? clamp(data.player.movement.focusTimeScale ?? FOCUS_TIME_SCALE, 0.05, 1)
     : 1;
   const dodgeTimeScale = (run.dodgeSlowTimer ?? 0) > 0 ? 0.38 : 1;
-  const simDt = dt * focusTimeScale * dodgeTimeScale;
+  const dashActionActive = Boolean(
+    isDashInputQueued(state) ||
+    run.player.dashWindupTimer > 0 ||
+    run.player.dashTimer > 0
+  );
+  const actionTimeScale = dashActionActive ? 1 : focusTimeScale;
+  const simDt = dt * actionTimeScale * dodgeTimeScale;
+  if (isVaultLockdownActive(run)) {
+    updateVaultEscapeTimer(state, data, simDt);
+    if (state.scene !== SCENES.EXPEDITION) {
+      return;
+    }
+    updateEffects(run, simDt, dt, data);
+    syncCamera(run, data, dt);
+    setStatus(state, "LOCKDOWN. All exits sealed.");
+    return;
+  }
   let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
   if (!lootWasActive && meleeSlotSelected && Boolean(state.mouse?.primaryJustPressed)) {
     attackPressed = true;
   }
-  const recoilShotPressed = reserveRecoilShotForWeapon || (!lootWasActive && Boolean(state.mouse?.primaryJustPressed));
+  const recoilShotPressed = reserveRecoilShotForWeapon
+    || (!lootWasActive && !meleeSlotSelected && (keyboardRecoilShotPressed || Boolean(state.mouse?.primaryJustPressed)));
   if (recoilShotPressed || queuedRecoilShotPressed) {
     pushInputTrace(state, "shotQueued", {
       shot: Number(Boolean(recoilShotPressed)),
@@ -10240,6 +14033,9 @@ function updateExpedition(state, data, dt) {
   updateEnemyShots(run, data, simDt);
   updateAttackHits(run, data);
   updateSpilledLoot(run, data, simDt);
+  if (updateVaultEscapeTimer(state, data, simDt)) {
+    return;
+  }
   if (lootActive) {
     run.prompt = "";
     run.promptWorld = null;
@@ -10274,82 +14070,196 @@ function updateExpedition(state, data, dt) {
         ? "?⑺샎 ?뺣컯."
         : "?쇨컙 ?꾪삊.";
   const notice = run.noticeTimer > 0 ? ` ${run.message}` : "";
-  setStatus(state, `${phaseLabel}${notice}`);
+  const vault = isVaultEscapeActive(run)
+    ? ` Vault ${Math.ceil(run.vaultEscape.timeLeft)}s ${run.vaultEscape.collected}/${run.vaultEscape.totalLoot}`
+    : "";
+  setStatus(state, `${phaseLabel}${notice}${vault}`);
   updateAutoSave(state, data, dt);
 }
 
-function updateShelterLegacy(state) {
-  setStatus(state, isMovementLab(state.data) ? "?쇰궃泥??湲? C: 異쒓꺽" : "?쇰궃泥??湲? C: 異쒓꺽");
-  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
-    startNewSavedRun(state, state.data);
-    setStatus(state, "異쒓꺽 以?");
-  }
-}
-
 function updateShelter(state) {
-  const menu = state.shelterMenu && typeof state.shelterMenu === "object"
-    ? state.shelterMenu
-    : {};
-  menu.menuIndex = clamp(Math.floor(menu.menuIndex || 0), 0, SHELTER_HUB_MENU_ITEMS.length - 1);
-  menu.upgradeIndex = clamp(Math.floor(menu.upgradeIndex || 0), 0, Math.max(0, SHELTER_UPGRADES.length - 1));
-  state.shelterMenu = menu;
+  state.shelter = state.shelter && typeof state.shelter === "object" ? state.shelter : { menuIndex: 0 };
+  state.shelter.menuIndex = clamp(Math.floor(state.shelter.menuIndex || 0), 0, SHELTER_HOME_MENU_ITEMS.length - 1);
+  state.shelter.upgradeIndex = clamp(Math.floor(state.shelter.upgradeIndex || 0), 0, Math.max(0, SHELTER_UPGRADES.length - 1));
+  state.shelterMenu = state.shelter;
+  const talk = ensureHomeShelterTalkState(state);
+
+  if (!talk.active) {
+    const autoEventState = updateShelterAutoEvent(talk, state, state.data, state.shelter);
+    if (autoEventState === "started") {
+      talk.active = true;
+      prepareShelterTalkChoices(talk, state, state.data);
+      beginShelterTalkTransition(talk, state, "in");
+      setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+      return;
+    }
+    if (autoEventState === "bridging") {
+      setStatus(state, "Shelter scene.");
+      return;
+    }
+  }
+
+  const startShelterTalk = () => {
+    talk.active = true;
+    talk.blockScriptedEventStart = false;
+    prepareShelterTalkChoices(talk, state, state.data);
+    if (!talk.line) {
+      talk.line = "……말해도 돼. 듣고 있어.";
+    }
+    beginShelterTalkTransition(talk, state, "in");
+    setStatus(state, "Shelter talk. W/S choose. Z listen. Esc back.");
+  };
+
+  const startShelterSortie = () => {
+    startNewSavedRun(state, state.data);
+    setStatus(state, "출격 중");
+  };
+
+  const handleShelterUpgrade = () => {
+    const upgrade = SHELTER_UPGRADES[state.shelter.upgradeIndex] || SHELTER_UPGRADES[0];
+    if (!upgrade) {
+      return true;
+    }
+    const level = getShelterUpgradeLevel(state.meta, upgrade.id);
+    const cost = getShelterUpgradeCost(upgrade, level);
+    if (cost === null) {
+      setStatus(state, `${upgrade.label} 최대 단계`);
+      return true;
+    }
+    if ((state.meta.bankedMaterials || 0) < cost) {
+      setStatus(state, `자재 부족 · ${cost} 필요`);
+      return true;
+    }
+    state.meta.upgrades = normalizeMetaUpgrades(state.meta.upgrades);
+    state.meta.bankedMaterials = Math.max(0, (state.meta.bankedMaterials || 0) - cost);
+    state.meta.upgrades[upgrade.id] = level + 1;
+    saveMetaState(state.meta);
+    setStatus(state, `${upgrade.label} Lv.${level + 1} 업그레이드 완료`);
+    return true;
+  };
+
+  if (talk.active) {
+    prepareShelterTalkChoices(talk, state, state.data);
+    const transitionState = updateShelterTalkTransition(talk, state);
+    if (transitionState === "running") {
+      return;
+    }
+    if (transitionState === "exit-complete") {
+      talk.active = false;
+      talk.pending = false;
+      talk.choiceReaction = null;
+      talk.eventResult = null;
+      setStatus(state, "Shelter menu.");
+      return;
+    }
+    if (stepShelterChoiceReaction(talk, state, state.data)) {
+      setStatus(state, "Shelter scene.");
+      return;
+    }
+    if (isShelterEventResultReady(talk, state)) {
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+        beginShelterTalkExit(talk, state);
+      } else {
+        setStatus(state, "Shelter result. Z close.");
+      }
+      return;
+    }
+    if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      beginShelterTalkExit(talk, state);
+      return;
+    }
+    updateShelterTalkTypingSound(talk, state);
+    if (!talk.pending) {
+      if (!talk.line) {
+        talk.line = "……말해도 돼. 듣고 있어.";
+      }
+      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
+        if (!isShelterCurrentLineTypedComplete(talk, state)) {
+          completeShelterCurrentLineTyping(talk, state);
+          return;
+        }
+        if (advanceShelterLine(talk, state)) {
+          return;
+        }
+        if (canSelectShelterTalkChoice(talk, state)) {
+          const playerChoice = getSelectedShelterTalkChoice(talk, state, state.data);
+          queueHomeShelterTalkLine(state, state.data, playerChoice);
+          return;
+        }
+      } else if (isShelterLineComplete(talk) && canSelectShelterTalkChoice(talk, state)) {
+        if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+        }
+        if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
+          talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+        }
+      }
+    }
+    setStatus(state, talk.pending ? "Shelter talk. Waiting..." : "Shelter talk. W/S choose. Z listen. Esc back.");
+    return;
+  }
+
+  const pointerAction = getShelterHomePointerAction(state);
+  if (pointerAction) {
+    state.mouse.primaryJustPressed = false;
+    if (pointerAction === "talk") {
+      startShelterTalk();
+      return;
+    }
+    if (pointerAction === "upgrade") {
+      state.shelter.menuIndex = SHELTER_HOME_MENU_ITEMS.indexOf("upgrade");
+      setStatus(state, "업그레이드 선택");
+      return;
+    }
+    startShelterSortie();
+    return;
+  }
 
   if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
-    menu.menuIndex = (menu.menuIndex + SHELTER_HUB_MENU_ITEMS.length - 1) % SHELTER_HUB_MENU_ITEMS.length;
-    setStatus(state, "?쇰궃泥?硫붾돱");
-    return;
+    state.shelter.menuIndex = (Math.max(0, Math.floor(state.shelter.menuIndex || 0)) + SHELTER_HOME_MENU_ITEMS.length - 1) % SHELTER_HOME_MENU_ITEMS.length;
   }
   if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
-    menu.menuIndex = (menu.menuIndex + 1) % SHELTER_HUB_MENU_ITEMS.length;
-    setStatus(state, "?쇰궃泥?硫붾돱");
-    return;
+    state.shelter.menuIndex = (Math.max(0, Math.floor(state.shelter.menuIndex || 0)) + 1) % SHELTER_HOME_MENU_ITEMS.length;
   }
 
-  const selectedMenuItem = SHELTER_HUB_MENU_ITEMS[menu.menuIndex] || "upgrade";
-  if (selectedMenuItem === "upgrade") {
+  const selected = SHELTER_HOME_MENU_ITEMS[clamp(Math.floor(state.shelter.menuIndex || 0), 0, SHELTER_HOME_MENU_ITEMS.length - 1)];
+  if (selected === "upgrade") {
     if (consumeEitherPress(state, SHELTER_VIEW_LEFT_KEYS)) {
-      menu.upgradeIndex = (menu.upgradeIndex + SHELTER_UPGRADES.length - 1) % SHELTER_UPGRADES.length;
-      setStatus(state, "?낃렇?덉씠???좏깮");
+      state.shelter.upgradeIndex = (state.shelter.upgradeIndex + SHELTER_UPGRADES.length - 1) % SHELTER_UPGRADES.length;
+      setStatus(state, "업그레이드 선택");
       return;
     }
     if (consumeEitherPress(state, SHELTER_VIEW_RIGHT_KEYS)) {
-      menu.upgradeIndex = (menu.upgradeIndex + 1) % SHELTER_UPGRADES.length;
-      setStatus(state, "?낃렇?덉씠???좏깮");
+      state.shelter.upgradeIndex = (state.shelter.upgradeIndex + 1) % SHELTER_UPGRADES.length;
+      setStatus(state, "업그레이드 선택");
       return;
     }
   }
 
-  if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
-    if (selectedMenuItem === "upgrade") {
-      const upgrade = SHELTER_UPGRADES[menu.upgradeIndex] || SHELTER_UPGRADES[0];
-      const level = getShelterUpgradeLevel(state.meta, upgrade.id);
-      const cost = getShelterUpgradeCost(upgrade, level);
-      if (cost === null) {
-        setStatus(state, `${upgrade.label} 理쒕? ?④퀎`);
-        return;
-      }
-      if ((state.meta.bankedMaterials || 0) < cost) {
-        setStatus(state, `?먯옱 遺議? ${cost} ?꾩슂`);
-        return;
-      }
-      state.meta.upgrades = normalizeMetaUpgrades(state.meta.upgrades);
-      state.meta.bankedMaterials = Math.max(0, (state.meta.bankedMaterials || 0) - cost);
-      state.meta.upgrades[upgrade.id] = level + 1;
-      saveMetaState(state.meta);
-      setStatus(state, `${upgrade.label} Lv.${level + 1} ?낃렇?덉씠???꾨즺`);
-      return;
-    }
-    startNewSavedRun(state, state.data);
-    setStatus(state, "출격 중");
+  if (consumeEitherPress(state, SHELTER_EXIT_KEYS)) {
+    startShelterSortie();
     return;
   }
 
-  const selectedUpgrade = SHELTER_UPGRADES[menu.upgradeIndex] || SHELTER_UPGRADES[0];
+  if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, CONFIRM_KEYS)) {
+    if (selected === "talk") {
+      startShelterTalk();
+      return;
+    }
+    if (selected === "upgrade") {
+      handleShelterUpgrade();
+      return;
+    }
+    startShelterSortie();
+    return;
+  }
+
+  const selectedUpgrade = SHELTER_UPGRADES[state.shelter.upgradeIndex] || SHELTER_UPGRADES[0];
   const level = getShelterUpgradeLevel(state.meta, selectedUpgrade.id);
   const cost = getShelterUpgradeCost(selectedUpgrade, level);
-  setStatus(state, selectedMenuItem === "upgrade"
+  setStatus(state, selected === "upgrade"
     ? `${selectedUpgrade.label} Lv.${level}/${selectedUpgrade.maxLevel} · ${cost === null ? "최대" : `자재 ${cost}`}`
-    : "출격 대기");
+    : "Shelter. W/S menu. Z select. C sortie.");
 }
 
 function ensureTitleMenuState(state, hasRun) {
@@ -10399,7 +14309,7 @@ function enterTitleNewRun(state, hasRun) {
 
 function updateTitle(state) {
   if (shouldStartFromUrlLevel()) {
-    startNewSavedRun(state, state.data, { clearSaved: false, persist: false });
+    startNewSavedRun(state, state.data, { clearSaved: false, persist: false, useUrlLevel: true });
     setStatus(state, "?삥뇣節뀐쉘 ?삠꺕");
     return;
   }
@@ -10490,9 +14400,49 @@ function updateGameOver(state) {
   }
 }
 
+function getShelterHomePointerAction(state) {
+  const mouse = state.mouse;
+  if (!mouse?.primaryJustPressed || mouse.onCanvas === false) {
+    return null;
+  }
+  const x = Number(mouse.screenX);
+  const y = Number(mouse.screenY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  const rowX = 44;
+  const rowY = 96;
+  const rowW = 210;
+  const rowH = 38;
+  const rowGap = 47;
+  for (let index = 0; index < SHELTER_HOME_MENU_ITEMS.length; index += 1) {
+    const top = rowY + index * rowGap;
+    if (x >= rowX && x <= rowX + rowW && y >= top && y <= top + rowH) {
+      state.shelter.menuIndex = index;
+      return SHELTER_HOME_MENU_ITEMS[index];
+    }
+  }
+  return null;
+}
+
 export function bindInput(state) {
+  const isTextInputTarget = (target) => {
+    const tagName = String(target?.tagName || "").toLowerCase();
+    return Boolean(target?.isContentEditable)
+      || tagName === "input"
+      || tagName === "textarea"
+      || tagName === "select";
+  };
+
+  window.addEventListener(SHELTER_CHAT_SUBMIT_EVENT, (event) => {
+    submitShelterChatText(state, event.detail?.text || "");
+  });
+
   window.addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Tab", "CapsLock", "Digit1", "Digit2", "Digit3", "Digit8", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "Minus", "Equal", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyF", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (isTextInputTarget(event.target)) {
+      return;
+    }
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Tab", "CapsLock", "Digit1", "Digit2", "Digit3", "Digit8", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "Minus", "Equal", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyE", "KeyF", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (typeof event.getModifierState === "function") {
@@ -10500,24 +14450,31 @@ export function bindInput(state) {
     }
     if (!state.pressed.has(event.code)) {
       state.justPressed.add(event.code);
+      state.keyHoldSeconds?.set(event.code, 0);
     }
     state.pressed.add(event.code);
   });
 
   window.addEventListener("keyup", (event) => {
+    if (isTextInputTarget(event.target)) {
+      return;
+    }
     if (typeof event.getModifierState === "function") {
       state.capsLockActive = event.getModifierState("CapsLock");
     }
     if (state.pressed.has(event.code)) {
+      state.releasedKeyHoldSeconds?.set(event.code, getKeyHoldSeconds(state, event.code));
       state.justReleased?.add(event.code);
     }
     state.pressed.delete(event.code);
+    state.keyHoldSeconds?.delete(event.code);
   });
 }
 
 export function updateGame(state, data, dt) {
   state.pulse += dt;
   state.sceneTimer += dt;
+  updateKeyHoldDurations(state, dt);
 
   if (consumeEitherPress(state, DEBUG_KEYS)) {
     state.debug.active = !state.debug.active;
@@ -10562,12 +14519,16 @@ export function updateGame(state, data, dt) {
     updateGameOver(state);
   }
 
+  updateShelterMusic(state);
+  updateLoopingAudioFades();
+
   if (state.mouse) {
     state.mouse.primaryJustPressed = false;
     state.mouse.secondaryJustPressed = false;
   }
   state.justPressed.clear();
   state.justReleased?.clear();
+  state.releasedKeyHoldSeconds?.clear();
 }
 
 export function hasThreatSense(state) {

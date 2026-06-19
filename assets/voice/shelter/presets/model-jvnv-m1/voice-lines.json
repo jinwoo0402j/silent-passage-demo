@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "scene": "shelter",
+  "speaker": "type-07a",
+  "voice": "type07a",
+  "generator": "Style-Bert-VITS2",
+  "format": "wav",
+  "generatedAt": "2026-06-19T05:38:44.585Z",
+  "lines": [
+    {
+      "id": "type07a_anxious_shelter-first-arrival-01_01x699w",
+      "scene": "shelter",
+      "speaker": "type-07a",
+      "emotion": "anxious",
+      "topic": "첫 쉘터 진입",
+      "eventId": "shelter-first-arrival-01",
+      "nodeId": "arrival",
+      "source": "event-node",
+      "text": "와... 여기 생각보다 멀쩡하네.",
+      "voiceText": "ここ、思ったより使えそうだな。",
+      "file": "anxious/type07a_anxious_shelter-first-arrival-01_01x699w.wav"
+    },
+    {
+      "id": "type07a_warm_shelter-first-arrival-01_1uuasii",
+      "scene": "shelter",
+      "speaker": "type-07a",
+      "emotion": "warm",
+      "topic": "첫 쉘터 진입",
+      "eventId": "shelter-first-arrival-01",
+      "nodeId": "cable-check",
+      "source": "event-node",
+      "text": "아빠, 여기 우리 임시 집 같은 거야? 나 그런 거 좀 좋은데.",
+      "voiceText": "ここが、俺たちの仮住まいなのか。",
+      "file": "warm/type07a_warm_shelter-first-arrival-01_1uuasii.wav"
+    }
+  ]
+}

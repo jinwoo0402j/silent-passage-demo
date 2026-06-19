@@ -61,6 +61,26 @@
 
       <details class="editor-panel is-collapsible" open>
         <summary class="panel-toggle">
+          <span>블록</span>
+          <span class="panel-toggle-meta">지형</span>
+        </summary>
+        <div class="panel-body">
+          <div class="tool-grid">
+            <button type="button" class="tool-button" data-tool="platform">플랫폼</button>
+            <button type="button" class="tool-button" data-tool="slopeDown">Slope v</button>
+            <button type="button" class="tool-button" data-tool="slopeUp">Slope ^</button>
+            <button type="button" class="tool-button" data-tool="braceWall">벽 짚기</button>
+            <button type="button" class="tool-button" data-tool="backgroundTile">Background Tile</button>
+            <button type="button" class="tool-button" data-tool="shadowTile">Shadow Tile</button>
+            <button type="button" class="tool-button" data-tool="temporaryBlock">Temp Block</button>
+            <button type="button" class="tool-button" data-tool="damageBlock">Damage Block</button>
+            <button type="button" class="tool-button" data-tool="recallDamageBlock">Recall Damage</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
           <span>도구</span>
           <span class="panel-toggle-meta">배치</span>
         </summary>
@@ -74,6 +94,8 @@
             <button type="button" class="tool-button" data-tool="braceWall">벽 짚기</button>
             <button type="button" class="tool-button" data-tool="backgroundTile">BG Tile</button>
             <button type="button" class="tool-button" data-tool="temporaryBlock">Temp Block</button>
+            <button type="button" class="tool-button" data-tool="damageBlock">Damage Block</button>
+            <button type="button" class="tool-button" data-tool="recallDamageBlock">Recall Damage</button>
             <button type="button" class="tool-button" data-tool="zipLine">Zipline</button>
             <button type="button" class="tool-button" data-tool="sign">표지판</button>
             <button type="button" class="tool-button" data-tool="lantern">랜턴</button>
@@ -81,6 +103,11 @@
             <button type="button" class="tool-button" data-tool="entrance">Entrance</button>
             <button type="button" class="tool-button" data-tool="routeExit">Route Exit</button>
             <button type="button" class="tool-button" data-tool="crate">Crate</button>
+            <button type="button" class="tool-button" data-tool="vaultDoor">Vault Door</button>
+            <button type="button" class="tool-button" data-tool="vaultLoot">Vault Loot</button>
+            <button type="button" class="tool-button" data-tool="escapeExit">Escape Exit</button>
+            <button type="button" class="tool-button" data-tool="escapeBarrier">Escape Barrier</button>
+            <button type="button" class="tool-button" data-tool="cameraZone">Camera Zone</button>
             <button type="button" class="tool-button" data-tool="enemy">Enemy</button>
             <button type="button" class="tool-button" data-tool="artilleryEnemy">Arc Enemy</button>
             <button type="button" class="tool-button" data-tool="drone">Drone</button>
@@ -90,7 +117,7 @@
         </div>
       </details>
 
-      <details class="editor-panel is-collapsible" open>
+      <details class="editor-panel is-collapsible">
         <summary class="panel-toggle">
           <span>월드</span>
           <span class="panel-toggle-meta">기본</span>
@@ -122,7 +149,7 @@
         </div>
       </details>
 
-      <details class="editor-panel is-collapsible" open>
+      <details class="editor-panel is-collapsible">
         <summary class="panel-toggle">
           <span>카메라 튜닝</span>
           <span class="panel-toggle-meta">시야/줌</span>
@@ -203,7 +230,6 @@
             <button type="button" class="ghost-button" id="downloadButton">JSON 저장</button>
             <button type="button" class="ghost-button" id="importButton">JSON 불러오기</button>
             <button type="button" class="ghost-button" id="fitViewButton">전체 보기</button>
-            <button type="button" class="ghost-button" id="resetButton">초기화</button>
             <a class="ghost-button link-button" id="playLevelLink" href="./index.html">게임으로</a>
             <input id="importInput" type="file" accept="application/json,.json" hidden>
           </div>
@@ -247,6 +273,6 @@
     </section>
   </main>
 
-  <script type="module" src="./editor.js?v=20260526-sfx-v1"></script>
+  <script type="module" src="./editor.js?v=20260619-shelter-voice-v9"></script>
 </body>
 </html>

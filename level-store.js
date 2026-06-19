@@ -3,13 +3,17 @@ import { deepClone } from "./utils.js";
 export const LEVEL_OVERRIDE_KEY = "rulebound-level-override-v2";
 export const LEVEL_OVERRIDES_KEY = "rulebound-level-overrides-v3";
 export const RUN_CONFIG_KEY = "rulebound-run-config-v1";
-const DELETED_LOCAL_LEVEL_IDS = new Set(["city-level-01"]);
+const DELETED_LOCAL_LEVEL_IDS = new Set();
 export const LEVEL_DATA_VERSION = 2;
 export const LEVEL_OVERRIDES_VERSION = 3;
 
 const DEFAULT_PLATFORM_COLOR = "#4b6075";
 const DEFAULT_SIGN_TEXT = "표지";
-const VALID_PROP_KINDS = new Set(["sign", "lantern", "backgroundTile"]);
+const DEFAULT_BACKGROUND_TILE_COLOR = "#70746f";
+const DEFAULT_SHADOW_TILE_COLOR = "#24313a";
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157", "#34383a"]);
+const PROP_KIND_ALIASES = {};
+const VALID_PROP_KINDS = new Set(["sign", "lantern", "backgroundTile", "shadowTile"]);
 const PLAYER_RENDER_FIELDS = [
   "widthRatio",
   "heightRatio",
@@ -482,6 +486,211 @@ function sanitizeLootCrate(crate, index, baseCrate = null) {
   return next;
 }
 
+function extractVaultDoor(door = {}) {
+  return {
+    id: safeString(door.id, "vault-door"),
+    label: safeString(door.label, door.id || "Vault"),
+    x: safeNumber(door.x, 0),
+    y: safeNumber(door.y, 0),
+    width: safeNumber(door.width, 96, 24),
+    height: safeNumber(door.height, 144, 24),
+    prompt: safeString(door.prompt, "Up: Hack vault"),
+    duration: safeNumber(door.duration, 60, 1),
+  };
+}
+
+function sanitizeVaultDoor(door, index, fallback = null) {
+  const base = fallback || {
+    id: `vault-door-${index + 1}`,
+    label: `Vault ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 144,
+    prompt: "Up: Hack vault",
+    duration: 60,
+  };
+  const source = door && typeof door === "object" ? door : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    prompt: safeString(source.prompt, base.prompt),
+    duration: safeNumber(source.duration, base.duration, 1),
+  };
+}
+
+function extractVaultLoot(loot = {}) {
+  return {
+    id: safeString(loot.id, "vault-loot"),
+    label: safeString(loot.label, loot.id || "Supplies"),
+    x: safeNumber(loot.x, 0),
+    y: safeNumber(loot.y, 0),
+    width: safeNumber(loot.width, 48, 16),
+    height: safeNumber(loot.height, 48, 16),
+    value: safeNumber(loot.value, 25, 0),
+    prompt: safeString(loot.prompt, "Up: Take supplies"),
+  };
+}
+
+function sanitizeVaultLoot(loot, index, fallback = null) {
+  const base = fallback || {
+    id: `vault-loot-${index + 1}`,
+    label: `Supply ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 48,
+    height: 48,
+    value: 25,
+    prompt: "Up: Take supplies",
+  };
+  const source = loot && typeof loot === "object" ? loot : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 16),
+    height: safeNumber(source.height, base.height, 16),
+    value: safeNumber(source.value, base.value, 0),
+    prompt: safeString(source.prompt, base.prompt),
+  };
+}
+
+function extractEscapeExit(exit = {}) {
+  return {
+    id: safeString(exit.id, "escape-exit"),
+    label: safeString(exit.label, exit.id || "Escape"),
+    x: safeNumber(exit.x, 0),
+    y: safeNumber(exit.y, 0),
+    width: safeNumber(exit.width, 96, 24),
+    height: safeNumber(exit.height, 192, 24),
+    prompt: safeString(exit.prompt, "Up: Escape"),
+  };
+}
+
+function sanitizeEscapeExit(exit, index, fallback = null) {
+  const base = fallback || {
+    id: `escape-exit-${index + 1}`,
+    label: `Escape ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 192,
+    prompt: "Up: Escape",
+  };
+  const source = exit && typeof exit === "object" ? exit : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    prompt: safeString(source.prompt, base.prompt),
+  };
+}
+
+function extractEscapeBarrier(barrier = {}) {
+  return {
+    id: safeString(barrier.id, "escape-barrier"),
+    label: safeString(barrier.label, barrier.id || "Escape Barrier"),
+    x: safeNumber(barrier.x, 0),
+    y: safeNumber(barrier.y, 0),
+    width: safeNumber(barrier.width, 96, 12),
+    height: safeNumber(barrier.height, 128, 12),
+    trigger: safeString(barrier.trigger, "vaultEscape"),
+    color: safeString(barrier.color, "#ff7a66"),
+  };
+}
+
+function sanitizeEscapeBarrier(barrier, index, fallback = null) {
+  const base = fallback || {
+    id: `escape-barrier-${index + 1}`,
+    label: `Barrier ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 96,
+    height: 128,
+    trigger: "vaultEscape",
+    color: "#ff7a66",
+  };
+  const source = barrier && typeof barrier === "object" ? barrier : {};
+  const trigger = ["vaultEscape", "lockdown"].includes(source.trigger)
+    ? source.trigger
+    : ["vaultEscape", "lockdown"].includes(base.trigger)
+      ? base.trigger
+      : "vaultEscape";
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 12),
+    height: safeNumber(source.height, base.height, 12),
+    trigger,
+    color: safeString(source.color, base.color || "#ff7a66"),
+  };
+}
+
+function extractCameraZone(zone = {}) {
+  return {
+    id: safeString(zone.id, "camera-zone"),
+    label: safeString(zone.label, zone.id || "Camera Zone"),
+    x: safeNumber(zone.x, 0),
+    y: safeNumber(zone.y, 0),
+    width: safeNumber(zone.width, 320, 24),
+    height: safeNumber(zone.height, 220, 24),
+    zoom: safeRange(zone.zoom, 1, 0.1, 5),
+    minZoom: safeRange(zone.minZoom, zone.zoom ?? 1, 0.1, 5),
+    focusX: safeRange(zone.focusX, 0.5, 0.24, 0.76),
+    focusY: safeRange(zone.focusY, 0.5, 0.28, 0.72),
+    zoomLerp: safeRange(zone.zoomLerp, 3.4, 0, 30),
+    focusLerp: safeRange(zone.focusLerp, 4.6, 0, 30),
+    priority: safeNumber(zone.priority, 0),
+    enabled: safeBoolean(zone.enabled, true),
+  };
+}
+
+function sanitizeCameraZone(zone, index, fallback = null) {
+  const base = fallback || {
+    id: `camera-zone-${index + 1}`,
+    label: `Camera Zone ${index + 1}`,
+    x: 0,
+    y: 0,
+    width: 320,
+    height: 220,
+    zoom: 1,
+    minZoom: 1,
+    focusX: 0.5,
+    focusY: 0.5,
+    zoomLerp: 3.4,
+    focusLerp: 4.6,
+    priority: 0,
+    enabled: true,
+  };
+  const source = zone && typeof zone === "object" ? zone : {};
+  return {
+    id: safeId(source.id, base.id),
+    label: safeString(source.label, base.label),
+    x: safeNumber(source.x, base.x),
+    y: safeNumber(source.y, base.y),
+    width: safeNumber(source.width, base.width, 24),
+    height: safeNumber(source.height, base.height, 24),
+    zoom: safeRange(source.zoom, base.zoom, 0.1, 5),
+    minZoom: safeRange(source.minZoom, source.zoom ?? base.minZoom, 0.1, 5),
+    focusX: safeRange(source.focusX, base.focusX, 0.24, 0.76),
+    focusY: safeRange(source.focusY, base.focusY, 0.28, 0.72),
+    zoomLerp: safeRange(source.zoomLerp, base.zoomLerp, 0, 30),
+    focusLerp: safeRange(source.focusLerp, base.focusLerp, 0, 30),
+    priority: safeNumber(source.priority, base.priority),
+    enabled: safeBoolean(source.enabled, base.enabled),
+  };
+}
+
 function extractCamera(camera = {}) {
   return {
     ...Object.fromEntries(
@@ -548,6 +757,9 @@ function sanitizePlatform(platform, index, basePlatform = null) {
     next.damageRatio = safeRange(source?.damageRatio, fallback.damageRatio ?? 0.33, 0, 1);
     next.respawn = safeBoolean(source?.respawn, fallback.respawn ?? true);
     next.color = safeString(source?.color, fallback.color || "#1d8fb8");
+  } else if (kind === "damage" || kind === "recallDamage") {
+    next.kind = kind;
+    next.damage = safeNumber(source?.damage, fallback.damage ?? 10, 0);
   }
   return next;
 }
@@ -560,9 +772,14 @@ function sanitizeTemporaryBlock(block, index, baseBlock = null) {
     width: 96,
     height: 96,
     color: "#5f7588",
+    maxHp: 1,
     hideDuration: 1.6,
+    breakRule: "normal",
   };
   const source = block && typeof block === "object" ? block : {};
+  const breakRule = source.breakRule === "recoilJumpStage5" || source.requiresRecoilJumpStage5 === true
+    ? "recoilJumpStage5"
+    : safeString(source.breakRule, fallback.breakRule || "normal");
   return {
     id: safeString(source.id, fallback.id || `temporary-block-${index + 1}`),
     x: safeNumber(source.x, fallback.x),
@@ -570,7 +787,9 @@ function sanitizeTemporaryBlock(block, index, baseBlock = null) {
     width: safeNumber(source.width, fallback.width, 12),
     height: safeNumber(source.height, fallback.height, 12),
     color: safeString(source.color, fallback.color || "#5f7588"),
+    maxHp: safeNumber(source.maxHp, fallback.maxHp ?? 1, 1),
     hideDuration: safeNumber(source.hideDuration, fallback.hideDuration ?? 1.6, 0.1),
+    breakRule: breakRule === "recoilJumpStage5" ? "recoilJumpStage5" : "normal",
   };
 }
 
@@ -581,7 +800,9 @@ function sanitizeProp(prop, index, baseProp = null) {
     y: 860,
     text: DEFAULT_SIGN_TEXT,
   };
-  const kind = VALID_PROP_KINDS.has(prop?.kind) ? prop.kind : fallback.kind;
+  const requestedKind = PROP_KIND_ALIASES[prop?.kind] || prop?.kind;
+  const fallbackKind = PROP_KIND_ALIASES[fallback.kind] || fallback.kind;
+  const kind = VALID_PROP_KINDS.has(requestedKind) ? requestedKind : fallbackKind;
 
   if (kind === "sign") {
     return {
@@ -592,22 +813,36 @@ function sanitizeProp(prop, index, baseProp = null) {
     };
   }
 
-  if (kind === "backgroundTile") {
+  if (kind === "backgroundTile" || kind === "shadowTile") {
+    const defaultColor = kind === "shadowTile" ? DEFAULT_SHADOW_TILE_COLOR : DEFAULT_BACKGROUND_TILE_COLOR;
+    const sourceColor = safeString(prop?.color, fallback.color || defaultColor);
     return {
       kind,
       x: safeNumber(prop?.x, fallback.x),
       y: safeNumber(prop?.y, fallback.y),
       width: safeNumber(prop?.width, fallback.width || 64, 8),
       height: safeNumber(prop?.height, fallback.height || 64, 8),
-      color: safeString(prop?.color, fallback.color || "#4f6f7d"),
+      color: LEGACY_TILE_COLORS.has(sourceColor.toLowerCase()) ? defaultColor : sourceColor,
     };
   }
 
-  return {
+  const x = safeNumber(prop?.x, fallback.x);
+  const y = safeNumber(prop?.y, fallback.y);
+  const lantern = {
     kind,
-    x: safeNumber(prop?.x, fallback.x),
-    y: safeNumber(prop?.y, fallback.y),
+    x,
+    y,
+    lightRadius: safeNumber(prop?.lightRadius, fallback.lightRadius ?? 260, 24),
   };
+  if (Number.isFinite(prop?.endX) || Number.isFinite(prop?.endY) || Number.isFinite(fallback.endX) || Number.isFinite(fallback.endY)) {
+    lantern.endX = safeNumber(prop?.endX, fallback.endX ?? x);
+    lantern.endY = safeNumber(prop?.endY, fallback.endY ?? y);
+  }
+  return lantern;
+}
+
+function isValidPropKind(kind) {
+  return VALID_PROP_KINDS.has(PROP_KIND_ALIASES[kind] || kind);
 }
 
 function sanitizeBraceWall(wall, index, baseWall = null) {
@@ -963,13 +1198,19 @@ export function extractEditableLevelData(data) {
       data.levelLabel || data.label || data.currentLevelId || data.levelId || "Room",
     ),
     entrances: (data.entrances || []).map((entrance) => extractEntrance(entrance)),
-      routeExits: (data.routeExits || []).map((exit) => extractRouteExit(exit)),
+    routeExits: (data.routeExits || []).map((exit) => extractRouteExit(exit)),
+    vaultDoors: (data.vaultDoors || []).map((door) => extractVaultDoor(door)),
+    vaultLoot: (data.vaultLoot || []).map((loot) => extractVaultLoot(loot)),
+    escapeExits: (data.escapeExits || []).map((exit) => extractEscapeExit(exit)),
+    escapeBarriers: (data.escapeBarriers || []).map((barrier) => extractEscapeBarrier(barrier)),
+    cameraZones: (data.cameraZones || []).map((zone) => extractCameraZone(zone)),
     extractionGate: extractExtractionGate(data.extractionGate),
     platforms: (data.platforms || []).map((platform) => ({
       kind: platform.kind,
       slopeDirection: platform.slopeDirection,
       damageRatio: platform.damageRatio,
       respawn: platform.respawn,
+      damage: platform.damage,
       x: platform.x,
       y: platform.y,
       width: platform.width,
@@ -983,13 +1224,15 @@ export function extractEditableLevelData(data) {
       width: block.width,
       height: block.height,
       color: block.color,
+      maxHp: block.maxHp,
       hideDuration: block.hideDuration,
+      breakRule: block.breakRule || "normal",
     })),
     props: (data.props || []).map((prop) => {
       if (prop.kind === "sign") {
         return { kind: prop.kind, x: prop.x, y: prop.y, text: prop.text };
       }
-      if (prop.kind === "backgroundTile") {
+      if (prop.kind === "backgroundTile" || prop.kind === "shadowTile") {
         return {
           kind: prop.kind,
           x: prop.x,
@@ -999,7 +1242,12 @@ export function extractEditableLevelData(data) {
           color: prop.color,
         };
       }
-      return { kind: prop.kind, x: prop.x, y: prop.y };
+      const extracted = { kind: prop.kind, x: prop.x, y: prop.y, lightRadius: prop.lightRadius };
+      if (prop.kind === "lantern" && (Number.isFinite(prop.endX) || Number.isFinite(prop.endY))) {
+        extracted.endX = Number.isFinite(prop.endX) ? prop.endX : prop.x;
+        extracted.endY = Number.isFinite(prop.endY) ? prop.endY : prop.y;
+      }
+      return extracted;
     }),
     braceWalls: (data.braceWalls || []).map((wall) => ({
       id: wall.id,
@@ -1085,10 +1333,25 @@ export function normalizeEditableLevelData(raw, baseData) {
     routeExits: Array.isArray(source.routeExits)
       ? source.routeExits.map((exit, index) => sanitizeRouteExit(exit, index, fallback.routeExits?.[index]))
       : (fallback.routeExits || []).map((exit, index) => sanitizeRouteExit(exit, index)),
+    vaultDoors: Array.isArray(source.vaultDoors)
+      ? source.vaultDoors.map((door, index) => sanitizeVaultDoor(door, index, fallback.vaultDoors?.[index]))
+      : (fallback.vaultDoors || []).map((door, index) => sanitizeVaultDoor(door, index)),
+    vaultLoot: Array.isArray(source.vaultLoot)
+      ? source.vaultLoot.map((loot, index) => sanitizeVaultLoot(loot, index, fallback.vaultLoot?.[index]))
+      : (fallback.vaultLoot || []).map((loot, index) => sanitizeVaultLoot(loot, index)),
+    escapeExits: Array.isArray(source.escapeExits)
+      ? source.escapeExits.map((exit, index) => sanitizeEscapeExit(exit, index, fallback.escapeExits?.[index]))
+      : (fallback.escapeExits || []).map((exit, index) => sanitizeEscapeExit(exit, index)),
+    escapeBarriers: Array.isArray(source.escapeBarriers)
+      ? source.escapeBarriers.map((barrier, index) => sanitizeEscapeBarrier(barrier, index, fallback.escapeBarriers?.[index]))
+      : (fallback.escapeBarriers || []).map((barrier, index) => sanitizeEscapeBarrier(barrier, index)),
+    cameraZones: Array.isArray(source.cameraZones)
+      ? source.cameraZones.map((zone, index) => sanitizeCameraZone(zone, index, fallback.cameraZones?.[index]))
+      : (fallback.cameraZones || []).map((zone, index) => sanitizeCameraZone(zone, index)),
     extractionGate: Object.prototype.hasOwnProperty.call(source, "extractionGate")
       ? sanitizeExtractionGate(source.extractionGate, fallback.extractionGate)
       : sanitizeExtractionGate(fallback.extractionGate),
-    platforms: Array.isArray(source.platforms) && source.platforms.length
+    platforms: Array.isArray(source.platforms)
       ? source.platforms.map((platform, index) => sanitizePlatform(platform, index, fallback.platforms[index]))
       : fallback.platforms.map((platform, index) => sanitizePlatform(platform, index)),
     temporaryBlocks: Array.isArray(source.temporaryBlocks)
@@ -1096,7 +1359,7 @@ export function normalizeEditableLevelData(raw, baseData) {
       : (fallback.temporaryBlocks || []).map((block, index) => sanitizeTemporaryBlock(block, index)),
     props: Array.isArray(source.props)
       ? source.props
-        .filter((prop) => VALID_PROP_KINDS.has(prop?.kind))
+        .filter((prop) => isValidPropKind(prop?.kind))
         .map((prop, index) => sanitizeProp(prop, index, fallback.props[index]))
       : fallback.props.map((prop, index) => sanitizeProp(prop, index)),
     braceWalls: Array.isArray(source.braceWalls)
@@ -1172,6 +1435,11 @@ export function mergeLevelData(baseData, override) {
   next.map = normalized.map;
   next.entrances = normalized.entrances;
   next.routeExits = normalized.routeExits;
+  next.vaultDoors = normalized.vaultDoors;
+  next.vaultLoot = normalized.vaultLoot;
+  next.escapeExits = normalized.escapeExits;
+  next.escapeBarriers = normalized.escapeBarriers;
+  next.cameraZones = normalized.cameraZones;
   next.extractionGate = normalized.extractionGate ? { ...normalized.extractionGate } : null;
   next.platforms = normalized.platforms;
   next.temporaryBlocks = normalized.temporaryBlocks;
@@ -1399,19 +1667,21 @@ export function loadLevelOverride(baseData, requestedLevelId = null) {
   return loadLevelOverrides(baseData)[levelId] || null;
 }
 
-export function getLevelSummaries(baseData) {
+export function getLevelSummaries(baseData, options = {}) {
+  const applyLevelOverride = options.applyLevelOverride !== false;
   const overrides = loadLevelOverrides(baseData);
   return getLevelIds(baseData).map((id) => {
     const definition = getLevelDefinition(baseData, id);
     const override = overrides[id];
+    const useOverride = Boolean(override && (applyLevelOverride || !definition));
     const baseLevel = createBaseLevelData(baseData, id);
-    const effective = override ? mergeLevelData(baseLevel, override) : baseLevel;
-    const label = override?.label || definition?.label || effective.levelLabel || id;
+    const effective = useOverride ? mergeLevelData(baseLevel, override) : baseLevel;
+    const label = useOverride ? (override?.label || effective.levelLabel || id) : (definition?.label || effective.levelLabel || id);
     return {
       id,
       label,
       builtIn: Boolean(definition),
-      hasOverride: Boolean(override),
+      hasOverride: useOverride,
       map: extractMapConfig(effective.map, id, label),
       world: {
         width: safeNumber(effective.world?.width, 1280, 1),
@@ -1423,6 +1693,7 @@ export function getLevelSummaries(baseData) {
         slopeDirection: platform.slopeDirection,
         damageRatio: platform.damageRatio,
         respawn: platform.respawn,
+        damage: platform.damage,
         x: platform.x,
         y: platform.y,
         width: platform.width,
@@ -1436,6 +1707,15 @@ export function getLevelSummaries(baseData) {
         width: block.width,
         height: block.height,
       })),
+      escapeBarriers: (effective.escapeBarriers || []).map((barrier) => ({
+        id: barrier.id,
+        x: barrier.x,
+        y: barrier.y,
+        width: barrier.width,
+        height: barrier.height,
+        trigger: barrier.trigger,
+      })),
+      cameraZones: (effective.cameraZones || []).map((zone) => extractCameraZone(zone)),
       braceWalls: (effective.braceWalls || []).map((wall) => ({
         id: wall.id,
         x: wall.x,
@@ -1516,6 +1796,7 @@ export function deleteLocalLevel(baseData, targetLevelId) {
 function normalizeRuntimeLevelOptions(options = {}) {
   return {
     applyLevelOverride: options.applyLevelOverride !== false,
+    useUrlLevel: options.useUrlLevel !== false,
   };
 }
 
@@ -1787,7 +2068,7 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
 
 export function createRuntimeGameData(baseData, requestedLevelId = null, options = {}) {
   const runtimeLevelOptions = normalizeRuntimeLevelOptions(options);
-  const explicitLevelId = requestedLevelId || getUrlLevelId();
+  const explicitLevelId = requestedLevelId || (runtimeLevelOptions.useUrlLevel ? getUrlLevelId() : null);
   const levelId = getRequestedLevelId(baseData, explicitLevelId || getRunStartLevelId(baseData));
   const baseLevel = createBaseLevelData(baseData, levelId);
   const override = runtimeLevelOptions.applyLevelOverride ? loadLevelOverride(baseData, levelId) : null;

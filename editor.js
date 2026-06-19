@@ -1,4 +1,4 @@
-import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260526-sfx-v1";
+import { GAME_DATA as STATIC_GAME_DATA } from "./level-data.js?v=20260619-shelter-voice-v9";
 import {
   clearLevelOverride,
   createBaseLevelData,
@@ -8,6 +8,7 @@ import {
   extractEditableLevelData,
   getLevelRouteReferences,
   getLevelSummaries,
+  getUrlLevelId,
   getRunStartLevelId,
   isBuiltInLevel,
   isLocalOnlyLevel,
@@ -15,7 +16,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260526-sfx-v1";
+} from "./level-store.js?v=20260619-shelter-voice-v9";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -23,6 +24,12 @@ const ZIP_LINE_CONNECT_RANGE = 640;
 const ZIP_LINE_MAX_CONNECTIONS = 2;
 const ROUTE_EXIT_RESIZE_HANDLE_SIZE = 12;
 const ROUTE_EXIT_MIN_SIZE = 24;
+
+function getEditorLevelSummaries() {
+  return getLevelSummaries(GAME_DATA, {
+    applyLevelOverride: true,
+  });
+}
 
 const TOOL_IDS = {
   SELECT: "select",
@@ -32,7 +39,10 @@ const TOOL_IDS = {
   SLOPE_UP: "slopeUp",
   BRACE_WALL: "braceWall",
   BACKGROUND_TILE: "backgroundTile",
+  SHADOW_TILE: "shadowTile",
   TEMPORARY_BLOCK: "temporaryBlock",
+  DAMAGE_BLOCK: "damageBlock",
+  RECALL_DAMAGE_BLOCK: "recallDamageBlock",
   ZIP_LINE: "zipLine",
   SIGN: "sign",
   LANTERN: "lantern",
@@ -41,6 +51,11 @@ const TOOL_IDS = {
   ROUTE_EXIT: "routeExit",
   GATE: "gate",
   CRATE: "crate",
+  VAULT_DOOR: "vaultDoor",
+  VAULT_LOOT: "vaultLoot",
+  ESCAPE_EXIT: "escapeExit",
+  ESCAPE_BARRIER: "escapeBarrier",
+  CAMERA_ZONE: "cameraZone",
   ENEMY: "enemy",
   ARTILLERY_ENEMY: "artilleryEnemy",
   DRONE: "drone",
@@ -59,7 +74,10 @@ const TOOL_SHORTCUTS = {
   Digit3: TOOL_IDS.BRACE_WALL,
   Numpad3: TOOL_IDS.BRACE_WALL,
   KeyB: TOOL_IDS.BACKGROUND_TILE,
+  KeyG: TOOL_IDS.SHADOW_TILE,
   KeyT: TOOL_IDS.TEMPORARY_BLOCK,
+  KeyV: TOOL_IDS.DAMAGE_BLOCK,
+  KeyR: TOOL_IDS.RECALL_DAMAGE_BLOCK,
   KeyZ: TOOL_IDS.ZIP_LINE,
   Digit4: TOOL_IDS.SIGN,
   Numpad4: TOOL_IDS.SIGN,
@@ -76,6 +94,7 @@ const TOOL_SHORTCUTS = {
   KeyJ: TOOL_IDS.ARTILLERY_ENEMY,
   KeyO: TOOL_IDS.DRONE,
   KeyF: TOOL_IDS.FLYING_ENEMY,
+  KeyY: TOOL_IDS.CAMERA_ZONE,
 };
 
 const TOOL_SHORTCUT_LABELS = {
@@ -86,7 +105,10 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.SLOPE_UP]: "U",
   [TOOL_IDS.BRACE_WALL]: "3",
   [TOOL_IDS.BACKGROUND_TILE]: "B",
+  [TOOL_IDS.SHADOW_TILE]: "G",
   [TOOL_IDS.TEMPORARY_BLOCK]: "T",
+  [TOOL_IDS.DAMAGE_BLOCK]: "V",
+  [TOOL_IDS.RECALL_DAMAGE_BLOCK]: "R",
   [TOOL_IDS.ZIP_LINE]: "Z",
   [TOOL_IDS.SIGN]: "4",
   [TOOL_IDS.SPAWN]: "5",
@@ -98,6 +120,7 @@ const TOOL_SHORTCUT_LABELS = {
   [TOOL_IDS.ARTILLERY_ENEMY]: "J",
   [TOOL_IDS.DRONE]: "O",
   [TOOL_IDS.FLYING_ENEMY]: "F",
+  [TOOL_IDS.CAMERA_ZONE]: "Y",
 };
 
 const TOOL_HINTS = {
@@ -107,20 +130,28 @@ const TOOL_HINTS = {
   [TOOL_IDS.SLOPE_DOWN]: "드래그로 오른쪽 내리막 경사로 생성",
   [TOOL_IDS.SLOPE_UP]: "드래그로 오른쪽 오르막 경사로 생성",
   [TOOL_IDS.SIGN]: "클릭으로 표지 배치",
-  [TOOL_IDS.LANTERN]: "클릭으로 랜턴 배치",
+  [TOOL_IDS.LANTERN]: "드래그로 선형 랜턴 배치",
   [TOOL_IDS.SPAWN]: "클릭으로 스폰 이동",
   [TOOL_IDS.GATE]: "클릭으로 출구 이동",
 };
 
 TOOL_HINTS[TOOL_IDS.BRACE_WALL] = "드래그로 벽 짚기 볼륨 생성";
 TOOL_HINTS[TOOL_IDS.BACKGROUND_TILE] = "Drag to place a non-colliding background tile";
+TOOL_HINTS[TOOL_IDS.SHADOW_TILE] = "Drag to place a shadow tile that fades when it covers the player";
 TOOL_HINTS[TOOL_IDS.TEMPORARY_BLOCK] = "Drag to place a shoot-open temporary block";
+TOOL_HINTS[TOOL_IDS.DAMAGE_BLOCK] = "Drag to place a contact-damage solid block";
+TOOL_HINTS[TOOL_IDS.RECALL_DAMAGE_BLOCK] = "Drag to place a damage block that returns the player to the last safe footing";
 TOOL_HINTS[TOOL_IDS.ZIP_LINE] = "Click to place a zipline node and auto-connect nearby nodes";
 
 TOOL_HINTS[TOOL_IDS.ENTRANCE] = "좌클릭으로 레벨 입구 배치";
 TOOL_HINTS[TOOL_IDS.ROUTE_EXIT] = "좌클릭으로 레벨 이동 출구 배치";
 
 TOOL_HINTS[TOOL_IDS.CRATE] = "Click to place a loot crate";
+TOOL_HINTS[TOOL_IDS.VAULT_DOOR] = "Click to place a hackable vault door";
+TOOL_HINTS[TOOL_IDS.VAULT_LOOT] = "Click to place timed escape supplies";
+TOOL_HINTS[TOOL_IDS.ESCAPE_EXIT] = "Click to place the timed escape exit";
+TOOL_HINTS[TOOL_IDS.ESCAPE_BARRIER] = "Drag to place a wall that appears during vault escape";
+TOOL_HINTS[TOOL_IDS.CAMERA_ZONE] = "Drag to place a camera zoom zone";
 TOOL_HINTS[TOOL_IDS.ENEMY] = "Click to place a humanoid enemy";
 TOOL_HINTS[TOOL_IDS.ARTILLERY_ENEMY] = "Click to place an arcing humanoid enemy";
 TOOL_HINTS[TOOL_IDS.DRONE] = "Click to place a hostile drone";
@@ -563,11 +594,27 @@ const COLORS = {
   temporaryBlockFill: "rgba(147, 234, 255, 0.17)",
   crate: "rgba(147, 234, 255, 0.9)",
   crateFill: "rgba(147, 234, 255, 0.13)",
+  vaultDoor: "rgba(255, 122, 102, 0.92)",
+  vaultDoorFill: "rgba(255, 122, 102, 0.16)",
+  vaultLoot: "rgba(231, 244, 126, 0.92)",
+  vaultLootFill: "rgba(231, 244, 126, 0.16)",
+  escapeExit: "rgba(255, 190, 102, 0.92)",
+  escapeExitFill: "rgba(255, 190, 102, 0.13)",
+  escapeBarrier: "rgba(255, 122, 102, 0.92)",
+  escapeBarrierFill: "rgba(255, 122, 102, 0.16)",
+  cameraZone: "rgba(147, 234, 255, 0.92)",
+  cameraZoneFill: "rgba(147, 234, 255, 0.12)",
   enemy: "rgba(255, 125, 147, 0.9)",
   enemyFill: "rgba(255, 125, 147, 0.13)",
   drone: "rgba(255, 190, 102, 0.9)",
   droneFill: "rgba(255, 190, 102, 0.13)",
 };
+
+const BACKGROUND_TILE_COLOR = "#70746f";
+const SHADOW_TILE_COLOR = "#24313a";
+const BACKGROUND_TILE_PREVIEW = "rgba(112, 116, 111, 0.5)";
+const SHADOW_TILE_PREVIEW = "rgba(36, 49, 58, 0.44)";
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157", "#34383a"]);
 
 const IMAGE_CACHE = new Map();
 
@@ -610,12 +657,76 @@ function isSlopeTool(tool) {
   return tool === TOOL_IDS.SLOPE_DOWN || tool === TOOL_IDS.SLOPE_UP;
 }
 
+function isPlatformDrawTool(tool) {
+  return tool === TOOL_IDS.PLATFORM
+    || isSlopeTool(tool)
+    || tool === TOOL_IDS.DAMAGE_BLOCK
+    || tool === TOOL_IDS.RECALL_DAMAGE_BLOCK;
+}
+
 function getSlopeDirectionForTool(tool) {
   return tool === TOOL_IDS.SLOPE_UP ? "up-right" : "down-right";
 }
 
 function getPlatformSlopeDirection(platform) {
   return platform?.slopeDirection === "up-right" ? "up-right" : "down-right";
+}
+
+function isShadowTileKind(kind) {
+  return kind === "shadowTile";
+}
+
+function isBackgroundTileKind(kind) {
+  return kind === "backgroundTile";
+}
+
+function isRectPropTileKind(kind) {
+  return isBackgroundTileKind(kind) || isShadowTileKind(kind);
+}
+
+function getLanternLightRadius(prop) {
+  return Math.max(24, Number(prop?.lightRadius ?? 260) || 260);
+}
+
+function getLanternEnd(prop) {
+  return {
+    x: Number.isFinite(prop?.endX) ? prop.endX : prop.x,
+    y: Number.isFinite(prop?.endY) ? prop.endY : prop.y,
+  };
+}
+
+function isLinearLantern(prop) {
+  const end = getLanternEnd(prop);
+  return Math.hypot(end.x - prop.x, end.y - prop.y) > 1;
+}
+
+function getLanternLightSamples(prop) {
+  const radius = getLanternLightRadius(prop);
+  const end = getLanternEnd(prop);
+  const dx = end.x - prop.x;
+  const dy = end.y - prop.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 1) {
+    return [{ x: prop.x, y: prop.y, lightRadius: radius }];
+  }
+  const spacing = Math.max(64, radius * 0.55);
+  const steps = Math.min(48, Math.max(1, Math.ceil(distance / spacing)));
+  const samples = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    samples.push({
+      x: prop.x + dx * t,
+      y: prop.y + dy * t,
+      lightRadius: radius,
+    });
+  }
+  return samples;
+}
+
+function getRectPropTileColor(prop) {
+  const fallback = isShadowTileKind(prop?.kind) ? SHADOW_TILE_COLOR : BACKGROUND_TILE_COLOR;
+  const color = prop?.color || fallback;
+  return LEGACY_TILE_COLORS.has(String(color).toLowerCase()) ? fallback : color;
 }
 
 function getPreviewPlatformRect(editor) {
@@ -637,7 +748,7 @@ function getPreviewPlatformRect(editor) {
 }
 
 function getPreviewBackgroundTileRect(editor) {
-  if (!editor.preview || editor.preview.kind !== "backgroundTile") {
+  if (!editor.preview || !isRectPropTileKind(editor.preview.kind)) {
     return null;
   }
   const scale = getScaleConfig(editor.data);
@@ -854,7 +965,6 @@ function getEditorDom() {
     collapseAllButton: document.getElementById("collapseAllButton"),
     expandAllButton: document.getElementById("expandAllButton"),
     fitViewButton: document.getElementById("fitViewButton"),
-    resetButton: document.getElementById("resetButton"),
     playLevelLink: document.getElementById("playLevelLink"),
     statusLabel: document.getElementById("statusLabel"),
     toolHint: document.getElementById("toolHint"),
@@ -933,6 +1043,11 @@ function prepareEditorData(data) {
   data.entrances = data.entrances || [];
   data.routeExits = data.routeExits || [];
   data.lootCrates = data.lootCrates || [];
+  data.vaultDoors = data.vaultDoors || [];
+  data.vaultLoot = data.vaultLoot || [];
+  data.escapeExits = data.escapeExits || [];
+  data.escapeBarriers = data.escapeBarriers || [];
+  data.cameraZones = data.cameraZones || [];
   data.humanoidEnemies = data.humanoidEnemies || [];
   data.faceOffEvents = Array.isArray(data.faceOffEvents) ? data.faceOffEvents : [];
   data.hostileDrones = data.hostileDrones || [];
@@ -947,12 +1062,12 @@ function prepareEditorData(data) {
       facing: 1,
     });
   }
-  data.levelSummaries = getLevelSummaries(GAME_DATA);
+  data.levelSummaries = getEditorLevelSummaries();
   return data;
 }
 
 function createEditorState() {
-  const data = prepareEditorData(createRuntimeGameData(GAME_DATA, null, {
+  const data = prepareEditorData(createRuntimeGameData(GAME_DATA, getUrlLevelId(), {
     applyLevelOverride: true,
   }));
   const scale = getScaleConfig(data);
@@ -1230,7 +1345,7 @@ function renderLevelControls(editor, dom) {
   if (!dom.levelSelect || !dom.levelNameInput) {
     return;
   }
-  const summaries = getLevelSummaries(GAME_DATA);
+  const summaries = getEditorLevelSummaries();
   editor.data.levelSummaries = summaries;
   dom.levelSelect.innerHTML = summaries
     .map((level) => {
@@ -1368,7 +1483,7 @@ function slugifyLevelId(value, fallback = "level") {
 }
 
 function createUniqueLevelId(editor, seed) {
-  const existing = new Set(getLevelSummaries(GAME_DATA).map((level) => level.id));
+  const existing = new Set(getEditorLevelSummaries().map((level) => level.id));
   const base = slugifyLevelId(seed, "level");
   let candidate = base;
   let suffix = 2;
@@ -1423,7 +1538,7 @@ function syncStartEntranceToSpawn(editor) {
 }
 
 function getPropRect(prop) {
-  if (prop.kind === "backgroundTile") {
+  if (isRectPropTileKind(prop.kind)) {
     return {
       x: prop.x,
       y: prop.y,
@@ -1438,6 +1553,17 @@ function getPropRect(prop) {
       y: prop.y - 64,
       width: 88,
       height: 42,
+    };
+  }
+
+  if (prop.kind === "lantern") {
+    const end = getLanternEnd(prop);
+    const markerPad = 24;
+    return {
+      x: Math.min(prop.x, end.x) - markerPad,
+      y: Math.min(prop.y, end.y) - markerPad,
+      width: Math.abs(end.x - prop.x) + markerPad * 2,
+      height: Math.abs(end.y - prop.y) + markerPad * 2,
     };
   }
 
@@ -1483,6 +1609,22 @@ function ensureFlyingRangedSpawn(entity) {
 
 function getLootCrateRect(crate) {
   return crate;
+}
+
+function getVaultDoorRect(door) {
+  return door;
+}
+
+function getVaultLootRect(loot) {
+  return loot;
+}
+
+function getEscapeExitRect(exit) {
+  return exit;
+}
+
+function getEscapeBarrierRect(barrier) {
+  return barrier;
 }
 
 function getBraceWallRect(wall) {
@@ -1651,6 +1793,21 @@ function getSelectedEntity(editor) {
   if (editor.selected.kind === "crate") {
     return editor.data.lootCrates[editor.selected.index] || null;
   }
+  if (editor.selected.kind === "vaultDoor") {
+    return editor.data.vaultDoors[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "vaultLoot") {
+    return editor.data.vaultLoot[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "escapeExit") {
+    return editor.data.escapeExits[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "escapeBarrier") {
+    return editor.data.escapeBarriers[editor.selected.index] || null;
+  }
+  if (editor.selected.kind === "cameraZone") {
+    return editor.data.cameraZones[editor.selected.index] || null;
+  }
   if (editor.selected.kind === "spawn") {
     return editor.data.player.spawn;
   }
@@ -1694,6 +1851,21 @@ function getSelectionCollection(editor, kind) {
   }
   if (kind === "crate") {
     return editor.data.lootCrates;
+  }
+  if (kind === "vaultDoor") {
+    return editor.data.vaultDoors;
+  }
+  if (kind === "vaultLoot") {
+    return editor.data.vaultLoot;
+  }
+  if (kind === "escapeExit") {
+    return editor.data.escapeExits;
+  }
+  if (kind === "escapeBarrier") {
+    return editor.data.escapeBarriers;
+  }
+  if (kind === "cameraZone") {
+    return editor.data.cameraZones;
   }
   if (kind === "entrance") {
     return editor.data.entrances;
@@ -1825,6 +1997,25 @@ function getSelectionRect(editor, selection = editor.selected) {
   if (selection.kind === "crate") {
     const crate = editor.data.lootCrates[selection.index];
     return crate ? getLootCrateRect(crate) : null;
+  }
+  if (selection.kind === "vaultDoor") {
+    const door = editor.data.vaultDoors[selection.index];
+    return door ? getVaultDoorRect(door) : null;
+  }
+  if (selection.kind === "vaultLoot") {
+    const loot = editor.data.vaultLoot[selection.index];
+    return loot ? getVaultLootRect(loot) : null;
+  }
+  if (selection.kind === "escapeExit") {
+    const exit = editor.data.escapeExits[selection.index];
+    return exit ? getEscapeExitRect(exit) : null;
+  }
+  if (selection.kind === "escapeBarrier") {
+    const barrier = editor.data.escapeBarriers[selection.index];
+    return barrier ? getEscapeBarrierRect(barrier) : null;
+  }
+  if (selection.kind === "cameraZone") {
+    return editor.data.cameraZones[selection.index] || null;
   }
   if (selection.kind === "spawn") {
     return getSpawnRect(editor.data);
@@ -1964,6 +2155,26 @@ function getSelectionOrigin(editor, selection = editor.selected) {
     const entity = editor.data.lootCrates[selection.index];
     return entity ? { x: entity.x, y: entity.y } : null;
   }
+  if (selection.kind === "vaultDoor") {
+    const entity = editor.data.vaultDoors[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "vaultLoot") {
+    const entity = editor.data.vaultLoot[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "escapeExit") {
+    const entity = editor.data.escapeExits[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "escapeBarrier") {
+    const entity = editor.data.escapeBarriers[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+  if (selection.kind === "cameraZone") {
+    const entity = editor.data.cameraZones[selection.index];
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
   if (selection.kind === "spawn") {
     return { x: editor.data.player.spawn.x, y: editor.data.player.spawn.y };
   }
@@ -2032,6 +2243,31 @@ function describeSelection(editor) {
     return crate ? `Crate ${editor.selected.index + 1} - ${crate.label || crate.id || "loot crate"}` : "No selection";
   }
 
+  if (editor.selected.kind === "vaultDoor") {
+    const door = editor.data.vaultDoors[editor.selected.index];
+    return door ? `Vault Door ${editor.selected.index + 1} - ${door.label || door.id || "vault"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "vaultLoot") {
+    const loot = editor.data.vaultLoot[editor.selected.index];
+    return loot ? `Vault Loot ${editor.selected.index + 1} - ${loot.label || loot.id || "supplies"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "escapeExit") {
+    const exit = editor.data.escapeExits[editor.selected.index];
+    return exit ? `Escape Exit ${editor.selected.index + 1} - ${exit.label || exit.id || "escape"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "escapeBarrier") {
+    const barrier = editor.data.escapeBarriers[editor.selected.index];
+    return barrier ? `Escape Barrier ${editor.selected.index + 1} - ${barrier.label || barrier.id || "barrier"}` : "No selection";
+  }
+
+  if (editor.selected.kind === "cameraZone") {
+    const zone = editor.data.cameraZones[editor.selected.index];
+    return zone ? `Camera Zone ${editor.selected.index + 1} - ${zone.label || zone.id || "zone"}` : "No selection";
+  }
+
   if (isMultiSelection(editor.selected)) {
     const items = getSelectionItems(editor.selected);
     const platformCount = items.filter((item) => item.kind === "platform").length;
@@ -2039,6 +2275,12 @@ function describeSelection(editor) {
     const temporaryBlockCount = items.filter((item) => item.kind === "temporaryBlock").length;
     const propCount = items.filter((item) => item.kind === "prop").length;
     const crateCount = items.filter((item) => item.kind === "crate").length;
+    const vaultCount = items.filter((item) => (
+      item.kind === "vaultDoor"
+      || item.kind === "vaultLoot"
+      || item.kind === "escapeExit"
+      || item.kind === "escapeBarrier"
+    )).length;
     const parts = [];
     if (braceWallCount > 0) {
       parts.push(`벽 짚기 ${braceWallCount}`);
@@ -2054,6 +2296,9 @@ function describeSelection(editor) {
     }
     if (crateCount > 0) {
       parts.push(`Crate ${crateCount}`);
+    }
+    if (vaultCount > 0) {
+      parts.push(`Vault ${vaultCount}`);
     }
     return `${items.length}개 선택${parts.length ? ` · ${parts.join(", ")}` : ""}`;
   }
@@ -2100,8 +2345,11 @@ function describeSelection(editor) {
 
   if (editor.selected.kind === "prop") {
     const prop = editor.data.props[editor.selected.index];
-    if (prop?.kind === "backgroundTile") {
+    if (isBackgroundTileKind(prop?.kind)) {
       return `Background tile ${editor.selected.index + 1}`;
+    }
+    if (isShadowTileKind(prop?.kind)) {
+      return `Shadow tile ${editor.selected.index + 1}`;
     }
     return prop?.kind === "sign"
       ? `표지 ${editor.selected.index + 1}`
@@ -2129,6 +2377,10 @@ function canDeleteSelection(selection) {
     || item.kind === "zipLineNode"
     || item.kind === "prop"
     || item.kind === "crate"
+    || item.kind === "vaultDoor"
+    || item.kind === "vaultLoot"
+    || item.kind === "escapeExit"
+    || item.kind === "gate"
     || item.kind === "enemy"
     || item.kind === "drone"
     || item.kind === "routeExit"
@@ -2347,6 +2599,8 @@ function renderSelectionFields(editor, dom) {
       { value: "solid", label: "Solid block" },
       { value: "slope", label: "Slope block" },
       { value: "water", label: "Water hazard" },
+      { value: "damage", label: "Damage block" },
+      { value: "recallDamage", label: "Recall damage block" },
     ]);
     if (entity.kind === "slope") {
       addSelect("Slope", "slopeDirection", getPlatformSlopeDirection(entity), [
@@ -2360,6 +2614,8 @@ function renderSelectionFields(editor, dom) {
         { value: "true", label: "Return to checkpoint" },
         { value: "false", label: "Damage only" },
       ]);
+    } else if (entity.kind === "damage" || entity.kind === "recallDamage") {
+      addNumber("Damage", "damage", entity.damage ?? 10, { min: 0 });
     }
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2377,7 +2633,12 @@ function renderSelectionFields(editor, dom) {
     addNumber("Y", "y", entity.y);
     addNumber("Width", "width", entity.width, { min: 12 });
     addNumber("Height", "height", entity.height, { min: 12 });
+    addNumber("HP", "maxHp", entity.maxHp ?? 1, { min: 1 });
     addNumber("Hide Time", "hideDuration", entity.hideDuration ?? 1.6, { min: 0.1, step: 0.1 });
+    addSelect("Break Rule", "breakRule", entity.breakRule || "normal", [
+      { value: "normal", label: "Normal" },
+      { value: "recoilJumpStage5", label: "Recoil Jump Lv5" },
+    ]);
     addColor("Color", "color", entity.color || "#5f7588");
   } else if (editor.selected.kind === "zipLine" || editor.selected.kind === "zipLineNode") {
     addText("ID", "id", entity.id || "");
@@ -2387,7 +2648,7 @@ function renderSelectionFields(editor, dom) {
       addNumber("Connect Range", "connectRange", entity.connectRange ?? ZIP_LINE_CONNECT_RANGE, { min: 1 });
     } else {
       addNumber("Speed", "speed", entity.speed ?? 1480, { min: 1 });
-      addText("Prompt", "prompt", entity.prompt || "E: Zipline");
+      addText("Prompt", "prompt", entity.prompt || "Up: Zipline");
     }
   } else if (editor.selected.kind === "prop") {
     addNumber("X", "x", entity.x);
@@ -2395,10 +2656,16 @@ function renderSelectionFields(editor, dom) {
     if (entity.kind === "sign") {
       addText("문구", "text", entity.text || "");
     }
-    if (entity.kind === "backgroundTile") {
+    if (entity.kind === "lantern") {
+      addNumber("Light Radius", "lightRadius", entity.lightRadius ?? 260, { min: 24 });
+      const end = getLanternEnd(entity);
+      addNumber("End X", "endX", end.x);
+      addNumber("End Y", "endY", end.y);
+    }
+    if (isRectPropTileKind(entity.kind)) {
       addNumber("Width", "width", entity.width, { min: 8 });
       addNumber("Height", "height", entity.height, { min: 8 });
-      addColor("Color", "color", entity.color || "#4f6f7d");
+      addColor("Color", "color", getRectPropTileColor(entity));
     }
   } else if (editor.selected.kind === "enemy") {
     addText("ID", "id", entity.id || "");
@@ -2407,7 +2674,7 @@ function renderSelectionFields(editor, dom) {
     addNumber("Y", "y", entity.y);
     addNumber("Width", "width", entity.width, { min: 12 });
     addNumber("Height", "height", entity.height, { min: 12 });
-    addNumber("HP", "maxHp", entity.maxHp ?? 140, { min: 1 });
+    addNumber("HP", "maxHp", entity.maxHp ?? 120, { min: 1 });
     addNumber("Damage", "damage", entity.damage ?? 12, { min: 0 });
     addNumber("Fire Range", "fireRange", entity.fireRange ?? 760, { min: 0 });
     addSelect("Attack", "attackPattern", entity.attackPattern || (entity.projectileArc ? "arc" : "rifle"), [
@@ -2465,6 +2732,54 @@ function renderSelectionFields(editor, dom) {
     addNumber("HP", "maxHp", entity.maxHp ?? entity.hp ?? 48, { min: 1 });
     addText("Loot Table", "lootTable", entity.lootTable || "streetCache");
     addNumber("Search Time", "searchTime", entity.searchTime ?? 0.75, { min: 0, step: 0.05 });
+  } else if (editor.selected.kind === "vaultDoor") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addText("Prompt", "prompt", entity.prompt || "");
+    addNumber("Timer", "duration", entity.duration ?? 60, { min: 1, step: 1 });
+  } else if (editor.selected.kind === "vaultLoot") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 16 });
+    addNumber("Height", "height", entity.height, { min: 16 });
+    addText("Prompt", "prompt", entity.prompt || "");
+    addNumber("Value", "value", entity.value ?? 25, { min: 0, step: 1 });
+  } else if (editor.selected.kind === "escapeBarrier") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 12 });
+    addNumber("Height", "height", entity.height, { min: 12 });
+    addSelect("Trigger", "trigger", entity.trigger || "vaultEscape", [
+      { value: "vaultEscape", label: "Vault escape" },
+      { value: "lockdown", label: "Lockdown only" },
+    ]);
+    addColor("Color", "color", entity.color || "#ff7a66");
+  } else if (editor.selected.kind === "cameraZone") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addNumber("Fit Scale", "zoom", entity.zoom ?? 1, { min: 0.1, max: 5, step: 0.01 });
+    addNumber("Min Scale", "minZoom", entity.minZoom ?? entity.zoom ?? 1, { min: 0.1, max: 5, step: 0.01 });
+    addNumber("Focus X", "focusX", entity.focusX ?? 0.5, { min: 0.24, max: 0.76, step: 0.01 });
+    addNumber("Focus Y", "focusY", entity.focusY ?? 0.5, { min: 0.28, max: 0.72, step: 0.01 });
+    addNumber("Zoom Lerp", "zoomLerp", entity.zoomLerp ?? 3.4, { min: 0, max: 30, step: 0.1 });
+    addNumber("Focus Lerp", "focusLerp", entity.focusLerp ?? 4.6, { min: 0, max: 30, step: 0.1 });
+    addNumber("Priority", "priority", entity.priority ?? 0, { step: 1 });
+    addSelect("Enabled", "enabled", entity.enabled === false ? "false" : "true", [
+      { value: "true", label: "Enabled" },
+      { value: "false", label: "Disabled" },
+    ]);
   } else if (editor.selected.kind === "spawn") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2491,7 +2806,7 @@ function renderSelectionFields(editor, dom) {
     ]);
     addNumber("Fade Sec", "fadeSeconds", entity.fadeSeconds ?? 0.42, { min: 0.05, max: 2, step: 0.05 });
     addText("Prompt", "prompt", entity.prompt || "");
-    const levelOptions = getLevelSummaries(GAME_DATA).map((level) => ({
+    const levelOptions = getEditorLevelSummaries().map((level) => ({
       value: level.id,
       label: level.label || level.id,
     }));
@@ -2503,6 +2818,14 @@ function renderSelectionFields(editor, dom) {
     addSelect("To Level", "toLevelId", targetLevelId, levelOptions);
     addSelect("To Entrance", "toEntranceId", entity.toEntranceId || entranceOptions[0]?.value || "start", entranceOptions);
     addText("Return Entrance", "returnEntranceId", entity.returnEntranceId || "start");
+  } else if (editor.selected.kind === "escapeExit") {
+    addText("ID", "id", entity.id || "");
+    addText("Label", "label", entity.label || "");
+    addNumber("X", "x", entity.x);
+    addNumber("Y", "y", entity.y);
+    addNumber("Width", "width", entity.width, { min: 24 });
+    addNumber("Height", "height", entity.height, { min: 24 });
+    addText("Prompt", "prompt", entity.prompt || "");
   } else if (editor.selected.kind === "gate") {
     addNumber("X", "x", entity.x);
     addNumber("Y", "y", entity.y);
@@ -2757,6 +3080,36 @@ function getSelectionsInRect(editor, rect) {
     }
   });
 
+  (editor.data.vaultDoors || []).forEach((door, index) => {
+    if (rectsIntersect(rect, getVaultDoorRect(door))) {
+      items.push({ kind: "vaultDoor", index });
+    }
+  });
+
+  (editor.data.vaultLoot || []).forEach((loot, index) => {
+    if (rectsIntersect(rect, getVaultLootRect(loot))) {
+      items.push({ kind: "vaultLoot", index });
+    }
+  });
+
+  (editor.data.escapeExits || []).forEach((exit, index) => {
+    if (rectsIntersect(rect, getEscapeExitRect(exit))) {
+      items.push({ kind: "escapeExit", index });
+    }
+  });
+
+  (editor.data.escapeBarriers || []).forEach((barrier, index) => {
+    if (rectsIntersect(rect, getEscapeBarrierRect(barrier))) {
+      items.push({ kind: "escapeBarrier", index });
+    }
+  });
+
+  (editor.data.cameraZones || []).forEach((zone, index) => {
+    if (rectsIntersect(rect, zone)) {
+      items.push({ kind: "cameraZone", index });
+    }
+  });
+
   editor.data.platforms.forEach((platform, index) => {
     if (rectsIntersect(rect, platform)) {
       items.push({ kind: "platform", index });
@@ -2807,6 +3160,36 @@ function hitTest(editor, point) {
   for (let index = (editor.data.lootCrates || []).length - 1; index >= 0; index -= 1) {
     if (pointInRect(point, getLootCrateRect(editor.data.lootCrates[index]))) {
       return { kind: "crate", index };
+    }
+  }
+
+  for (let index = (editor.data.vaultDoors || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getVaultDoorRect(editor.data.vaultDoors[index]))) {
+      return { kind: "vaultDoor", index };
+    }
+  }
+
+  for (let index = (editor.data.vaultLoot || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getVaultLootRect(editor.data.vaultLoot[index]))) {
+      return { kind: "vaultLoot", index };
+    }
+  }
+
+  for (let index = (editor.data.escapeExits || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getEscapeExitRect(editor.data.escapeExits[index]))) {
+      return { kind: "escapeExit", index };
+    }
+  }
+
+  for (let index = (editor.data.escapeBarriers || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, getEscapeBarrierRect(editor.data.escapeBarriers[index]))) {
+      return { kind: "escapeBarrier", index };
+    }
+  }
+
+  for (let index = (editor.data.cameraZones || []).length - 1; index >= 0; index -= 1) {
+    if (pointInRect(point, editor.data.cameraZones[index])) {
+      return { kind: "cameraZone", index };
     }
   }
 
@@ -3055,6 +3438,22 @@ function deleteSelection(editor, dom) {
   const crateIndexes = new Set(
     items.filter((item) => item.kind === "crate").map((item) => item.index),
   );
+  const vaultDoorIndexes = new Set(
+    items.filter((item) => item.kind === "vaultDoor").map((item) => item.index),
+  );
+  const vaultLootIndexes = new Set(
+    items.filter((item) => item.kind === "vaultLoot").map((item) => item.index),
+  );
+  const escapeExitIndexes = new Set(
+    items.filter((item) => item.kind === "escapeExit").map((item) => item.index),
+  );
+  const escapeBarrierIndexes = new Set(
+    items.filter((item) => item.kind === "escapeBarrier").map((item) => item.index),
+  );
+  const deleteGate = items.some((item) => item.kind === "gate");
+  const cameraZoneIndexes = new Set(
+    items.filter((item) => item.kind === "cameraZone").map((item) => item.index),
+  );
   const routeExitIndexes = new Set(
     items.filter((item) => item.kind === "routeExit").map((item) => item.index),
   );
@@ -3072,6 +3471,12 @@ function deleteSelection(editor, dom) {
     && enemyIndexes.size === 0
     && droneIndexes.size === 0
     && crateIndexes.size === 0
+    && vaultDoorIndexes.size === 0
+    && vaultLootIndexes.size === 0
+    && escapeExitIndexes.size === 0
+    && escapeBarrierIndexes.size === 0
+    && !deleteGate
+    && cameraZoneIndexes.size === 0
     && routeExitIndexes.size === 0
     && entranceIndexes.size === 0
   ) {
@@ -3103,6 +3508,14 @@ function deleteSelection(editor, dom) {
   }
   editor.data.hostileDrones = editor.data.hostileDrones.filter((_, index) => !droneIndexes.has(index));
   editor.data.lootCrates = editor.data.lootCrates.filter((_, index) => !crateIndexes.has(index));
+  editor.data.vaultDoors = editor.data.vaultDoors.filter((_, index) => !vaultDoorIndexes.has(index));
+  editor.data.vaultLoot = editor.data.vaultLoot.filter((_, index) => !vaultLootIndexes.has(index));
+  editor.data.escapeExits = editor.data.escapeExits.filter((_, index) => !escapeExitIndexes.has(index));
+  editor.data.escapeBarriers = editor.data.escapeBarriers.filter((_, index) => !escapeBarrierIndexes.has(index));
+  if (deleteGate) {
+    editor.data.extractionGate = null;
+  }
+  editor.data.cameraZones = editor.data.cameraZones.filter((_, index) => !cameraZoneIndexes.has(index));
   editor.data.routeExits = editor.data.routeExits.filter((_, index) => !routeExitIndexes.has(index));
   editor.data.entrances = editor.data.entrances.filter((_, index) => !entranceIndexes.has(index));
 
@@ -3191,6 +3604,7 @@ function applySelectionField(editor, dom, field, value) {
     || field === "visualKind"
     || field === "lootTable"
     || field === "attackPattern"
+    || field === "breakRule"
     || field === "toLevelId"
     || field === "toEntranceId"
     || field === "returnEntranceId"
@@ -3206,17 +3620,28 @@ function applySelectionField(editor, dom, field, value) {
         entity.slopeDirection = getPlatformSlopeDirection(entity);
         delete entity.damageRatio;
         delete entity.respawn;
+        delete entity.damage;
       } else if (value === "water") {
         entity.kind = "water";
         entity.damageRatio = Number.isFinite(entity.damageRatio) ? entity.damageRatio : 0.33;
         entity.respawn = entity.respawn !== false;
         entity.color = entity.color || "#1d8fb8";
+        delete entity.damage;
+        delete entity.slopeDirection;
+      } else if (value === "damage" || value === "recallDamage") {
+        entity.kind = value;
+        entity.damage = Number.isFinite(entity.damage) ? entity.damage : 10;
+        entity.color = value === "recallDamage" ? "#2367a8" : entity.color || "#8b3446";
+        delete entity.damageRatio;
+        delete entity.respawn;
+        delete entity.damage;
         delete entity.slopeDirection;
       } else {
         delete entity.kind;
         delete entity.slopeDirection;
         delete entity.damageRatio;
         delete entity.respawn;
+        delete entity.damage;
       }
     } else if (field === "slopeDirection") {
       if (editor.selected?.kind !== "platform" || entity.kind !== "slope") {
@@ -3274,6 +3699,19 @@ function applySelectionField(editor, dom, field, value) {
     }
     pushUndo(editor);
     entity.respawn = nextValue;
+    renderSelectionFields(editor, dom);
+    markDirty(editor, dom);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (field === "enabled") {
+    const nextValue = value !== "false";
+    if (entity.enabled === nextValue) {
+      return;
+    }
+    pushUndo(editor);
+    entity.enabled = nextValue;
     renderSelectionFields(editor, dom);
     markDirty(editor, dom);
     queueRender(editor, dom);
@@ -3546,8 +3984,16 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     if (!entity) {
       return;
     }
+    const deltaX = snappedX - entity.x;
+    const deltaY = snappedY - entity.y;
+    const wasLinearLantern = entity.kind === "lantern" && isLinearLantern(entity);
+    const previousLanternEnd = wasLinearLantern ? getLanternEnd(entity) : null;
     entity.x = snappedX;
     entity.y = snappedY;
+    if (wasLinearLantern) {
+      entity.endX = previousLanternEnd.x + deltaX;
+      entity.endY = previousLanternEnd.y + deltaY;
+    }
   } else if (selection.kind === "enemy") {
     const entity = editor.data.humanoidEnemies[selection.index];
     if (!entity) {
@@ -3586,6 +4032,41 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     }
   } else if (selection.kind === "crate") {
     const entity = editor.data.lootCrates[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "vaultDoor") {
+    const entity = editor.data.vaultDoors[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "vaultLoot") {
+    const entity = editor.data.vaultLoot[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "escapeExit") {
+    const entity = editor.data.escapeExits[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "escapeBarrier") {
+    const entity = editor.data.escapeBarriers[selection.index];
+    if (!entity) {
+      return;
+    }
+    entity.x = snappedX;
+    entity.y = snappedY;
+  } else if (selection.kind === "cameraZone") {
+    const entity = editor.data.cameraZones[selection.index];
     if (!entity) {
       return;
     }
@@ -3683,6 +4164,10 @@ function createPlatformFromPreview(editor, dom) {
     platform.kind = "water";
     platform.damageRatio = 0.33;
     platform.respawn = true;
+  } else if (rect.kind === "damage" || rect.kind === "recallDamage") {
+    platform.kind = rect.kind;
+    platform.color = rect.kind === "recallDamage" ? "#2367a8" : "#8b3446";
+    platform.damage = 10;
   }
 
   editor.data.platforms.push(platform);
@@ -3726,11 +4211,36 @@ function createTemporaryBlockFromPreview(editor, dom) {
     y: rect.y,
     width: Math.max(12, rect.width || 96),
     height: Math.max(12, rect.height || 96),
+    maxHp: 1,
     color: "#5f7588",
     hideDuration: 1.6,
+    breakRule: "normal",
   };
   editor.data.temporaryBlocks.push(block);
   setSelection(editor, dom, { kind: "temporaryBlock", index: editor.data.temporaryBlocks.length - 1 });
+  markDirty(editor, dom);
+}
+
+function createEscapeBarrierFromPreview(editor, dom) {
+  if (!editor.preview || editor.preview.kind !== "escapeBarrier") {
+    return;
+  }
+
+  pushUndo(editor);
+
+  const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+  const barrier = {
+    id: `escape-barrier-${Date.now()}`,
+    label: "Escape Barrier",
+    x: rect.x,
+    y: rect.y,
+    width: Math.max(12, rect.width || 96),
+    height: Math.max(12, rect.height || 128),
+    trigger: "vaultEscape",
+    color: "#ff7a66",
+  };
+  editor.data.escapeBarriers.push(barrier);
+  setSelection(editor, dom, { kind: "escapeBarrier", index: editor.data.escapeBarriers.length - 1 });
   markDirty(editor, dom);
 }
 
@@ -3757,15 +4267,44 @@ function placeZipLineNodeAt(editor, dom, point) {
       start: { x: nearest.node.x, y: nearest.node.y },
       end: { x: node.x, y: node.y },
       speed: 1480,
-      prompt: "E: Zipline",
+    prompt: "Up: Zipline",
     });
   }
   setSelection(editor, dom, { kind: "zipLineNode", index: editor.data.zipLineNodes.length - 1 });
   markDirty(editor, dom);
 }
 
+function createCameraZoneFromPreview(editor, dom) {
+  if (!editor.preview || editor.preview.kind !== "cameraZone") {
+    return;
+  }
+
+  pushUndo(editor);
+
+  const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+  const zone = {
+    id: `camera-zone-${Date.now()}`,
+    label: "Camera Zone",
+    x: rect.x,
+    y: rect.y,
+    width: Math.max(96, rect.width || 320),
+    height: Math.max(96, rect.height || 220),
+    zoom: 1,
+    minZoom: 1,
+    focusX: 0.5,
+    focusY: 0.5,
+    zoomLerp: 3.4,
+    focusLerp: 4.6,
+    priority: 0,
+    enabled: true,
+  };
+  editor.data.cameraZones.push(zone);
+  setSelection(editor, dom, { kind: "cameraZone", index: editor.data.cameraZones.length - 1 });
+  markDirty(editor, dom);
+}
+
 function createBackgroundTileFromPreview(editor, dom) {
-  if (!editor.preview || editor.preview.kind !== "backgroundTile") {
+  if (!editor.preview || !isRectPropTileKind(editor.preview.kind)) {
     return;
   }
 
@@ -3777,13 +4316,37 @@ function createBackgroundTileFromPreview(editor, dom) {
   }
 
   const prop = {
-    kind: "backgroundTile",
+    kind: editor.preview.kind,
     x: rect.x,
     y: rect.y,
     width: rect.width,
     height: rect.height,
-    color: "#4f6f7d",
+    color: isShadowTileKind(editor.preview.kind) ? SHADOW_TILE_COLOR : BACKGROUND_TILE_COLOR,
   };
+  editor.data.props.push(prop);
+  setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
+  markDirty(editor, dom);
+}
+
+function createLanternFromPreview(editor, dom) {
+  if (!editor.preview || editor.preview.kind !== "lantern") {
+    return;
+  }
+
+  pushUndo(editor);
+
+  const start = editor.preview.start;
+  const end = editor.preview.end || start;
+  const prop = {
+    kind: "lantern",
+    x: start.x,
+    y: start.y,
+    lightRadius: 260,
+  };
+  if (Math.hypot(end.x - start.x, end.y - start.y) > 1) {
+    prop.endX = end.x;
+    prop.endY = end.y;
+  }
   editor.data.props.push(prop);
   setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
   markDirty(editor, dom);
@@ -3795,6 +4358,9 @@ function placeProp(editor, dom, kind, point) {
   const prop = kind === "sign"
     ? { kind, x: snapped.x, y: snapped.y, text: "표지" }
     : { kind, x: snapped.x, y: snapped.y };
+  if (kind === "lantern") {
+    prop.lightRadius = 260;
+  }
   editor.data.props.push(prop);
   setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
   markDirty(editor, dom);
@@ -3831,8 +4397,31 @@ function placeEntranceAt(editor, dom, point) {
 
 function getDefaultRouteTarget(editor) {
   const currentId = editor.data.currentLevelId;
-  const target = getLevelSummaries(GAME_DATA).find((level) => level.id !== currentId);
+  const target = getEditorLevelSummaries().find((level) => level.id !== currentId);
   return target?.id || currentId || editor.data.defaultLevelId || "movement-lab-01";
+}
+
+function getNextReturnEntranceId(editor) {
+  const existingIds = new Set((editor.data.entrances || []).map((entrance) => entrance.id));
+  for (let index = 1; index < 1000; index += 1) {
+    const id = `return-entrance-${String(index).padStart(2, "0")}`;
+    if (!existingIds.has(id)) {
+      return id;
+    }
+  }
+  return `return-entrance-${Date.now()}`;
+}
+
+function createReturnEntranceForRouteExit(editor, routeExit) {
+  const id = getNextReturnEntranceId(editor);
+  const label = `Return Entrance ${id.match(/\d+$/)?.[0] || ""}`.trim();
+  return {
+    id,
+    label,
+    x: routeExit.x + routeExit.width / 2,
+    y: routeExit.y + routeExit.height,
+    facing: 1,
+  };
 }
 
 function placeRouteExitAt(editor, dom, point) {
@@ -3850,15 +4439,19 @@ function placeRouteExitAt(editor, dom, point) {
     y: snapped.y,
     width,
     height,
-    prompt: "E: 다음 구역",
+    prompt: "Up: Next area",
     toLevelId: getDefaultRouteTarget(editor),
     toEntranceId: "start",
     trigger: "touch",
     fadeSeconds: 0.42,
   };
+  const returnEntrance = createReturnEntranceForRouteExit(editor, routeExit);
+  routeExit.returnEntranceId = returnEntrance.id;
+  editor.data.entrances.push(returnEntrance);
   editor.data.routeExits.push(routeExit);
   setSelection(editor, dom, { kind: "routeExit", index: editor.data.routeExits.length - 1 });
   markDirty(editor, dom);
+  setStatus(editor, dom, `Route Exit 생성 (${editor.data.routeExits.length}개)`, "", true);
 }
 
 function placeEnemyAt(editor, dom, point, options = {}) {
@@ -3877,7 +4470,7 @@ function placeEnemyAt(editor, dom, point, options = {}) {
     y: snapped.y,
     width,
     height,
-    maxHp: 140,
+    maxHp: 120,
     damage: 12,
     fireRange: 760,
     triggerRate: 10,
@@ -4021,6 +4614,74 @@ function placeLootCrateAt(editor, dom, point) {
   markDirty(editor, dom);
 }
 
+function placeVaultDoorAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 112;
+  const height = 144;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const door = {
+    id: `vault-door-${Date.now()}`,
+    label: "Supply Vault",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    prompt: "Up: Hack vault",
+    duration: 60,
+  };
+  editor.data.vaultDoors.push(door);
+  setSelection(editor, dom, { kind: "vaultDoor", index: editor.data.vaultDoors.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeVaultLootAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 48;
+  const height = 48;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const loot = {
+    id: `vault-loot-${Date.now()}`,
+    label: "Supplies",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    value: 25,
+    prompt: "Up: Take supplies",
+  };
+  editor.data.vaultLoot.push(loot);
+  setSelection(editor, dom, { kind: "vaultLoot", index: editor.data.vaultLoot.length - 1 });
+  markDirty(editor, dom);
+}
+
+function placeEscapeExitAt(editor, dom, point) {
+  pushUndo(editor);
+  const width = 112;
+  const height = 192;
+  const snapped = snapPoint({
+    x: point.x - width / 2,
+    y: point.y - height,
+  }, editor.snap);
+  const exit = {
+    id: `escape-exit-${Date.now()}`,
+    label: "Emergency Exit",
+    x: snapped.x,
+    y: snapped.y,
+    width,
+    height,
+    prompt: "Up: Escape",
+  };
+  editor.data.escapeExits.push(exit);
+  setSelection(editor, dom, { kind: "escapeExit", index: editor.data.escapeExits.length - 1 });
+  markDirty(editor, dom);
+}
+
 function placeGateAt(editor, dom, point) {
   pushUndo(editor);
   const gate = editor.data.extractionGate || {
@@ -4028,7 +4689,7 @@ function placeGateAt(editor, dom, point) {
     y: 0,
     width: 96,
     height: 192,
-    prompt: "E: 추출",
+    prompt: "Up: Extract",
   };
   const snapped = snapPoint({
     x: point.x - gate.width / 2,
@@ -4116,12 +4777,20 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
-  if (editor.tool === TOOL_IDS.PLATFORM || editor.tool === TOOL_IDS.WATER || isSlopeTool(editor.tool)) {
+  if (isPlatformDrawTool(editor.tool)) {
     editor.preview = {
       kind: "platform",
       start: snapped,
       end: snapped,
-      platformKind: editor.tool === TOOL_IDS.WATER ? "water" : isSlopeTool(editor.tool) ? "slope" : "solid",
+      platformKind: editor.tool === TOOL_IDS.DAMAGE_BLOCK
+        ? "damage"
+        : editor.tool === TOOL_IDS.RECALL_DAMAGE_BLOCK
+          ? "recallDamage"
+          : editor.tool === TOOL_IDS.WATER
+            ? "water"
+        : isSlopeTool(editor.tool)
+          ? "slope"
+          : "solid",
       slopeDirection: getSlopeDirectionForTool(editor.tool),
     };
     editor.drag = {
@@ -4157,6 +4826,32 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
+  if (editor.tool === TOOL_IDS.ESCAPE_BARRIER) {
+    editor.preview = {
+      kind: "escapeBarrier",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewEscapeBarrier",
+    };
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.CAMERA_ZONE) {
+    editor.preview = {
+      kind: "cameraZone",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewCameraZone",
+    };
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.tool === TOOL_IDS.ZIP_LINE) {
     placeZipLineNodeAt(editor, dom, world);
     queueRender(editor, dom);
@@ -4176,6 +4871,19 @@ function handlePointerDown(editor, dom, event) {
     return;
   }
 
+  if (editor.tool === TOOL_IDS.SHADOW_TILE) {
+    editor.preview = {
+      kind: "shadowTile",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewBackgroundTile",
+    };
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.tool === TOOL_IDS.SIGN) {
     placeProp(editor, dom, "sign", world);
     queueRender(editor, dom);
@@ -4183,7 +4891,14 @@ function handlePointerDown(editor, dom, event) {
   }
 
   if (editor.tool === TOOL_IDS.LANTERN) {
-    placeProp(editor, dom, "lantern", world);
+    editor.preview = {
+      kind: "lantern",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewLantern",
+    };
     queueRender(editor, dom);
     return;
   }
@@ -4232,6 +4947,24 @@ function handlePointerDown(editor, dom, event) {
 
   if (editor.tool === TOOL_IDS.CRATE) {
     placeLootCrateAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.VAULT_DOOR) {
+    placeVaultDoorAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.VAULT_LOOT) {
+    placeVaultLootAt(editor, dom, world);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.tool === TOOL_IDS.ESCAPE_EXIT) {
+    placeEscapeExitAt(editor, dom, world);
     queueRender(editor, dom);
     return;
   }
@@ -4377,7 +5110,25 @@ function handlePointerMove(editor, dom, event) {
     return;
   }
 
+  if (editor.drag.kind === "previewEscapeBarrier" && editor.preview) {
+    editor.preview.end = snapPoint(world, editor.snap);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.drag.kind === "previewCameraZone" && editor.preview) {
+    editor.preview.end = snapPoint(world, editor.snap);
+    queueRender(editor, dom);
+    return;
+  }
+
   if (editor.drag.kind === "previewBackgroundTile" && editor.preview) {
+    editor.preview.end = snapPoint(world, editor.snap);
+    queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.drag.kind === "previewLantern" && editor.preview) {
     editor.preview.end = snapPoint(world, editor.snap);
     queueRender(editor, dom);
   }
@@ -4418,8 +5169,23 @@ function handlePointerUp(editor, dom) {
     editor.preview = null;
   }
 
+  if (editor.drag?.kind === "previewEscapeBarrier") {
+    createEscapeBarrierFromPreview(editor, dom);
+    editor.preview = null;
+  }
+
+  if (editor.drag?.kind === "previewCameraZone") {
+    createCameraZoneFromPreview(editor, dom);
+    editor.preview = null;
+  }
+
   if (editor.drag?.kind === "previewBackgroundTile") {
     createBackgroundTileFromPreview(editor, dom);
+    editor.preview = null;
+  }
+
+  if (editor.drag?.kind === "previewLantern") {
+    createLanternFromPreview(editor, dom);
     editor.preview = null;
   }
 
@@ -4459,7 +5225,11 @@ function loadEditorLevel(editor, dom, levelId, options = {}) {
     return;
   }
   if (editor.dirty && options.saveCurrent !== false) {
-    saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
+    const saved = saveCurrentLevelOverride(editor, dom, { refresh: false });
+    if (!saved) {
+      renderLevelControls(editor, dom);
+      return;
+    }
   }
   editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
     applyLevelOverride: true,
@@ -4484,7 +5254,9 @@ function duplicateCurrentLevel(editor, dom) {
   const baseName = copy.levelId || editor.data.currentLevelId || "level";
   copy.levelId = createUniqueLevelId(editor, `${baseName}-copy`);
   copy.label = `${copy.label || baseName} Copy`;
-  saveLevelOverride(copy, GAME_DATA, copy.levelId);
+  if (!saveLevelDocument(editor, dom, copy, copy.levelId)) {
+    return;
+  }
   loadEditorLevel(editor, dom, copy.levelId, { saveCurrent: false });
 }
 
@@ -4511,7 +5283,9 @@ function createNewLevel(editor, dom) {
       height: 82,
     }],
   };
-  saveLevelOverride(copy, GAME_DATA, copy.levelId);
+  if (!saveLevelDocument(editor, dom, copy, copy.levelId)) {
+    return;
+  }
   loadEditorLevel(editor, dom, copy.levelId, { saveCurrent: false });
 }
 
@@ -4547,7 +5321,7 @@ function deleteCurrentLocalLevel(editor, dom) {
     return;
   }
 
-  const fallbackLevelId = GAME_DATA.defaultLevelId || getLevelSummaries(GAME_DATA)[0]?.id || "movement-lab-01";
+  const fallbackLevelId = GAME_DATA.defaultLevelId || getEditorLevelSummaries()[0]?.id || "movement-lab-01";
   editor.dirty = false;
   loadEditorLevel(editor, dom, fallbackLevelId, { saveCurrent: false });
   setStatus(editor, dom, `Deleted local level ${levelId}.`, "", false);
@@ -4574,9 +5348,40 @@ function updateRunStartLevel(editor, dom, levelId) {
   setStatus(editor, dom, `Run start level set to ${nextLevelId}.`, "", editor.dirty);
 }
 
+function saveLevelDocument(editor, dom, document, levelId) {
+  try {
+    return saveLevelOverride(document, GAME_DATA, levelId);
+  } catch (error) {
+    console.warn("Level save failed", error);
+    setStatus(editor, dom, "로컬 저장 실패", "error", true);
+    return null;
+  }
+}
+
+function saveCurrentLevelOverride(editor, dom, options = {}) {
+  const editable = extractEditableLevelData(editor.data);
+  const levelId = editable.levelId || editor.data.currentLevelId || editor.data.levelId;
+  editable.levelId = levelId;
+  const saved = saveLevelDocument(editor, dom, editable, levelId);
+  if (!saved) {
+    return null;
+  }
+  if (options.refresh !== false) {
+    editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, saved.levelId, {
+      applyLevelOverride: true,
+    }));
+    renderLevelControls(editor, dom);
+    renderSelectionFields(editor, dom);
+    queueRender(editor, dom);
+  }
+  return saved;
+}
+
 function saveEditorLevel(editor, dom) {
-  saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
-  renderLevelControls(editor, dom);
+  const saved = saveCurrentLevelOverride(editor, dom);
+  if (!saved) {
+    return;
+  }
   setStatus(editor, dom, "로컬 저장 완료", "", false);
 }
 
@@ -4701,7 +5506,7 @@ async function saveLevelJsonToDraftFolder(editor, dom, fileName, json) {
     ])).sort();
     await writeLevelManifestToDirectory(directory, manifest);
 
-    setStatus(editor, dom, `Saved ${targetDraftPath} and updated levels/manifest.json.`, "", editor.dirty);
+    setStatus(editor, dom, `Saved ${targetDraftPath} and updated levels/manifest.json.`, "", false);
     return true;
   } catch (error) {
     if (error?.name !== "AbortError") {
@@ -4725,8 +5530,6 @@ async function downloadLevelJson(editor, dom) {
   anchor.click();
   URL.revokeObjectURL(url);
   setStatus(editor, dom, `Downloaded ${fileName}. Move it to levels/drafts/.`, "", editor.dirty);
-  return;
-  setStatus(editor, dom, "JSON 저장 완료", "", editor.dirty);
 }
 
 async function importLevelFile(editor, dom, file) {
@@ -4747,12 +5550,14 @@ async function importLevelFile(editor, dom, file) {
       previewPose: "idle",
       selected: null,
     };
+    if (!saveLevelDocument(editor, dom, normalized, normalized.levelId)) {
+      return;
+    }
     if (getSnapshotKey(before) !== getSnapshotKey(nextSnapshot)) {
       pushUndoSnapshot(editor, before);
     }
     editor.data = prepareEditorData(mergeLevelData(baseLevel, normalized));
     editor.snap = getScaleConfig(editor.data).subTileSize;
-    saveLevelOverride(normalized, GAME_DATA, normalized.levelId);
     editor.previewPose = "idle";
     setSelection(editor, dom, null);
     syncWorldInputs(editor, dom);
@@ -4764,30 +5569,6 @@ async function importLevelFile(editor, dom, file) {
   } catch {
     setStatus(editor, dom, "JSON 불러오기 실패", "error", editor.dirty);
   }
-}
-
-function resetEditorLevel(editor, dom) {
-  const before = captureEditorSnapshot(editor);
-  const levelId = editor.data.currentLevelId || GAME_DATA.defaultLevelId;
-  clearLevelOverride(GAME_DATA, levelId);
-  editor.data = prepareEditorData(createRuntimeGameData(GAME_DATA, levelId, {
-    applyLevelOverride: isLocalOnlyLevel(GAME_DATA, levelId),
-  }));
-  editor.snap = getScaleConfig(editor.data).subTileSize;
-  editor.preview = null;
-  editor.drag = null;
-  editor.previewPose = "idle";
-  setSelection(editor, dom, null);
-  syncWorldInputs(editor, dom);
-  renderSelectionFields(editor, dom);
-  renderPlayerRenderFields(editor, dom);
-  renderHudLayoutFields(editor, dom);
-  const after = captureEditorSnapshot(editor);
-  if (getSnapshotKey(before) !== getSnapshotKey(after)) {
-    pushUndoSnapshot(editor, before);
-  }
-  setStatus(editor, dom, "기본값 복원", "", false);
-  fitViewToWorld(editor, dom);
 }
 
 function snapEntireLevelToScale(editor, dom) {
@@ -4820,6 +5601,46 @@ function snapEntireLevelToScale(editor, dom) {
     y: snapValue(routeExit.y, step),
     width: Math.max(tile, snapValue(routeExit.width, step)),
     height: Math.max(tile, snapValue(routeExit.height, step)),
+  }));
+
+  editor.data.vaultDoors = (editor.data.vaultDoors || []).map((door) => ({
+    ...door,
+    x: snapValue(door.x, step),
+    y: snapValue(door.y, step),
+    width: Math.max(tile, snapValue(door.width, step)),
+    height: Math.max(tile, snapValue(door.height, step)),
+  }));
+
+  editor.data.vaultLoot = (editor.data.vaultLoot || []).map((loot) => ({
+    ...loot,
+    x: snapValue(loot.x, step),
+    y: snapValue(loot.y, step),
+    width: Math.max(step, snapValue(loot.width, step)),
+    height: Math.max(step, snapValue(loot.height, step)),
+  }));
+
+  editor.data.escapeExits = (editor.data.escapeExits || []).map((exit) => ({
+    ...exit,
+    x: snapValue(exit.x, step),
+    y: snapValue(exit.y, step),
+    width: Math.max(tile, snapValue(exit.width, step)),
+    height: Math.max(tile, snapValue(exit.height, step)),
+  }));
+
+  editor.data.escapeBarriers = (editor.data.escapeBarriers || []).map((barrier) => ({
+    ...barrier,
+    x: snapValue(barrier.x, step),
+    y: snapValue(barrier.y, step),
+    width: Math.max(step, snapValue(barrier.width, step)),
+    height: Math.max(step, snapValue(barrier.height, step)),
+  }));
+
+  editor.data.cameraZones = (editor.data.cameraZones || []).map((zone) => ({
+    ...zone,
+    x: snapValue(zone.x, step),
+    y: snapValue(zone.y, step),
+    width: Math.max(tile, snapValue(zone.width, step)),
+    height: Math.max(tile, snapValue(zone.height, step)),
   }));
 
   editor.data.platforms = editor.data.platforms.map((platform) => ({
@@ -4869,7 +5690,13 @@ function snapEntireLevelToScale(editor, dom) {
     ...prop,
     x: snapValue(prop.x, step),
     y: snapValue(prop.y, step),
-    ...(prop.kind === "backgroundTile"
+    ...(prop.kind === "lantern" && Number.isFinite(prop.endX) && Number.isFinite(prop.endY)
+      ? {
+        endX: snapValue(prop.endX, step),
+        endY: snapValue(prop.endY, step),
+      }
+      : {}),
+    ...(isRectPropTileKind(prop.kind)
       ? {
         width: Math.max(step, snapValue(prop.width, step)),
         height: Math.max(step, snapValue(prop.height, step)),
@@ -5035,7 +5862,6 @@ function bindEvents(editor, dom) {
     importLevelFile(editor, dom, dom.importInput.files?.[0] || null);
     dom.importInput.value = "";
   });
-  dom.resetButton.addEventListener("click", () => resetEditorLevel(editor, dom));
   dom.fitViewButton.addEventListener("click", () => fitViewToWorld(editor, dom));
 
   dom.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -5097,7 +5923,10 @@ function bindEvents(editor, dom) {
 
     if (event.code === "KeyG") {
       event.preventDefault();
-      saveLevelOverride(extractEditableLevelData(editor.data), GAME_DATA, editor.data.currentLevelId);
+      const saved = saveCurrentLevelOverride(editor, dom);
+      if (!saved) {
+        return;
+      }
       const levelId = encodeURIComponent(editor.data.currentLevelId || editor.data.defaultLevelId || "movement-lab-01");
       window.location.href = `./index.html?level=${levelId}&directLevel=1&localOverride=1`;
       return;
@@ -5279,11 +6108,43 @@ function drawPlatformBlock(ctx, editor, platform, selected) {
     }
     return;
   }
-  ctx.fillStyle = platform.color || "#54697b";
+  const isDamage = platform.kind === "damage" || platform.kind === "recallDamage";
+  const isRecallDamage = platform.kind === "recallDamage";
+  ctx.fillStyle = platform.color || (isRecallDamage ? "#2367a8" : isDamage ? "#8b3446" : "#54697b");
   ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
 
-  ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+  ctx.fillStyle = isDamage ? "rgba(255, 190, 102, 0.28)" : "rgba(255, 255, 255, 0.16)";
   ctx.fillRect(platform.x, platform.y, platform.width, Math.max(2, platform.height * 0.18));
+
+  if (isDamage) {
+    ctx.strokeStyle = selected ? COLORS.accent : (isRecallDamage ? "rgba(94, 190, 255, 0.82)" : "rgba(255, 126, 102, 0.72)");
+    ctx.lineWidth = (selected ? 3 : 1.6) / editor.view.zoom;
+    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+    ctx.strokeStyle = isRecallDamage ? "rgba(147, 234, 255, 0.56)" : "rgba(255, 226, 126, 0.55)";
+    ctx.lineWidth = 1.4 / editor.view.zoom;
+    const step = Math.max(18 / editor.view.zoom, 24);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(platform.x, platform.y, platform.width, platform.height);
+    ctx.clip();
+    for (let x = platform.x - platform.height; x < platform.x + platform.width; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, platform.y + platform.height);
+      ctx.lineTo(x + platform.height, platform.y);
+      ctx.stroke();
+    }
+    if (isRecallDamage) {
+      ctx.strokeStyle = "rgba(225, 245, 255, 0.62)";
+      ctx.beginPath();
+      ctx.moveTo(platform.x + platform.width * 0.24, platform.y + platform.height * 0.52);
+      ctx.lineTo(platform.x + platform.width * 0.48, platform.y + platform.height * 0.28);
+      ctx.lineTo(platform.x + platform.width * 0.48, platform.y + platform.height * 0.43);
+      ctx.lineTo(platform.x + platform.width * 0.76, platform.y + platform.height * 0.43);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
 
   ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 255, 255, 0.12)";
   ctx.lineWidth = (selected ? 3 : 1.2) / editor.view.zoom;
@@ -5342,6 +6203,17 @@ function drawSlopePlatform(ctx, editor, platform, selected, options = {}) {
 
 function drawPlatforms(ctx, editor) {
   editor.data.platforms.forEach((platform, index) => {
+    if (platform.kind !== "damage" && platform.kind !== "recallDamage") {
+      return;
+    }
+    const selected = isSelectionItemSelected(editor.selected, { kind: "platform", index });
+    drawPlatformBlock(ctx, editor, platform, selected);
+  });
+
+  editor.data.platforms.forEach((platform, index) => {
+    if (platform.kind === "damage" || platform.kind === "recallDamage") {
+      return;
+    }
     const selected = isSelectionItemSelected(editor.selected, { kind: "platform", index });
     if (platform.kind === "slope") {
       drawSlopePlatform(ctx, editor, platform, selected);
@@ -5393,6 +6265,67 @@ function drawTemporaryBlocks(ctx, editor) {
       ctx.lineTo(x, block.y + block.height - 8 / editor.view.zoom);
       ctx.stroke();
     }
+    if (block.breakRule === "recoilJumpStage5") {
+      ctx.fillStyle = COLORS.accent;
+      ctx.font = `${14 / editor.view.zoom}px Segoe UI`;
+      ctx.textAlign = "center";
+      ctx.fillText("RJ5", block.x + block.width / 2, block.y + block.height / 2 + 5 / editor.view.zoom);
+      ctx.textAlign = "left";
+    }
+  });
+}
+
+function drawEscapeBarriers(ctx, editor) {
+  (editor.data.escapeBarriers || []).forEach((barrier, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "escapeBarrier", index });
+    ctx.save();
+    ctx.fillStyle = COLORS.escapeBarrierFill;
+    ctx.fillRect(barrier.x, barrier.y, barrier.width, barrier.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.escapeBarrier;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(barrier.x, barrier.y, barrier.width, barrier.height);
+    ctx.strokeStyle = "rgba(255, 226, 126, 0.36)";
+    ctx.lineWidth = 1.4 / editor.view.zoom;
+    const slits = Math.max(2, Math.floor(barrier.width / 32));
+    for (let slit = 0; slit < slits; slit += 1) {
+      const x = barrier.x + 8 / editor.view.zoom + slit * (barrier.width - 16 / editor.view.zoom) / Math.max(1, slits - 1);
+      ctx.beginPath();
+      ctx.moveTo(x, barrier.y + 8 / editor.view.zoom);
+      ctx.lineTo(x, barrier.y + barrier.height - 8 / editor.view.zoom);
+      ctx.stroke();
+    }
+    ctx.fillStyle = selected ? COLORS.accent : COLORS.escapeBarrier;
+    ctx.font = `${12 / editor.view.zoom}px Segoe UI`;
+    ctx.fillText(barrier.trigger === "lockdown" ? "Lockdown" : "Escape", barrier.x + 6 / editor.view.zoom, barrier.y - 6 / editor.view.zoom);
+    ctx.restore();
+  });
+}
+
+function drawCameraZones(ctx, editor) {
+  (editor.data.cameraZones || []).forEach((zone, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "cameraZone", index });
+    const focusX = zone.x + zone.width * clamp(Number(zone.focusX ?? 0.5), 0.24, 0.76);
+    const focusY = zone.y + zone.height * clamp(Number(zone.focusY ?? 0.5), 0.28, 0.72);
+    ctx.save();
+    ctx.fillStyle = COLORS.cameraZoneFill;
+    ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.cameraZone;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.setLineDash([12 / editor.view.zoom, 8 / editor.view.zoom]);
+    ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "rgba(231, 244, 126, 0.68)";
+    ctx.lineWidth = 1.4 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(focusX - 16 / editor.view.zoom, focusY);
+    ctx.lineTo(focusX + 16 / editor.view.zoom, focusY);
+    ctx.moveTo(focusX, focusY - 16 / editor.view.zoom);
+    ctx.lineTo(focusX, focusY + 16 / editor.view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = selected ? COLORS.accent : COLORS.cameraZone;
+    ctx.font = `${12 / editor.view.zoom}px Segoe UI`;
+    ctx.fillText(`${zone.label || zone.id || "Camera"} fit x${Number(zone.zoom ?? 1).toFixed(2)}`, zone.x + 6 / editor.view.zoom, zone.y - 6 / editor.view.zoom);
+    ctx.restore();
   });
 }
 
@@ -5446,7 +6379,7 @@ function drawZipLines(ctx, editor) {
 
 function drawProps(ctx, editor) {
   editor.data.props.forEach((prop, index) => {
-    if (prop.kind === "backgroundTile") {
+    if (isRectPropTileKind(prop.kind)) {
       return;
     }
     const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
@@ -5463,37 +6396,108 @@ function drawProps(ctx, editor) {
       ctx.textAlign = "center";
       ctx.fillText(prop.text || "표지", prop.x, prop.y - 32);
       ctx.textAlign = "left";
-    } else {
-      const gradient = ctx.createRadialGradient(prop.x, prop.y - 4, 2, prop.x, prop.y - 4, 24);
+    } else if (prop.kind === "lantern") {
+      const radius = getLanternLightRadius(prop);
+      const end = getLanternEnd(prop);
+      const samples = getLanternLightSamples(prop);
+      samples.forEach((sample) => {
+        const light = ctx.createRadialGradient(
+          sample.x,
+          sample.y,
+          Math.max(8, radius * 0.12),
+          sample.x,
+          sample.y,
+          radius,
+        );
+        light.addColorStop(0, "rgba(231, 244, 126, 0.14)");
+        light.addColorStop(0.48, "rgba(147, 234, 255, 0.052)");
+        light.addColorStop(1, "rgba(231, 244, 126, 0)");
+        ctx.fillStyle = light;
+        ctx.beginPath();
+        ctx.arc(sample.x, sample.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.strokeStyle = selected ? COLORS.accent : "rgba(231, 244, 126, 0.34)";
+      ctx.lineWidth = (selected ? 2.5 : 1.25) / editor.view.zoom;
+      ctx.setLineDash(selected ? [] : [12 / editor.view.zoom, 8 / editor.view.zoom]);
+      samples.forEach((sample) => {
+        ctx.beginPath();
+        ctx.arc(sample.x, sample.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+
+      if (isLinearLantern(prop)) {
+        ctx.strokeStyle = selected ? COLORS.accent : COLORS.lantern;
+        ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+        ctx.beginPath();
+        ctx.moveTo(prop.x, prop.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+
+      const gradient = ctx.createRadialGradient(prop.x, prop.y, 2, prop.x, prop.y, 24);
       gradient.addColorStop(0, "rgba(231, 244, 126, 0.92)");
       gradient.addColorStop(1, "rgba(231, 244, 126, 0)");
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(prop.x, prop.y - 4, 24, 0, Math.PI * 2);
+      ctx.arc(prop.x, prop.y, 24, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = COLORS.lantern;
       ctx.beginPath();
-      ctx.arc(prop.x, prop.y - 4, 10, 0, Math.PI * 2);
+      ctx.arc(prop.x, prop.y, 7 / editor.view.zoom + 4, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 255, 255, 0.16)";
       ctx.lineWidth = 2 / editor.view.zoom;
       ctx.beginPath();
-      ctx.arc(prop.x, prop.y - 4, 14, 0, Math.PI * 2);
+      ctx.arc(prop.x, prop.y, 14 / editor.view.zoom + 2, 0, Math.PI * 2);
       ctx.stroke();
+
+      if (isLinearLantern(prop)) {
+        const endGradient = ctx.createRadialGradient(end.x, end.y, 2, end.x, end.y, 20);
+        endGradient.addColorStop(0, "rgba(231, 244, 126, 0.72)");
+        endGradient.addColorStop(1, "rgba(231, 244, 126, 0)");
+        ctx.fillStyle = endGradient;
+        ctx.beginPath();
+        ctx.arc(end.x, end.y, 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = COLORS.lantern;
+        ctx.beginPath();
+        ctx.arc(end.x, end.y, 5 / editor.view.zoom + 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   });
 }
 
 function drawBackgroundTiles(ctx, editor) {
   editor.data.props.forEach((prop, index) => {
-    if (prop.kind !== "backgroundTile") {
+    if (!isBackgroundTileKind(prop.kind)) {
       return;
     }
     const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
     const rect = getPropRect(prop);
-    ctx.fillStyle = prop.color || "#4f6f7d";
+    ctx.fillStyle = getRectPropTileColor(prop);
+    ctx.globalAlpha = 1;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.backgroundTileStroke;
+    ctx.lineWidth = (selected ? 3 : 1.5) / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  });
+}
+
+function drawShadowTiles(ctx, editor) {
+  editor.data.props.forEach((prop, index) => {
+    if (!isShadowTileKind(prop.kind)) {
+      return;
+    }
+    const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
+    const rect = getPropRect(prop);
+    ctx.fillStyle = getRectPropTileColor(prop);
     ctx.globalAlpha = 0.72;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.globalAlpha = 1;
@@ -5628,6 +6632,70 @@ function drawLootCrates(ctx, editor) {
     ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
     ctx.textAlign = "center";
     ctx.fillText(crate.label || crate.id || "Crate", crate.x + crate.width / 2, crate.y - 10 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+}
+
+function drawVaultObjects(ctx, editor) {
+  (editor.data.vaultDoors || []).forEach((door, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "vaultDoor", index });
+    ctx.fillStyle = COLORS.vaultDoorFill;
+    ctx.fillRect(door.x, door.y, door.width, door.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.vaultDoor;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(door.x, door.y, door.width, door.height);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+    ctx.lineWidth = 1.5 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(door.x + 10 / editor.view.zoom, door.y + 18 / editor.view.zoom);
+    ctx.lineTo(door.x + door.width - 10 / editor.view.zoom, door.y + 18 / editor.view.zoom);
+    ctx.moveTo(door.x + door.width * 0.5, door.y + 8 / editor.view.zoom);
+    ctx.lineTo(door.x + door.width * 0.5, door.y + door.height - 8 / editor.view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.vaultDoor;
+    ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(door.label || door.id || "Vault", door.x + door.width / 2, door.y - 10 / editor.view.zoom);
+    ctx.fillText(`${Math.round(door.duration ?? 60)}s`, door.x + door.width / 2, door.y + door.height + 20 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+
+  (editor.data.vaultLoot || []).forEach((loot, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "vaultLoot", index });
+    ctx.fillStyle = COLORS.vaultLootFill;
+    ctx.fillRect(loot.x, loot.y, loot.width, loot.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.vaultLoot;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(loot.x, loot.y, loot.width, loot.height);
+    ctx.fillStyle = COLORS.vaultLoot;
+    ctx.fillRect(loot.x + 8 / editor.view.zoom, loot.y + 8 / editor.view.zoom, Math.max(4, loot.width - 16 / editor.view.zoom), 5 / editor.view.zoom);
+    ctx.font = `${14 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(loot.label || loot.id || "Loot", loot.x + loot.width / 2, loot.y - 10 / editor.view.zoom);
+    ctx.fillText(`${Math.round(loot.value ?? 25)}`, loot.x + loot.width / 2, loot.y + loot.height + 18 / editor.view.zoom);
+    ctx.textAlign = "left";
+  });
+
+  (editor.data.escapeExits || []).forEach((exit, index) => {
+    const selected = isSelectionItemSelected(editor.selected, { kind: "escapeExit", index });
+    ctx.fillStyle = COLORS.escapeExitFill;
+    ctx.fillRect(exit.x, exit.y, exit.width, exit.height);
+    ctx.strokeStyle = selected ? COLORS.accent : COLORS.escapeExit;
+    ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+    ctx.strokeRect(exit.x, exit.y, exit.width, exit.height);
+    ctx.strokeStyle = "rgba(255, 190, 102, 0.42)";
+    ctx.lineWidth = 1.5 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(exit.x + exit.width * 0.25, exit.y + exit.height * 0.5);
+    ctx.lineTo(exit.x + exit.width * 0.75, exit.y + exit.height * 0.5);
+    ctx.lineTo(exit.x + exit.width * 0.58, exit.y + exit.height * 0.38);
+    ctx.moveTo(exit.x + exit.width * 0.75, exit.y + exit.height * 0.5);
+    ctx.lineTo(exit.x + exit.width * 0.58, exit.y + exit.height * 0.62);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.escapeExit;
+    ctx.font = `${15 / editor.view.zoom}px Segoe UI`;
+    ctx.textAlign = "center";
+    ctx.fillText(exit.label || exit.id || "Escape", exit.x + exit.width / 2, exit.y - 10 / editor.view.zoom);
     ctx.textAlign = "left";
   });
 }
@@ -5812,9 +6880,16 @@ function drawPreview(ctx, editor) {
         stroke: COLORS.accentAlt,
       });
     } else if (rect) {
-      ctx.fillStyle = "rgba(147, 234, 255, 0.16)";
+      const isDamagePreview = rect.kind === "damage" || rect.kind === "recallDamage";
+      ctx.fillStyle = isDamagePreview
+        ? "rgba(255, 126, 102, 0.2)"
+        : "rgba(147, 234, 255, 0.16)";
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-      ctx.strokeStyle = COLORS.accentAlt;
+      ctx.strokeStyle = rect.kind === "recallDamage"
+        ? "rgba(94, 190, 255, 0.92)"
+        : rect.kind === "damage"
+          ? "rgba(255, 190, 102, 0.85)"
+          : COLORS.accentAlt;
       ctx.lineWidth = 2 / editor.view.zoom;
       ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
     }
@@ -5843,6 +6918,30 @@ function drawPreview(ctx, editor) {
     ctx.strokeRect(rect.x, rect.y, width, height);
   }
 
+  if (editor.preview?.kind === "escapeBarrier") {
+    const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+    const width = Math.max(12, rect.width || 96);
+    const height = Math.max(12, rect.height || 128);
+    ctx.fillStyle = COLORS.escapeBarrierFill;
+    ctx.fillRect(rect.x, rect.y, width, height);
+    ctx.strokeStyle = COLORS.escapeBarrier;
+    ctx.lineWidth = 2 / editor.view.zoom;
+    ctx.strokeRect(rect.x, rect.y, width, height);
+  }
+
+  if (editor.preview?.kind === "cameraZone") {
+    const rect = getRectFromPoints(editor.preview.start, editor.preview.end);
+    const width = Math.max(96, rect.width || 320);
+    const height = Math.max(96, rect.height || 220);
+    ctx.fillStyle = COLORS.cameraZoneFill;
+    ctx.fillRect(rect.x, rect.y, width, height);
+    ctx.strokeStyle = COLORS.cameraZone;
+    ctx.lineWidth = 2 / editor.view.zoom;
+    ctx.setLineDash([12 / editor.view.zoom, 8 / editor.view.zoom]);
+    ctx.strokeRect(rect.x, rect.y, width, height);
+    ctx.setLineDash([]);
+  }
+
   if (editor.preview?.kind === "zipLine") {
     ctx.strokeStyle = COLORS.accent;
     ctx.lineWidth = 3 / editor.view.zoom;
@@ -5857,15 +6956,51 @@ function drawPreview(ctx, editor) {
     ctx.fill();
   }
 
-  if (editor.preview?.kind === "backgroundTile") {
+  if (isRectPropTileKind(editor.preview?.kind)) {
     const rect = getPreviewBackgroundTileRect(editor);
     if (rect) {
-      ctx.fillStyle = "rgba(79, 111, 125, 0.42)";
+      ctx.fillStyle = isShadowTileKind(editor.preview.kind)
+        ? SHADOW_TILE_PREVIEW
+        : BACKGROUND_TILE_PREVIEW;
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
       ctx.strokeStyle = COLORS.accentAlt;
       ctx.lineWidth = 2 / editor.view.zoom;
       ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
     }
+  }
+
+  if (editor.preview?.kind === "lantern") {
+    const previewProp = {
+      kind: "lantern",
+      x: editor.preview.start.x,
+      y: editor.preview.start.y,
+      endX: editor.preview.end.x,
+      endY: editor.preview.end.y,
+      lightRadius: 260,
+    };
+    const radius = getLanternLightRadius(previewProp);
+    const samples = getLanternLightSamples(previewProp);
+    samples.forEach((sample) => {
+      const light = ctx.createRadialGradient(sample.x, sample.y, 8, sample.x, sample.y, radius);
+      light.addColorStop(0, "rgba(231, 244, 126, 0.16)");
+      light.addColorStop(0.56, "rgba(147, 234, 255, 0.055)");
+      light.addColorStop(1, "rgba(231, 244, 126, 0)");
+      ctx.fillStyle = light;
+      ctx.beginPath();
+      ctx.arc(sample.x, sample.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.strokeStyle = COLORS.lantern;
+    ctx.lineWidth = 2.5 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(editor.preview.start.x, editor.preview.start.y);
+    ctx.lineTo(editor.preview.end.x, editor.preview.end.y);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.accentAlt;
+    ctx.beginPath();
+    ctx.arc(editor.preview.start.x, editor.preview.start.y, 8 / editor.view.zoom + 3, 0, Math.PI * 2);
+    ctx.arc(editor.preview.end.x, editor.preview.end.y, 8 / editor.view.zoom + 3, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   if (editor.preview?.kind === "marquee") {
@@ -6005,13 +7140,17 @@ function renderEditor(editor, dom) {
   drawGrid(ctx, editor);
   drawWorldBounds(ctx, editor);
   drawCameraGuide(ctx, editor);
+  drawBackgroundTiles(ctx, editor);
   drawPlatforms(ctx, editor);
   drawBraceWalls(ctx, editor);
   drawTemporaryBlocks(ctx, editor);
-  drawBackgroundTiles(ctx, editor);
+  drawEscapeBarriers(ctx, editor);
+  drawCameraZones(ctx, editor);
+  drawShadowTiles(ctx, editor);
   drawZipLines(ctx, editor);
   drawProps(ctx, editor);
   drawLootCrates(ctx, editor);
+  drawVaultObjects(ctx, editor);
   drawHumanoidEnemies(ctx, editor);
   drawHostileDrones(ctx, editor);
   drawRouteExits(ctx, editor);

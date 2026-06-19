@@ -1,0 +1,2523 @@
+{
+  "version": 2,
+  "levelId": "new-level",
+  "label": "Combat Level",
+  "world": {
+    "mode": "movementLab",
+    "width": 9000,
+    "height": 4270,
+    "gravity": 2350,
+    "groundY": 3900,
+    "duskAt": 9999,
+    "nightAt": 19999,
+    "sanityDrain": {
+      "day": 0,
+      "dusk": 0,
+      "night": 0
+    },
+    "startMessage": "이동 실험실 진입.",
+    "startClueLog": [
+      "플랫폼 간격과 벽 높이를 먼저 본다.",
+      "스프라이트 비율은 에디터에서 바로 조정할 수 있다.",
+      "출구까지 도달하면 결과 화면으로 넘어간다."
+    ],
+    "labObjectives": [
+      "달리기 감각 확인",
+      "점프와 버퍼 확인",
+      "벽 슬라이드 확인",
+      "대시 거리 확인",
+      "출구까지 도달"
+    ],
+    "camera": {
+      "zoom": 1,
+      "minZoom": 0.15,
+      "neutralFocusX": 0.5,
+      "neutralFocusY": 0.6,
+      "walkLookAhead": 0.15,
+      "sprintLookAhead": 0.34,
+      "sprintJumpLookAhead": 0.34,
+      "dashLookAhead": 0,
+      "wallRunLookAhead": 0.33,
+      "wallRunUpLookAhead": 0.22,
+      "braceLookAhead": 0.25,
+      "fallLookAhead": 0.3,
+      "directionSpeedThreshold": 300,
+      "sprintCameraMinSpeed": 430,
+      "speedZoomStart": 600,
+      "speedZoomFull": 980,
+      "speedZoomMin": 0.15,
+      "upwardFocusOffset": -0.35,
+      "fallingFocusOffset": 0.35,
+      "sprintZoom": 0.6,
+      "sprintJumpZoom": 0.6,
+      "dashZoom": 0.95,
+      "wallRunZoom": 0.35,
+      "braceZoom": 0.36,
+      "directionLerp": 2.5,
+      "focusLerp": 4,
+      "zoomLerp": 1.5,
+      "aimPanMaxX": 0.36,
+      "aimPanMaxY": 0.27,
+      "aimPanLerp": 8.25,
+      "aimPanReturnLerp": 7.5,
+      "lookAheadEnabled": true,
+      "dashAffectsCamera": false,
+      "braceAffectsCamera": false,
+      "mousePanAlways": true
+    }
+  },
+  "player": {
+    "spawn": {
+      "x": 864,
+      "y": 2752
+    },
+    "speed": 360,
+    "jumpVelocity": -900,
+    "maxHp": 100,
+    "maxSanity": 100,
+    "maxBattery": 100,
+    "startingSanity": 100,
+    "attackDamage": 34,
+    "attackCooldown": 0.42,
+    "lightDrainPerSecond": 10,
+    "movement": {
+      "runSpeed": 440,
+      "sprintSpeed": 1180,
+      "sprintBuildMs": 520,
+      "sprintDecayMs": 220,
+      "sprintJumpCarryMs": 990,
+      "sprintJumpMinSpeed": 1020,
+      "slideMinSpeed": 570,
+      "slideDurationMs": 720,
+      "slideFriction": 110,
+      "slideSpeedMultiplier": 1.21,
+      "slideInvulnerable": true,
+      "slideJumpCarryMs": 650,
+      "slideJumpBoostMinSpeed": 1080,
+      "slideJumpMinSpeed": 1190,
+      "slideJumpSpeedMultiplier": 0.88,
+      "slideJumpVerticalMultiplier": 1.2,
+      "slideSlopeAccel": 900,
+      "slideSlopeMaxSpeed": 2100,
+      "slideDownhillFriction": 8,
+      "slideDownhillTimerDrainMultiplier": 0.28,
+      "slideUphillFriction": 2450,
+      "slideUphillTimerDrainMultiplier": 3.8,
+      "slideUphillStartMinSpeed": 1040,
+      "slideUphillStartSpeedMultiplier": 0.52,
+      "slideUphillStartTimerMultiplier": 0.28,
+      "slideUphillStopSpeed": 540,
+      "slopeSnapDistance": 34,
+      "hoverFallSpeed": 150,
+      "hoverGravityMultiplier": 0.16,
+      "hoverStartMaxFallSpeed": 220,
+      "hoverStartMinVy": -60,
+      "hoverAirControlMultiplier": 0.9,
+      "groundAccel": 3400,
+      "groundDecel": 4200,
+      "stopInertiaInitialDecelMultiplier": 0.26,
+      "stopInertiaMaxDecelMultiplier": 1.28,
+      "stopInertiaRampSeconds": 0.52,
+      "airControlMultiplier": 0.75,
+      "jumpVelocity": -930,
+      "coyoteTimeMs": 100,
+      "jumpBufferMs": 120,
+      "jumpCutMultiplier": 0.45,
+      "apexGravityMultiplier": 0.58,
+      "apexGravityThreshold": 180,
+      "jumpCornerCorrectionPx": 12,
+      "dashDurationMs": 120,
+      "dashWindupMs": 55,
+      "dashDistance": 162,
+      "maxDashCount": 2,
+      "dashCooldownMs": 450,
+      "dashCornerCorrectionPx": 12,
+      "dashCarryWindowMs": 150,
+      "dashCarrySpeedMultiplier": 0.68,
+      "dashJumpMinSpeed": 520,
+      "dashInvulnerable": true,
+      "crouchHeight": 48,
+      "crouchSpeedMultiplier": 0.45,
+      "wallSlideFallMultiplier": 0.4,
+      "wallCoyoteTimeMs": 110,
+      "wallSlideGraceMs": 80,
+      "wallSpeedRetentionMs": 90,
+      "wallSpeedRetentionMinSpeed": 180,
+      "wallRunStartSpeed": 260,
+      "wallRunAccel": 1680,
+      "wallRunMaxSpeed": 920,
+      "wallRunExitMinBoost": 720,
+      "wallRunExitHorizontal": 180,
+      "wallJumpHorizontal": 506,
+      "wallJumpVertical": 840,
+      "wallJumpLockMs": 100,
+      "braceDetectPaddingX": 24,
+      "braceDetectPaddingY": 24,
+      "braceHoldStartSpeed": 24,
+      "braceHoldAccel": 840,
+      "braceHoldFallSpeed": 114,
+      "braceHoldMoveMultiplier": 0.81,
+      "braceBoostHorizontal": 560,
+      "braceBoostVertical": 940,
+      "braceReuseMs": 180,
+      "recoilShotCharges": 1,
+      "recoilShotHumanoidDamage": 50,
+      "recoilShotForce": 1550,
+      "recoilShotMaxHorizontalSpeed": 3000,
+      "recoilShotMaxUpSpeed": 2000,
+      "recoilShotMaxFallSpeed": 760,
+      "recoilShotCooldownMs": 180,
+      "recoilShotFocusTimeScale": 0.05,
+      "recoilShotAimLookAhead": 0.1,
+      "recoilShotAimUpLookAhead": 0.14,
+      "recoilShotRecoilLookAhead": 0.18,
+      "recoilShotRecoilUpLookAhead": 0.2,
+      "recoilShotCameraHoldMs": 240,
+      "recoilAirShotPoseMs": 160,
+      "recoilSpinDurationMs": 220,
+      "recoilSpinLoopCount": 2,
+      "recoilAimVerticalPoseThreshold": 0.45
+    },
+    "render": {
+      "widthRatio": 1,
+      "heightRatio": 1.52,
+      "idleWidthRatio": 1,
+      "idleHeightRatio": 1.1,
+      "runWidthRatio": 1,
+      "runHeightRatio": 1.025,
+      "sprintWidthRatio": 1,
+      "sprintHeightRatio": 1.013,
+      "zipLineAssetKey": "playerZipline",
+      "zipLineWidthRatio": 0.95,
+      "zipLineHeightRatio": 1.02,
+      "zipLineFootAnchorY": 0.55,
+      "jumpWidthRatio": 1,
+      "jumpHeightRatio": 1.15,
+      "fallWidthRatio": 1,
+      "fallHeightRatio": 1.52,
+      "dashWidthRatio": 0.898,
+      "dashHeightRatio": 0.89,
+      "crouchWidthRatio": 1,
+      "crouchHeightRatio": 1.542,
+      "slideShotWidthRatio": 1.12,
+      "slideShotHeightRatio": 1.32,
+      "wallJumpWidthRatio": 1,
+      "wallJumpHeightRatio": 1.56,
+      "wallSlideWidthRatio": 1,
+      "wallSlideHeightRatio": 1.5,
+      "wallRunWidthRatio": 1,
+      "wallRunHeightRatio": 1.56,
+      "braceHoldWidthRatio": 1,
+      "braceHoldHeightRatio": 1.5,
+      "braceReleaseWidthRatio": 1,
+      "braceReleaseHeightRatio": 1.56,
+      "idleAnchorX": 0.58,
+      "runAnchorX": 0.651,
+      "sprintAnchorX": 0.53,
+      "zipLineAnchorX": 0.42,
+      "jumpAnchorX": 0.63,
+      "fallAnchorX": 0.46,
+      "dashAnchorX": 0.51,
+      "crouchAnchorX": 0.52,
+      "slideShotAnchorX": 0.34,
+      "wallJumpAnchorX": 0.34,
+      "wallSlideAnchorX": 0.38,
+      "wallRunAnchorX": 0.34,
+      "braceHoldAnchorX": 0.38,
+      "braceReleaseAnchorX": 0.34,
+      "footAnchorY": 0.978
+    }
+  },
+  "ui": {
+    "layout": {
+      "toast": {
+        "x": 52,
+        "y": 42,
+        "width": 176
+      },
+      "minimap": {
+        "x": 1148,
+        "y": 122,
+        "radius": 48
+      },
+      "objective": {
+        "x": 1062,
+        "y": 256,
+        "gap": 34
+      },
+      "status": {
+        "x": 932,
+        "y": 608,
+        "width": 156,
+        "gap": 20
+      },
+      "portrait": {
+        "x": 1168,
+        "y": 624,
+        "radius": 30
+      },
+      "actions": {
+        "moveX": 46,
+        "moveY": 648,
+        "dashX": 168,
+        "dashY": 649,
+        "jumpX": 44,
+        "jumpY": 699,
+        "crouchX": 126,
+        "crouchY": 706,
+        "useX": 210,
+        "useY": 690
+      },
+      "results": {
+        "cardX": 150,
+        "cardY": 104,
+        "cardW": 980,
+        "cardH": 512,
+        "artX": 560,
+        "artY": 144,
+        "artW": 514,
+        "artH": 244
+      }
+    }
+  },
+  "faceOff": {
+    "enemyLineCharDelay": 0.045,
+    "enemyLineHoldDuration": 0.85,
+    "choiceSlideDuration": 0.32,
+    "targetAimScale": 1.62,
+    "targetAimTop": 128,
+    "targetAimPivotY": 362,
+    "targetAimPanMax": 330,
+    "targetAimAssistY": 386,
+    "targetArtAimHeight": 1160,
+    "targetArtAimY": 18,
+    "targetArtPanMultiplier": 0.82
+  },
+  "map": {
+    "rooms": [
+      {
+        "id": "main",
+        "label": "New Level",
+        "x": 0,
+        "y": 0,
+        "width": 180,
+        "height": 82
+      }
+    ]
+  },
+  "entrances": [
+    {
+      "id": "start",
+      "label": "Start",
+      "x": 864,
+      "y": 2752,
+      "facing": 1
+    },
+    {
+      "id": "return-entrance-01",
+      "label": "Return Entrance 01",
+      "x": 8208,
+      "y": 2368,
+      "facing": 1
+    }
+  ],
+  "routeExits": [
+    {
+      "id": "route-exit-1780154776838",
+      "kind": "route",
+      "type": "route",
+      "label": "Route Exit",
+      "x": 8176,
+      "y": 2272,
+      "width": 96,
+      "height": 192,
+      "prompt": "E: 다음 구역",
+      "toLevelId": "city-level-01",
+      "toEntranceId": "start",
+      "returnEntranceId": "return-entrance-01"
+    },
+    {
+      "id": "route-exit-1780222548504",
+      "kind": "route",
+      "type": "route",
+      "label": "Route Exit",
+      "x": 832,
+      "y": 2640,
+      "width": 96,
+      "height": 192,
+      "prompt": "E: 다음 구역",
+      "toLevelId": "new-level-2",
+      "toEntranceId": "return-entrance-01",
+      "returnEntranceId": "return-entrance-02"
+    }
+  ],
+  "extractionGate": null,
+  "platforms": [
+    {
+      "x": 32,
+      "y": 3904,
+      "width": 8992,
+      "height": 384,
+      "color": "#54697b"
+    },
+    {
+      "x": 864,
+      "y": 2848,
+      "width": 576,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1184,
+      "y": 2880,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 1184,
+      "y": 2784,
+      "width": 32,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 1184,
+      "y": 2560,
+      "width": 32,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 1088,
+      "y": 2784,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 1184,
+      "y": 2528,
+      "width": 384,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1184,
+      "y": 2496,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1216,
+      "y": 2464,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1824,
+      "y": 2496,
+      "width": 32,
+      "height": 384,
+      "color": "#54697b"
+    },
+    {
+      "x": 1568,
+      "y": 2848,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1632,
+      "y": 2816,
+      "width": 192,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1024,
+      "y": 3168,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1216,
+      "y": 3072,
+      "width": 112,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 1824,
+      "y": 2880,
+      "width": 32,
+      "height": 320,
+      "color": "#54697b"
+    },
+    {
+      "x": 1792,
+      "y": 3040,
+      "width": 32,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 1376,
+      "y": 3200,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 2048,
+      "y": 3456,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 1216,
+      "y": 2976,
+      "width": 112,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 1408,
+      "y": 3456,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1328,
+      "y": 3104,
+      "width": 176,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2592,
+      "y": 2848,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2336,
+      "y": 2848,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2048,
+      "y": 3200,
+      "width": 32,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 2304,
+      "y": 2848,
+      "width": 32,
+      "height": 608,
+      "color": "#54697b"
+    },
+    {
+      "x": 2208,
+      "y": 3200,
+      "width": 96,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2240,
+      "y": 3360,
+      "width": 64,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 1408,
+      "y": 3392,
+      "width": 288,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 1408,
+      "y": 3296,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 1856,
+      "y": 2848,
+      "width": 160,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 2208,
+      "y": 2848,
+      "width": 96,
+      "height": 352,
+      "color": "#54697b"
+    },
+    {
+      "x": 3232,
+      "y": 3040,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3232,
+      "y": 2560,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 608,
+      "y": 2848,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 608,
+      "y": 2560,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 608,
+      "y": 2528,
+      "width": 576,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2816,
+      "y": 3392,
+      "width": 448,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2944,
+      "y": 3328,
+      "width": 192,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2848,
+      "y": 2560,
+      "width": 224,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 3072,
+      "y": 2560,
+      "width": 160,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 2816,
+      "y": 3104,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 2688,
+      "y": 2880,
+      "width": 32,
+      "height": 224,
+      "color": "#54697b"
+    },
+    {
+      "x": 3232,
+      "y": 3072,
+      "width": 32,
+      "height": 320,
+      "color": "#54697b"
+    },
+    {
+      "x": 1856,
+      "y": 2496,
+      "width": 1024,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2848,
+      "y": 2528,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 2784,
+      "y": 2656,
+      "width": 64,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2208,
+      "y": 2784,
+      "width": 32,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 2688,
+      "y": 3104,
+      "width": 128,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3840,
+      "y": 2880,
+      "width": 32,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 3872,
+      "y": 2880,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4096,
+      "y": 2624,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 4096,
+      "y": 2048,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 4096,
+      "y": 2336,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 3488,
+      "y": 3040,
+      "width": 384,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3840,
+      "y": 2016,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 2880,
+      "y": 2496,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 3328,
+      "y": 2400,
+      "width": 160,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 3296,
+      "y": 1888,
+      "width": 32,
+      "height": 672,
+      "color": "#54697b"
+    },
+    {
+      "x": 4096,
+      "y": 2016,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3328,
+      "y": 1888,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4352,
+      "y": 1728,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 4736,
+      "y": 2016,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 5376,
+      "y": 1728,
+      "width": 160,
+      "height": 320,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 5696,
+      "y": 1728,
+      "width": 480,
+      "height": 320,
+      "color": "#54697b"
+    },
+    {
+      "x": 5536,
+      "y": 1728,
+      "width": 160,
+      "height": 320,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 3488,
+      "y": 2880,
+      "width": 352,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 5536,
+      "y": 2048,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3840,
+      "y": 2048,
+      "width": 32,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 5376,
+      "y": 1440,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6304,
+      "y": 1792,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 6592,
+      "y": 2048,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 5632,
+      "y": 1440,
+      "width": 704,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 6048,
+      "y": 1600,
+      "width": 288,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 6336,
+      "y": 2048,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 5984,
+      "y": 2336,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6464,
+      "y": 2272,
+      "width": 128,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 5984,
+      "y": 2272,
+      "width": 128,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 6112,
+      "y": 2272,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 6368,
+      "y": 2272,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 5792,
+      "y": 2272,
+      "width": 192,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5600,
+      "y": 2368,
+      "width": 192,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 5792,
+      "y": 2368,
+      "width": 96,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 5632,
+      "y": 3136,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 5152,
+      "y": 2592,
+      "width": 448,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 4384,
+      "y": 3136,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4352,
+      "y": 2880,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 6080,
+      "y": 2240,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6464,
+      "y": 2240,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3296,
+      "y": 1216,
+      "width": 32,
+      "height": 672,
+      "color": "#54697b"
+    },
+    {
+      "x": 5376,
+      "y": 1184,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 3296,
+      "y": 1184,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 3552,
+      "y": 1184,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4192,
+      "y": 1184,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4768,
+      "y": 1184,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4992,
+      "y": 3136,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 5600,
+      "y": 3136,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 4992,
+      "y": 3392,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 5120,
+      "y": 3360,
+      "width": 384,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4384,
+      "y": 3008,
+      "width": 160,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 4544,
+      "y": 3072,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 4384,
+      "y": 2944,
+      "width": 64,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 5504,
+      "y": 2496,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5536,
+      "y": 2400,
+      "width": 64,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5376,
+      "y": 2560,
+      "width": 128,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 5024,
+      "y": 3296,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 4160,
+      "y": 2912,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 5600,
+      "y": 2656,
+      "width": 192,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 5696,
+      "y": 2944,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 5792,
+      "y": 2912,
+      "width": 352,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 5888,
+      "y": 3136,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6144,
+      "y": 3136,
+      "width": 288,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6432,
+      "y": 2976,
+      "width": 320,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 6720,
+      "y": 2720,
+      "width": 32,
+      "height": 256,
+      "color": "#54697b"
+    },
+    {
+      "x": 6432,
+      "y": 2688,
+      "width": 320,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6624,
+      "y": 2848,
+      "width": 96,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 5792,
+      "y": 2752,
+      "width": 96,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 5888,
+      "y": 2816,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 6144,
+      "y": 3040,
+      "width": 288,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 5984,
+      "y": 2848,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 6496,
+      "y": 2368,
+      "width": 128,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 6432,
+      "y": 2720,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 4128,
+      "y": 2880,
+      "width": 128,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 7200,
+      "y": 896,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7200,
+      "y": 864,
+      "width": 384,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7200,
+      "y": 928,
+      "width": 32,
+      "height": 1760,
+      "color": "#54697b"
+    },
+    {
+      "x": 6752,
+      "y": 2688,
+      "width": 480,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7136,
+      "y": 2304,
+      "width": 64,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 7136,
+      "y": 1840,
+      "width": 64,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 7136,
+      "y": 1408,
+      "width": 64,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 7168,
+      "y": 1504,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7168,
+      "y": 1936,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7168,
+      "y": 2400,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7136,
+      "y": 992,
+      "width": 64,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 7168,
+      "y": 1088,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7264,
+      "y": 576,
+      "width": 320,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7328,
+      "y": 608,
+      "width": 32,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 7296,
+      "y": 608,
+      "width": 32,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 7360,
+      "y": 608,
+      "width": 32,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 7488,
+      "y": 896,
+      "width": 128,
+      "height": 192,
+      "color": "#54697b"
+    },
+    {
+      "x": 7872,
+      "y": 576,
+      "width": 32,
+      "height": 288,
+      "color": "#54697b"
+    },
+    {
+      "x": 7584,
+      "y": 576,
+      "width": 288,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7488,
+      "y": 1152,
+      "width": 384,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7392,
+      "y": 1152,
+      "width": 96,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 7680,
+      "y": 1088,
+      "width": 192,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 7488,
+      "y": 1072,
+      "width": 128,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7776,
+      "y": 1472,
+      "width": 96,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7232,
+      "y": 1472,
+      "width": 384,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7232,
+      "y": 1888,
+      "width": 320,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7808,
+      "y": 1888,
+      "width": 64,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 7232,
+      "y": 2464,
+      "width": 640,
+      "height": 256,
+      "color": "#54697b"
+    },
+    {
+      "x": 4384,
+      "y": 1856,
+      "width": 160,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 4544,
+      "y": 1920,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 4800,
+      "y": 1920,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 5248,
+      "y": 1856,
+      "width": 128,
+      "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 5088,
+      "y": 1888,
+      "width": 160,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 7232,
+      "y": 2336,
+      "width": 96,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 7872,
+      "y": 576,
+      "width": 32,
+      "height": 1728,
+      "color": "#54697b"
+    },
+    {
+      "x": 7808,
+      "y": 2304,
+      "width": 96,
+      "height": 80,
+      "color": "#54697b"
+    },
+    {
+      "x": 7872,
+      "y": 2464,
+      "width": 448,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "down-right",
+      "x": 7328,
+      "y": 2400,
+      "width": 416,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 8320,
+      "y": 2240,
+      "width": 32,
+      "height": 256,
+      "color": "#54697b"
+    },
+    {
+      "x": 8096,
+      "y": 2208,
+      "width": 256,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 8096,
+      "y": 1984,
+      "width": 32,
+      "height": 224,
+      "color": "#54697b"
+    },
+    {
+      "x": 7904,
+      "y": 1952,
+      "width": 224,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6592,
+      "y": 576,
+      "width": 32,
+      "height": 1472,
+      "color": "#54697b"
+    },
+    {
+      "x": 6624,
+      "y": 576,
+      "width": 640,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 6624,
+      "y": 1280,
+      "width": 192,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 1312,
+      "y": 2816,
+      "width": 96,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 1408,
+      "y": 2816,
+      "width": 32,
+      "height": 32,
+      "color": "#54697b"
+    },
+    {
+      "x": 4896,
+      "y": 1952,
+      "width": 96,
+      "height": 64,
+      "color": "#54697b"
+    },
+    {
+      "x": 4256,
+      "y": 1920,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "kind": "slope",
+      "slopeDirection": "up-right",
+      "x": 4096,
+      "y": 1920,
+      "width": 160,
+      "height": 96,
+      "color": "#54697b"
+    },
+    {
+      "x": 6624,
+      "y": 1312,
+      "width": 96,
+      "height": 96,
+      "color": "#54697b"
+    }
+  ],
+  "temporaryBlocks": [
+    {
+      "id": "temporary-block-1779961721461",
+      "x": 1184,
+      "y": 2656,
+      "width": 32,
+      "height": 128,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1779978611354",
+      "x": 2048,
+      "y": 3328,
+      "width": 32,
+      "height": 128,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1780014759811",
+      "x": 1664,
+      "y": 3168,
+      "width": 128,
+      "height": 32,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1780019706155",
+      "x": 2784,
+      "y": 2720,
+      "width": 32,
+      "height": 128,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1780033223077",
+      "x": 5728,
+      "y": 3008,
+      "width": 32,
+      "height": 128,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1780034130814",
+      "x": 6528,
+      "y": 2560,
+      "width": 32,
+      "height": 128,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1780035780368",
+      "x": 7328,
+      "y": 704,
+      "width": 32,
+      "height": 160,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1780035967714",
+      "x": 7232,
+      "y": 1152,
+      "width": 160,
+      "height": 32,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    },
+    {
+      "id": "temporary-block-1780035967714-copy-mpqjjs91-1-0",
+      "x": 7616,
+      "y": 1472,
+      "width": 160,
+      "height": 32,
+      "color": "#5f7588",
+      "hideDuration": 1.6
+    }
+  ],
+  "props": [],
+  "braceWalls": [
+    {
+      "id": "brace-1780014871671",
+      "x": 2848,
+      "y": 2848,
+      "width": 384,
+      "height": 192
+    },
+    {
+      "id": "brace-1780019855683",
+      "x": 3344,
+      "y": 2656,
+      "width": 384,
+      "height": 192
+    },
+    {
+      "id": "brace-1780021045515",
+      "x": 4432,
+      "y": 1536,
+      "width": 384,
+      "height": 192
+    },
+    {
+      "id": "brace-1780026337439",
+      "x": 4992,
+      "y": 1536,
+      "width": 384,
+      "height": 192
+    },
+    {
+      "id": "brace-1780026449974",
+      "x": 3440,
+      "y": 2144,
+      "width": 384,
+      "height": 192
+    },
+    {
+      "id": "brace-1780034591894",
+      "x": 5024,
+      "y": 2944,
+      "width": 576,
+      "height": 192
+    },
+    {
+      "id": "brace-1780034842351",
+      "x": 6048,
+      "y": 2560,
+      "width": 352,
+      "height": 128
+    }
+  ],
+  "zipLineNodes": [
+    {
+      "id": "zipline-node-1780030811607",
+      "x": 5504,
+      "y": 2336,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780030814782",
+      "x": 4928,
+      "y": 2512,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780030906821",
+      "x": 4384,
+      "y": 2688,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780035504582",
+      "x": 6752,
+      "y": 2560,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780035507339",
+      "x": 6880,
+      "y": 1952,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780035512028",
+      "x": 7008,
+      "y": 1344,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780035522161",
+      "x": 7136,
+      "y": 736,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780035538042",
+      "x": 6688,
+      "y": 2560,
+      "connectRange": 640
+    },
+    {
+      "id": "zipline-node-1780035542270",
+      "x": 7232,
+      "y": 736,
+      "connectRange": 640
+    }
+  ],
+  "zipLines": [
+    {
+      "id": "zipline-1780030814783",
+      "startNodeId": "zipline-node-1780030811607",
+      "endNodeId": "zipline-node-1780030814782",
+      "start": {
+        "x": 5504,
+        "y": 2336
+      },
+      "end": {
+        "x": 4928,
+        "y": 2512
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1780030906821",
+      "startNodeId": "zipline-node-1780030814782",
+      "endNodeId": "zipline-node-1780030906821",
+      "start": {
+        "x": 4928,
+        "y": 2512
+      },
+      "end": {
+        "x": 4384,
+        "y": 2688
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1780035507339",
+      "startNodeId": "zipline-node-1780035504582",
+      "endNodeId": "zipline-node-1780035507339",
+      "start": {
+        "x": 6752,
+        "y": 2560
+      },
+      "end": {
+        "x": 6880,
+        "y": 1952
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1780035512028",
+      "startNodeId": "zipline-node-1780035507339",
+      "endNodeId": "zipline-node-1780035512028",
+      "start": {
+        "x": 6880,
+        "y": 1952
+      },
+      "end": {
+        "x": 7008,
+        "y": 1344
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1780035522161",
+      "startNodeId": "zipline-node-1780035512028",
+      "endNodeId": "zipline-node-1780035522161",
+      "start": {
+        "x": 7008,
+        "y": 1344
+      },
+      "end": {
+        "x": 7136,
+        "y": 736
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1780035538042",
+      "startNodeId": "zipline-node-1780035504582",
+      "endNodeId": "zipline-node-1780035538042",
+      "start": {
+        "x": 6752,
+        "y": 2560
+      },
+      "end": {
+        "x": 6688,
+        "y": 2560
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    },
+    {
+      "id": "zipline-1780035542270",
+      "startNodeId": "zipline-node-1780035522161",
+      "endNodeId": "zipline-node-1780035542270",
+      "start": {
+        "x": 7136,
+        "y": 736
+      },
+      "end": {
+        "x": 7232,
+        "y": 736
+      },
+      "speed": 1480,
+      "prompt": "E: Zipline"
+    }
+  ],
+  "humanoidEnemies": [
+    {
+      "id": "enemy-1779962218077",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 1520,
+      "y": 3280,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 1410,
+        "right": 1740
+      }
+    },
+    {
+      "id": "arc-enemy-1779977739082",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 1712,
+      "y": 2704,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 1602,
+        "right": 1932
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "arc-enemy-1779978581748",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 2176,
+      "y": 3344,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 2066,
+        "right": 2396
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "arc-enemy-1780015124131",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 3152,
+      "y": 3280,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 3042,
+        "right": 3372
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "enemy-1780016087083",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 2752,
+      "y": 2992,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 2642,
+        "right": 2972
+      }
+    },
+    {
+      "id": "enemy-1780020800738",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 4000,
+      "y": 2768,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 3890,
+        "right": 4220
+      }
+    },
+    {
+      "id": "enemy-1780025647871",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 3360,
+      "y": 2272,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 3250,
+        "right": 3580
+      }
+    },
+    {
+      "id": "arc-enemy-1780025957802",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 3488,
+      "y": 1760,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 3378,
+        "right": 3708
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "enemy-1780030229230",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 6512,
+      "y": 2160,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 6402,
+        "right": 6732
+      }
+    },
+    {
+      "id": "enemy-1780030384848",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 6016,
+      "y": 2160,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 5906,
+        "right": 6236
+      }
+    },
+    {
+      "id": "arc-enemy-1780031358254",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 4272,
+      "y": 2800,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 4162,
+        "right": 4492
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    },
+    {
+      "id": "enemy-1780032628344",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 5040,
+      "y": 3168,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 4930,
+        "right": 5260
+      }
+    },
+    {
+      "id": "enemy-1780032629329",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 5520,
+      "y": 3280,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 5410,
+        "right": 5740
+      }
+    },
+    {
+      "id": "enemy-1780033335514",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 6496,
+      "y": 2864,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 6386,
+        "right": 6716
+      }
+    },
+    {
+      "id": "enemy-1780033336926",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 5920,
+      "y": 2704,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 5810,
+        "right": 6140
+      }
+    },
+    {
+      "id": "enemy-1780035972954",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 7280,
+      "y": 1024,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 7170,
+        "right": 7500
+      }
+    },
+    {
+      "id": "enemy-1780036141414",
+      "type": "humanoidEnemy",
+      "label": "Enemy",
+      "x": 7264,
+      "y": 1344,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 12,
+      "fireRange": 760,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 12,
+      "projectileSpeed": 820,
+      "projectileRadius": 8,
+      "projectileLife": 2.1,
+      "projectileColor": "#ffbe66",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 7154,
+        "right": 7484
+      }
+    },
+    {
+      "id": "arc-enemy-1780036441807",
+      "type": "humanoidEnemy",
+      "label": "Arc gunman",
+      "x": 6704,
+      "y": 1136,
+      "width": 58,
+      "height": 104,
+      "maxHp": 120,
+      "damage": 14,
+      "fireRange": 840,
+      "triggerRate": 10,
+      "rangedProjectile": true,
+      "projectileDamage": 14,
+      "projectileSpeed": 620,
+      "projectileRadius": 10,
+      "projectileLife": 3.2,
+      "projectileColor": "#f6d36f",
+      "knockdownEnabled": true,
+      "patrol": {
+        "left": 6594,
+        "right": 6924
+      },
+      "attackPattern": "arc",
+      "projectileArc": true,
+      "fireCooldown": 2.1,
+      "projectileGravity": 1692,
+      "projectileFlightTime": 1.05
+    }
+  ],
+  "hostileDrones": [],
+  "lootTables": {
+    "streetCache": [
+      {
+        "id": "alloy-shards",
+        "name": "합금 파편",
+        "rarity": "common",
+        "type": "material",
+        "quantity": 12,
+        "value": 24,
+        "weight": 1.2,
+        "lootTime": 0.35
+      },
+      {
+        "id": "bio-gel",
+        "name": "생체 젤",
+        "rarity": "uncommon",
+        "type": "material",
+        "quantity": 8,
+        "value": 42,
+        "weight": 1.8,
+        "lootTime": 0.55
+      },
+      {
+        "id": "servo-core",
+        "name": "서보 코어",
+        "rarity": "rare",
+        "type": "component",
+        "quantity": 1,
+        "value": 110,
+        "weight": 2.6,
+        "lootTime": 0.95
+      }
+    ],
+    "deepCache": [
+      {
+        "id": "stabilizer-coil",
+        "name": "안정화 코일",
+        "rarity": "uncommon",
+        "type": "component",
+        "quantity": 2,
+        "value": 68,
+        "weight": 2.2,
+        "lootTime": 0.7
+      },
+      {
+        "id": "neural-prism",
+        "name": "신경 프리즘",
+        "rarity": "rare",
+        "type": "artifact",
+        "quantity": 1,
+        "value": 145,
+        "weight": 3.1,
+        "lootTime": 1.05
+      },
+      {
+        "id": "blackbox-seed",
+        "name": "블랙박스 시드",
+        "rarity": "epic",
+        "type": "artifact",
+        "quantity": 1,
+        "value": 260,
+        "weight": 4.4,
+        "lootTime": 1.55
+      }
+    ]
+  },
+  "lootCrates": [
+    {
+      "id": "loot-crate-1780054442344",
+      "x": 3008,
+      "y": 3264,
+      "width": 78,
+      "height": 50,
+      "label": "Supply cache",
+      "prompt": "E: Open cache",
+      "lootTable": "streetCache",
+      "searchTime": 0.75,
+      "items": [
+        {
+          "id": "loot-crate-1780054442344-item-1",
+          "name": "Field supplies",
+          "rarity": "common",
+          "type": "material",
+          "quantity": 1,
+          "value": 12,
+          "weight": 1,
+          "lootTime": 0.35,
+          "revealDelay": 0
+        }
+      ]
+    },
+    {
+      "id": "loot-crate-1780054449572",
+      "x": 5264,
+      "y": 3296,
+      "width": 78,
+      "height": 50,
+      "label": "Supply cache",
+      "prompt": "E: Open cache",
+      "lootTable": "streetCache",
+      "searchTime": 0.75,
+      "items": [
+        {
+          "id": "loot-crate-1780054449572-item-1",
+          "name": "Field supplies",
+          "rarity": "common",
+          "type": "material",
+          "quantity": 1,
+          "value": 12,
+          "weight": 1,
+          "lootTime": 0.35,
+          "revealDelay": 0
+        }
+      ]
+    },
+    {
+      "id": "loot-crate-1780054490377",
+      "x": 3952,
+      "y": 1952,
+      "width": 78,
+      "height": 50,
+      "label": "Supply cache",
+      "prompt": "E: Open cache",
+      "lootTable": "streetCache",
+      "searchTime": 0.75,
+      "items": [
+        {
+          "id": "loot-crate-1780054490377-item-1",
+          "name": "Field supplies",
+          "rarity": "common",
+          "type": "material",
+          "quantity": 1,
+          "value": 12,
+          "weight": 1,
+          "lootTime": 0.35,
+          "revealDelay": 0
+        }
+      ]
+    },
+    {
+      "id": "loot-crate-1780054602923",
+      "x": 7776,
+      "y": 1408,
+      "width": 78,
+      "height": 50,
+      "label": "Supply cache",
+      "prompt": "E: Open cache",
+      "lootTable": "streetCache",
+      "searchTime": 0.75,
+      "items": [
+        {
+          "id": "loot-crate-1780054602923-item-1",
+          "name": "Field supplies",
+          "rarity": "common",
+          "type": "material",
+          "quantity": 1,
+          "value": 12,
+          "weight": 1,
+          "lootTime": 0.35,
+          "revealDelay": 0
+        }
+      ]
+    }
+  ]
+}

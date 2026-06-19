@@ -157,6 +157,14 @@ function createShelterRestState() {
       capturedImage: null,
       flashTimer: 0,
     },
+    talk: {
+      requestId: 0,
+      pending: false,
+      topicIndex: 0,
+      line: "",
+      history: [],
+      error: "",
+    },
     recordsIndex: 0,
     backgroundIndex: 0,
   };
@@ -424,10 +432,92 @@ function createTemporaryBlockState(definition, index) {
     width: Math.max(12, Number(definition.width ?? 96)),
     height: Math.max(12, Number(definition.height ?? 96)),
     color: definition.color || "#5f7588",
+    maxHp: Math.max(1, Number(definition.maxHp ?? 1)),
+    hp: Math.max(1, Number(definition.hp ?? definition.maxHp ?? 1)),
     hideDuration: Math.max(0.1, Number(definition.hideDuration ?? 1.6)),
+    breakRule: definition.breakRule === "recoilJumpStage5" || definition.requiresRecoilJumpStage5 === true
+      ? "recoilJumpStage5"
+      : "normal",
     hiddenTimer: 0,
     hitFlash: 0,
     respawnFlash: 0,
+  };
+}
+
+function createVaultDoorState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `vault-door-${index + 1}`,
+    label: definition.label || `Vault ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(24, Number(definition.width ?? 96)),
+    height: Math.max(24, Number(definition.height ?? 144)),
+    prompt: definition.prompt || "Up: Hack vault",
+    duration: Math.max(1, Number(definition.duration ?? 60)),
+    hacked: false,
+  };
+}
+
+function createVaultLootState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `vault-loot-${index + 1}`,
+    label: definition.label || `Supply ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(16, Number(definition.width ?? 48)),
+    height: Math.max(16, Number(definition.height ?? 48)),
+    value: Math.max(0, Number(definition.value ?? 25)),
+    prompt: definition.prompt || "Up: Take supplies",
+    collected: false,
+  };
+}
+
+function createEscapeExitState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `escape-exit-${index + 1}`,
+    label: definition.label || `Escape ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(24, Number(definition.width ?? 96)),
+    height: Math.max(24, Number(definition.height ?? 192)),
+    prompt: definition.prompt || "Up: Escape",
+  };
+}
+
+function createEscapeBarrierState(definition, index) {
+  return {
+    ...deepClone(definition),
+    id: definition.id || `escape-barrier-${index + 1}`,
+    label: definition.label || `Barrier ${index + 1}`,
+    x: Number(definition.x ?? 0),
+    y: Number(definition.y ?? 0),
+    width: Math.max(12, Number(definition.width ?? 96)),
+    height: Math.max(12, Number(definition.height ?? 128)),
+    trigger: definition.trigger || "vaultEscape",
+    color: definition.color || "#ff7a66",
+  };
+}
+
+function createVaultEscapeState(data) {
+  const totalLoot = (data.vaultLoot || []).length;
+  const totalValue = (data.vaultLoot || []).reduce((sum, item) => sum + Math.max(0, Number(item.value ?? 25)), 0);
+  return {
+    active: false,
+    completed: false,
+    failed: false,
+    lockdownActive: false,
+    lockdownTimer: 0,
+    lockdownDuration: 1.6,
+    doorId: null,
+    duration: 0,
+    timeLeft: 0,
+    collected: 0,
+    totalLoot,
+    valueCollected: 0,
+    totalValue,
   };
 }
 
@@ -439,6 +529,11 @@ export function createLevelRuntimeState(data) {
     })),
     lootCrates: (data.lootCrates || []).map((crate, index) => createLootCrateState(crate, data, index)),
     temporaryBlocks: (data.temporaryBlocks || []).map((block, index) => createTemporaryBlockState(block, index)),
+    vaultDoors: (data.vaultDoors || []).map((door, index) => createVaultDoorState(door, index)),
+    vaultLoot: (data.vaultLoot || []).map((loot, index) => createVaultLootState(loot, index)),
+    escapeExits: (data.escapeExits || []).map((exit, index) => createEscapeExitState(exit, index)),
+    escapeBarriers: (data.escapeBarriers || []).map((barrier, index) => createEscapeBarrierState(barrier, index)),
+    vaultEscape: createVaultEscapeState(data),
     loot: {
       active: false,
       crateId: null,
@@ -503,6 +598,9 @@ export function createLevelRuntimeState(data) {
       triggerLimit: data.faceOff?.triggerLimit ?? 4.5,
       result: null,
       resultTimer: 0,
+      aiRequestId: 0,
+      aiPending: false,
+      spokenLine: "",
       message: "",
     },
     prompt: "",
@@ -804,6 +902,9 @@ export function computeArmWeaponStats(data, armState = {}) {
     recoil: Math.max(0, Number(weapon.recoil ?? 0) * recoilMultiplier),
     fireCooldown: Math.max(0.03, Number(weapon.fireCooldown ?? 0.2)),
     range: Math.max(32, Number(weapon.range ?? 520)),
+    closeRange: Math.max(0, Number(weapon.closeRange ?? 0)),
+    closeRangeAngle: Math.max(0.1, Number(weapon.closeRangeAngle ?? 1.35)),
+    closeRangeDamageMultiplier: Math.max(1, Number(weapon.closeRangeDamageMultiplier ?? 1)),
     hitRadius: Math.max(1, Number(weapon.hitRadius ?? 32)),
     headshotMultiplier: Math.max(1, Number(weapon.headshotMultiplier ?? 2)),
     knockdownPower: Math.max(0, Number(weapon.knockdownPower ?? 1) * knockdownMultiplier),
@@ -922,6 +1023,8 @@ export function createRunState(data, meta) {
   const player = {
     x: startEntrance.x,
     y: startEntrance.y,
+    lastSafeGroundX: startEntrance.x,
+    lastSafeGroundY: startEntrance.y,
     width: data.player.size.width,
     height: data.player.size.height,
     standHeight: data.player.size.height,
@@ -935,6 +1038,7 @@ export function createRunState(data, meta) {
     attackCooldown: 0,
     attackWindow: 0,
     attackToolActive: false,
+    attackAirHoldTimer: 0,
     attackHits: new Set(),
     attackDamage: data.player.attackDamage,
     lightActive: false,
@@ -951,6 +1055,10 @@ export function createRunState(data, meta) {
     dashWindupTimer: 0,
     dashCooldownTimer: 0,
     dashDirection: 0,
+    dashVectorX: 1,
+    dashVectorY: 0,
+    dashDistanceScale: 1,
+    dashStartedAirborne: false,
     dashCarryTimer: 0,
     dashCarrySpeed: 0,
     sprintCharge: 0,
@@ -962,6 +1070,12 @@ export function createRunState(data, meta) {
     noMoveInputTimer: 0,
     sprintJumpCarryTimer: 0,
     sprintJumpCarrySpeed: 0,
+    verticalMomentum: 0,
+    verticalMomentumTimer: 0,
+    verticalMomentumStage: 0,
+    verticalMomentumFlashTimer: 0,
+    verticalMomentumLastAction: null,
+    verticalMomentumBoostActive: false,
     slideTimer: 0,
     slideDirection: 0,
     slideSpeed: 0,
@@ -970,6 +1084,12 @@ export function createRunState(data, meta) {
     hoverActive: false,
     hoverBoostActive: false,
     hoverParticleTimer: 0,
+    airDashHoverTimer: 0,
+    airDashDirectionGraceTimer: 0,
+    airDashDirectionPending: false,
+    airDashPendingDirX: 0,
+    airDashPendingDirY: 0,
+    airDashHoverConsumed: false,
     wallDirection: 0,
     wallSliding: false,
     wallGraceTimer: 0,
@@ -1032,11 +1152,22 @@ export function createRunState(data, meta) {
     recoilFocusBlend: 0,
     recoilAimFacing: 1,
     recoilAimPitch: 0,
+    weaponReloadHoldConsumed: false,
+    armSwitchReloadHoldConsumed: false,
+    recoilJumpChargeActive: false,
+    recoilJumpChargeFocusSpent: 0,
+    recoilJumpChargeMultiplier: 1,
+    recoilJumpChargePendingMultiplier: 1,
+    recoilJumpChargePendingShot: false,
+    recoilJumpLastDirX: 1,
+    recoilJumpLastDirY: 0,
+    recoilJumpChargeEffectStep: 0,
     recoilAimX: 0,
     recoilAimY: 1,
     recoilDirX: 0,
     recoilDirY: -1,
     recoilCameraTimer: 0,
+    recoilCameraReturning: false,
     recoilCameraDirX: 0,
     recoilCameraDirY: -1,
   };
@@ -1070,6 +1201,7 @@ export function createRunState(data, meta) {
     focus: 100,
     focusMax: 100,
     focusDepleted: false,
+    heatFailureNotified: false,
     focusActive: false,
     playerBody: createPlayerBodyStatus(data),
     playerBodyVersion: 2,
@@ -1128,6 +1260,11 @@ export function createRunState(data, meta) {
       used: false,
     })),
     lootCrates: (data.lootCrates || []).map((crate, index) => createLootCrateState(crate, data, index)),
+    vaultDoors: (data.vaultDoors || []).map((door, index) => createVaultDoorState(door, index)),
+    vaultLoot: (data.vaultLoot || []).map((loot, index) => createVaultLootState(loot, index)),
+    escapeExits: (data.escapeExits || []).map((exit, index) => createEscapeExitState(exit, index)),
+    escapeBarriers: (data.escapeBarriers || []).map((barrier, index) => createEscapeBarrierState(barrier, index)),
+    vaultEscape: createVaultEscapeState(data),
     loot: {
       active: false,
       crateId: null,
@@ -1198,6 +1335,9 @@ export function createRunState(data, meta) {
       triggerLimit: data.faceOff?.triggerLimit ?? 4.5,
       result: null,
       resultTimer: 0,
+      aiRequestId: 0,
+      aiPending: false,
+      spokenLine: "",
       message: "",
     },
     ...levelRuntime,
@@ -1231,9 +1371,16 @@ export function createRunState(data, meta) {
     cameraLookDirection: player.facing,
     cameraTargetX: initialCameraX,
     cameraTargetY: initialCameraY,
+    screenShakeTimer: 0,
+    screenShakeDuration: 0,
+    screenShakeIntensity: 0,
+    screenShakeDirX: 0,
+    screenShakeDirY: 0,
     cameraTargetZoom: cameraZoom,
     cameraLookAhead: 0,
     cameraSpeedRatio: 0,
+    activeCameraZoneId: null,
+    activeCameraZoneLabel: null,
     cameraFallHoldTimer: 0,
     cameraFallRatio: 0,
     cameraFallTargetYOffset: 0,
@@ -1258,6 +1405,8 @@ export function createInitialState(data) {
     pressed: new Set(),
     justPressed: new Set(),
     justReleased: new Set(),
+    keyHoldSeconds: new Map(),
+    releasedKeyHoldSeconds: new Map(),
     capsLockActive: false,
     mouse: {
       screenX: CAMERA_SCREEN_WIDTH / 2,
@@ -1284,6 +1433,24 @@ export function createInitialState(data) {
     shelterMenu: {
       menuIndex: 0,
       upgradeIndex: 0,
+    },
+    shelter: {
+      menuIndex: 0,
+      upgradeIndex: 0,
+      talk: {
+        active: false,
+        requestId: 0,
+        pending: false,
+        topicIndex: 0,
+        line: "",
+        history: [],
+        choices: [],
+        choiceIndex: 0,
+        lastChoice: null,
+        reaction: null,
+        error: "",
+        eventResult: null,
+      },
     },
     sceneTimer: 0,
     debugFrame: 0,

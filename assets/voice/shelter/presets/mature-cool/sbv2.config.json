@@ -1,0 +1,62 @@
+{
+  "serverUrl": "http://127.0.0.1:5000",
+  "modelName": "jvnv-F1-jp",
+  "modelId": 1,
+  "speakerName": "jvnv-F1-jp",
+  "speakerId": 0,
+  "language": "JP",
+  "outputFormat": "wav",
+  "defaults": {
+    "style": "Neutral",
+    "styleWeight": 0.92,
+    "sdpRatio": 0.12,
+    "noise": 0.4,
+    "noiseW": 0.58,
+    "length": 1.18,
+    "autoSplit": true,
+    "splitInterval": 0.3,
+    "assistText": "低めで落ち着いた、冷静な美しい声で話して。",
+    "assistTextWeight": 0.3
+  },
+  "emotionStyles": {
+    "neutral": {
+      "style": "Neutral",
+      "styleWeight": 1,
+      "length": 1.16
+    },
+    "warm": {
+      "style": "Neutral",
+      "styleWeight": 0.94,
+      "length": 1.18,
+      "noise": 0.4,
+      "assistTextWeight": 0.28
+    },
+    "anxious": {
+      "style": "Neutral",
+      "styleWeight": 0.9,
+      "length": 1.18,
+      "sdpRatio": 0.12,
+      "noiseW": 0.58,
+      "assistTextWeight": 0.24
+    },
+    "tired": {
+      "style": "Sad",
+      "styleWeight": 0.72,
+      "length": 1.22
+    },
+    "hurt": {
+      "style": "Sad",
+      "styleWeight": 0.76,
+      "length": 1.2
+    },
+    "angry": {
+      "style": "Angry",
+      "styleWeight": 0.76,
+      "length": 1.12
+    }
+  },
+  "runtimePlayback": {
+    "playbackRate": 1.04,
+    "preservesPitch": false
+  }
+}

@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "storageKey": "silent-passage-shelter-voice-preset-v1",
+  "defaultPreset": "aivis-mai",
+  "updatedAt": "2026-06-19T06:56:52.703Z",
+  "presets": [
+    {
+      "id": "aivis-mai",
+      "label": "Aivis: まい",
+      "description": "AivisHub의 まい 모델. 요염한 젊은 여성 톤의 Type-07A 후보.",
+      "tags": [
+        "aivis",
+        "mai",
+        "female",
+        "acml-1.0"
+      ],
+      "manifest": "./assets/voice/shelter/presets/aivis-mai/manifest.json"
+    },
+    {
+      "id": "model-amitaro",
+      "label": "모델 원본: amitaro",
+      "description": "설치 모델 amitaro의 기본 음색. 튜닝을 거의 넣지 않은 비교용.",
+      "tags": [
+        "model",
+        "amitaro",
+        "raw"
+      ],
+      "manifest": "./assets/voice/shelter/presets/model-amitaro/manifest.json"
+    },
+    {
+      "id": "model-jvnv-f1",
+      "label": "모델 원본: jvnv-F1",
+      "description": "jvnv 여성 1번 모델. 성숙하고 낮은 후보.",
+      "tags": [
+        "model",
+        "female",
+        "f1"
+      ],
+      "manifest": "./assets/voice/shelter/presets/model-jvnv-f1/manifest.json"
+    },
+    {
+      "id": "model-jvnv-f2",
+      "label": "모델 원본: jvnv-F2",
+      "description": "jvnv 여성 2번 모델. 현재 튜닝들의 주 기반 음색.",
+      "tags": [
+        "model",
+        "female",
+        "f2"
+      ],
+      "manifest": "./assets/voice/shelter/presets/model-jvnv-f2/manifest.json"
+    },
+    {
+      "id": "model-koharune-ami",
+      "label": "모델 원본: 小春音アミ",
+      "description": "캐릭터성이 강한 모델. 어린 톤인지 확인하는 비교용.",
+      "tags": [
+        "model",
+        "character",
+        "young"
+      ],
+      "manifest": "./assets/voice/shelter/presets/model-koharune-ami/manifest.json"
+    },
+    {
+      "id": "new-amazingood",
+      "label": "새 모델: amazinGood",
+      "description": "새로 받은 girl-jp-extra의 age20 female amazinGood 원음색.",
+      "tags": [
+        "new-model",
+        "female",
+        "amazinGood"
+      ],
+      "manifest": "./assets/voice/shelter/presets/new-amazingood/manifest.json"
+    },
+    {
+      "id": "new-calmcloud",
+      "label": "새 모델: calmCloud",
+      "description": "새로 받은 girl-jp-extra의 age20 female calmCloud 원음색.",
+      "tags": [
+        "new-model",
+        "female",
+        "calmCloud"
+      ],
+      "manifest": "./assets/voice/shelter/presets/new-calmcloud/manifest.json"
+    },
+    {
+      "id": "new-coolcute",
+      "label": "새 모델: coolcute",
+      "description": "새로 받은 girl-jp-extra의 age20 female coolcute 원음색.",
+      "tags": [
+        "new-model",
+        "female",
+        "coolcute"
+      ],
+      "manifest": "./assets/voice/shelter/presets/new-coolcute/manifest.json"
+    },
+    {
+      "id": "new-finecrystal",
+      "label": "새 모델: fineCrystal",
+      "description": "새로 받은 girl-jp-extra의 age20 female fineCrystal 원음색.",
+      "tags": [
+        "new-model",
+        "female",
+        "fineCrystal"
+      ],
+      "manifest": "./assets/voice/shelter/presets/new-finecrystal/manifest.json"
+    },
+    {
+      "id": "new-lightfire",
+      "label": "새 모델: lightFire",
+      "description": "새로 받은 girl-jp-extra의 age20 male lightFire 비교용.",
+      "tags": [
+        "new-model",
+        "male",
+        "reference"
+      ],
+      "manifest": "./assets/voice/shelter/presets/new-lightfire/manifest.json"
+    },
+    {
+      "id": "rikka-cool",
+      "label": "새 모델: Rikka cool",
+      "description": "RikkaBotan CC BY-SA 모델의 cool 원음색. 차갑고 얇은 후보.",
+      "tags": [
+        "new-model",
+        "cc-by-sa",
+        "cool"
+      ],
+      "manifest": "./assets/voice/shelter/presets/rikka-cool/manifest.json"
+    },
+    {
+      "id": "rikka-sweet",
+      "label": "새 모델: Rikka sweet",
+      "description": "RikkaBotan CC BY-SA 모델의 sweet 원음색. 밝고 귀여운 후보.",
+      "tags": [
+        "new-model",
+        "cc-by-sa",
+        "sweet"
+      ],
+      "manifest": "./assets/voice/shelter/presets/rikka-sweet/manifest.json"
+    },
+    {
+      "id": "rikka-asmr",
+      "label": "새 모델: Rikka asmr",
+      "description": "RikkaBotan CC BY-SA 모델의 ASMR 원음색. 속삭임/저자극 후보.",
+      "tags": [
+        "new-model",
+        "cc-by-sa",
+        "asmr"
+      ],
+      "manifest": "./assets/voice/shelter/presets/rikka-asmr/manifest.json"
+    },
+    {
+      "id": "model-jvnv-m1",
+      "label": "모델 원본: jvnv-M1",
+      "description": "jvnv 남성 1번 모델. 참고 비교용.",
+      "tags": [
+        "model",
+        "male",
+        "reference"
+      ],
+      "manifest": "./assets/voice/shelter/presets/model-jvnv-m1/manifest.json"
+    },
+    {
+      "id": "model-jvnv-m2",
+      "label": "모델 원본: jvnv-M2",
+      "description": "jvnv 남성 2번 모델. 참고 비교용.",
+      "tags": [
+        "model",
+        "male",
+        "reference"
+      ],
+      "manifest": "./assets/voice/shelter/presets/model-jvnv-m2/manifest.json"
+    },
+    {
+      "id": "calm-bishoujo",
+      "label": "차분한 미소녀",
+      "description": "맑고 얇은 톤은 남기고 감정만 살짝 누른 기준점.",
+      "tags": [
+        "clear",
+        "soft",
+        "baseline"
+      ],
+      "manifest": "./assets/voice/shelter/presets/calm-bishoujo/manifest.json"
+    },
+    {
+      "id": "cool-beauty",
+      "label": "냉미녀",
+      "description": "감정선을 낮게 눌러 조용하고 차가운 인상.",
+      "tags": [
+        "cool",
+        "restrained",
+        "low"
+      ],
+      "manifest": "./assets/voice/shelter/presets/cool-beauty/manifest.json"
+    },
+    {
+      "id": "proud-commanding",
+      "label": "단호한 도도",
+      "description": "낮게 웃지 않고 또렷하게 끊는, 자신감 있는 미녀 톤.",
+      "tags": [
+        "firm",
+        "proud",
+        "beauty"
+      ],
+      "manifest": "./assets/voice/shelter/presets/proud-commanding/manifest.json"
+    },
+    {
+      "id": "elegant-beauty",
+      "label": "우아한 미녀",
+      "description": "차갑기보다 고급스럽고 정돈된 미녀 톤.",
+      "tags": [
+        "elegant",
+        "polished",
+        "adult"
+      ],
+      "manifest": "./assets/voice/shelter/presets/elegant-beauty/manifest.json"
+    },
+    {
+      "id": "mature-cool",
+      "label": "성숙한 쿨",
+      "description": "조금 더 낮고 성숙한 후보. 미소녀보다 성인 미녀 쪽.",
+      "tags": [
+        "mature",
+        "low",
+        "reserved"
+      ],
+      "manifest": "./assets/voice/shelter/presets/mature-cool/manifest.json"
+    }
+  ]
+}

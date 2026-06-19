@@ -1,4 +1,4 @@
-export const SPRINT_TUNING_KEY = "rulebound-sprint-tuning-v1";
+export const SPRINT_TUNING_KEY = "rulebound-sprint-tuning-v2";
 
 export const SPRINT_TUNING_FIELDS = [
   { key: "runSpeed", label: "Run Speed", min: 120, max: 900, step: 10 },
@@ -9,6 +9,13 @@ export const SPRINT_TUNING_FIELDS = [
   { key: "sprintDecayMs", label: "Sprint Decay", min: 0, max: 1200, step: 10 },
   { key: "sprintJumpCarryMs", label: "Sprint Jump Carry", min: 0, max: 1200, step: 10 },
   { key: "sprintJumpMinSpeed", label: "Sprint Jump Min", min: 0, max: 1400, step: 10 },
+  { key: "verticalMomentumDecayMs", label: "Momentum Decay", min: 120, max: 3000, step: 10 },
+  { key: "verticalMomentumComboMs", label: "Momentum Combo", min: 120, max: 3000, step: 10 },
+  { key: "verticalMomentumSpeedBoost", label: "Momentum Speed Boost", min: 0, max: 0.7, step: 0.01 },
+  { key: "verticalMomentumSpeedBuild", label: "Momentum Speed Build", min: 0, max: 1.2, step: 0.01 },
+  { key: "verticalMomentumJumpBoost", label: "Momentum Jump Boost", min: 0, max: 0.5, step: 0.01 },
+  { key: "verticalMomentumWallBoost", label: "Momentum Wall Boost", min: 0, max: 0.7, step: 0.01 },
+  { key: "verticalMomentumRecoilBoost", label: "Momentum Recoil Boost", min: 0, max: 0.6, step: 0.01 },
   { key: "slideMinSpeed", label: "Slide Min Speed", min: 0, max: 1400, step: 10 },
   { key: "slideDurationMs", label: "Slide Duration", min: 80, max: 1600, step: 10 },
   { key: "slideFriction", label: "Slide Friction", min: 0, max: 2400, step: 10 },
@@ -16,10 +23,6 @@ export const SPRINT_TUNING_FIELDS = [
   { key: "slideJumpCarryMs", label: "Slide Jump Carry", min: 0, max: 1600, step: 10 },
   { key: "slideJumpMinSpeed", label: "Slide Jump Min", min: 0, max: 2200, step: 10 },
   { key: "slideJumpSpeedMultiplier", label: "Slide Jump Mult", min: 0.5, max: 3, step: 0.01 },
-  { key: "hoverFallSpeed", label: "Hover Fall Speed", min: 40, max: 600, step: 1 },
-  { key: "hoverGravityMultiplier", label: "Hover Gravity Mult", min: 0.05, max: 1, step: 0.01 },
-  { key: "hoverStartMaxFallSpeed", label: "Hover Entry Clamp", min: 40, max: 1200, step: 10 },
-  { key: "hoverAirControlMultiplier", label: "Hover Air Control", min: 0.25, max: 1.5, step: 0.01 },
   { key: "braceDetectPaddingX", label: "Brace Detect X", min: 0, max: 96, step: 1 },
   { key: "braceDetectPaddingY", label: "Brace Detect Y", min: 0, max: 96, step: 1 },
   { key: "braceHoldStartSpeed", label: "Brace Start Speed", min: 0, max: 300, step: 1 },
@@ -31,9 +34,12 @@ export const SPRINT_TUNING_FIELDS = [
   { key: "recoilShotMaxHorizontalSpeed", label: "Recoil Max X Speed", min: 120, max: 6000, step: 10 },
   { key: "recoilShotMaxUpSpeed", label: "Recoil Max Up Speed", min: 120, max: 6000, step: 10 },
   { key: "recoilShotMaxFallSpeed", label: "Recoil Max Fall Speed", min: 120, max: 6000, step: 10 },
+  { key: "recoilShotStackSpeedMultiplier", label: "Recoil Stack Cap", min: 1, max: 6, step: 0.1 },
   { key: "recoilShotFocusTimeScale", label: "Focus Time Scale", min: 0.05, max: 1, step: 0.01 },
   { key: "recoilSpinDurationMs", label: "Recoil Spin Time", min: 60, max: 520, step: 10 },
   { key: "recoilSpinLoopCount", label: "Recoil Spin Loops", min: 1, max: 4, step: 1 },
+  { key: "airInertiaDecelMultiplier", label: "Air Inertia Decel", min: 0.05, max: 1, step: 0.01 },
+  { key: "airTurnDecelMultiplier", label: "Air Turn Decel", min: 0.05, max: 1.5, step: 0.01 },
 ];
 
 function clampNumber(value, min, max, fallback) {

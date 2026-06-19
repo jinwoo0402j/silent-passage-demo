@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "presetId": "model-jvnv-m1",
+  "label": "모델 원본: jvnv-M1",
+  "description": "jvnv 남성 1번 모델. 참고 비교용.",
+  "tags": [
+    "model",
+    "male",
+    "reference"
+  ],
+  "scene": "shelter",
+  "speaker": "type-07a",
+  "voice": "type07a",
+  "format": "wav",
+  "generator": "Style-Bert-VITS2",
+  "modelName": "jvnv-M1-jp",
+  "generatedAt": "2026-06-19T05:38:47.632Z",
+  "playbackRate": 1,
+  "preservesPitch": true,
+  "lines": [
+    {
+      "id": "type07a_anxious_shelter-first-arrival-01_01x699w",
+      "emotion": "anxious",
+      "topic": "첫 쉘터 진입",
+      "text": "와... 여기 생각보다 멀쩡하네.",
+      "voiceText": "ここ、思ったより使えそうだな。",
+      "src": "./assets/voice/shelter/presets/model-jvnv-m1/anxious/type07a_anxious_shelter-first-arrival-01_01x699w.wav",
+      "tags": [
+        "anxious",
+        "첫 쉘터 진입"
+      ]
+    },
+    {
+      "id": "type07a_warm_shelter-first-arrival-01_1uuasii",
+      "emotion": "warm",
+      "topic": "첫 쉘터 진입",
+      "text": "아빠, 여기 우리 임시 집 같은 거야? 나 그런 거 좀 좋은데.",
+      "voiceText": "ここが、俺たちの仮住まいなのか。",
+      "src": "./assets/voice/shelter/presets/model-jvnv-m1/warm/type07a_warm_shelter-first-arrival-01_1uuasii.wav",
+      "tags": [
+        "warm",
+        "첫 쉘터 진입"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "presetId": "elegant-beauty",
+  "label": "우아한 미녀",
+  "description": "차갑기보다 고급스럽고 정돈된 미녀 톤.",
+  "tags": [
+    "elegant",
+    "polished",
+    "adult"
+  ],
+  "scene": "shelter",
+  "speaker": "type-07a",
+  "voice": "type07a",
+  "format": "wav",
+  "generator": "Style-Bert-VITS2",
+  "modelName": "jvnv-F2-jp",
+  "generatedAt": "2026-06-19T05:38:53.094Z",
+  "playbackRate": 1.08,
+  "preservesPitch": false,
+  "lines": [
+    {
+      "id": "type07a_anxious_shelter-first-arrival-01_01x699w",
+      "emotion": "anxious",
+      "topic": "첫 쉘터 진입",
+      "text": "와... 여기 생각보다 멀쩡하네.",
+      "voiceText": "……悪くないわ。想像より、整っている。",
+      "src": "./assets/voice/shelter/presets/elegant-beauty/anxious/type07a_anxious_shelter-first-arrival-01_01x699w.wav",
+      "tags": [
+        "anxious",
+        "첫 쉘터 진입"
+      ]
+    },
+    {
+      "id": "type07a_warm_shelter-first-arrival-01_1uuasii",
+      "emotion": "warm",
+      "topic": "첫 쉘터 진입",
+      "text": "아빠, 여기 우리 임시 집 같은 거야? 나 그런 거 좀 좋은데.",
+      "voiceText": "お父さま。ここが仮の住まいなのね。……ええ、上出来よ。",
+      "src": "./assets/voice/shelter/presets/elegant-beauty/warm/type07a_warm_shelter-first-arrival-01_1uuasii.wav",
+      "tags": [
+        "warm",
+        "첫 쉘터 진입"
+      ]
+    }
+  ]
+}

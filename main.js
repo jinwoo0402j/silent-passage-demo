@@ -1,10 +1,11 @@
-import { GAME_DATA } from "./level-data.js?v=20260526-sfx-v1";
+import { GAME_DATA } from "./level-data.js?v=20260619-shelter-voice-v9";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
   saveLevelOverride,
-} from "./level-store.js?v=20260526-sfx-v1";
+  shouldUseLocalLevelOverrideFromUrl,
+} from "./level-store.js?v=20260619-shelter-voice-v9";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -12,9 +13,28 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260501-run-start-v1";
-import { renderGame } from "./render.js?v=20260526-sfx-v1";
-import { saveCurrentGame } from "./save-game.js?v=20260526-sfx-v1";
+} from "./movement-tuning.js?v=20260615-speedfx-v11";
+import {
+  AUDIO_OPTION_CHANNELS,
+  applyAudioOptions,
+  loadAudioOptions,
+  resetAudioOptions,
+  saveAudioOptions,
+} from "./audio-options.js?v=20260619-shelter-voice-v9";
+import {
+  loadTtsEnabled,
+  resetTtsEnabled,
+  saveTtsEnabled,
+} from "./tts-client.js?v=20260619-shelter-voice-v9";
+import {
+  GAME_OPTION_CONTROLS,
+  applyGameOptions,
+  loadGameOptions,
+  resetGameOptions,
+  saveGameOptions,
+} from "./game-options.js?v=20260619-text-speed-v1";
+import { renderGame } from "./render.js?v=20260619-shelter-voice-v9";
+import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260619-shelter-voice-v9";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -25,23 +45,33 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260526-sfx-v1";
-import { bindInput, updateGame } from "./systems.js?v=20260526-sfx-v1";
+} from "./state.js?v=20260619-shelter-voice-v9";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260619-shelter-voice-v9";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const liveEditButton = document.getElementById("liveEditButton");
 const debugButton = document.getElementById("debugButton");
 const movementTuningButton = document.getElementById("movementTuningButton");
+const soundOptionsButton = document.getElementById("soundOptionsButton");
+const soundOptionsPanel = document.getElementById("soundOptionsPanel");
+const soundOptionsFields = document.getElementById("soundOptionsFields");
+const soundOptionsCloseButton = document.getElementById("soundOptionsCloseButton");
+const soundOptionsResetButton = document.getElementById("soundOptionsResetButton");
 const movementTuningPanel = document.getElementById("movementTuningPanel");
 const movementTuningFields = document.getElementById("movementTuningFields");
 const movementTuningCloseButton = document.getElementById("movementTuningCloseButton");
 const movementTuningSaveButton = document.getElementById("movementTuningSaveButton");
+const movementTuningSaveTestButton = document.getElementById("movementTuningSaveTestButton");
+const movementTuningLoadTestButton = document.getElementById("movementTuningLoadTestButton");
 const movementTuningResetButton = document.getElementById("movementTuningResetButton");
 const sceneActionButton = document.getElementById("sceneActionButton");
+const shelterChatForm = document.getElementById("shelterChatForm");
+const shelterChatInput = document.getElementById("shelterChatInput");
 const touchControls = document.getElementById("touchControls");
 const touchButtons = Array.from(document.querySelectorAll(".touch-button"));
 const stageShell = document.querySelector(".stage-shell");
+const MOVEMENT_TUNING_TEST_KEY = "rulebound-movement-tuning-test-v1";
 const testDebugButton = document.createElement("button");
 testDebugButton.id = "testDebugButton";
 testDebugButton.className = "test-debug-button";
@@ -61,7 +91,9 @@ testDebugPanel.innerHTML = `
     <button class="test-debug-close" type="button" data-test-action="close">닫기</button>
   </div>
   <div class="test-debug-actions">
+    <button type="button" data-test-action="setupVaultEscape">Vault test setup</button>
     <button type="button" data-test-action="maxAmmo">탄환 최대로 수정</button>
+    <button type="button" data-test-action="applyLevelZeroMovement">Lv.0</button>
     <button type="button" data-test-action="restartRun">다시 시작하기</button>
     <button type="button" data-test-action="resetLevel">레벨 처음으로 돌아가기</button>
     <button type="button" data-test-action="respawnEnemies">맵의 적 전부 리스폰</button>
@@ -169,6 +201,62 @@ const FACE_OFF_TUNING_FIELDS = [
   { key: "enemyLineHoldDuration", label: "Enemy Line Hold", min: 0.2, max: 3, step: 0.05 },
   { key: "choiceSlideDuration", label: "Choice Slide", min: 0.08, max: 1, step: 0.02 },
 ];
+const LEVEL_ZERO_MOVEMENT_TUNING = {
+  runSpeed: 410,
+  sprintSpeed: 640,
+  sprintBuildMs: 260,
+  sprintDecayMs: 180,
+  sprintJumpCarryMs: 340,
+  sprintJumpMinSpeed: 540,
+  slideMinSpeed: 430,
+  slideDurationMs: 420,
+  slideFriction: 980,
+  slideSpeedMultiplier: 1.16,
+  slideJumpCarryMs: 360,
+  slideJumpMinSpeed: 690,
+  slideJumpSpeedMultiplier: 1.14,
+  hoverFallSpeed: 185,
+  hoverGravityMultiplier: 0.22,
+  hoverStartMaxFallSpeed: 280,
+  hoverAirControlMultiplier: 1.0,
+  groundAccel: 5200,
+  groundDecel: 6200,
+  airControlMultiplier: 0.88,
+  airInertiaDecelMultiplier: 0.18,
+  airTurnDecelMultiplier: 0.52,
+  jumpVelocity: -920,
+  dashDurationMs: 95,
+  dashWindupMs: 35,
+  dashDistance: 124,
+  dashCarryWindowMs: 130,
+  dashCarrySpeedMultiplier: 0.58,
+  dashJumpMinSpeed: 520,
+  braceDetectPaddingX: 24,
+  braceDetectPaddingY: 24,
+  braceHoldStartSpeed: 24,
+  braceHoldAccel: 780,
+  braceHoldFallSpeed: 130,
+  braceHoldMoveMultiplier: 0.82,
+  braceBoostHorizontal: 520,
+  braceBoostVertical: 900,
+  wallSpeedRetentionMinSpeed: 220,
+  wallRunStartSpeed: 300,
+  wallRunAccel: 1700,
+  wallRunMaxSpeed: 760,
+  wallRunExitMinBoost: 640,
+  wallRunExitHorizontal: 210,
+  wallJumpHorizontal: 720,
+  wallJumpVertical: 1120,
+  recoilShotCharges: 1,
+  recoilShotForce: 1250,
+  recoilShotMaxHorizontalSpeed: 1900,
+  recoilShotMaxUpSpeed: 1650,
+  recoilShotMaxFallSpeed: 720,
+  recoilShotStackSpeedMultiplier: 3,
+  recoilShotFocusTimeScale: 0.05,
+  recoilSpinDurationMs: 180,
+  recoilSpinLoopCount: 2,
+};
 
 const dom = {
   canvas,
@@ -178,19 +266,36 @@ const dom = {
   testDebugButton,
   testDebugPanel,
   movementTuningButton,
+  soundOptionsButton,
+  soundOptionsPanel,
+  soundOptionsFields,
+  soundOptionsCloseButton,
+  soundOptionsResetButton,
   movementTuningPanel,
   movementTuningFields,
   movementTuningCloseButton,
   movementTuningSaveButton,
+  movementTuningSaveTestButton,
+  movementTuningLoadTestButton,
   movementTuningResetButton,
   sceneActionButton,
+  shelterChatForm,
+  shelterChatInput,
   touchControls,
   touchButtons,
 };
 
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
+applyAudioOptions(loadAudioOptions());
+applyGameOptions(loadGameOptions());
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get("resetMeta") === "1" || urlParams.get("resetShelter") === "1") {
+  window.localStorage.removeItem("rulebound-extraction-meta-v1");
+  window.localStorage.removeItem("rulebound-local-profile-v1");
+}
 const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
-  applyLevelOverride: true,
+  applyLevelOverride: shouldUseLocalLevelOverrideFromUrl(),
+  useUrlLevel: shouldStartFromUrlLevel(),
 });
 const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
 applySprintTuning(
@@ -200,7 +305,57 @@ applySprintTuning(
 );
 
 const state = createInitialState(runtimeData);
-if (new URLSearchParams(window.location.search).get("partsLoop") === "1") {
+const SHELTER_CG_PREVIEW_ASSETS = {
+  neutral: "shelterHomeNeutralCg",
+  anxious: "shelterHomeAnxiousCg",
+  warm: "shelterHomeWarmCg",
+  tired: "shelterHomeTiredCg",
+  hurt: "shelterHomeHurtCg",
+  angry: "shelterHomeAngryCg",
+};
+
+function applyShelterCgPreviewFromUrl(currentState, data, params) {
+  const emotion = String(params.get("shelterCgPreview") || "").trim();
+  const assetKey = SHELTER_CG_PREVIEW_ASSETS[emotion];
+  if (!assetKey) {
+    return;
+  }
+  currentState.scene = SCENES.SHELTER;
+  currentState.sceneTimer = 0;
+  currentState.shelter = currentState.shelter && typeof currentState.shelter === "object"
+    ? currentState.shelter
+    : { menuIndex: 0 };
+  const talk = currentState.shelter.talk && typeof currentState.shelter.talk === "object"
+    ? currentState.shelter.talk
+    : {};
+  currentState.shelter.talk = {
+    ...talk,
+    active: true,
+    pending: false,
+    line: `CG preview: ${emotion} / ${assetKey}`,
+    emotion,
+    eventArtAssetKey: assetKey,
+    eventBaseArtAssetKey: "shelterHomeCharmCg",
+    blockScriptedEventStart: true,
+    lineIndex: 0,
+    lineShownAt: currentState.pulse || 0,
+    choices: [],
+    choiceIndex: 0,
+    lastChoice: null,
+    reaction: {
+      emotion,
+      startedAt: currentState.pulse || 0,
+      requestId: 0,
+      choice: "preview",
+    },
+    choiceReaction: null,
+    eventResult: null,
+    error: data.art?.[assetKey]?.src ? "" : `Missing art asset: ${assetKey}`,
+  };
+}
+
+applyShelterCgPreviewFromUrl(state, runtimeData, urlParams);
+if (urlParams.get("partsLoop") === "1") {
   const testPart = normalizePartInstance(runtimeData, "watchman-right-arm");
   if (testPart) {
     state.meta.partInventory = [testPart];
@@ -215,6 +370,25 @@ if (new URLSearchParams(window.location.search).get("partsLoop") === "1") {
 window.__faceOffState = state;
 window.__faceOffData = runtimeData;
 bindInput(state);
+shelterChatForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = String(shelterChatInput?.value || "").replace(/\s+/g, " ").trim();
+  if (!text || shelterChatInput?.disabled) {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent("silent-passage-shelter-chat-submit", { detail: { text } }));
+  shelterChatInput.value = "";
+});
+shelterChatInput?.addEventListener("keydown", (event) => {
+  event.stopPropagation();
+  if (event.key === "Enter" && !event.isComposing) {
+    event.preventDefault();
+    shelterChatForm?.requestSubmit();
+  }
+});
+shelterChatInput?.addEventListener("keyup", (event) => {
+  event.stopPropagation();
+});
 inputTraceDownloadButton.addEventListener("click", () => {
   downloadInputTrace(state);
 });
@@ -468,6 +642,130 @@ function getSceneActionLabel(currentState) {
   return "";
 }
 
+function formatVolumePercent(value) {
+  return `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`;
+}
+
+function formatTextSpeed(value) {
+  return `${Math.round(Math.max(15, Math.min(90, Number(value) || 30)))} cps`;
+}
+
+function formatToggle(value) {
+  return value ? "On" : "Off";
+}
+
+function renderSoundOptionsFields() {
+  if (!soundOptionsFields) {
+    return;
+  }
+  const audioOptions = loadAudioOptions();
+  const gameOptions = loadGameOptions();
+  const ttsEnabled = loadTtsEnabled();
+  const audioFields = AUDIO_OPTION_CHANNELS.map((channel) => {
+    const value = audioOptions[channel.id] ?? 1;
+    return `
+      <div class="sound-options-field">
+        <label for="sound-${channel.id}">${channel.label}</label>
+        <output for="sound-${channel.id}" data-audio-output="${channel.id}">${formatVolumePercent(value)}</output>
+        <input
+          id="sound-${channel.id}"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="${Math.round(value * 100)}"
+          data-audio-channel="${channel.id}"
+        >
+        <small>${channel.description}</small>
+      </div>
+    `;
+  }).join("");
+  const voiceToggleField = `
+    <div class="sound-options-field">
+      <label for="tts-enabled">Voice Lines</label>
+      <output for="tts-enabled" data-tts-output="enabled">${formatToggle(ttsEnabled)}</output>
+      <input
+        id="tts-enabled"
+        type="checkbox"
+        ${ttsEnabled ? "checked" : ""}
+        data-tts-option="enabled"
+      >
+      <small>Read Type-07A shelter dialogue</small>
+    </div>
+  `;
+  const voiceAuditionField = `
+    <div class="sound-options-field">
+      <label>Voice Audition</label>
+      <a href="./voice-audition.html" class="sound-options-link">Open presets</a>
+      <small>Compare and select Type-07A voice presets</small>
+    </div>
+  `;
+  const gameFields = GAME_OPTION_CONTROLS.map((control) => {
+    const value = gameOptions[control.id] ?? 30;
+    return `
+      <div class="sound-options-field">
+        <label for="game-${control.id}">${control.label}</label>
+        <output for="game-${control.id}" data-game-output="${control.id}">${formatTextSpeed(value)}</output>
+        <input
+          id="game-${control.id}"
+          type="range"
+          min="${control.min}"
+          max="${control.max}"
+          step="${control.step}"
+          value="${Math.round(value)}"
+          data-game-option="${control.id}"
+        >
+        <small>${control.description}</small>
+      </div>
+    `;
+  }).join("");
+  soundOptionsFields.innerHTML = `${audioFields}${voiceToggleField}${voiceAuditionField}${gameFields}`;
+}
+
+function setSoundOptionsPanelOpen(open) {
+  if (!soundOptionsPanel || !soundOptionsButton) {
+    return;
+  }
+  soundOptionsPanel.hidden = !open;
+  soundOptionsButton.classList.toggle("is-active", open);
+  if (open) {
+    renderSoundOptionsFields();
+  }
+}
+
+function updateSoundOptionsFromInput(currentDom, input) {
+  const channel = input?.dataset?.audioChannel;
+  const gameOption = input?.dataset?.gameOption;
+  const ttsOption = input?.dataset?.ttsOption;
+  if (channel) {
+    const options = loadAudioOptions();
+    options[channel] = Math.max(0, Math.min(1, Number(input.value) / 100));
+    saveAudioOptions(options);
+    const output = currentDom.soundOptionsFields?.querySelector(`[data-audio-output="${channel}"]`);
+    if (output) {
+      output.textContent = formatVolumePercent(options[channel]);
+    }
+    return;
+  }
+  if (ttsOption === "enabled") {
+    const enabled = saveTtsEnabled(Boolean(input.checked));
+    const output = currentDom.soundOptionsFields?.querySelector('[data-tts-output="enabled"]');
+    if (output) {
+      output.textContent = formatToggle(enabled);
+    }
+    return;
+  }
+  if (gameOption) {
+    const options = loadGameOptions();
+    options[gameOption] = Number(input.value);
+    saveGameOptions(options);
+    const output = currentDom.soundOptionsFields?.querySelector(`[data-game-output="${gameOption}"]`);
+    if (output) {
+      output.textContent = formatTextSpeed(options[gameOption]);
+    }
+  }
+}
+
 function syncLiveEditButton(currentDom, currentState, data) {
   if (!currentDom.liveEditButton) {
     return;
@@ -705,6 +1003,86 @@ function syncMovementTuningToRun(currentState, data) {
   }
 }
 
+function extractTuningValues(fields, source = {}) {
+  return Object.fromEntries(
+    fields.map(({ key }) => [key, source?.[key]]),
+  );
+}
+
+function getPrimaryCrowTuningSource(data) {
+  return data.hostileDrones?.find((entry) => entry.visualKind === "crow") ?? data.hostileDrones?.[0] ?? null;
+}
+
+function createMovementTuningTestSnapshot(data) {
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    movement: extractSprintTuning(data.player.movement),
+    crow: extractTuningValues(CROW_TUNING_FIELDS, getPrimaryCrowTuningSource(data)),
+    faceOff: extractTuningValues(FACE_OFF_TUNING_FIELDS, data.faceOff),
+  };
+}
+
+function saveMovementTuningTestSnapshot(data) {
+  const snapshot = createMovementTuningTestSnapshot(data);
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(MOVEMENT_TUNING_TEST_KEY, JSON.stringify(snapshot));
+  }
+  return snapshot;
+}
+
+function loadMovementTuningTestSnapshot() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(MOVEMENT_TUNING_TEST_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyMovementTuningTestSnapshot(data, currentState, snapshot) {
+  if (!snapshot) {
+    return false;
+  }
+
+  applySprintTuning(data.player.movement, snapshot.movement, GAME_DATA.player.movement);
+
+  CROW_TUNING_FIELDS.forEach(({ key }) => {
+    if (snapshot.crow?.[key] !== undefined) {
+      applyCrowFieldValue(data, key, snapshot.crow[key]);
+    }
+  });
+
+  FACE_OFF_TUNING_FIELDS.forEach(({ key }) => {
+    if (snapshot.faceOff?.[key] !== undefined) {
+      applyFaceOffFieldValue(data, key, snapshot.faceOff[key]);
+    }
+  });
+
+  syncMovementTuningToRun(currentState, data);
+  syncCrowTuningToRun(currentState, data);
+  syncFaceOffTuningToRun(currentState, data);
+  return true;
+}
+
+function applyLevelZeroMovementTuning(data, currentState) {
+  applySprintTuning(data.player.movement, LEVEL_ZERO_MOVEMENT_TUNING, GAME_DATA.player.movement);
+  Object.entries(LEVEL_ZERO_MOVEMENT_TUNING).forEach(([key, value]) => {
+    if (!SPRINT_TUNING_FIELDS.some((field) => field.key === key)) {
+      data.player.movement[key] = value;
+    }
+  });
+  syncMovementTuningToRun(currentState, data);
+  return true;
+}
+
 function ensureExpeditionRun(currentState, data) {
   if (currentState.scene === SCENES.EXPEDITION && currentState.run) {
     return currentState.run;
@@ -743,6 +1121,8 @@ function clearRunActionEffects(run) {
   run.afterimages = [];
   run.recoilFocusAfterimages = [];
   run.recoilFocusAfterimageTimer = 0;
+  run.screenShakeTimer = 0;
+  run.screenShakeIntensity = 0;
   if (run.recoilAim) {
     run.recoilAim.active = false;
     run.recoilAim.aiming = false;
@@ -791,6 +1171,15 @@ function resetPlayerToLevelStart(run, data) {
   player.recoilSpinTimer = 0;
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
+  player.armSwitchReloadHoldConsumed = false;
+  player.recoilJumpChargeActive = false;
+  player.recoilJumpChargeFocusSpent = 0;
+  player.recoilJumpChargeMultiplier = 1;
+  player.recoilJumpChargePendingMultiplier = 1;
+  player.recoilJumpChargePendingShot = false;
+  player.recoilJumpLastDirX = player.facing || 1;
+  player.recoilJumpLastDirY = 0;
+  player.recoilJumpChargeEffectStep = 0;
 }
 
 function snapCameraToPlayer(currentDom, run, data) {
@@ -945,6 +1334,73 @@ function equipDebugWeaponPreset(currentState, data, preset) {
   saveCurrentGame(currentState, data);
 }
 
+function resetVaultEscapeDebugState(run, data) {
+  const fresh = createLevelRuntimeState(data);
+  run.vaultDoors = fresh.vaultDoors;
+  run.vaultLoot = fresh.vaultLoot;
+  run.escapeExits = fresh.escapeExits;
+  run.vaultEscape = fresh.vaultEscape;
+  run.loot = fresh.loot;
+  run.enemyShots = [];
+  run.playerBullets = [];
+  run.damageNumbers = [];
+  run.dodgeFx = [];
+}
+
+function movePlayerBesideDebugTarget(player, target, side = "left") {
+  if (!player || !target) {
+    return;
+  }
+  const targetBottom = Number(target.y) + Number(target.height);
+  const targetCenterX = Number(target.x) + Number(target.width) * 0.5;
+  player.x = targetCenterX - Number(player.width) * 0.5;
+  player.y = targetBottom - Number(player.height);
+  player.vx = 0;
+  player.vy = 0;
+  player.facing = side === "right" ? -1 : 1;
+  player.onGround = true;
+  player.wasOnGround = true;
+  player.movementState = MOVEMENT_STATES.GROUNDED;
+  player.attackCooldown = 0;
+  player.attackWindow = 0;
+  player.attackHits = new Set();
+  player.dashTimer = 0;
+  player.dashWindupTimer = 0;
+  player.dashCooldownTimer = 0;
+  player.slideTimer = 0;
+  player.hoverActive = false;
+  player.lightActive = false;
+  player.invulnTimer = 0;
+}
+
+function setupVaultEscapeDebug(currentDom, currentState, data) {
+  const run = ensureExpeditionRun(currentState, data);
+  currentState.scene = SCENES.EXPEDITION;
+  currentState.sceneTimer = 0;
+  currentState.resultSummary = null;
+  currentState.liveEdit.active = false;
+
+  resetVaultEscapeDebugState(run, data);
+  run.humanoidEnemies = [];
+  run.hostileDrones = [];
+  run.threats = [];
+  run.faceOff = createLevelRuntimeState(data).faceOff;
+
+  const door = run.vaultDoors?.[0];
+  if (!door) {
+    setRunNotice(currentState, "TEST: no vault door in this level.");
+    return;
+  }
+
+  movePlayerBesideDebugTarget(run.player, door, "left");
+  beginVaultEscape(run, door);
+  fillDebugAmmo(currentState, data);
+  snapCameraToPlayer(currentDom, run, data);
+  setTestDebugPanelOpen(currentDom, currentState, false);
+  setRunNotice(currentState, "TEST: vault timer started.");
+  saveCurrentGame(currentState, data);
+}
+
 function runTestDebugAction(currentDom, currentState, data, action) {
   if (action === "close") {
     setTestDebugPanelOpen(currentDom, currentState, false);
@@ -952,6 +1408,10 @@ function runTestDebugAction(currentDom, currentState, data, action) {
   }
   if (action === "maxAmmo") {
     fillDebugAmmo(currentState, data);
+  } else if (action === "applyLevelZeroMovement") {
+    applyLevelZeroMovementTuning(data, currentState);
+    renderMovementTuningFields(currentDom, data.player.movement);
+    setRunNotice(currentState, "테스트: Lv.0 이동 튜닝 적용");
   } else if (action === "restartRun") {
     restartDebugRun(currentDom, currentState, data);
   } else if (action === "resetLevel") {
@@ -964,6 +1424,8 @@ function runTestDebugAction(currentDom, currentState, data, action) {
     equipDebugWeaponPreset(currentState, data, "arSniper");
   } else if (action === "equipShotgunMachinegun") {
     equipDebugWeaponPreset(currentState, data, "shotgunMachinegun");
+  } else if (action === "setupVaultEscape") {
+    setupVaultEscapeDebug(currentDom, currentState, data);
   }
 }
 
@@ -972,13 +1434,35 @@ function isTestDebugToggleKey(event) {
 }
 
 function syncBrowserControls(currentDom, currentState) {
+  const shelterTalkActive = currentState.scene === SCENES.SHELTER && (
+    Boolean(currentState.shelter?.talk?.active)
+    || Boolean(currentState.run?.shelterRest?.active && currentState.run.shelterRest.phase === "talk")
+  );
+  const shelterBridgeActive = currentState.scene === SCENES.SHELTER && (
+    Boolean(currentState.shelter?.autoEventBridge)
+    || Boolean(currentState.run?.shelterRest?.active && currentState.run.shelterRest.autoEventBridge)
+  );
+  const shelterCinematicActive = shelterTalkActive || shelterBridgeActive;
   document.body.classList.toggle("is-map-overlay-active", Boolean(currentState.run?.mapOverlay?.active));
   document.body.classList.toggle("is-inventory-overlay-active", Boolean(currentState.run?.inventoryOverlay?.active));
+  document.body.classList.toggle("is-shelter-talk-active", shelterCinematicActive);
 
   if (currentDom.sceneActionButton) {
-    const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION;
+    const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION && !shelterCinematicActive;
     currentDom.sceneActionButton.hidden = !sceneActionVisible;
     currentDom.sceneActionButton.textContent = getSceneActionLabel(currentState);
+  }
+
+  if (currentDom.shelterChatForm && currentDom.shelterChatInput) {
+    currentDom.shelterChatForm.hidden = true;
+    currentDom.shelterChatForm.classList.remove("is-pending");
+    currentDom.shelterChatInput.disabled = true;
+    currentDom.shelterChatInput.value = "";
+    if (document.activeElement === currentDom.shelterChatInput) {
+      currentDom.shelterChatInput.blur();
+    }
+    currentDom.shelterChatWasActive = false;
+    currentDom.shelterChatWasPending = false;
   }
 
   if (currentDom.touchControls) {
@@ -1308,6 +1792,8 @@ function bindUi(currentDom, currentState, data) {
 
   renderMovementTuningFields(currentDom, data.player.movement);
   setMovementTuningPanelOpen(currentDom, false);
+  renderSoundOptionsFields();
+  setSoundOptionsPanelOpen(false);
 
   currentDom.sceneActionButton?.addEventListener("click", () => {
     pressVirtualKey(currentState, "KeyC");
@@ -1320,6 +1806,7 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.testDebugButton?.addEventListener("click", () => {
+    setSoundOptionsPanelOpen(false);
     setTestDebugPanelOpen(currentDom, currentState, !currentState.testDebug?.active);
   });
 
@@ -1353,6 +1840,7 @@ function bindUi(currentDom, currentState, data) {
     const nextOpen = currentDom.movementTuningPanel.hidden;
     if (nextOpen) {
       setTestDebugPanelOpen(currentDom, currentState, false);
+      setSoundOptionsPanelOpen(false);
     }
     setMovementTuningPanelOpen(currentDom, nextOpen);
   });
@@ -1361,12 +1849,55 @@ function bindUi(currentDom, currentState, data) {
     setMovementTuningPanelOpen(currentDom, false);
   });
 
+  currentDom.soundOptionsButton?.addEventListener("click", () => {
+    const nextOpen = currentDom.soundOptionsPanel?.hidden ?? true;
+    if (nextOpen) {
+      setTestDebugPanelOpen(currentDom, currentState, false);
+      setMovementTuningPanelOpen(currentDom, false);
+    }
+    setSoundOptionsPanelOpen(nextOpen);
+  });
+
+  currentDom.soundOptionsCloseButton?.addEventListener("click", () => {
+    setSoundOptionsPanelOpen(false);
+  });
+
+  currentDom.soundOptionsResetButton?.addEventListener("click", () => {
+    resetAudioOptions();
+    resetGameOptions();
+    resetTtsEnabled();
+    renderSoundOptionsFields();
+  });
+
+  currentDom.soundOptionsFields?.addEventListener("input", (event) => {
+    updateSoundOptionsFromInput(currentDom, event.target);
+  });
+
+  currentDom.soundOptionsFields?.addEventListener("change", (event) => {
+    updateSoundOptionsFromInput(currentDom, event.target);
+  });
+
   currentDom.movementTuningSaveButton?.addEventListener("click", () => {
     saveRuntimeOverride(data, currentState);
     syncMovementTuningToRun(currentState, data);
     syncCrowTuningToRun(currentState, data);
     syncFaceOffTuningToRun(currentState, data);
     renderMovementTuningFields(currentDom, data.player.movement);
+  });
+
+  currentDom.movementTuningSaveTestButton?.addEventListener("click", () => {
+    saveMovementTuningTestSnapshot(data);
+    setRunNotice(currentState, "TEST 이동 튜닝 저장.");
+  });
+
+  currentDom.movementTuningLoadTestButton?.addEventListener("click", () => {
+    const loaded = applyMovementTuningTestSnapshot(data, currentState, loadMovementTuningTestSnapshot());
+    if (!loaded) {
+      setRunNotice(currentState, "TEST 이동 튜닝 없음.");
+      return;
+    }
+    renderMovementTuningFields(currentDom, data.player.movement);
+    setRunNotice(currentState, "TEST 이동 튜닝 불러옴.");
   });
 
   currentDom.movementTuningResetButton?.addEventListener("click", () => {
@@ -1455,6 +1986,12 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.canvas.addEventListener("pointerdown", (event) => {
+    syncMouseFromEvent(event);
+    if (event.button === 0) {
+      markPrimaryMouseDown();
+    } else if (event.button === 2) {
+      markSecondaryMouseDown();
+    }
     if (beginMapOverlayDrag(event)) {
       if (currentDom.canvas.setPointerCapture) {
         try {
@@ -1477,6 +2014,12 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.canvas.addEventListener("mousedown", (event) => {
+    syncMouseFromEvent(event);
+    if (event.button === 0) {
+      markPrimaryMouseDown();
+    } else if (event.button === 2) {
+      markSecondaryMouseDown();
+    }
     if (handleMiddleMouseSwitch(event)) {
       return;
     }
@@ -1728,7 +2271,7 @@ function bindUi(currentDom, currentState, data) {
       return;
     }
 
-    if (event.repeat && ["KeyP", "KeyL", "KeyB", "KeyM", "KeyT"].includes(code)) {
+    if (event.repeat && ["KeyP", "KeyL", "KeyB", "KeyM", "KeyT", "F5"].includes(code)) {
       event.preventDefault();
       return;
     }
@@ -1774,6 +2317,13 @@ function bindUi(currentDom, currentState, data) {
         setTestDebugPanelOpen(currentDom, currentState, false);
       }
       setMovementTuningPanelOpen(currentDom, nextOpen);
+      return;
+    }
+
+    if (code === "F5") {
+      event.preventDefault();
+      consumeShortcutState(currentState, code);
+      setupVaultEscapeDebug(currentDom, currentState, data);
     }
   });
 }
