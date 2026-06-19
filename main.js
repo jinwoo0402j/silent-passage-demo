@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260619-shelter-emotion-art-v1";
+import { GAME_DATA } from "./level-data.js?v=20260619-emotion-cg-v3";
 import {
   createGameDataWithExternalLevels,
   createRuntimeGameData,
@@ -20,8 +20,20 @@ import {
   loadAudioOptions,
   resetAudioOptions,
   saveAudioOptions,
-} from "./audio-options.js?v=20260619-shelter-bgm-v1";
-import { renderGame } from "./render.js?v=20260619-shelter-emotion-art-v1";
+} from "./audio-options.js?v=20260619-shelter-voice-v9";
+import {
+  loadTtsEnabled,
+  resetTtsEnabled,
+  saveTtsEnabled,
+} from "./tts-client.js?v=20260619-shelter-voice-v9";
+import {
+  GAME_OPTION_CONTROLS,
+  applyGameOptions,
+  loadGameOptions,
+  resetGameOptions,
+  saveGameOptions,
+} from "./game-options.js?v=20260619-text-speed-v1";
+import { renderGame } from "./render.js?v=20260619-shelter-cg-tools-v1";
 import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260520-shelter-photo-v1";
 import {
   MOVEMENT_STATES,
@@ -34,7 +46,7 @@ import {
   normalizePartInstance,
   saveMetaState,
 } from "./state.js?v=20260618-shelter-event-result-v1";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260619-shelter-emotion-art-v1";
+import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260619-shelter-voice-v9";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -275,6 +287,7 @@ const dom = {
 
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
 applyAudioOptions(loadAudioOptions());
+applyGameOptions(loadGameOptions());
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get("resetMeta") === "1" || urlParams.get("resetShelter") === "1") {
   window.localStorage.removeItem("rulebound-extraction-meta-v1");
@@ -292,6 +305,56 @@ applySprintTuning(
 );
 
 const state = createInitialState(runtimeData);
+const SHELTER_CG_PREVIEW_ASSETS = {
+  neutral: "shelterHomeNeutralCg",
+  anxious: "shelterHomeAnxiousCg",
+  warm: "shelterHomeWarmCg",
+  tired: "shelterHomeTiredCg",
+  hurt: "shelterHomeHurtCg",
+  angry: "shelterHomeAngryCg",
+};
+
+function applyShelterCgPreviewFromUrl(currentState, data, params) {
+  const emotion = String(params.get("shelterCgPreview") || "").trim();
+  const assetKey = SHELTER_CG_PREVIEW_ASSETS[emotion];
+  if (!assetKey) {
+    return;
+  }
+  currentState.scene = SCENES.SHELTER;
+  currentState.sceneTimer = 0;
+  currentState.shelter = currentState.shelter && typeof currentState.shelter === "object"
+    ? currentState.shelter
+    : { menuIndex: 0 };
+  const talk = currentState.shelter.talk && typeof currentState.shelter.talk === "object"
+    ? currentState.shelter.talk
+    : {};
+  currentState.shelter.talk = {
+    ...talk,
+    active: true,
+    pending: false,
+    line: `CG preview: ${emotion} / ${assetKey}`,
+    emotion,
+    eventArtAssetKey: assetKey,
+    eventBaseArtAssetKey: "shelterHomeCharmCg",
+    blockScriptedEventStart: true,
+    lineIndex: 0,
+    lineShownAt: currentState.pulse || 0,
+    choices: [],
+    choiceIndex: 0,
+    lastChoice: null,
+    reaction: {
+      emotion,
+      startedAt: currentState.pulse || 0,
+      requestId: 0,
+      choice: "preview",
+    },
+    choiceReaction: null,
+    eventResult: null,
+    error: data.art?.[assetKey]?.src ? "" : `Missing art asset: ${assetKey}`,
+  };
+}
+
+applyShelterCgPreviewFromUrl(state, runtimeData, urlParams);
 if (urlParams.get("partsLoop") === "1") {
   const testPart = normalizePartInstance(runtimeData, "watchman-right-arm");
   if (testPart) {
@@ -583,13 +646,23 @@ function formatVolumePercent(value) {
   return `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`;
 }
 
+function formatTextSpeed(value) {
+  return `${Math.round(Math.max(15, Math.min(90, Number(value) || 30)))} cps`;
+}
+
+function formatToggle(value) {
+  return value ? "On" : "Off";
+}
+
 function renderSoundOptionsFields() {
   if (!soundOptionsFields) {
     return;
   }
-  const options = loadAudioOptions();
-  soundOptionsFields.innerHTML = AUDIO_OPTION_CHANNELS.map((channel) => {
-    const value = options[channel.id] ?? 1;
+  const audioOptions = loadAudioOptions();
+  const gameOptions = loadGameOptions();
+  const ttsEnabled = loadTtsEnabled();
+  const audioFields = AUDIO_OPTION_CHANNELS.map((channel) => {
+    const value = audioOptions[channel.id] ?? 1;
     return `
       <div class="sound-options-field">
         <label for="sound-${channel.id}">${channel.label}</label>
@@ -607,6 +680,46 @@ function renderSoundOptionsFields() {
       </div>
     `;
   }).join("");
+  const voiceToggleField = `
+    <div class="sound-options-field">
+      <label for="tts-enabled">Voice Lines</label>
+      <output for="tts-enabled" data-tts-output="enabled">${formatToggle(ttsEnabled)}</output>
+      <input
+        id="tts-enabled"
+        type="checkbox"
+        ${ttsEnabled ? "checked" : ""}
+        data-tts-option="enabled"
+      >
+      <small>Read Type-07A shelter dialogue</small>
+    </div>
+  `;
+  const voiceAuditionField = `
+    <div class="sound-options-field">
+      <label>Voice Audition</label>
+      <a href="./voice-audition.html" class="sound-options-link">Open presets</a>
+      <small>Compare and select Type-07A voice presets</small>
+    </div>
+  `;
+  const gameFields = GAME_OPTION_CONTROLS.map((control) => {
+    const value = gameOptions[control.id] ?? 30;
+    return `
+      <div class="sound-options-field">
+        <label for="game-${control.id}">${control.label}</label>
+        <output for="game-${control.id}" data-game-output="${control.id}">${formatTextSpeed(value)}</output>
+        <input
+          id="game-${control.id}"
+          type="range"
+          min="${control.min}"
+          max="${control.max}"
+          step="${control.step}"
+          value="${Math.round(value)}"
+          data-game-option="${control.id}"
+        >
+        <small>${control.description}</small>
+      </div>
+    `;
+  }).join("");
+  soundOptionsFields.innerHTML = `${audioFields}${voiceToggleField}${voiceAuditionField}${gameFields}`;
 }
 
 function setSoundOptionsPanelOpen(open) {
@@ -617,6 +730,39 @@ function setSoundOptionsPanelOpen(open) {
   soundOptionsButton.classList.toggle("is-active", open);
   if (open) {
     renderSoundOptionsFields();
+  }
+}
+
+function updateSoundOptionsFromInput(currentDom, input) {
+  const channel = input?.dataset?.audioChannel;
+  const gameOption = input?.dataset?.gameOption;
+  const ttsOption = input?.dataset?.ttsOption;
+  if (channel) {
+    const options = loadAudioOptions();
+    options[channel] = Math.max(0, Math.min(1, Number(input.value) / 100));
+    saveAudioOptions(options);
+    const output = currentDom.soundOptionsFields?.querySelector(`[data-audio-output="${channel}"]`);
+    if (output) {
+      output.textContent = formatVolumePercent(options[channel]);
+    }
+    return;
+  }
+  if (ttsOption === "enabled") {
+    const enabled = saveTtsEnabled(Boolean(input.checked));
+    const output = currentDom.soundOptionsFields?.querySelector('[data-tts-output="enabled"]');
+    if (output) {
+      output.textContent = formatToggle(enabled);
+    }
+    return;
+  }
+  if (gameOption) {
+    const options = loadGameOptions();
+    options[gameOption] = Number(input.value);
+    saveGameOptions(options);
+    const output = currentDom.soundOptionsFields?.querySelector(`[data-game-output="${gameOption}"]`);
+    if (output) {
+      output.textContent = formatTextSpeed(options[gameOption]);
+    }
   }
 }
 
@@ -1718,22 +1864,17 @@ function bindUi(currentDom, currentState, data) {
 
   currentDom.soundOptionsResetButton?.addEventListener("click", () => {
     resetAudioOptions();
+    resetGameOptions();
+    resetTtsEnabled();
     renderSoundOptionsFields();
   });
 
   currentDom.soundOptionsFields?.addEventListener("input", (event) => {
-    const input = event.target;
-    const channel = input?.dataset?.audioChannel;
-    if (!channel) {
-      return;
-    }
-    const options = loadAudioOptions();
-    options[channel] = Math.max(0, Math.min(1, Number(input.value) / 100));
-    saveAudioOptions(options);
-    const output = currentDom.soundOptionsFields.querySelector(`[data-audio-output="${channel}"]`);
-    if (output) {
-      output.textContent = formatVolumePercent(options[channel]);
-    }
+    updateSoundOptionsFromInput(currentDom, event.target);
+  });
+
+  currentDom.soundOptionsFields?.addEventListener("change", (event) => {
+    updateSoundOptionsFromInput(currentDom, event.target);
   });
 
   currentDom.movementTuningSaveButton?.addEventListener("click", () => {

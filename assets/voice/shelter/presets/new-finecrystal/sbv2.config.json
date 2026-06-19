@@ -1,0 +1,57 @@
+{
+  "serverUrl": "http://127.0.0.1:5000",
+  "modelName": "girl-jp-extra",
+  "modelId": 2,
+  "speakerName": "NotAnime-JP-age20female-fineCrystal",
+  "speakerId": 0,
+  "language": "JP",
+  "outputFormat": "wav",
+  "defaults": {
+    "style": "fineCrystal(normal)",
+    "styleWeight": 1,
+    "sdpRatio": 0.16,
+    "noise": 0.5,
+    "noiseW": 0.68,
+    "length": 1,
+    "autoSplit": true,
+    "splitInterval": 0.3,
+    "assistText": "",
+    "assistTextWeight": 0
+  },
+  "emotionStyles": {
+    "neutral": {
+      "style": "Neutral",
+      "styleWeight": 1,
+      "length": 1.16
+    },
+    "warm": {
+      "style": "fineCrystal(normal)",
+      "styleWeight": 1,
+      "length": 1
+    },
+    "anxious": {
+      "style": "fineCrystal(sad)",
+      "styleWeight": 0.85,
+      "length": 1.04
+    },
+    "tired": {
+      "style": "Sad",
+      "styleWeight": 0.72,
+      "length": 1.22
+    },
+    "hurt": {
+      "style": "Sad",
+      "styleWeight": 0.76,
+      "length": 1.2
+    },
+    "angry": {
+      "style": "Angry",
+      "styleWeight": 0.76,
+      "length": 1.12
+    }
+  },
+  "runtimePlayback": {
+    "playbackRate": 1,
+    "preservesPitch": true
+  }
+}

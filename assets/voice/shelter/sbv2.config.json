@@ -1,0 +1,69 @@
+{
+  "serverUrl": "http://127.0.0.1:5000",
+  "modelName": "jvnv-F2-jp",
+  "modelId": 2,
+  "speakerName": "jvnv-F2-jp",
+  "speakerId": 0,
+  "language": "JP",
+  "outputFormat": "wav",
+  "defaults": {
+    "style": "Neutral",
+    "styleWeight": 0.9,
+    "sdpRatio": 0.12,
+    "noise": 0.4,
+    "noiseW": 0.58,
+    "length": 1.24,
+    "autoSplit": true,
+    "splitInterval": 0.3,
+    "assistText": "感情を抑えて、冷静で澄んだ声で静かに話して。",
+    "assistTextWeight": 0.28
+  },
+  "emotionStyles": {
+    "neutral": {
+      "style": "Neutral",
+      "styleWeight": 0.9,
+      "length": 1.24
+    },
+    "warm": {
+      "style": "Neutral",
+      "styleWeight": 0.92,
+      "length": 1.22,
+      "noise": 0.4,
+      "assistTextWeight": 0.26
+    },
+    "anxious": {
+      "style": "Neutral",
+      "styleWeight": 0.88,
+      "length": 1.22,
+      "sdpRatio": 0.12,
+      "noiseW": 0.6,
+      "assistTextWeight": 0.24
+    },
+    "tired": {
+      "style": "Sad",
+      "styleWeight": 0.62,
+      "length": 1.28,
+      "noise": 0.38,
+      "assistTextWeight": 0.2
+    },
+    "hurt": {
+      "style": "Sad",
+      "styleWeight": 0.66,
+      "length": 1.26,
+      "noise": 0.38,
+      "assistTextWeight": 0.2
+    },
+    "angry": {
+      "style": "Angry",
+      "styleWeight": 0.66,
+      "length": 1.18,
+      "sdpRatio": 0.12,
+      "noise": 0.42,
+      "assistTextWeight": 0.22
+    }
+  },
+  "runtimePlayback": {
+    "playbackRate": 1.04,
+    "preservesPitch": false
+  }
+}

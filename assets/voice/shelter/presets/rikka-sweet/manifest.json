@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "presetId": "rikka-sweet",
+  "label": "새 모델: Rikka sweet",
+  "description": "RikkaBotan CC BY-SA 모델의 sweet 원음색. 밝고 귀여운 후보.",
+  "tags": [
+    "new-model",
+    "cc-by-sa",
+    "sweet"
+  ],
+  "scene": "shelter",
+  "speaker": "type-07a",
+  "voice": "type07a",
+  "format": "wav",
+  "generator": "Style-Bert-VITS2",
+  "modelName": "rikka-sweet",
+  "generatedAt": "2026-06-19T05:38:40.989Z",
+  "playbackRate": 1,
+  "preservesPitch": true,
+  "lines": [
+    {
+      "id": "type07a_anxious_shelter-first-arrival-01_01x699w",
+      "emotion": "anxious",
+      "topic": "첫 쉘터 진입",
+      "text": "와... 여기 생각보다 멀쩡하네.",
+      "voiceText": "ここ、思ったより使えそうね。",
+      "src": "./assets/voice/shelter/presets/rikka-sweet/anxious/type07a_anxious_shelter-first-arrival-01_01x699w.wav",
+      "tags": [
+        "anxious",
+        "첫 쉘터 진입"
+      ]
+    },
+    {
+      "id": "type07a_warm_shelter-first-arrival-01_1uuasii",
+      "emotion": "warm",
+      "topic": "첫 쉘터 진입",
+      "text": "아빠, 여기 우리 임시 집 같은 거야? 나 그런 거 좀 좋은데.",
+      "voiceText": "お父さん。ここが、私たちの仮住まいなのね。",
+      "src": "./assets/voice/shelter/presets/rikka-sweet/warm/type07a_warm_shelter-first-arrival-01_1uuasii.wav",
+      "tags": [
+        "warm",
+        "첫 쉘터 진입"
+      ]
+    }
+  ]
+}

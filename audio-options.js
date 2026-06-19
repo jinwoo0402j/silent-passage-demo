@@ -4,6 +4,7 @@ export const AUDIO_OPTION_CHANNELS = [
   { id: "master", label: "Master", description: "All game audio" },
   { id: "bgm", label: "BGM", description: "Music loops" },
   { id: "sfx", label: "SFX", description: "Shots and interface sounds" },
+  { id: "typing", label: "Typing", description: "Dialogue typewriter taps" },
   { id: "voice", label: "Voice", description: "Character voice playback" },
 ];
 
@@ -11,6 +12,7 @@ export const DEFAULT_AUDIO_OPTIONS = {
   master: 0.8,
   bgm: 0.7,
   sfx: 0.8,
+  typing: 0.85,
   voice: 0.8,
 };
 
@@ -27,6 +29,7 @@ export function normalizeAudioOptions(options = {}) {
     master: clampVolume(options.master, DEFAULT_AUDIO_OPTIONS.master),
     bgm: clampVolume(options.bgm, DEFAULT_AUDIO_OPTIONS.bgm),
     sfx: clampVolume(options.sfx, DEFAULT_AUDIO_OPTIONS.sfx),
+    typing: clampVolume(options.typing, DEFAULT_AUDIO_OPTIONS.typing),
     voice: clampVolume(options.voice, DEFAULT_AUDIO_OPTIONS.voice),
   };
 }

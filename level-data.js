@@ -173,22 +173,22 @@ export const GAME_DATA = {
       "src": "./assets/cg/shelter-home-charm-01.png?v=20260618-home-charm-2"
     },
     "shelterHomeNeutralCg": {
-      "src": "./assets/cg/shelter-home-emotion-neutral-01.png?v=20260619-emotion-cg-v1"
+      "src": "./assets/cg/shelter-home-emotion-neutral-03.png?v=20260619-emotion-cg-v3"
     },
     "shelterHomeAnxiousCg": {
-      "src": "./assets/cg/shelter-home-emotion-anxious-01.png?v=20260619-emotion-cg-v1"
+      "src": "./assets/cg/shelter-home-emotion-anxious-03.png?v=20260619-emotion-cg-v3"
     },
     "shelterHomeWarmCg": {
-      "src": "./assets/cg/shelter-home-emotion-warm-01.png?v=20260619-emotion-cg-v1"
+      "src": "./assets/cg/shelter-home-emotion-warm-03.png?v=20260619-emotion-cg-v3"
     },
     "shelterHomeTiredCg": {
-      "src": "./assets/cg/shelter-home-emotion-tired-01.png?v=20260619-emotion-cg-v1"
+      "src": "./assets/cg/shelter-home-emotion-tired-03.png?v=20260619-emotion-cg-v3"
     },
     "shelterHomeHurtCg": {
-      "src": "./assets/cg/shelter-home-emotion-hurt-01.png?v=20260619-emotion-cg-v1"
+      "src": "./assets/cg/shelter-home-emotion-hurt-03.png?v=20260619-emotion-cg-v3"
     },
     "shelterHomeAngryCg": {
-      "src": "./assets/cg/shelter-home-emotion-angry-01.png?v=20260619-emotion-cg-v1"
+      "src": "./assets/cg/shelter-home-emotion-angry-03.png?v=20260619-emotion-cg-v3"
     }
   },
   "scale": {

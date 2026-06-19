@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Silent Passage Voice Audition</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101113;
+      --panel: #191b1f;
+      --line: #30343b;
+      --text: #f2f2f0;
+      --muted: #a9adb5;
+      --accent: #d6b779;
+      --accent-strong: #ffd88a;
+      --danger: #e07979;
+      font-family: Inter, "Noto Sans KR", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: end;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(24px, 4vw, 42px);
+      font-weight: 750;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .volume {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      background: #14161a;
+    }
+
+    input[type="range"] {
+      width: 132px;
+      accent-color: var(--accent);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 16px;
+    }
+
+    .card.selected {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(214, 183, 121, 0.35);
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .badge {
+      flex: 0 0 auto;
+      border: 1px solid rgba(214, 183, 121, 0.5);
+      color: var(--accent-strong);
+      padding: 3px 7px;
+      font-size: 12px;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 12px 0;
+    }
+
+    .tag {
+      border: 1px solid #3a3f47;
+      color: #c9cdd5;
+      padding: 3px 7px;
+      font-size: 12px;
+    }
+
+    .samples {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .sample {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 9px;
+      align-items: center;
+      padding: 9px;
+      background: #121419;
+      border: 1px solid #282c33;
+    }
+
+    .sample-text {
+      min-width: 0;
+      color: #d9dce2;
+      font-size: 13px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    button,
+    a.button {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: #20242b;
+      color: var(--text);
+      min-height: 36px;
+      padding: 8px 12px;
+      font: inherit;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    button:hover,
+    a.button:hover {
+      border-color: var(--accent);
+      color: var(--accent-strong);
+    }
+
+    button.primary {
+      background: #2b261b;
+      border-color: rgba(214, 183, 121, 0.7);
+      color: var(--accent-strong);
+    }
+
+    button.playing {
+      border-color: var(--danger);
+      color: #ffd2d2;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .status {
+      margin-top: 16px;
+      min-height: 22px;
+      color: var(--accent-strong);
+    }
+
+    .error {
+      color: var(--danger);
+    }
+
+    @media (max-width: 720px) {
+      header {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Voice Audition</h1>
+        <p>Type-07A 쉘터 보이스 프리셋을 직접 듣고 선택합니다.</p>
+      </div>
+      <div class="toolbar">
+        <label class="volume">
+          Volume
+          <input id="volume" type="range" min="0" max="100" value="90">
+        </label>
+        <a class="button" href="./?perf=lite&resetShelter=1&shelterCgPreview=warm&tts=on">Game</a>
+      </div>
+    </header>
+
+    <div id="status" class="status"></div>
+    <section id="grid" class="grid" aria-live="polite"></section>
+  </main>
+
+  <script type="module">
+    const PRESET_INDEX_URL = "./assets/voice/shelter/voice-presets.json?v=20260619-shelter-voice-v9";
+    const TTS_ENABLED_KEY = "silent-passage-tts-enabled-v1";
+    const grid = document.querySelector("#grid");
+    const statusEl = document.querySelector("#status");
+    const volumeEl = document.querySelector("#volume");
+    let presetIndex = null;
+    let currentAudio = null;
+    let currentButton = null;
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.classList.toggle("error", isError);
+    }
+
+    function selectedPresetId() {
+      return window.localStorage.getItem(presetIndex?.storageKey || "silent-passage-shelter-voice-preset-v1")
+        || presetIndex?.defaultPreset
+        || "";
+    }
+
+    function setSelectedPreset(id) {
+      window.localStorage.setItem(presetIndex.storageKey, id);
+      window.localStorage.setItem(TTS_ENABLED_KEY, "on");
+      renderCards();
+      setStatus(`선택됨: ${presetIndex.presets.find((preset) => preset.id === id)?.label || id}`);
+    }
+
+    function stopAudio() {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }
+      if (currentButton) {
+        currentButton.classList.remove("playing");
+        currentButton.textContent = currentButton.dataset.label || "Play";
+      }
+      currentAudio = null;
+      currentButton = null;
+    }
+
+    function applyPlaybackTuning(audio, manifest, line) {
+      audio.playbackRate = Number(line?.playbackRate ?? manifest.playbackRate ?? 1) || 1;
+      const preservesPitch = (line?.preservesPitch ?? manifest.preservesPitch) !== false;
+      if ("preservesPitch" in audio) {
+        audio.preservesPitch = preservesPitch;
+      }
+      if ("mozPreservesPitch" in audio) {
+        audio.mozPreservesPitch = preservesPitch;
+      }
+      if ("webkitPreservesPitch" in audio) {
+        audio.webkitPreservesPitch = preservesPitch;
+      }
+    }
+
+    async function loadManifest(preset) {
+      const url = `${preset.manifest}?v=20260619-shelter-voice-v9`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`${preset.label} manifest load failed`);
+      }
+      return response.json();
+    }
+
+    async function playSample(preset, line, button, manifest) {
+      if (currentAudio && currentButton === button) {
+        stopAudio();
+        return;
+      }
+      stopAudio();
+      const audio = new Audio(line.src);
+      applyPlaybackTuning(audio, manifest, line);
+      audio.volume = Number(volumeEl.value) / 100;
+      currentAudio = audio;
+      currentButton = button;
+      button.dataset.label = button.textContent;
+      button.textContent = "Stop";
+      button.classList.add("playing");
+      audio.addEventListener("ended", stopAudio, { once: true });
+      await audio.play();
+      setStatus(`${preset.label} sample`);
+    }
+
+    function gameHref(id) {
+      const params = new URLSearchParams({
+        perf: "lite",
+        resetShelter: "1",
+        shelterCgPreview: "warm",
+        tts: "on",
+        voicePreset: id,
+        voiceAudition: Date.now().toString(),
+      });
+      return `./?${params.toString()}`;
+    }
+
+    async function renderCard(preset) {
+      const manifest = await loadManifest(preset);
+      const card = document.createElement("article");
+      card.className = `card${selectedPresetId() === preset.id ? " selected" : ""}`;
+      const tags = (preset.tags || []).map((tag) => `<span class="tag">${tag}</span>`).join("");
+      const sampleButtons = manifest.lines.slice(0, 2).map((line, index) => `
+        <div class="sample">
+          <button type="button" data-sample="${index}">Play ${index + 1}</button>
+          <div class="sample-text">${line.voiceText || line.text || line.id}</div>
+        </div>
+      `).join("");
+      card.innerHTML = `
+        <div class="card-head">
+          <h2>${preset.label}</h2>
+          ${selectedPresetId() === preset.id ? '<span class="badge">Selected</span>' : ""}
+        </div>
+        <p>${preset.description}</p>
+        <div class="tags">${tags}</div>
+        <div class="samples">${sampleButtons}</div>
+        <div class="actions">
+          <button class="primary" type="button" data-select>Use</button>
+          <a class="button" href="${gameHref(preset.id)}">Game Test</a>
+        </div>
+      `;
+      card.querySelector("[data-select]").addEventListener("click", () => setSelectedPreset(preset.id));
+      card.querySelectorAll("[data-sample]").forEach((button) => {
+        const line = manifest.lines[Number(button.dataset.sample)];
+        button.addEventListener("click", () => playSample(preset, line, button, manifest)
+          .catch((error) => setStatus(error.message || "Audio playback failed", true)));
+      });
+      return card;
+    }
+
+    async function renderCards() {
+      grid.replaceChildren();
+      const cards = await Promise.all(presetIndex.presets.map(renderCard));
+      grid.replaceChildren(...cards);
+    }
+
+    async function main() {
+      const response = await fetch(PRESET_INDEX_URL);
+      if (!response.ok) {
+        throw new Error("voice-presets.json load failed");
+      }
+      presetIndex = await response.json();
+      await renderCards();
+      const selected = selectedPresetId();
+      setStatus(selected ? `현재 선택: ${presetIndex.presets.find((preset) => preset.id === selected)?.label || selected}` : "프리셋을 선택하세요.");
+    }
+
+    main().catch((error) => {
+      setStatus(error.message || "Voice audition failed", true);
+    });
+  </script>
+</body>
+</html>

@@ -105,7 +105,6 @@ body.is-shelter-talk-active .app-links,
 body.is-shelter-talk-active .live-edit-button,
 body.is-shelter-talk-active .debug-button,
 body.is-shelter-talk-active .movement-tuning-button,
-body.is-shelter-talk-active .sound-options-button,
 body.is-shelter-talk-active .scene-action-button,
 body.is-shelter-talk-active .test-debug-button,
 body.is-shelter-talk-active .test-debug-panel {
@@ -415,12 +414,14 @@ body.is-inventory-overlay-active .touch-controls {
   display: flex;
   flex-direction: column;
   width: 320px;
+  max-height: calc(100% - 270px);
   padding: 16px;
   border: 1px solid rgba(147, 234, 255, 0.24);
   border-radius: 18px;
   background: rgba(7, 14, 20, 0.9);
   backdrop-filter: blur(14px);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.26);
+  overflow: auto;
 }
 
 .sound-options-panel[hidden] {
@@ -494,6 +495,21 @@ body.is-inventory-overlay-active .touch-controls {
 .sound-options-field output {
   color: rgba(147, 234, 255, 0.94);
   font: 800 12px "Segoe UI", sans-serif;
+}
+
+.sound-options-link {
+  justify-self: end;
+  border: 1px solid rgba(147, 234, 255, 0.28);
+  background: rgba(147, 234, 255, 0.08);
+  color: rgba(238, 247, 251, 0.9);
+  padding: 6px 9px;
+  font: 800 11px "Segoe UI", sans-serif;
+  text-decoration: none;
+}
+
+.sound-options-link:hover {
+  border-color: rgba(147, 234, 255, 0.62);
+  color: #ffffff;
 }
 
 .sound-options-field small {

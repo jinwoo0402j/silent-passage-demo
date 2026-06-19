@@ -5,15 +5,18 @@ import {
   ensureWeaponLoadoutState,
   hasUnlocked,
 } from "./state.js?v=20260615-speedfx-v11";
+import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
 const imageCache = new Map();
+const shelterCinematicVisualStates = new WeakMap();
 let spriteTintCanvas = null;
 let spriteTintContext = null;
 let nightOverlayCanvas = null;
 let nightOverlayContext = null;
 const SCREEN_WIDTH = 1280;
 const SCREEN_HEIGHT = 720;
+const SHELTER_CG_CROSSFADE_SECONDS = 0.36;
 const MAP_EXPLORE_CELL_SIZE = 320;
 const NIGHT_TRANSITION_SECONDS = 1.4;
 const TITLE_MENU_OPTIONS = [
@@ -8294,6 +8297,100 @@ const SHELTER_HOME_EMOTION_ART_ASSETS = {
   angry: "shelterHomeAngryCg",
 };
 
+function getShelterCinematicVisualState(state, assetKey) {
+  const pulse = Number.isFinite(state?.pulse) ? state.pulse : 0;
+  let visual = shelterCinematicVisualStates.get(state);
+  if (!visual) {
+    visual = {
+      assetKey,
+      previousAssetKey: "",
+      changedAt: pulse,
+    };
+    shelterCinematicVisualStates.set(state, visual);
+    return visual;
+  }
+  if (visual.assetKey !== assetKey) {
+    visual.previousAssetKey = visual.assetKey || "";
+    visual.assetKey = assetKey;
+    visual.changedAt = pulse;
+  }
+  return visual;
+}
+
+function getShelterArtImage(data, assetKey) {
+  const key = typeof assetKey === "string" ? assetKey.trim() : "";
+  return key ? getImageAsset(data.art?.[key]?.src) : null;
+}
+
+function drawShelterCinematicReadability(ctx) {
+  const leftReadability = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.52, 0);
+  leftReadability.addColorStop(0, "rgba(2,7,10,0.5)");
+  leftReadability.addColorStop(0.7, "rgba(2,7,10,0.14)");
+  leftReadability.addColorStop(1, "rgba(2,7,10,0)");
+  ctx.fillStyle = leftReadability;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  const bottomReadability = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.56, 0, SCREEN_HEIGHT);
+  bottomReadability.addColorStop(0, "rgba(2,7,10,0)");
+  bottomReadability.addColorStop(0.58, "rgba(2,7,10,0.42)");
+  bottomReadability.addColorStop(1, "rgba(2,7,10,0.76)");
+  ctx.fillStyle = bottomReadability;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+}
+
+function drawShelterCinematicCg(ctx, state, data, theme, talk, assetKey, image, emotion) {
+  const reaction = getShelterMemorialReaction(talk, state, emotion);
+  const motion = getShelterMemorialMotion(state, reaction);
+  const visual = getShelterCinematicVisualState(state, assetKey);
+  const age = Math.max(0, (Number.isFinite(state?.pulse) ? state.pulse : 0) - visual.changedAt);
+  const fade = clamp(age / SHELTER_CG_CROSSFADE_SECONDS, 0, 1);
+  const previousImage = fade < 1 ? getShelterArtImage(data, visual.previousAssetKey) : null;
+  const hasCurrent = Boolean(image && image.complete && image.naturalWidth);
+  const hasPrevious = Boolean(previousImage && previousImage.complete && previousImage.naturalWidth);
+
+  if (!hasCurrent && !hasPrevious) {
+    drawShelterRestBackground(ctx, state, data, theme, 1);
+    return false;
+  }
+
+  ctx.save();
+  if (motion.filter && motion.filter !== "none") {
+    ctx.filter = motion.filter;
+  }
+  if (hasPrevious && fade < 1) {
+    drawImageCoverPan(
+      ctx,
+      previousImage,
+      -4 + motion.shakeX,
+      -4 + motion.shakeY,
+      SCREEN_WIDTH + 8,
+      SCREEN_HEIGHT + 8,
+      motion.panX,
+      motion.panY,
+      motion.zoom,
+      1 - fade,
+    );
+  }
+  if (hasCurrent) {
+    drawImageCoverPan(
+      ctx,
+      image,
+      -4 + motion.shakeX,
+      -4 + motion.shakeY,
+      SCREEN_WIDTH + 8,
+      SCREEN_HEIGHT + 8,
+      motion.panX,
+      motion.panY,
+      motion.zoom,
+      hasPrevious ? fade : 1,
+    );
+  }
+  ctx.filter = "none";
+  drawShelterCinematicReadability(ctx);
+  drawShelterCinematicReactionEffects(ctx, state, talk, reaction);
+  ctx.restore();
+  return true;
+}
+
 const SHELTER_MEMORIAL_REACTION_PRESETS = {
   neutral: {
     panX: 0,
@@ -8648,45 +8745,9 @@ function getShelterTalkEmotion(talk) {
 function drawShelterEmotionPortrait(ctx, state, data, theme, talk) {
   const emotion = getShelterTalkEmotion(talk);
   const eventArtAssetKey = typeof talk?.eventArtAssetKey === "string" ? talk.eventArtAssetKey.trim() : "";
-  const eventImage = eventArtAssetKey ? getImageAsset(data.art?.[eventArtAssetKey]?.src) : null;
+  const eventImage = getShelterArtImage(data, eventArtAssetKey);
   if (eventArtAssetKey) {
-    if (!eventImage || !eventImage.complete || !eventImage.naturalWidth) {
-      drawShelterRestBackground(ctx, state, data, theme, 1);
-      return;
-    }
-    ctx.save();
-    const reaction = getShelterMemorialReaction(talk, state, emotion);
-    const motion = getShelterMemorialMotion(state, reaction);
-    if (motion.filter && motion.filter !== "none") {
-      ctx.filter = motion.filter;
-    }
-    drawImageCoverPan(
-      ctx,
-      eventImage,
-      -4 + motion.shakeX,
-      -4 + motion.shakeY,
-      SCREEN_WIDTH + 8,
-      SCREEN_HEIGHT + 8,
-      motion.panX,
-      motion.panY,
-      motion.zoom,
-      1,
-    );
-    ctx.filter = "none";
-    const leftReadability = ctx.createLinearGradient(0, 0, SCREEN_WIDTH * 0.52, 0);
-    leftReadability.addColorStop(0, "rgba(2,7,10,0.5)");
-    leftReadability.addColorStop(0.7, "rgba(2,7,10,0.14)");
-    leftReadability.addColorStop(1, "rgba(2,7,10,0)");
-    ctx.fillStyle = leftReadability;
-    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-    const bottomReadability = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.56, 0, SCREEN_HEIGHT);
-    bottomReadability.addColorStop(0, "rgba(2,7,10,0)");
-    bottomReadability.addColorStop(0.58, "rgba(2,7,10,0.42)");
-    bottomReadability.addColorStop(1, "rgba(2,7,10,0.76)");
-    ctx.fillStyle = bottomReadability;
-    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-    drawShelterCinematicReactionEffects(ctx, state, talk, reaction);
-    ctx.restore();
+    drawShelterCinematicCg(ctx, state, data, theme, talk, eventArtAssetKey, eventImage, emotion);
     return;
   }
   const memorialKey = SHELTER_MEMORIAL_ASSETS[emotion] || SHELTER_MEMORIAL_ASSETS.neutral;
@@ -8811,7 +8872,6 @@ const SHELTER_CINEMATIC_SERIF_FONT = "'Noto Serif KR', 'KoPubBatang', 'KoPub Bat
 const SHELTER_CHOICE_REVEAL_DELAY_SECONDS = 0.42;
 const SHELTER_CHOICE_REVEAL_SECONDS = 0.22;
 const SHELTER_CHOICE_REACTION_SECONDS = 0.48;
-const SHELTER_SUBTITLE_TYPE_CHARS_PER_SECOND = 30;
 const SHELTER_SUBTITLE_TYPE_MIN_SECONDS = 0.18;
 const SHELTER_SUBTITLE_TYPE_MAX_SECONDS = 2.6;
 
@@ -8825,7 +8885,7 @@ function getShelterLineTypeDuration(line) {
     return 0;
   }
   return clamp(
-    length / SHELTER_SUBTITLE_TYPE_CHARS_PER_SECOND,
+    length / getShelterSubtitleCharsPerSecond(),
     SHELTER_SUBTITLE_TYPE_MIN_SECONDS,
     SHELTER_SUBTITLE_TYPE_MAX_SECONDS,
   );
@@ -9220,7 +9280,8 @@ function drawShelterAutoEventBridgeOverlay(ctx, state, data, theme, bridge) {
     drawShelterSceneV3(ctx, state, data);
     return;
   }
-  const duration = Number.isFinite(bridge?.duration) ? Math.max(0.45, Number(bridge.duration)) : 1.15;
+  const baseDuration = Number.isFinite(bridge?.duration) ? Math.max(0.45, Number(bridge.duration)) : 1.15;
+  const duration = Math.max(baseDuration, getShelterLineTypeDuration(line) + 0.2);
   const startedAt = Number.isFinite(bridge?.startedAt) ? Number(bridge.startedAt) : (state.pulse || 0);
   const progress = clamp(((state.pulse || 0) - startedAt) / duration, 0, 1);
   const fadeIn = clamp(progress / 0.28, 0, 1);

@@ -21,9 +21,14 @@ import {
 import {
   getAudioChannelVolume,
   registerAudioElement,
-} from "./audio-options.js?v=20260619-shelter-bgm-v1";
+} from "./audio-options.js?v=20260619-shelter-voice-v9";
+import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
 import { requestFaceOffLine } from "./ai-client.js?v=20260618-direct-chat-v7";
-import { speakFaceOffLine } from "./tts-client.js?v=20260619-shelter-bgm-v1";
+import {
+  speakFaceOffLine,
+  speakShelterLine,
+  stopTtsPlayback,
+} from "./tts-client.js?v=20260619-shelter-voice-v9";
 import {
   approach,
   clamp,
@@ -267,9 +272,19 @@ const SHELTER_EVENT_BRIDGE_SECONDS = 1.15;
 const SHELTER_CHOICE_REVEAL_DELAY_SECONDS = 0.42;
 const SHELTER_CHOICE_REACTION_SECONDS = 0.48;
 const SHELTER_TALK_DOOR_TRANSITION_SECONDS = 0.62;
-const SHELTER_SUBTITLE_TYPE_CHARS_PER_SECOND = 30;
 const SHELTER_SUBTITLE_TYPE_MIN_SECONDS = 0.18;
 const SHELTER_SUBTITLE_TYPE_MAX_SECONDS = 2.6;
+const SHELTER_TYPING_SOUND_MAX_CATCHUP = 4;
+const SHELTER_TYPING_SOUND_DEFAULT_INTERVAL = 0.045;
+const SHELTER_TYPING_SOUND_GAIN = 12;
+const SHELTER_TYPING_SOUND_PRESETS = {
+  neutral: { base: 520, step: 13, volume: 0.036, interval: 0.045, duration: 0.034, tone: "triangle", filter: 1900 },
+  warm: { base: 460, step: 10, volume: 0.04, interval: 0.052, duration: 0.04, tone: "sine", filter: 1500 },
+  anxious: { base: 650, step: 18, volume: 0.029, interval: 0.038, duration: 0.028, tone: "triangle", filter: 2500 },
+  tired: { base: 380, step: 8, volume: 0.028, interval: 0.07, duration: 0.046, tone: "sine", filter: 1200 },
+  hurt: { base: 430, step: 9, volume: 0.026, interval: 0.085, duration: 0.042, tone: "triangle", filter: 1350 },
+  angry: { base: 700, step: 22, volume: 0.033, interval: 0.04, duration: 0.028, tone: "square", filter: 3000 },
+};
 const SHELTER_NIGHT_LOCK_MESSAGE = "Shelter opens only at night.";
 const SHELTER_COOLDOWN_MESSAGE = "Shelter door is still closing.";
 const SHELTER_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
@@ -3044,6 +3059,140 @@ function getAudioClockSeconds() {
     return performance.now() / 1000;
   }
   return Date.now() / 1000;
+}
+
+function getShelterTypingSoundPreset(emotion) {
+  return SHELTER_TYPING_SOUND_PRESETS[normalizeShelterTalkEmotion(emotion, "neutral")]
+    || SHELTER_TYPING_SOUND_PRESETS.neutral;
+}
+
+function shouldSkipShelterTypingChar(char) {
+  return !String(char || "").trim();
+}
+
+function isShelterTypingPunctuation(char) {
+  return /[.!?。！？…]$/u.test(String(char || ""));
+}
+
+function createShelterTypingNoiseBuffer(context, duration) {
+  const sampleCount = Math.max(1, Math.floor(context.sampleRate * duration));
+  const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < sampleCount; index += 1) {
+    const decay = 1 - index / sampleCount;
+    channel[index] = (Math.random() * 2 - 1) * decay * decay;
+  }
+  return buffer;
+}
+
+function playShelterTypingSound(emotion, char, visibleCount = 0) {
+  if (shouldSkipShelterTypingChar(char)) {
+    return;
+  }
+  try {
+    const context = getGameAudioContext();
+    if (!context) {
+      return;
+    }
+    const preset = getShelterTypingSoundPreset(emotion);
+    const punctuation = isShelterTypingPunctuation(char);
+    const seed = ((String(char).codePointAt(0) || 0) + visibleCount * 17) % 7;
+    const volume = getAudioChannelVolume(
+      "typing",
+      preset.volume * SHELTER_TYPING_SOUND_GAIN * (punctuation ? 0.82 : 1),
+    );
+    if (volume <= 0.0001) {
+      return;
+    }
+    const now = context.currentTime;
+    const toneDuration = preset.duration * (punctuation ? 1.28 : 1);
+    const oscillator = context.createOscillator();
+    const toneFilter = context.createBiquadFilter();
+    const toneGain = context.createGain();
+    oscillator.type = preset.tone;
+    oscillator.frequency.setValueAtTime(
+      (punctuation ? preset.base * 0.78 : preset.base) + seed * preset.step,
+      now,
+    );
+    toneFilter.type = "bandpass";
+    toneFilter.frequency.setValueAtTime(preset.filter, now);
+    toneFilter.Q.setValueAtTime(punctuation ? 2.4 : 3.2, now);
+    toneGain.gain.setValueAtTime(0.0001, now);
+    toneGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + 0.004);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + toneDuration);
+    oscillator.connect(toneFilter);
+    toneFilter.connect(toneGain);
+    toneGain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + toneDuration + 0.012);
+
+    const noiseDuration = Math.min(0.018, toneDuration);
+    const noise = context.createBufferSource();
+    const noiseFilter = context.createBiquadFilter();
+    const noiseGain = context.createGain();
+    noise.buffer = createShelterTypingNoiseBuffer(context, noiseDuration);
+    noiseFilter.type = "highpass";
+    noiseFilter.frequency.setValueAtTime(punctuation ? 720 : 1100, now);
+    noiseGain.gain.setValueAtTime(0.0001, now);
+    noiseGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume * 0.72), now + 0.003);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDuration);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(context.destination);
+    noise.start(now);
+    noise.stop(now + noiseDuration + 0.004);
+  } catch {
+    // Typing feedback is optional; browsers may block audio until a user gesture.
+  }
+}
+
+function getShelterVisibleTypedCharacterCount(line, progress) {
+  const letters = Array.from(String(line || ""));
+  if (!letters.length) {
+    return 0;
+  }
+  return clamp(Math.ceil(letters.length * progress), 1, letters.length);
+}
+
+function updateShelterTypingSoundForLine(host, line, progress, emotion, lineKey) {
+  if (!host || typeof line !== "string" || !line) {
+    return;
+  }
+  const letters = Array.from(line);
+  const visibleCount = getShelterVisibleTypedCharacterCount(line, progress);
+  host.typingSound = host.typingSound && typeof host.typingSound === "object" ? host.typingSound : {};
+  if (host.typingSound.lineKey !== lineKey) {
+    host.typingSound = {
+      lineKey,
+      visibleCount: 0,
+      lastPlayedAt: 0,
+    };
+  }
+  const previousCount = clamp(Math.floor(host.typingSound.visibleCount || 0), 0, letters.length);
+  if (visibleCount <= previousCount) {
+    host.typingSound.visibleCount = visibleCount;
+    return;
+  }
+  const delta = visibleCount - previousCount;
+  host.typingSound.visibleCount = visibleCount;
+  if (delta > SHELTER_TYPING_SOUND_MAX_CATCHUP) {
+    return;
+  }
+  const newLetters = letters.slice(previousCount, visibleCount);
+  const audibleChar = [...newLetters].reverse().find((char) => !shouldSkipShelterTypingChar(char));
+  if (!audibleChar) {
+    return;
+  }
+  const now = getAudioClockSeconds();
+  const preset = getShelterTypingSoundPreset(emotion);
+  const minInterval = Number.isFinite(preset.interval)
+    ? preset.interval
+    : SHELTER_TYPING_SOUND_DEFAULT_INTERVAL;
+  if (now - Number(host.typingSound.lastPlayedAt || 0) < minInterval) {
+    return;
+  }
+  host.typingSound.lastPlayedAt = now;
+  playShelterTypingSound(emotion, audibleChar, visibleCount);
 }
 
 function setAudioElementFadeVolume(element, fadeVolume = 1) {
@@ -9944,6 +10093,7 @@ function beginShelterAutoEventBridge(host, state, event) {
     startedAt: Number.isFinite(state?.pulse) ? state.pulse : 0,
     emotion: bridge.emotion,
     artAssetKey: bridge.artAssetKey,
+    voiceLineKey: "",
   };
   return true;
 }
@@ -9958,13 +10108,22 @@ function stepShelterAutoEventBridge(talk, state, data, host) {
     host.autoEventBridge = null;
     return "none";
   }
+  const bridgeDuration = Math.max(
+    bridge.duration,
+    getShelterLineTypeDuration(bridge.line) + 0.2,
+  );
   const elapsed = Math.max(0, (Number.isFinite(state?.pulse) ? state.pulse : 0) - bridge.startedAt);
   const skip = consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS);
-  if (elapsed < bridge.duration && !skip) {
+  if (!skip) {
+    playShelterBridgeVoiceLine(bridge, state);
+    updateShelterBridgeTypingSound(bridge, state);
+  }
+  if (elapsed < bridgeDuration && !skip) {
     setStatus(state, "Shelter scene.");
     return "bridging";
   }
   host.autoEventBridge = null;
+  stopTtsPlayback();
   talk.blockScriptedEventStart = false;
   return startShelterScriptedEvent(talk, event, state) ? "started" : "none";
 }
@@ -10052,6 +10211,8 @@ function markShelterLineShown(talk, state = null) {
 function resetShelterLineProgress(talk, state = null) {
   if (talk) {
     talk.lineIndex = 0;
+    talk.typingSound = null;
+    talk.voiceLineKey = "";
     markShelterLineShown(talk, state);
   }
 }
@@ -10071,7 +10232,9 @@ function advanceShelterLine(talk, state = null) {
   }
   const segments = getShelterDialogueSegments(talk.line);
   talk.lineIndex = clamp(Math.floor(talk.lineIndex || 0) + 1, 0, Math.max(0, segments.length - 1));
+  talk.typingSound = null;
   markShelterLineShown(talk, state);
+  playShelterCurrentVoiceLine(talk, state);
   return true;
 }
 
@@ -10098,13 +10261,118 @@ function getShelterCurrentDialogueSegment(talk) {
   return segments[lineIndex] || segments[0] || "";
 }
 
+function extractShelterQuotedDialogue(line = "") {
+  const text = String(line || "").trim();
+  if (!text) {
+    return "";
+  }
+  const matches = [];
+  const quotePattern = /[“"「『‘']([^”"」』’']+)[”"」』’']/gu;
+  let match = quotePattern.exec(text);
+  while (match) {
+    const quoted = String(match[1] || "").trim();
+    if (quoted) {
+      matches.push(quoted);
+    }
+    match = quotePattern.exec(text);
+  }
+  return matches.join(" ").trim();
+}
+
+function isShelterScriptedVoiceContext(talk) {
+  return Boolean(talk?.event?.eventId || talk?.lastChoice?.eventId || talk?.eventResult);
+}
+
+function getShelterCharacterVoiceText(line = "", options = {}) {
+  const text = String(line || "").trim();
+  if (!text) {
+    return "";
+  }
+  const quoted = extractShelterQuotedDialogue(text);
+  if (quoted) {
+    return quoted;
+  }
+  return options.allowUnquoted ? text : "";
+}
+
+function getShelterCurrentLineIndex(talk) {
+  return clamp(
+    Math.floor(talk?.lineIndex || 0),
+    0,
+    Math.max(0, getShelterDialogueSegments(talk?.line || "").length - 1),
+  );
+}
+
+function getShelterVoiceLineKey(talk, line, emotion) {
+  return [
+    "shelter",
+    talk?.event?.eventId || "free",
+    talk?.event?.nodeId || "",
+    talk?.requestId || 0,
+    getShelterCurrentLineIndex(talk),
+    emotion || talk?.emotion || "neutral",
+    line,
+  ].join("|");
+}
+
+function playShelterCurrentVoiceLine(talk, state = null, options = {}) {
+  const line = getShelterCurrentDialogueSegment(talk);
+  if (!line || talk?.pending || talk?.choiceReaction) {
+    return;
+  }
+  const voiceText = getShelterCharacterVoiceText(line, {
+    allowUnquoted: !isShelterScriptedVoiceContext(talk),
+  });
+  if (!voiceText) {
+    return;
+  }
+  const emotion = normalizeShelterTalkEmotion(talk?.emotion, "neutral");
+  const lineKey = getShelterVoiceLineKey(talk, voiceText, emotion);
+  if (talk.voiceLineKey === lineKey) {
+    return;
+  }
+  talk.voiceLineKey = lineKey;
+  speakShelterLine(voiceText, {
+    emotion,
+    topic: options.topic || talk?.lastChoice?.intent || "",
+    choice: talk?.lastChoice?.label || "",
+    eventId: talk?.event?.eventId || "",
+    nodeId: talk?.event?.nodeId || "",
+    lineIndex: getShelterCurrentLineIndex(talk),
+    startedAt: getShelterPulseTime(state),
+  });
+}
+
+function playShelterBridgeVoiceLine(bridge, state = null) {
+  const line = String(bridge?.line || "").trim();
+  if (!line) {
+    return;
+  }
+  const voiceText = getShelterCharacterVoiceText(line, { allowUnquoted: false });
+  if (!voiceText) {
+    return;
+  }
+  const emotion = normalizeShelterTalkEmotion(bridge?.emotion, "neutral");
+  const lineKey = `bridge|${bridge?.eventId || ""}|${emotion}|${voiceText}`;
+  if (bridge.voiceLineKey === lineKey) {
+    return;
+  }
+  bridge.voiceLineKey = lineKey;
+  speakShelterLine(voiceText, {
+    emotion,
+    eventId: bridge?.eventId || "",
+    topic: "bridge",
+    startedAt: getShelterPulseTime(state),
+  });
+}
+
 function getShelterLineTypeDuration(line) {
   const length = Array.from(String(line || "").trim()).length;
   if (!length) {
     return 0;
   }
   return clamp(
-    length / SHELTER_SUBTITLE_TYPE_CHARS_PER_SECOND,
+    length / getShelterSubtitleCharsPerSecond(),
     SHELTER_SUBTITLE_TYPE_MIN_SECONDS,
     SHELTER_SUBTITLE_TYPE_MAX_SECONDS,
   );
@@ -10119,6 +10387,33 @@ function getShelterCurrentLineTypeProgress(talk, state = null) {
     return 1;
   }
   return clamp(getShelterCurrentLineAge(talk, state) / duration, 0, 1);
+}
+
+function updateShelterTalkTypingSound(talk, state = null) {
+  if (!isShelterScriptedTalk(talk) || talk?.pending || talk?.choiceReaction || normalizeShelterTalkTransition(talk)) {
+    return;
+  }
+  const line = getShelterCurrentDialogueSegment(talk);
+  const duration = getShelterLineTypeDuration(line);
+  if (!line || duration <= 0) {
+    return;
+  }
+  const lineIndex = clamp(Math.floor(talk?.lineIndex || 0), 0, Math.max(0, getShelterDialogueSegments(talk.line).length - 1));
+  const progress = clamp(getShelterCurrentLineAge(talk, state) / duration, 0, 1);
+  const lineKey = `talk:${talk.requestId || 0}:${lineIndex}:${line}`;
+  updateShelterTypingSoundForLine(talk, line, progress, talk.emotion, lineKey);
+}
+
+function updateShelterBridgeTypingSound(bridge, state = null) {
+  const line = String(bridge?.line || "").trim();
+  const duration = getShelterLineTypeDuration(line);
+  if (!line || duration <= 0) {
+    return;
+  }
+  const startedAt = Number.isFinite(bridge?.startedAt) ? bridge.startedAt : getShelterPulseTime(state);
+  const progress = clamp((getShelterPulseTime(state) - startedAt) / duration, 0, 1);
+  const lineKey = `bridge:${bridge.eventId || ""}:${startedAt}:${line}`;
+  updateShelterTypingSoundForLine(bridge, line, progress, bridge.emotion, lineKey);
 }
 
 function isShelterCurrentLineTypedComplete(talk, state = null) {
@@ -10226,6 +10521,7 @@ function startShelterScriptedEvent(talk, event, state = null) {
   talk.pending = false;
   talk.blockScriptedEventStart = false;
   resetShelterLineProgress(talk, state);
+  playShelterCurrentVoiceLine(talk, state, { topic: event.title || event.id || "" });
   return true;
 }
 
@@ -10338,6 +10634,7 @@ function beginShelterTalkExit(talk, state = null) {
   if (!talk) {
     return;
   }
+  stopTtsPlayback();
   talk.pending = false;
   talk.choiceReaction = null;
   beginShelterTalkTransition(talk, state, "out");
@@ -10457,6 +10754,7 @@ function ensureShelterTalkState(rest) {
   rest.talk.event = rest.talk.event && typeof rest.talk.event === "object" ? rest.talk.event : null;
   rest.talk.eventBaseArtAssetKey = normalizeShelterArtAssetKey(rest.talk.eventBaseArtAssetKey);
   rest.talk.eventArtAssetKey = normalizeShelterArtAssetKey(rest.talk.eventArtAssetKey);
+  rest.talk.voiceLineKey = typeof rest.talk.voiceLineKey === "string" ? rest.talk.voiceLineKey : "";
   rest.talk.blockScriptedEventStart = Boolean(rest.talk.blockScriptedEventStart);
   return rest.talk;
 }
@@ -10578,6 +10876,7 @@ function beginShelterChoiceReaction(talk, playerChoice, topic = "", state = null
   if (!talk || !playerChoice?.eventId) {
     return false;
   }
+  stopTtsPlayback();
   const display = getShelterChoiceDisplay(talk, playerChoice, data);
   const event = display.event;
   const rawDuration = Number(event?.choiceReactionSeconds ?? playerChoice.choiceReactionSeconds);
@@ -10663,12 +10962,7 @@ function commitShelterChoiceReply(talk, playerChoice, topic = "", state = null, 
   }
   talk.history = talk.history.slice(-SHELTER_TALK_HISTORY_LIMIT);
   prepareShelterTalkChoices(talk, state, data);
-  speakFaceOffLine(displayLine, {
-    scene: "shelter",
-    emotion: displayEmotion,
-    topic: playerChoice?.intent || topic,
-    choice: playerChoice?.label || "",
-  });
+  playShelterCurrentVoiceLine(talk, state, { topic: playerChoice?.intent || topic });
 }
 
 function submitShelterChatText() {
@@ -10717,6 +11011,7 @@ function ensureHomeShelterTalkState(state) {
   talk.event = talk.event && typeof talk.event === "object" ? talk.event : null;
   talk.eventBaseArtAssetKey = normalizeShelterArtAssetKey(talk.eventBaseArtAssetKey);
   talk.eventArtAssetKey = normalizeShelterArtAssetKey(talk.eventArtAssetKey);
+  talk.voiceLineKey = typeof talk.voiceLineKey === "string" ? talk.voiceLineKey : "";
   talk.blockScriptedEventStart = Boolean(talk.blockScriptedEventStart);
   return talk;
 }
@@ -11607,6 +11902,7 @@ function updateShelterRestMode(state, data, dt) {
       updateAutoSave(state, data, dt);
       return true;
     }
+    updateShelterTalkTypingSound(talk, state);
     if (!talk.line) {
       talk.line = "……말해도 돼. 듣고 있어.";
     }
@@ -12005,6 +12301,7 @@ function updateShelter(state) {
       beginShelterTalkExit(talk, state);
       return;
     }
+    updateShelterTalkTypingSound(talk, state);
     if (!talk.pending) {
       if (!talk.line) {
         talk.line = "……말해도 돼. 듣고 있어.";

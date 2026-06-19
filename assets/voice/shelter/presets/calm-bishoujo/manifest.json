@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "presetId": "calm-bishoujo",
+  "label": "차분한 미소녀",
+  "description": "맑고 얇은 톤은 남기고 감정만 살짝 누른 기준점.",
+  "tags": [
+    "clear",
+    "soft",
+    "baseline"
+  ],
+  "scene": "shelter",
+  "speaker": "type-07a",
+  "voice": "type07a",
+  "format": "wav",
+  "generator": "Style-Bert-VITS2",
+  "modelName": "jvnv-F2-jp",
+  "generatedAt": "2026-06-19T05:38:50.799Z",
+  "playbackRate": 1.1,
+  "preservesPitch": false,
+  "lines": [
+    {
+      "id": "type07a_anxious_shelter-first-arrival-01_01x699w",
+      "emotion": "anxious",
+      "topic": "첫 쉘터 진입",
+      "text": "와... 여기 생각보다 멀쩡하네.",
+      "voiceText": "わあ……ここ、思ったよりちゃんとしてるじゃない。",
+      "src": "./assets/voice/shelter/presets/calm-bishoujo/anxious/type07a_anxious_shelter-first-arrival-01_01x699w.wav",
+      "tags": [
+        "anxious",
+        "첫 쉘터 진입"
+      ]
+    },
+    {
+      "id": "type07a_warm_shelter-first-arrival-01_1uuasii",
+      "emotion": "warm",
+      "topic": "첫 쉘터 진입",
+      "text": "아빠, 여기 우리 임시 집 같은 거야? 나 그런 거 좀 좋은데.",
+      "voiceText": "ねえ、お父さん。ここって私たちの仮住まいみたいなもの？ ……少し、好きかも。",
+      "src": "./assets/voice/shelter/presets/calm-bishoujo/warm/type07a_warm_shelter-first-arrival-01_1uuasii.wav",
+      "tags": [
+        "warm",
+        "첫 쉘터 진입"
+      ]
+    }
+  ]
+}
