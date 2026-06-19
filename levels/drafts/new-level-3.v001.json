@@ -331,8 +331,8 @@
     {
       "id": "return-entrance-02",
       "label": "Return Entrance 02",
-      "x": 2864,
-      "y": 3888,
+      "x": 2768,
+      "y": 3808,
       "facing": 1
     }
   ],
@@ -356,8 +356,8 @@
       "kind": "route",
       "type": "route",
       "label": "Route Exit",
-      "x": 2816,
-      "y": 3696,
+      "x": 2752,
+      "y": 3712,
       "width": 96,
       "height": 192,
       "prompt": "Up: Next area",

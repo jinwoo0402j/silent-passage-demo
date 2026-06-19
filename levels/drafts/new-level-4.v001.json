@@ -324,8 +324,8 @@
     {
       "id": "return-entrance-01",
       "label": "Return Entrance 01",
-      "x": 7840,
-      "y": 1088,
+      "x": 7808,
+      "y": 976,
       "facing": 1
     }
   ],
@@ -335,7 +335,7 @@
       "kind": "route",
       "type": "route",
       "label": "Route Exit",
-      "x": 7792,
+      "x": 7776,
       "y": 896,
       "width": 96,
       "height": 192,
@@ -4995,6 +4995,20 @@
       "y": 1744,
       "width": 64,
       "height": 160,
+      "color": "#54697b"
+    },
+    {
+      "x": 5792,
+      "y": 1536,
+      "width": 160,
+      "height": 128,
+      "color": "#54697b"
+    },
+    {
+      "x": 5952,
+      "y": 1408,
+      "width": 160,
+      "height": 256,
       "color": "#54697b"
     }
   ],
