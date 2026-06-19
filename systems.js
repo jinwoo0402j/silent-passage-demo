@@ -4950,12 +4950,6 @@ function applyFaceOffAttack(run, data, enemy) {
     return;
   }
 
-  const parts = getFaceOffBodyParts(data);
-  const part = parts.find((entry) => entry.id === faceOff.selectedPart) || parts.find((entry) => entry.id === "torso");
-  if (!part) {
-    return;
-  }
-
   spendWeaponHeat(run, weaponContext);
   weaponContext.arm.magazine = weaponContext.stats.magazineSize;
   weaponContext.arm.fireCooldownTimer = weaponContext.stats.fireCooldown;
