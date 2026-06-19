@@ -729,6 +729,102 @@ function spawnDirectedParticles(run, x, y, amount, color, directionX, directionY
   }
 }
 
+function spawnConcreteBlockShards(run, block, originX, originY, directionX, directionY, amount = 14) {
+  const dirLength = Math.max(0.001, Math.hypot(directionX, directionY));
+  const dirX = directionX / dirLength;
+  const dirY = directionY / dirLength;
+  const baseAngle = Math.atan2(dirY, dirX);
+  const palette = ["#8b8d86", "#74776f", "#62665f", "#9a9b92", "#515650"];
+  const left = block.x;
+  const right = block.x + block.width;
+  const top = block.y;
+  const bottom = block.y + block.height;
+  for (let index = 0; index < amount; index += 1) {
+    const edgeBias = Math.random();
+    const sourceX = edgeBias < 0.62
+      ? clamp(originX + (Math.random() - 0.5) * block.width * 0.62, left, right)
+      : left + Math.random() * block.width;
+    const sourceY = edgeBias < 0.62
+      ? clamp(originY + (Math.random() - 0.5) * block.height * 0.62, top, bottom)
+      : top + Math.random() * block.height;
+    const angle = baseAngle + (Math.random() - 0.5) * 1.22;
+    const velocity = 260 + Math.random() * 520;
+    const size = 10 + Math.random() * 24;
+    const life = 0.55 + Math.random() * 0.42;
+    run.particles.push({
+      shape: "concreteShard",
+      x: sourceX,
+      y: sourceY,
+      vx: Math.cos(angle) * velocity + dirX * 120,
+      vy: Math.sin(angle) * velocity + dirY * 120 - Math.random() * 120,
+      life,
+      maxLife: life,
+      color: palette[index % palette.length],
+      radius: size * 0.5,
+      width: size * (0.8 + Math.random() * 0.9),
+      height: size * (0.45 + Math.random() * 0.7),
+      rotation: Math.random() * Math.PI,
+      spin: (Math.random() - 0.5) * 14,
+    });
+  }
+}
+
+function getParticleCollisionRect(particle) {
+  const width = Math.max(2, particle.width ?? particle.radius * 2);
+  const height = Math.max(2, particle.height ?? particle.radius * 2);
+  return createRect(particle.x - width * 0.5, particle.y - height * 0.5, width, height);
+}
+
+function resolveConcreteShardCollision(particle, data, previousX, previousY) {
+  if (particle.shape !== "concreteShard" || !data) {
+    return;
+  }
+  const platforms = getSolidLevelPlatforms(data);
+  if (!platforms.length) {
+    return;
+  }
+  const rect = getParticleCollisionRect(particle);
+  for (const platform of platforms) {
+    if (!rectsOverlap(rect, platform)) {
+      continue;
+    }
+    const previousRect = {
+      ...rect,
+      x: previousX - rect.width * 0.5,
+      y: previousY - rect.height * 0.5,
+    };
+    if (previousRect.y + previousRect.height <= platform.y && particle.vy > 0) {
+      particle.y = platform.y - rect.height * 0.5 - 0.1;
+      particle.vy *= -0.16;
+      particle.vx *= 0.48;
+      particle.spin *= 0.42;
+    } else if (previousRect.y >= platform.y + platform.height && particle.vy < 0) {
+      particle.y = platform.y + platform.height + rect.height * 0.5 + 0.1;
+      particle.vy *= -0.12;
+      particle.vx *= 0.62;
+      particle.spin *= 0.5;
+    } else if (previousRect.x + previousRect.width <= platform.x && particle.vx > 0) {
+      particle.x = platform.x - rect.width * 0.5 - 0.1;
+      particle.vx *= -0.18;
+      particle.vy *= 0.72;
+      particle.spin *= 0.55;
+    } else if (previousRect.x >= platform.x + platform.width && particle.vx < 0) {
+      particle.x = platform.x + platform.width + rect.width * 0.5 + 0.1;
+      particle.vx *= -0.18;
+      particle.vy *= 0.72;
+      particle.spin *= 0.55;
+    } else {
+      particle.x = previousX;
+      particle.y = previousY;
+      particle.vx *= -0.12;
+      particle.vy *= -0.12;
+      particle.spin *= 0.35;
+    }
+    particle.life = Math.min(particle.life, Math.max(0.22, (particle.maxLife ?? particle.life) * 0.58));
+    return;
+  }
+}
+
 function spawnDamageNumber(run, x, y, amount, color = "#f5f8fb", label = null, options = {}) {
   run.damageNumbers = run.damageNumbers || [];
   run.damageNumbers.push({
@@ -904,9 +1000,13 @@ function updateEffects(run, dt, visualDt = dt, data = null) {
 
   run.particles = run.particles.filter((particle) => {
     particle.life -= dt;
+    const previousX = particle.x;
+    const previousY = particle.y;
     particle.x += particle.vx * dt;
     particle.y += particle.vy * dt;
     particle.vy += 360 * dt;
+    particle.rotation = (particle.rotation ?? 0) + (particle.spin ?? 0) * dt;
+    resolveConcreteShardCollision(particle, data, previousX, previousY);
     return particle.life > 0;
   });
 
@@ -1417,9 +1517,10 @@ function constrainCameraToPlayer(cameraX, cameraY, run, data, viewportWidth, vie
     maxCameraY = centeredY;
   }
 
+  const minWorldCameraY = Math.min(0, minCameraY, maxCameraY);
   return {
     x: clamp(clamp(cameraX, minCameraX, maxCameraX), 0, maxX),
-    y: clamp(clamp(cameraY, minCameraY, maxCameraY), 0, maxY),
+    y: clamp(clamp(cameraY, minCameraY, maxCameraY), minWorldCameraY, maxY),
   };
 }
 
@@ -1897,7 +1998,6 @@ function getPlayerSlopeProbeXs(player) {
 function canOccupyRect(rect, data, run = null, collisionPlatforms = null) {
   return (
     rect.x >= 0 &&
-    rect.y >= 0 &&
     rect.x + rect.width <= data.world.width &&
     rect.y + rect.height <= data.world.height &&
     !collidesWithPlatforms(rect, data, run, collisionPlatforms)
@@ -1938,7 +2038,7 @@ function canResizePlayer(player, data, targetHeight) {
     width: player.width,
     height: targetHeight,
   };
-  return nextRect.y >= 0 && !collidesWithPlatforms(nextRect, data);
+  return !collidesWithPlatforms(nextRect, data);
 }
 
 function getActiveBraceWall(player, data, run = null) {
@@ -2450,11 +2550,6 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
     }
   }
 
-  if (player.y < 0) {
-    player.y = 0;
-    player.vy = 0;
-    contacts.hitHead = true;
-  }
   if (player.y + player.height > data.world.height) {
     contacts.landingSpeed = player.vy;
     player.y = data.world.height - player.height;
@@ -4911,6 +5006,23 @@ function pushScreenShake(run, duration, intensity, dirX = 0, dirY = 0) {
   run.screenShakeDirY = Number.isFinite(dirY) ? dirY : 0;
 }
 
+function isRecoilJumpStage5Block(block) {
+  return block?.breakRule === "recoilJumpStage5" || block?.requiresRecoilJumpStage5 === true;
+}
+
+function isRecoilJumpStage5Charge(chargeLevel) {
+  return Number(chargeLevel ?? 0) >= 0.99;
+}
+
+function destroyTemporaryBlock(run, block, x, y, label = "OPEN") {
+  block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
+  block.hp = 0;
+  block.hitFlash = 0.2;
+  block.destroyed = true;
+  block.hiddenTimer = 0;
+  spawnDamageNumber(run, x, y - 12, 0, "#93eaff", label);
+}
+
 function spawnRecoilBlast(run, data, weaponStats, aim, recoilChargeMultiplier = 1, visualChargeLevel = null) {
   const chargeLevel = Number.isFinite(visualChargeLevel)
     ? clamp(visualChargeLevel, 0, 1)
@@ -4962,6 +5074,18 @@ function spawnRecoilBlast(run, data, weaponStats, aim, recoilChargeMultiplier = 
     if (!hit) {
       continue;
     }
+    if (isRecoilJumpStage5Block(block)) {
+      if (!isRecoilJumpStage5Charge(chargeLevel)) {
+        block.hitFlash = 0.16;
+        spawnDamageNumber(run, hit.nearestX, hit.nearestY - 12, 0, "#93eaff", "LV5");
+        spawnDirectedParticles(run, hit.nearestX, hit.nearestY, 7, "#93eaff", aim.shotDirX, aim.shotDirY, 360, 0.72);
+        continue;
+      }
+      destroyTemporaryBlock(run, block, hit.nearestX, hit.nearestY, "LV5 OPEN");
+      spawnConcreteBlockShards(run, block, hit.nearestX, hit.nearestY, aim.shotDirX, aim.shotDirY, 17);
+      spawnDirectedParticles(run, hit.nearestX, hit.nearestY, 22, "#f5fbff", aim.shotDirX, aim.shotDirY, 620, 1);
+      continue;
+    }
     const damage = Math.max(1, Number(weaponStats.damage ?? 1)) * lerp(0.65, 1.25, hit.falloff);
     block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
     block.hp = Math.max(0, Number(block.hp ?? block.maxHp) - damage);
@@ -4969,6 +5093,7 @@ function spawnRecoilBlast(run, data, weaponStats, aim, recoilChargeMultiplier = 
     spawnDamageNumber(run, hit.nearestX, hit.nearestY - 12, damage, "#93eaff", block.hp <= 0 ? "OPEN" : "BLAST");
     spawnDirectedParticles(run, hit.nearestX, hit.nearestY, block.hp <= 0 ? 18 : 10, "#93eaff", aim.shotDirX, aim.shotDirY, 500, 0.95);
     if (block.hp <= 0) {
+      spawnConcreteBlockShards(run, block, hit.nearestX, hit.nearestY, aim.shotDirX, aim.shotDirY, 14);
       block.destroyed = true;
       block.hiddenTimer = 0;
     }
@@ -5119,6 +5244,12 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
 
   if (hit.type === "temporaryBlock") {
     const block = hit.target;
+    if (isRecoilJumpStage5Block(block)) {
+      block.hitFlash = 0.16;
+      spawnDamageNumber(run, hitX, hitY - 12, 0, "#93eaff", "LV5");
+      spawnDirectedParticles(run, hitX, hitY, 7, "#93eaff", -bullet.dirX, -bullet.dirY, 320, 0.7);
+      return;
+    }
     const damage = Math.max(1, Number(bullet.damage ?? 1));
     block.maxHp = Math.max(1, Number(block.maxHp ?? 1));
     block.hp = Math.max(0, Number(block.hp ?? block.maxHp) - damage);
@@ -5126,6 +5257,7 @@ function applyPlayerBulletHit(run, data, bullet, hit) {
     spawnDamageNumber(run, hitX, hitY - 12, damage, "#93eaff", block.hp <= 0 ? "OPEN" : null);
     spawnDirectedParticles(run, hitX, hitY, block.hp <= 0 ? 16 : 8, "#93eaff", -bullet.dirX, -bullet.dirY, 420, 0.82);
     if (block.hp <= 0) {
+      spawnConcreteBlockShards(run, block, hitX, hitY, bullet.dirX, bullet.dirY, 13);
       block.destroyed = true;
       block.hiddenTimer = 0;
     }
@@ -6387,7 +6519,6 @@ function updatePlayer(run, data, state, dt, input) {
   const sprintHeld = isEitherPressed(state, SPRINT_KEYS) || capsDashInput.sprintHeld;
   const activeBraceWall = getActiveBraceWall(player, data, run);
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
-  const wasWallSliding = player.wallSliding;
   const wasSprintActive = Boolean(player.sprintActive || player.sprintCharge > 0.55);
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
 
@@ -6666,14 +6797,13 @@ function updatePlayer(run, data, state, dt, input) {
       : player.wallGraceTimer > 0
         ? player.wallGraceDirection
         : 0;
-  const holdingWallRunLine =
+  const pressingTowardWall =
     wallJumpSourceDirection !== 0 &&
-    (moveAxis === 0 || moveAxis === wallJumpSourceDirection);
+    moveAxis === wallJumpSourceDirection;
   const wantsWallRun =
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
-    holdingWallRunLine &&
-    jumpHeld &&
+    pressingTowardWall &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
     player.dashWindupTimer === 0 &&
@@ -6996,7 +7126,7 @@ function updatePlayer(run, data, state, dt, input) {
     }
   } else if (player.wallRunActive && jumpReleased) {
     launchFromWallRun(player, run, config);
-  } else if (player.wallRunActive && (!jumpHeld || !holdingWallRunLine)) {
+  } else if (player.wallRunActive && !pressingTowardWall) {
     clearWallRun(player);
   }
 
@@ -7159,20 +7289,6 @@ function updatePlayer(run, data, state, dt, input) {
     });
   }
 
-  const wallSlideSourceDirection =
-    player.wallDirection !== 0
-      ? player.wallDirection
-      : player.wallSlideGraceTimer > 0
-        ? player.wallSlideGraceDirection
-        : 0;
-
-  const wantsWallSlide =
-    !player.onGround &&
-    wallSlideSourceDirection !== 0 &&
-    (((wallSlideSourceDirection === -1) && moveAxis < 0) || ((wallSlideSourceDirection === 1) && moveAxis > 0)) &&
-    player.wallJumpLockTimer === 0 &&
-    player.vy > 0;
-
   if (
     !player.onGround &&
     !player.wallSliding &&
@@ -7222,9 +7338,6 @@ function updatePlayer(run, data, state, dt, input) {
   if (player.hoverActive) {
     player.vy = Math.min(player.vy, config.hoverFallSpeed ?? 160);
   }
-  if (wantsWallSlide && !player.wallRunActive) {
-    player.vy = Math.min(player.vy, Math.abs(config.jumpVelocity) * config.wallSlideFallMultiplier);
-  }
 
   const vxBeforeResolve = player.vx;
   const contacts = resolvePlayerCollisions(player, data, dt, config, run);
@@ -7241,13 +7354,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.onGround = contacts.onGround;
   player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
   player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
-  player.wallSliding =
-    !player.wallRunActive &&
-    !player.onGround &&
-    player.wallDirection !== 0 &&
-    ((player.wallDirection === -1 && moveAxis < 0) || (player.wallDirection === 1 && moveAxis > 0)) &&
-    player.vy > 0 &&
-    player.wallJumpLockTimer === 0;
+  player.wallSliding = false;
 
   if (player.wallRunActive) {
     if (player.wallDirection === 0 || player.onGround || contacts.hitHead) {
@@ -7258,26 +7365,8 @@ function updatePlayer(run, data, state, dt, input) {
     }
   }
 
-  if (player.wallSliding && !wasWallSliding) {
-    refillDashFromWall(player, config);
-    refillRecoilShot(player, config);
-    resetShotgunFireCooldown(run, data);
-  }
-
-  if (player.wallSliding) {
-    player.wallSlideGraceTimer = (config.wallSlideGraceMs ?? 0) / 1000;
-    player.wallSlideGraceDirection = player.wallDirection;
-  } else if (
-    !player.onGround &&
-    player.wallSlideGraceTimer > 0 &&
-    player.wallSlideGraceDirection !== 0 &&
-    (((player.wallSlideGraceDirection === -1) && moveAxis < 0) || ((player.wallSlideGraceDirection === 1) && moveAxis > 0)) &&
-    player.vy > 0 &&
-    player.wallJumpLockTimer === 0
-  ) {
-    player.wallSliding = true;
-    player.wallSlideGraceActive = true;
-  }
+  player.wallSlideGraceTimer = 0;
+  player.wallSlideGraceDirection = 0;
 
   if (
     !player.onGround &&
@@ -7985,7 +8074,7 @@ function carryPlayerOnDynamicSolid(run, entity, previousX, previousY, data) {
     return;
   }
   player.x = clamp(player.x + dx, 0, data.world.width - player.width);
-  player.y = clamp(player.y + dy, 0, data.world.height - player.height);
+  player.y = Math.min(player.y + dy, data.world.height - player.height);
 }
 
 function updateCrowDive(run, data, drone, dt) {
@@ -9712,7 +9801,7 @@ function snapCameraToPlayer(run, data) {
   run.cameraFocusX = focusX;
   run.cameraFocusY = focusY;
   run.cameraX = clamp(targetX, 0, maxX);
-  run.cameraY = clamp(targetY, 0, maxY);
+  run.cameraY = clamp(targetY, Math.min(0, targetY), maxY);
   run.cameraTargetX = targetX;
   run.cameraTargetY = targetY;
   run.cameraTargetZoom = zoom;
@@ -11187,7 +11276,7 @@ function updateZipLineRide(player, data, run, config, dt, jumpPressed) {
   player.zipLineProgress = clamp(player.zipLineProgress + direction * (speed * dt / length), 0, 1);
   const point = getZipLinePoint(zipLine, player.zipLineProgress);
   player.x = clamp(point.x - player.width * 0.5, 0, data.world.width - player.width);
-  player.y = clamp(point.y - player.height * 0.38, 0, data.world.height - player.height);
+  player.y = Math.min(point.y - player.height * 0.38, data.world.height - player.height);
   player.vx = (point.x - previousPoint.x) / Math.max(dt, 0.001);
   player.vy = (point.y - previousPoint.y) / Math.max(dt, 0.001);
   player.facing = Math.sign(player.vx) || direction;

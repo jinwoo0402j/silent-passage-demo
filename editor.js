@@ -124,7 +124,7 @@ const TOOL_HINTS = {
   [TOOL_IDS.SLOPE_DOWN]: "드래그로 오른쪽 내리막 경사로 생성",
   [TOOL_IDS.SLOPE_UP]: "드래그로 오른쪽 오르막 경사로 생성",
   [TOOL_IDS.SIGN]: "클릭으로 표지 배치",
-  [TOOL_IDS.LANTERN]: "클릭으로 랜턴 배치",
+  [TOOL_IDS.LANTERN]: "드래그로 선형 랜턴 배치",
   [TOOL_IDS.SPAWN]: "클릭으로 스폰 이동",
   [TOOL_IDS.GATE]: "클릭으로 출구 이동",
 };
@@ -604,11 +604,11 @@ const COLORS = {
   droneFill: "rgba(255, 190, 102, 0.13)",
 };
 
-const BACKGROUND_TILE_COLOR = "#34383a";
+const BACKGROUND_TILE_COLOR = "#70746f";
 const SHADOW_TILE_COLOR = "#24313a";
-const BACKGROUND_TILE_PREVIEW = "rgba(52, 56, 58, 0.36)";
+const BACKGROUND_TILE_PREVIEW = "rgba(112, 116, 111, 0.5)";
 const SHADOW_TILE_PREVIEW = "rgba(36, 49, 58, 0.44)";
-const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157"]);
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157", "#34383a"]);
 
 const IMAGE_CACHE = new Map();
 
@@ -673,6 +673,41 @@ function isRectPropTileKind(kind) {
 
 function getLanternLightRadius(prop) {
   return Math.max(24, Number(prop?.lightRadius ?? 260) || 260);
+}
+
+function getLanternEnd(prop) {
+  return {
+    x: Number.isFinite(prop?.endX) ? prop.endX : prop.x,
+    y: Number.isFinite(prop?.endY) ? prop.endY : prop.y,
+  };
+}
+
+function isLinearLantern(prop) {
+  const end = getLanternEnd(prop);
+  return Math.hypot(end.x - prop.x, end.y - prop.y) > 1;
+}
+
+function getLanternLightSamples(prop) {
+  const radius = getLanternLightRadius(prop);
+  const end = getLanternEnd(prop);
+  const dx = end.x - prop.x;
+  const dy = end.y - prop.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 1) {
+    return [{ x: prop.x, y: prop.y, lightRadius: radius }];
+  }
+  const spacing = Math.max(64, radius * 0.55);
+  const steps = Math.min(48, Math.max(1, Math.ceil(distance / spacing)));
+  const samples = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    samples.push({
+      x: prop.x + dx * t,
+      y: prop.y + dy * t,
+      lightRadius: radius,
+    });
+  }
+  return samples;
 }
 
 function getRectPropTileColor(prop) {
@@ -1504,6 +1539,17 @@ function getPropRect(prop) {
       y: prop.y - 64,
       width: 88,
       height: 42,
+    };
+  }
+
+  if (prop.kind === "lantern") {
+    const end = getLanternEnd(prop);
+    const markerPad = 24;
+    return {
+      x: Math.min(prop.x, end.x) - markerPad,
+      y: Math.min(prop.y, end.y) - markerPad,
+      width: Math.abs(end.x - prop.x) + markerPad * 2,
+      height: Math.abs(end.y - prop.y) + markerPad * 2,
     };
   }
 
@@ -2351,6 +2397,10 @@ function renderSelectionFields(editor, dom) {
     addNumber("Height", "height", entity.height, { min: 12 });
     addNumber("HP", "maxHp", entity.maxHp ?? 1, { min: 1 });
     addNumber("Hide Time", "hideDuration", entity.hideDuration ?? 1.6, { min: 0.1, step: 0.1 });
+    addSelect("Break Rule", "breakRule", entity.breakRule || "normal", [
+      { value: "normal", label: "Normal" },
+      { value: "recoilJumpStage5", label: "Recoil Jump Lv5" },
+    ]);
     addColor("Color", "color", entity.color || "#5f7588");
   } else if (editor.selected.kind === "zipLine" || editor.selected.kind === "zipLineNode") {
     addText("ID", "id", entity.id || "");
@@ -2370,6 +2420,9 @@ function renderSelectionFields(editor, dom) {
     }
     if (entity.kind === "lantern") {
       addNumber("Light Radius", "lightRadius", entity.lightRadius ?? 260, { min: 24 });
+      const end = getLanternEnd(entity);
+      addNumber("End X", "endX", end.x);
+      addNumber("End Y", "endY", end.y);
     }
     if (isRectPropTileKind(entity.kind)) {
       addNumber("Width", "width", entity.width, { min: 8 });
@@ -3287,6 +3340,7 @@ function applySelectionField(editor, dom, field, value) {
     || field === "visualKind"
     || field === "lootTable"
     || field === "attackPattern"
+    || field === "breakRule"
     || field === "toLevelId"
     || field === "toEntranceId"
     || field === "returnEntranceId"
@@ -3534,8 +3588,16 @@ function moveSelectionTo(editor, dom, selection, x, y, step = editor.snap, optio
     if (!entity) {
       return;
     }
+    const deltaX = snappedX - entity.x;
+    const deltaY = snappedY - entity.y;
+    const wasLinearLantern = entity.kind === "lantern" && isLinearLantern(entity);
+    const previousLanternEnd = wasLinearLantern ? getLanternEnd(entity) : null;
     entity.x = snappedX;
     entity.y = snappedY;
+    if (wasLinearLantern) {
+      entity.endX = previousLanternEnd.x + deltaX;
+      entity.endY = previousLanternEnd.y + deltaY;
+    }
   } else if (selection.kind === "enemy") {
     const entity = editor.data.humanoidEnemies[selection.index];
     if (!entity) {
@@ -3752,6 +3814,7 @@ function createTemporaryBlockFromPreview(editor, dom) {
     maxHp: 1,
     color: "#5f7588",
     hideDuration: 1.6,
+    breakRule: "normal",
   };
   editor.data.temporaryBlocks.push(block);
   setSelection(editor, dom, { kind: "temporaryBlock", index: editor.data.temporaryBlocks.length - 1 });
@@ -3860,6 +3923,30 @@ function createBackgroundTileFromPreview(editor, dom) {
     height: rect.height,
     color: isShadowTileKind(editor.preview.kind) ? SHADOW_TILE_COLOR : BACKGROUND_TILE_COLOR,
   };
+  editor.data.props.push(prop);
+  setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
+  markDirty(editor, dom);
+}
+
+function createLanternFromPreview(editor, dom) {
+  if (!editor.preview || editor.preview.kind !== "lantern") {
+    return;
+  }
+
+  pushUndo(editor);
+
+  const start = editor.preview.start;
+  const end = editor.preview.end || start;
+  const prop = {
+    kind: "lantern",
+    x: start.x,
+    y: start.y,
+    lightRadius: 260,
+  };
+  if (Math.hypot(end.x - start.x, end.y - start.y) > 1) {
+    prop.endX = end.x;
+    prop.endY = end.y;
+  }
   editor.data.props.push(prop);
   setSelection(editor, dom, { kind: "prop", index: editor.data.props.length - 1 });
   markDirty(editor, dom);
@@ -4380,7 +4467,14 @@ function handlePointerDown(editor, dom, event) {
   }
 
   if (editor.tool === TOOL_IDS.LANTERN) {
-    placeProp(editor, dom, "lantern", world);
+    editor.preview = {
+      kind: "lantern",
+      start: snapped,
+      end: snapped,
+    };
+    editor.drag = {
+      kind: "previewLantern",
+    };
     queueRender(editor, dom);
     return;
   }
@@ -4566,6 +4660,12 @@ function handlePointerMove(editor, dom, event) {
   if (editor.drag.kind === "previewBackgroundTile" && editor.preview) {
     editor.preview.end = snapPoint(world, editor.snap);
     queueRender(editor, dom);
+    return;
+  }
+
+  if (editor.drag.kind === "previewLantern" && editor.preview) {
+    editor.preview.end = snapPoint(world, editor.snap);
+    queueRender(editor, dom);
   }
 }
 
@@ -4611,6 +4711,11 @@ function handlePointerUp(editor, dom) {
 
   if (editor.drag?.kind === "previewBackgroundTile") {
     createBackgroundTileFromPreview(editor, dom);
+    editor.preview = null;
+  }
+
+  if (editor.drag?.kind === "previewLantern") {
+    createLanternFromPreview(editor, dom);
     editor.preview = null;
   }
 
@@ -5115,6 +5220,12 @@ function snapEntireLevelToScale(editor, dom) {
     ...prop,
     x: snapValue(prop.x, step),
     y: snapValue(prop.y, step),
+    ...(prop.kind === "lantern" && Number.isFinite(prop.endX) && Number.isFinite(prop.endY)
+      ? {
+        endX: snapValue(prop.endX, step),
+        endY: snapValue(prop.endY, step),
+      }
+      : {}),
     ...(isRectPropTileKind(prop.kind)
       ? {
         width: Math.max(step, snapValue(prop.width, step)),
@@ -5637,6 +5748,13 @@ function drawTemporaryBlocks(ctx, editor) {
       ctx.lineTo(x, block.y + block.height - 8 / editor.view.zoom);
       ctx.stroke();
     }
+    if (block.breakRule === "recoilJumpStage5") {
+      ctx.fillStyle = COLORS.accent;
+      ctx.font = `${14 / editor.view.zoom}px Segoe UI`;
+      ctx.textAlign = "center";
+      ctx.fillText("RJ5", block.x + block.width / 2, block.y + block.height / 2 + 5 / editor.view.zoom);
+      ctx.textAlign = "left";
+    }
   });
 }
 
@@ -5763,22 +5881,44 @@ function drawProps(ctx, editor) {
       ctx.textAlign = "left";
     } else if (prop.kind === "lantern") {
       const radius = getLanternLightRadius(prop);
-      const light = ctx.createRadialGradient(prop.x, prop.y, Math.max(8, radius * 0.12), prop.x, prop.y, radius);
-      light.addColorStop(0, "rgba(231, 244, 126, 0.22)");
-      light.addColorStop(0.48, "rgba(147, 234, 255, 0.08)");
-      light.addColorStop(1, "rgba(231, 244, 126, 0)");
-      ctx.fillStyle = light;
-      ctx.beginPath();
-      ctx.arc(prop.x, prop.y, radius, 0, Math.PI * 2);
-      ctx.fill();
+      const end = getLanternEnd(prop);
+      const samples = getLanternLightSamples(prop);
+      samples.forEach((sample) => {
+        const light = ctx.createRadialGradient(
+          sample.x,
+          sample.y,
+          Math.max(8, radius * 0.12),
+          sample.x,
+          sample.y,
+          radius,
+        );
+        light.addColorStop(0, "rgba(231, 244, 126, 0.14)");
+        light.addColorStop(0.48, "rgba(147, 234, 255, 0.052)");
+        light.addColorStop(1, "rgba(231, 244, 126, 0)");
+        ctx.fillStyle = light;
+        ctx.beginPath();
+        ctx.arc(sample.x, sample.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      });
 
       ctx.strokeStyle = selected ? COLORS.accent : "rgba(231, 244, 126, 0.34)";
       ctx.lineWidth = (selected ? 2.5 : 1.25) / editor.view.zoom;
       ctx.setLineDash(selected ? [] : [12 / editor.view.zoom, 8 / editor.view.zoom]);
-      ctx.beginPath();
-      ctx.arc(prop.x, prop.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
+      samples.forEach((sample) => {
+        ctx.beginPath();
+        ctx.arc(sample.x, sample.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      });
       ctx.setLineDash([]);
+
+      if (isLinearLantern(prop)) {
+        ctx.strokeStyle = selected ? COLORS.accent : COLORS.lantern;
+        ctx.lineWidth = (selected ? 3 : 2) / editor.view.zoom;
+        ctx.beginPath();
+        ctx.moveTo(prop.x, prop.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
 
       const gradient = ctx.createRadialGradient(prop.x, prop.y, 2, prop.x, prop.y, 24);
       gradient.addColorStop(0, "rgba(231, 244, 126, 0.92)");
@@ -5798,6 +5938,20 @@ function drawProps(ctx, editor) {
       ctx.beginPath();
       ctx.arc(prop.x, prop.y, 14 / editor.view.zoom + 2, 0, Math.PI * 2);
       ctx.stroke();
+
+      if (isLinearLantern(prop)) {
+        const endGradient = ctx.createRadialGradient(end.x, end.y, 2, end.x, end.y, 20);
+        endGradient.addColorStop(0, "rgba(231, 244, 126, 0.72)");
+        endGradient.addColorStop(1, "rgba(231, 244, 126, 0)");
+        ctx.fillStyle = endGradient;
+        ctx.beginPath();
+        ctx.arc(end.x, end.y, 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = COLORS.lantern;
+        ctx.beginPath();
+        ctx.arc(end.x, end.y, 5 / editor.view.zoom + 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   });
 }
@@ -5810,7 +5964,7 @@ function drawBackgroundTiles(ctx, editor) {
     const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
     const rect = getPropRect(prop);
     ctx.fillStyle = getRectPropTileColor(prop);
-    ctx.globalAlpha = 0.58;
+    ctx.globalAlpha = 1;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = selected ? COLORS.accent : COLORS.backgroundTileStroke;
@@ -6279,6 +6433,40 @@ function drawPreview(ctx, editor) {
       ctx.lineWidth = 2 / editor.view.zoom;
       ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
     }
+  }
+
+  if (editor.preview?.kind === "lantern") {
+    const previewProp = {
+      kind: "lantern",
+      x: editor.preview.start.x,
+      y: editor.preview.start.y,
+      endX: editor.preview.end.x,
+      endY: editor.preview.end.y,
+      lightRadius: 260,
+    };
+    const radius = getLanternLightRadius(previewProp);
+    const samples = getLanternLightSamples(previewProp);
+    samples.forEach((sample) => {
+      const light = ctx.createRadialGradient(sample.x, sample.y, 8, sample.x, sample.y, radius);
+      light.addColorStop(0, "rgba(231, 244, 126, 0.16)");
+      light.addColorStop(0.56, "rgba(147, 234, 255, 0.055)");
+      light.addColorStop(1, "rgba(231, 244, 126, 0)");
+      ctx.fillStyle = light;
+      ctx.beginPath();
+      ctx.arc(sample.x, sample.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.strokeStyle = COLORS.lantern;
+    ctx.lineWidth = 2.5 / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(editor.preview.start.x, editor.preview.start.y);
+    ctx.lineTo(editor.preview.end.x, editor.preview.end.y);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.accentAlt;
+    ctx.beginPath();
+    ctx.arc(editor.preview.start.x, editor.preview.start.y, 8 / editor.view.zoom + 3, 0, Math.PI * 2);
+    ctx.arc(editor.preview.end.x, editor.preview.end.y, 8 / editor.view.zoom + 3, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   if (editor.preview?.kind === "marquee") {
