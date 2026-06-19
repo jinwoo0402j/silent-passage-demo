@@ -91,9 +91,43 @@ function writeJson(key, value) {
 }
 
 function captureLevelRuntimeState(run) {
-  return Object.fromEntries(
+  return {
+    __levelSignature: createLevelStateSignature(run),
+    ...Object.fromEntries(
     LEVEL_STATE_KEYS.map((key) => [key, clonePlain(run[key], [])]),
-  );
+    ),
+  };
+}
+
+function getStructuralValue(source, key) {
+  const value = source?.[key];
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+}
+
+function createLevelEntitySignature(entity) {
+  return {
+    id: typeof entity?.id === "string" ? entity.id : "",
+    x: getStructuralValue(entity, "x"),
+    y: getStructuralValue(entity, "y"),
+    width: getStructuralValue(entity, "width"),
+    height: getStructuralValue(entity, "height"),
+  };
+}
+
+function createLevelStateSignature(run) {
+  const signature = {};
+  LEVEL_STATE_KEYS.forEach((key) => {
+    signature[key] = (Array.isArray(run?.[key]) ? run[key] : [])
+      .map((entity) => createLevelEntitySignature(entity));
+  });
+  return signature;
+}
+
+function levelStateSignatureMatches(run, levelState) {
+  if (!levelState?.__levelSignature) {
+    return false;
+  }
+  return JSON.stringify(levelState.__levelSignature) === JSON.stringify(createLevelStateSignature(run));
 }
 
 function normalizePlayerForSave(player) {
@@ -247,6 +281,9 @@ function captureRunForSave(run) {
 
 function applyLevelRuntimeState(run, levelState = null) {
   if (!levelState) {
+    return;
+  }
+  if (!levelStateSignatureMatches(run, levelState)) {
     return;
   }
   LEVEL_STATE_KEYS.forEach((key) => {

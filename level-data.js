@@ -717,20 +717,23 @@ export const GAME_DATA = {
     }
   },
   "defaultLoadout": {
-    "selectedSide": "right",
+    "selectedSide": "left",
     "reserveAmmo": {
-      "pistol": 48
+      "shell": 16,
+      "pistol": 48,
+      "rifle": 180,
+      "heavy": 240
     },
     "arms": {
       "left": {
-        "armId": null,
+        "armId": "shotgun-arm-a",
         "magazine": null,
-        "modules": []
+        "modules": ["recoil-amplifier", "impact-barrier", "spread-reducer"]
       },
       "right": {
         "armId": "pistol-arm-a",
         "magazine": null,
-        "modules": []
+        "modules": ["magazine-extender", "knockdown-booster"]
       }
     }
   },

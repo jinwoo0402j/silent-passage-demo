@@ -5612,7 +5612,7 @@ function canChargeRecoilJumpWeapon(run, data, player) {
   if (!canFireWeaponPose(player)) {
     return false;
   }
-  const context = getSelectedArmContext(run, data);
+  const context = getShotgunArmContext(run, data);
   const focusMax = Math.max(1, Number(run.focusMax ?? FOCUS_MAX));
   const availableHeat = clamp(Number(run.focus ?? focusMax), 0, focusMax);
   const chargeAlreadyActive = Boolean(
@@ -5629,6 +5629,7 @@ function canChargeRecoilJumpWeapon(run, data, player) {
     ? !run.focusDepleted && availableHeat > 0
     : hasWeaponHeat(run, context);
   return Boolean(
+    context.stats.equipped &&
     context.stats.type === "shotgun" &&
     (recoilJumpInProgress || (context.arm.fireCooldownTimer ?? 0) === 0) &&
     hasChargeHeat
@@ -5905,9 +5906,9 @@ function updateWeaponFireReloadInput(run, data, state) {
   player.recoilJumpChargeEffectStep = 0;
   player.recoilJumpChargePendingShot = releasedRecoilCharge;
   const selectedContext = getSelectedArmContext(run, data);
-  const shouldFire = selectedContext.stats.type === "shotgun"
-    ? releasedRecoilCharge
-    : !player.weaponReloadHoldConsumed;
+  const shouldFire = releasedRecoilCharge || (
+    selectedContext.stats.type !== "shotgun" && !player.weaponReloadHoldConsumed
+  );
   player.weaponReloadHoldConsumed = false;
   return shouldFire;
 }
@@ -7205,7 +7206,10 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
     return false;
   }
 
-  const context = options.contextOverride || getSelectedArmContext(run, data);
+  const recoilJumpShot = Boolean(player.recoilJumpChargePendingShot);
+  const context = options.contextOverride || (
+    recoilJumpShot ? getShotgunArmContext(run, data) : getSelectedArmContext(run, data)
+  );
   if (!context.stats.equipped) {
     if (state) {
       pushInputTrace(state, "shotBlock:empty", { side: context.side });
@@ -7216,7 +7220,6 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   if (options.requireWeaponType && context.stats.type !== options.requireWeaponType) {
     return false;
   }
-  const recoilJumpShot = Boolean(player.recoilJumpChargePendingShot);
   if (!canFireWeaponPose(player) || (context.arm.fireCooldownTimer ?? 0) > 0) {
     if (state) {
       pushInputTrace(state, "shotBlock:cool", {
@@ -11480,15 +11483,50 @@ const LEVEL_STATE_KEYS = [
 ];
 
 function captureLevelRuntimeState(run) {
-  return Object.fromEntries(
+  return {
+    __levelSignature: createLevelStateSignature(run),
+    ...Object.fromEntries(
     LEVEL_STATE_KEYS.map((key) => [key, deepClone(run[key])]),
-  );
+    ),
+  };
+}
+
+function getLevelSignatureNumber(source, key) {
+  const value = source?.[key];
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+}
+
+function createLevelEntitySignature(entity) {
+  return {
+    id: typeof entity?.id === "string" ? entity.id : "",
+    x: getLevelSignatureNumber(entity, "x"),
+    y: getLevelSignatureNumber(entity, "y"),
+    width: getLevelSignatureNumber(entity, "width"),
+    height: getLevelSignatureNumber(entity, "height"),
+  };
+}
+
+function createLevelStateSignature(run) {
+  const signature = {};
+  LEVEL_STATE_KEYS.forEach((key) => {
+    signature[key] = (Array.isArray(run?.[key]) ? run[key] : [])
+      .map((entity) => createLevelEntitySignature(entity));
+  });
+  return signature;
+}
+
+function levelStateSignatureMatches(run, savedState) {
+  if (!savedState?.__levelSignature) {
+    return false;
+  }
+  return JSON.stringify(savedState.__levelSignature) === JSON.stringify(createLevelStateSignature(run));
 }
 
 function installLevelRuntimeState(run, data, savedState = null) {
   const fresh = createLevelRuntimeState(data);
+  const canUseSavedState = levelStateSignatureMatches(fresh, savedState);
   LEVEL_STATE_KEYS.forEach((key) => {
-    run[key] = savedState?.[key] ? deepClone(savedState[key]) : fresh[key];
+    run[key] = canUseSavedState && savedState?.[key] ? deepClone(savedState[key]) : fresh[key];
   });
   run.loot = fresh.loot;
   run.enemyShots = [];

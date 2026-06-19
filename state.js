@@ -695,6 +695,12 @@ function hasSameModules(modules, expected) {
 
 function migrateLegacyDefaultArmState(side, armState, fallbackArm) {
   if (side === "left"
+    && fallbackArm.armId === LEGACY_DEFAULT_LEFT_ARM_ID
+    && !armState?.armId
+    && hasSameModules(armState?.modules, [])) {
+    return { ...fallbackArm };
+  }
+  if (side === "left"
     && !fallbackArm.armId
     && armState?.armId === LEGACY_DEFAULT_LEFT_ARM_ID
     && hasSameModules(armState.modules, LEGACY_DEFAULT_LEFT_MODULES)) {
