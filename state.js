@@ -333,6 +333,9 @@ function createTemporaryBlockState(definition, index) {
     maxHp: Math.max(1, Number(definition.maxHp ?? 1)),
     hp: Math.max(1, Number(definition.hp ?? definition.maxHp ?? 1)),
     hideDuration: Math.max(0.1, Number(definition.hideDuration ?? 1.6)),
+    breakRule: definition.breakRule === "recoilJumpStage5" || definition.requiresRecoilJumpStage5 === true
+      ? "recoilJumpStage5"
+      : "normal",
     hiddenTimer: 0,
     hitFlash: 0,
     respawnFlash: 0,

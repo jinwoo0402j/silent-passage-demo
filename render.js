@@ -39,9 +39,9 @@ const LOW_PERFORMANCE_MODE = typeof window !== "undefined"
     window.__SILENT_PASSAGE_PERF === "lite" ||
     new URLSearchParams(window.location.search).get("perf") === "lite"
   );
-const BACKGROUND_TILE_COLOR = "#34383a";
+const BACKGROUND_TILE_COLOR = "#70746f";
 const SHADOW_TILE_COLOR = "#24313a";
-const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157"]);
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157", "#34383a"]);
 const LOOT_RARITY_META = {
   common: { label: "COMMON", color: "#dce7ec", glow: "rgba(220, 231, 236, 0.16)" },
   uncommon: { label: "UNCOMMON", color: "#8ef0c2", glow: "rgba(142, 240, 194, 0.2)" },
@@ -1443,6 +1443,40 @@ function getLanternLightRadius(prop) {
   return Math.max(24, Number(prop.lightRadius ?? 260) || 260);
 }
 
+function getLanternEnd(prop) {
+  return {
+    x: Number.isFinite(prop?.endX) ? prop.endX : prop.x,
+    y: Number.isFinite(prop?.endY) ? prop.endY : prop.y,
+  };
+}
+
+function getLanternLightSamples(prop) {
+  const radius = getLanternLightRadius(prop);
+  const end = getLanternEnd(prop);
+  const dx = end.x - prop.x;
+  const dy = end.y - prop.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 1) {
+    return [{ x: prop.x, y: prop.y, lightRadius: radius }];
+  }
+  const spacing = Math.max(64, radius * 0.55);
+  const steps = Math.min(48, Math.max(1, Math.ceil(distance / spacing)));
+  const samples = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    samples.push({
+      x: prop.x + dx * t,
+      y: prop.y + dy * t,
+      lightRadius: radius,
+    });
+  }
+  return samples;
+}
+
+function getLanternWorldLights(data) {
+  return getLanternProps(data).flatMap((lantern) => getLanternLightSamples(lantern));
+}
+
 function createLayerCanvas(width, height) {
   const safeWidth = Math.max(1, Math.ceil(width));
   const safeHeight = Math.max(1, Math.ceil(height));
@@ -1485,6 +1519,7 @@ function getLanternScreenLights(data, run, cameraZoom) {
     return [];
   }
   return getLanternProps(data)
+    .flatMap((lantern) => getLanternLightSamples(lantern))
     .map((lantern) => ({
       x: (lantern.x - run.cameraX) * cameraZoom,
       y: (lantern.y - run.cameraY) * cameraZoom,
@@ -1657,14 +1692,14 @@ function drawBackgroundTiles(ctx, data) {
     const rect = getBackgroundTileRect(prop);
     ctx.save();
     ctx.fillStyle = getRectPropTileColor(prop);
-    ctx.globalAlpha = prop.alpha ?? 0.72;
+    ctx.globalAlpha = 1;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     ctx.restore();
   });
 }
 
 function drawShadowTiles(ctx, data, run = null) {
-  const lanterns = getLanternProps(data);
+  const lanterns = getLanternWorldLights(data);
   const worldLightBlockers = getWorldLightBlockers(data);
   data.props.forEach((prop) => {
     if (!isShadowTileKind(prop.kind)) {
@@ -4702,7 +4737,31 @@ function drawRecoilAimWorld(ctx, run) {
 
 function drawParticles(ctx, run) {
   run.particles.forEach((particle) => {
-    ctx.globalAlpha = Math.max(0, particle.life);
+    const alpha = Math.max(0, particle.maxLife ? particle.life / particle.maxLife : particle.life);
+    ctx.globalAlpha = alpha;
+    if (particle.shape === "concreteShard") {
+      const width = Math.max(2, particle.width ?? particle.radius * 2);
+      const height = Math.max(2, particle.height ?? particle.radius);
+      ctx.save();
+      ctx.translate(particle.x, particle.y);
+      ctx.rotate(particle.rotation ?? 0);
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.moveTo(-width * 0.5, -height * 0.35);
+      ctx.lineTo(width * 0.2, -height * 0.55);
+      ctx.lineTo(width * 0.55, height * 0.04);
+      ctx.lineTo(width * 0.08, height * 0.5);
+      ctx.lineTo(-width * 0.48, height * 0.28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = `rgba(32, 35, 34, ${0.28 * alpha})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = `rgba(210, 210, 198, ${0.22 * alpha})`;
+      ctx.fillRect(-width * 0.25, -height * 0.18, width * 0.34, Math.max(1, height * 0.12));
+      ctx.restore();
+      return;
+    }
     ctx.fillStyle = particle.color;
     ctx.beginPath();
     ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);

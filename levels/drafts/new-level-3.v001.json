@@ -87,6 +87,14 @@
       "sprintDecayMs": 220,
       "sprintJumpCarryMs": 990,
       "sprintJumpMinSpeed": 1020,
+      "verticalMomentumDecayMs": 1150,
+      "verticalMomentumComboMs": 980,
+      "verticalMomentumSpeedBoost": 0.22,
+      "verticalMomentumSpeedBuild": 0.24,
+      "verticalMomentumJumpBoost": 0.12,
+      "verticalMomentumWallBoost": 0.18,
+      "verticalMomentumRecoilBoost": 0.14,
+      "verticalMomentumHoverLift": 110,
       "slideMinSpeed": 570,
       "slideDurationMs": 720,
       "slideFriction": 110,
@@ -319,6 +327,13 @@
       "x": 8496,
       "y": 2608,
       "facing": 1
+    },
+    {
+      "id": "return-entrance-02",
+      "label": "Return Entrance 02",
+      "x": 2864,
+      "y": 3888,
+      "facing": 1
     }
   ],
   "routeExits": [
@@ -335,8 +350,27 @@
       "toLevelId": "new-level-2",
       "toEntranceId": "start",
       "returnEntranceId": "return-entrance-01"
+    },
+    {
+      "id": "route-exit-1781843125794",
+      "kind": "route",
+      "type": "route",
+      "label": "Route Exit",
+      "x": 2816,
+      "y": 3696,
+      "width": 96,
+      "height": 192,
+      "prompt": "Up: Next area",
+      "toLevelId": "new-level-4",
+      "toEntranceId": "return-entrance-01",
+      "returnEntranceId": "return-entrance-02"
     }
   ],
+  "vaultDoors": [],
+  "vaultLoot": [],
+  "escapeExits": [],
+  "escapeBarriers": [],
+  "cameraZones": [],
   "extractionGate": null,
   "platforms": [
     {
@@ -2625,7 +2659,9 @@
       "width": 32,
       "height": 192,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "maxHp": 1,
+      "hideDuration": 1.6,
+      "breakRule": "normal"
     },
     {
       "id": "temporary-block-1780367488875",
@@ -2634,7 +2670,9 @@
       "width": 128,
       "height": 32,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "maxHp": 1,
+      "hideDuration": 1.6,
+      "breakRule": "normal"
     },
     {
       "id": "temporary-block-1780373795840",
@@ -2643,7 +2681,9 @@
       "width": 96,
       "height": 128,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "maxHp": 1,
+      "hideDuration": 1.6,
+      "breakRule": "normal"
     },
     {
       "id": "temporary-block-1780375982472",
@@ -2652,7 +2692,9 @@
       "width": 48,
       "height": 128,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "maxHp": 1,
+      "hideDuration": 1.6,
+      "breakRule": "normal"
     },
     {
       "id": "temporary-block-1780379786421",
@@ -2661,7 +2703,9 @@
       "width": 64,
       "height": 80,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "maxHp": 1,
+      "hideDuration": 1.6,
+      "breakRule": "normal"
     },
     {
       "id": "temporary-block-1780382656944",
@@ -2670,7 +2714,9 @@
       "width": 64,
       "height": 80,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "maxHp": 1,
+      "hideDuration": 1.6,
+      "breakRule": "normal"
     },
     {
       "id": "temporary-block-1780386956984",
@@ -2679,7 +2725,9 @@
       "width": 48,
       "height": 128,
       "color": "#5f7588",
-      "hideDuration": 1.6
+      "maxHp": 1,
+      "hideDuration": 1.6,
+      "breakRule": "normal"
     }
   ],
   "props": [
@@ -2689,7 +2737,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2697,7 +2745,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2705,7 +2753,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2713,7 +2761,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2721,7 +2769,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2729,7 +2777,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2737,7 +2785,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2745,7 +2793,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2753,7 +2801,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2761,7 +2809,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2769,7 +2817,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2777,7 +2825,7 @@
       "y": 96,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2785,7 +2833,7 @@
       "y": 128,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2793,7 +2841,7 @@
       "y": 288,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2801,7 +2849,7 @@
       "y": 448,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2809,7 +2857,7 @@
       "y": 608,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2817,7 +2865,7 @@
       "y": 768,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2825,7 +2873,7 @@
       "y": 928,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2833,7 +2881,7 @@
       "y": 1088,
       "width": 32,
       "height": 128,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2841,7 +2889,7 @@
       "y": 128,
       "width": 1920,
       "height": 1088,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2849,7 +2897,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2857,7 +2905,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2865,7 +2913,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2873,7 +2921,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2881,7 +2929,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2889,7 +2937,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2897,7 +2945,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2905,7 +2953,7 @@
       "y": 1248,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2913,7 +2961,7 @@
       "y": 1280,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2921,7 +2969,7 @@
       "y": 1440,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2929,7 +2977,7 @@
       "y": 1600,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2937,7 +2985,7 @@
       "y": 1760,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2945,7 +2993,7 @@
       "y": 1920,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2953,7 +3001,7 @@
       "y": 1280,
       "width": 1280,
       "height": 800,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2961,7 +3009,7 @@
       "y": 2112,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2969,7 +3017,7 @@
       "y": 2112,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2977,7 +3025,7 @@
       "y": 2112,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2985,7 +3033,7 @@
       "y": 2112,
       "width": 160,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -2993,7 +3041,7 @@
       "y": 2144,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3001,7 +3049,7 @@
       "y": 2304,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3009,7 +3057,7 @@
       "y": 2464,
       "width": 32,
       "height": 160,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3017,7 +3065,7 @@
       "y": 2144,
       "width": 640,
       "height": 480,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3025,7 +3073,7 @@
       "y": 2736,
       "width": 416,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3033,7 +3081,7 @@
       "y": 2752,
       "width": 1920,
       "height": 1088,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3041,7 +3089,7 @@
       "y": 1632,
       "width": 1920,
       "height": 1088,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3049,7 +3097,7 @@
       "y": 2752,
       "width": 1920,
       "height": 1088,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3057,7 +3105,7 @@
       "y": 2832,
       "width": 320,
       "height": 128,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3065,7 +3113,7 @@
       "y": 2752,
       "width": 32,
       "height": 256,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3073,7 +3121,7 @@
       "y": 1120,
       "width": 16,
       "height": 128,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3081,7 +3129,7 @@
       "y": 1120,
       "width": 16,
       "height": 128,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3089,7 +3137,7 @@
       "y": 896,
       "width": 16,
       "height": 192,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3097,7 +3145,7 @@
       "y": 896,
       "width": 16,
       "height": 192,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3105,7 +3153,7 @@
       "y": 1776,
       "width": 128,
       "height": 16,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3113,7 +3161,7 @@
       "y": 1824,
       "width": 128,
       "height": 16,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3121,7 +3169,7 @@
       "y": 1392,
       "width": 128,
       "height": 16,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3129,7 +3177,7 @@
       "y": 1440,
       "width": 128,
       "height": 16,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3137,7 +3185,7 @@
       "y": 1328,
       "width": 384,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     },
     {
       "kind": "backgroundTile",
@@ -3145,7 +3193,7 @@
       "y": 1312,
       "width": 384,
       "height": 32,
-      "color": "#4f6f7d"
+      "color": "#70746f"
     }
   ],
   "braceWalls": [

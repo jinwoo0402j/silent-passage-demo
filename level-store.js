@@ -9,9 +9,9 @@ export const LEVEL_OVERRIDES_VERSION = 3;
 
 const DEFAULT_PLATFORM_COLOR = "#4b6075";
 const DEFAULT_SIGN_TEXT = "표지";
-const DEFAULT_BACKGROUND_TILE_COLOR = "#34383a";
+const DEFAULT_BACKGROUND_TILE_COLOR = "#70746f";
 const DEFAULT_SHADOW_TILE_COLOR = "#24313a";
-const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157"]);
+const LEGACY_TILE_COLORS = new Set(["#4f6f7d", "#284157", "#34383a"]);
 const PROP_KIND_ALIASES = {};
 const VALID_PROP_KINDS = new Set(["sign", "lantern", "backgroundTile", "shadowTile"]);
 const PLAYER_RENDER_FIELDS = [
@@ -749,9 +749,14 @@ function sanitizeTemporaryBlock(block, index, baseBlock = null) {
     width: 96,
     height: 96,
     color: "#5f7588",
+    maxHp: 1,
     hideDuration: 1.6,
+    breakRule: "normal",
   };
   const source = block && typeof block === "object" ? block : {};
+  const breakRule = source.breakRule === "recoilJumpStage5" || source.requiresRecoilJumpStage5 === true
+    ? "recoilJumpStage5"
+    : safeString(source.breakRule, fallback.breakRule || "normal");
   return {
     id: safeString(source.id, fallback.id || `temporary-block-${index + 1}`),
     x: safeNumber(source.x, fallback.x),
@@ -759,7 +764,9 @@ function sanitizeTemporaryBlock(block, index, baseBlock = null) {
     width: safeNumber(source.width, fallback.width, 12),
     height: safeNumber(source.height, fallback.height, 12),
     color: safeString(source.color, fallback.color || "#5f7588"),
+    maxHp: safeNumber(source.maxHp, fallback.maxHp ?? 1, 1),
     hideDuration: safeNumber(source.hideDuration, fallback.hideDuration ?? 1.6, 0.1),
+    breakRule: breakRule === "recoilJumpStage5" ? "recoilJumpStage5" : "normal",
   };
 }
 
@@ -796,12 +803,19 @@ function sanitizeProp(prop, index, baseProp = null) {
     };
   }
 
-  return {
+  const x = safeNumber(prop?.x, fallback.x);
+  const y = safeNumber(prop?.y, fallback.y);
+  const lantern = {
     kind,
-    x: safeNumber(prop?.x, fallback.x),
-    y: safeNumber(prop?.y, fallback.y),
+    x,
+    y,
     lightRadius: safeNumber(prop?.lightRadius, fallback.lightRadius ?? 260, 24),
   };
+  if (Number.isFinite(prop?.endX) || Number.isFinite(prop?.endY) || Number.isFinite(fallback.endX) || Number.isFinite(fallback.endY)) {
+    lantern.endX = safeNumber(prop?.endX, fallback.endX ?? x);
+    lantern.endY = safeNumber(prop?.endY, fallback.endY ?? y);
+  }
+  return lantern;
 }
 
 function isValidPropKind(kind) {
@@ -1135,7 +1149,9 @@ export function extractEditableLevelData(data) {
       width: block.width,
       height: block.height,
       color: block.color,
+      maxHp: block.maxHp,
       hideDuration: block.hideDuration,
+      breakRule: block.breakRule || "normal",
     })),
     props: (data.props || []).map((prop) => {
       if (prop.kind === "sign") {
@@ -1151,7 +1167,12 @@ export function extractEditableLevelData(data) {
           color: prop.color,
         };
       }
-      return { kind: prop.kind, x: prop.x, y: prop.y, lightRadius: prop.lightRadius };
+      const extracted = { kind: prop.kind, x: prop.x, y: prop.y, lightRadius: prop.lightRadius };
+      if (prop.kind === "lantern" && (Number.isFinite(prop.endX) || Number.isFinite(prop.endY))) {
+        extracted.endX = Number.isFinite(prop.endX) ? prop.endX : prop.x;
+        extracted.endY = Number.isFinite(prop.endY) ? prop.endY : prop.y;
+      }
+      return extracted;
     }),
     braceWalls: (data.braceWalls || []).map((wall) => ({
       id: wall.id,
