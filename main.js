@@ -46,7 +46,7 @@ import {
   normalizePartInstance,
   saveMetaState,
 } from "./state.js?v=20260619-shelter-voice-v9";
-import { beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260620-sfx-rain-v1";
+import { beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260620-no-mouse-combat-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

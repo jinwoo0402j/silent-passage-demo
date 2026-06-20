@@ -435,6 +435,14 @@ function consumeEitherPress(state, codes) {
   return codes.some((code) => consumePress(state, code));
 }
 
+function clearMouseCombatPrimaryInput(state) {
+  if (!state.mouse) {
+    return;
+  }
+  state.mouse.primaryDown = false;
+  state.mouse.primaryJustPressed = false;
+}
+
 function consumeRelease(state, code) {
   if (state.justReleased?.has(code)) {
     state.justReleased.delete(code);
@@ -5369,11 +5377,9 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
     }
   }
 
+  clearMouseCombatPrimaryInput(state);
   if (consumeEitherPress(state, ATTACK_KEYS) || consumeEitherPress(state, FIRE_KEYS)) {
     applyFaceOffAttack(run, data, enemy);
-  }
-  if (state.mouse) {
-    state.mouse.primaryJustPressed = false;
   }
 
   return Boolean(run.faceOff?.active);
@@ -14169,6 +14175,7 @@ function updateExpedition(state, data, dt) {
     setStatus(state, run.faceOff?.message ? `Face-off: ${run.faceOff.message}` : "Face-off");
     return;
   }
+  clearMouseCombatPrimaryInput(state);
   const focusActive = updateFocusState(run, data, state, dt);
   if (run.player.recoilJumpChargeActive) {
     const chargeDrag = Math.min(1, RECOIL_CHARGE_VELOCITY_DRAG_PER_SECOND * dt);
@@ -14200,7 +14207,7 @@ function updateExpedition(state, data, dt) {
     setStatus(state, "LOCKDOWN. All exits sealed.");
     return;
   }
-  const attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
+  let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
   const recoilShotPressed = reserveRecoilShotForWeapon
     || (!lootWasActive && !meleeSlotSelected && keyboardRecoilShotPressed);
   if (recoilShotPressed || queuedRecoilShotPressed) {
