@@ -2308,7 +2308,11 @@ function describeSelection(editor) {
     if (!platform) {
       return "선택 없음";
     }
-    const platformLabel = platform.kind === "slope" ? "경사로" : "플랫폼";
+    const platformLabel = platform.kind === "slope"
+      ? "경사로"
+      : platform.kind === "oneWay"
+        ? "일방향 플랫폼"
+        : "플랫폼";
     return `${platformLabel} ${editor.selected.index + 1} · ${formatTiles(platform.width, scale.tileSize)} × ${formatTiles(platform.height, scale.tileSize)}`;
   }
 
@@ -2597,6 +2601,7 @@ function renderSelectionFields(editor, dom) {
   if (editor.selected.kind === "platform") {
     addSelect("Type", "kind", entity.kind || "solid", [
       { value: "solid", label: "Solid block" },
+      { value: "oneWay", label: "One-way platform" },
       { value: "slope", label: "Slope block" },
       { value: "water", label: "Water hazard" },
       { value: "damage", label: "Damage block" },
@@ -3636,6 +3641,13 @@ function applySelectionField(editor, dom, field, value) {
         delete entity.respawn;
         delete entity.damage;
         delete entity.slopeDirection;
+      } else if (value === "oneWay") {
+        entity.kind = "oneWay";
+        entity.color = entity.color || "#6f8791";
+        delete entity.slopeDirection;
+        delete entity.damageRatio;
+        delete entity.respawn;
+        delete entity.damage;
       } else {
         delete entity.kind;
         delete entity.slopeDirection;
@@ -6113,7 +6125,12 @@ function drawPlatformBlock(ctx, editor, platform, selected) {
   ctx.fillStyle = platform.color || (isRecallDamage ? "#2367a8" : isDamage ? "#8b3446" : "#54697b");
   ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
 
-  ctx.fillStyle = isDamage ? "rgba(255, 190, 102, 0.28)" : "rgba(255, 255, 255, 0.16)";
+  const isOneWay = platform.kind === "oneWay";
+  ctx.fillStyle = isDamage
+    ? "rgba(255, 190, 102, 0.28)"
+    : isOneWay
+      ? "rgba(147, 234, 255, 0.38)"
+      : "rgba(255, 255, 255, 0.16)";
   ctx.fillRect(platform.x, platform.y, platform.width, Math.max(2, platform.height * 0.18));
 
   if (isDamage) {
@@ -6143,6 +6160,30 @@ function drawPlatformBlock(ctx, editor, platform, selected) {
       ctx.stroke();
     }
     ctx.restore();
+    return;
+  }
+
+  if (isOneWay) {
+    ctx.strokeStyle = selected ? COLORS.accent : "rgba(147, 234, 255, 0.72)";
+    ctx.lineWidth = (selected ? 3 : 1.8) / editor.view.zoom;
+    ctx.beginPath();
+    ctx.moveTo(platform.x, platform.y);
+    ctx.lineTo(platform.x + platform.width, platform.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(230, 252, 255, 0.54)";
+    ctx.lineWidth = 1.2 / editor.view.zoom;
+    const step = Math.max(24, 34 / editor.view.zoom);
+    for (let x = platform.x + step * 0.5; x < platform.x + platform.width; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x - 7, platform.y + Math.max(8, platform.height * 0.38));
+      ctx.lineTo(x, platform.y + Math.max(14, platform.height * 0.62));
+      ctx.lineTo(x + 7, platform.y + Math.max(8, platform.height * 0.38));
+      ctx.stroke();
+    }
+    ctx.strokeStyle = selected ? COLORS.accent : "rgba(255, 255, 255, 0.12)";
+    ctx.lineWidth = (selected ? 3 : 1.2) / editor.view.zoom;
+    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
     return;
   }
 

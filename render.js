@@ -1239,6 +1239,29 @@ function drawPlatformMass(ctx, platform, theme) {
     return;
   }
 
+  if (platform.kind === "oneWay") {
+    const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+    gradient.addColorStop(0, "rgba(180, 225, 232, 0.46)");
+    gradient.addColorStop(0.32, "rgba(91, 126, 138, 0.58)");
+    gradient.addColorStop(1, "rgba(24, 38, 45, 0.62)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+    ctx.fillStyle = "rgba(225, 252, 255, 0.72)";
+    ctx.fillRect(platform.x, platform.y, platform.width, 4);
+
+    ctx.strokeStyle = "rgba(147, 234, 255, 0.38)";
+    ctx.lineWidth = 2;
+    for (let x = platform.x + 18; x < platform.x + platform.width; x += 36) {
+      ctx.beginPath();
+      ctx.moveTo(x - 8, platform.y + 10);
+      ctx.lineTo(x, platform.y + 17);
+      ctx.lineTo(x + 8, platform.y + 10);
+      ctx.stroke();
+    }
+    return;
+  }
+
   const topGradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
   topGradient.addColorStop(0, "rgba(212, 230, 236, 0.24)");
   topGradient.addColorStop(0.18, "rgba(112, 130, 139, 0.46)");

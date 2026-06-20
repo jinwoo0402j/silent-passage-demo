@@ -2223,9 +2223,18 @@ function getSolidLevelPlatforms(data) {
   return (data.platforms || []).filter((platform) => (
     !isSlopePlatform(platform) &&
     !isWaterPlatform(platform) &&
+    platform.kind !== "oneWay" &&
     platform.kind !== "damage" &&
     platform.kind !== "recallDamage"
   ));
+}
+
+function isOneWayPlatform(platform) {
+  return platform?.kind === "oneWay";
+}
+
+function getOneWayPlatforms(data) {
+  return (data.platforms || []).filter((platform) => isOneWayPlatform(platform));
 }
 
 function getCollisionPlatforms(data, run = null) {
@@ -2720,10 +2729,32 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
   player.y += player.vy * dt;
   player.onGround = false;
   let groundPlatform = null;
+  const verticalCollisionPlatforms = [
+    ...collisionPlatforms,
+    ...getOneWayPlatforms(data),
+  ];
 
-  for (const platform of collisionPlatforms) {
-    const catchDynamicTop = shouldCatchDynamicTop(player, platform, previousY);
+  for (const platform of verticalCollisionPlatforms) {
+    const oneWayPlatform = isOneWayPlatform(platform);
+    const catchDynamicTop = !oneWayPlatform && shouldCatchDynamicTop(player, platform, previousY);
     if (!catchDynamicTop && !rectsOverlap(player, platform)) {
+      continue;
+    }
+
+    if (oneWayPlatform) {
+      const previousFootY = previousY + player.height;
+      if (
+        player.vy < -EPSILON ||
+        previousFootY > platform.y + EPSILON
+      ) {
+        continue;
+      }
+      contacts.landingSpeed = player.vy;
+      player.y = platform.y - player.height;
+      player.vy = 0;
+      contacts.onGround = true;
+      contacts.groundEntityId = platform.dynamicEntityId ?? null;
+      groundPlatform = platform;
       continue;
     }
 

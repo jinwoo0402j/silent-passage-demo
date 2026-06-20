@@ -752,6 +752,8 @@ function sanitizePlatform(platform, index, basePlatform = null) {
       : ["up-right", "down-right"].includes(fallback.slopeDirection)
         ? fallback.slopeDirection
         : "down-right";
+  } else if (kind === "oneWay") {
+    next.kind = "oneWay";
   } else if (kind === "water") {
     next.kind = "water";
     next.damageRatio = safeRange(source?.damageRatio, fallback.damageRatio ?? 0.33, 0, 1);
