@@ -33,7 +33,7 @@ import {
   speakFaceOffLine,
   speakShelterLine,
   stopTtsPlayback,
-} from "./tts-client.js?v=20260619-shelter-voice-v9";
+} from "./tts-client.js?v=20260620-sfx-v1";
 import {
   approach,
   clamp,
@@ -350,6 +350,7 @@ const AIR_DASH_HOVER_BRAKE = 420;
 const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
 const SHELTER_MUSIC_SRC = "./assets/audio/bloom-through-concrete.mp3";
 const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
+const PROCEDURAL_SFX_OUTPUT_BOOST = 1.8;
 const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
 const AIR_DASH_DISTANCE_MULTIPLIER = 1.25;
 const AIR_DASH_INERTIA_RETAIN_RATIO = 0.25;
@@ -3820,6 +3821,13 @@ function createShelterTypingNoiseBuffer(context, duration) {
 function playSfxTone(context, options = {}) {
   const now = context.currentTime + (options.delay ?? 0);
   const duration = Math.max(0.01, options.duration ?? 0.12);
+  const volumeScale = Number.isFinite(options.volumeScale)
+    ? clamp(Number(options.volumeScale), 0, 1)
+    : getAudioChannelVolume("sfx", 1);
+  if (volumeScale <= 0) {
+    return;
+  }
+  const peakGain = Math.max(0.0001, (options.gain ?? 0.05) * volumeScale * PROCEDURAL_SFX_OUTPUT_BOOST);
   const oscillator = context.createOscillator();
   const gain = context.createGain();
   oscillator.type = options.type || "sine";
@@ -3828,7 +3836,7 @@ function playSfxTone(context, options = {}) {
     oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, options.endFrequency), now + duration);
   }
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, options.gain ?? 0.05), now + (options.attack ?? 0.006));
+  gain.gain.exponentialRampToValueAtTime(peakGain, now + (options.attack ?? 0.006));
   gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
   oscillator.connect(gain);
   gain.connect(context.destination);
@@ -3839,6 +3847,13 @@ function playSfxTone(context, options = {}) {
 function playSfxNoise(context, options = {}) {
   const now = context.currentTime + (options.delay ?? 0);
   const duration = Math.max(0.01, options.duration ?? 0.12);
+  const volumeScale = Number.isFinite(options.volumeScale)
+    ? clamp(Number(options.volumeScale), 0, 1)
+    : getAudioChannelVolume("sfx", 1);
+  if (volumeScale <= 0) {
+    return;
+  }
+  const peakGain = Math.max(0.0001, (options.gain ?? 0.05) * volumeScale * PROCEDURAL_SFX_OUTPUT_BOOST);
   const source = context.createBufferSource();
   const filter = context.createBiquadFilter();
   const gain = context.createGain();
@@ -3850,7 +3865,7 @@ function playSfxNoise(context, options = {}) {
   }
   filter.Q.setValueAtTime(Math.max(0.01, options.q ?? 0.9), now);
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, options.gain ?? 0.05), now + (options.attack ?? 0.006));
+  gain.gain.exponentialRampToValueAtTime(peakGain, now + (options.attack ?? 0.006));
   gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
   source.connect(filter);
   filter.connect(gain);
@@ -3859,7 +3874,7 @@ function playSfxNoise(context, options = {}) {
   source.stop(now + duration + 0.01);
 }
 
-function playGameSfx(kind, options = {}) {
+export function playGameSfx(kind, options = {}) {
   const context = getShotAudioContext();
   if (!context) {
     return;
@@ -3876,7 +3891,52 @@ function playGameSfx(kind, options = {}) {
       cooldowns[kind] = nowMs;
     }
 
-    if (kind === "jump") {
+    if (kind === "uiMove" || kind === "promptFocus") {
+      const prompt = kind === "promptFocus";
+      playSfxTone(context, {
+        type: "sine",
+        frequency: prompt ? 520 : 440,
+        endFrequency: prompt ? 660 : 560,
+        duration: prompt ? 0.055 : 0.045,
+        gain: prompt ? 0.032 : 0.046,
+      });
+    } else if (kind === "uiConfirm") {
+      playSfxTone(context, { type: "triangle", frequency: 420, endFrequency: 780, duration: 0.08, gain: 0.064 });
+      playSfxTone(context, { type: "sine", frequency: 620, endFrequency: 920, duration: 0.07, gain: 0.036, delay: 0.028 });
+    } else if (kind === "uiBack") {
+      playSfxTone(context, { type: "triangle", frequency: 380, endFrequency: 210, duration: 0.075, gain: 0.052 });
+    } else if (kind === "uiDenied") {
+      playSfxTone(context, { type: "square", frequency: 170, endFrequency: 110, duration: 0.09, gain: 0.064 });
+      playSfxNoise(context, { filterType: "bandpass", frequency: 520, duration: 0.065, gain: 0.042 });
+    } else if (kind === "shelterMenuOpen") {
+      playSfxNoise(context, { filterType: "bandpass", frequency: 620, endFrequency: 1180, duration: 0.16, gain: 0.052, curve: 2.2 });
+      playSfxTone(context, { type: "triangle", frequency: 220, endFrequency: 330, duration: 0.12, gain: 0.044 });
+    } else if (kind === "shelterUpgrade") {
+      playSfxTone(context, { type: "triangle", frequency: 392, endFrequency: 784, duration: 0.18, gain: 0.078 });
+      playSfxTone(context, { type: "sine", frequency: 587, endFrequency: 1174, duration: 0.16, gain: 0.05, delay: 0.06 });
+      playSfxNoise(context, { filterType: "highpass", frequency: 1800, duration: 0.12, gain: 0.036 });
+    } else if (kind === "photoShutter") {
+      playSfxNoise(context, { filterType: "highpass", frequency: 2400, duration: 0.052, gain: 0.092, curve: 1.3 });
+      playSfxTone(context, { type: "square", frequency: 120, endFrequency: 70, duration: 0.052, gain: 0.034 });
+    } else if (kind === "recordFlip") {
+      playSfxNoise(context, { filterType: "bandpass", frequency: 820, endFrequency: 540, duration: 0.11, gain: 0.052, curve: 1.5 });
+    } else if (kind === "terminalStart") {
+      playSfxTone(context, { type: "square", frequency: 196, endFrequency: 196, duration: 0.08, gain: 0.058 });
+      playSfxTone(context, { type: "square", frequency: 294, endFrequency: 440, duration: 0.11, gain: 0.048, delay: 0.055 });
+      playSfxNoise(context, { filterType: "highpass", frequency: 1700, duration: 0.12, gain: 0.034, delay: 0.025 });
+    } else if (kind === "lockdownStart") {
+      playSfxTone(context, { type: "square", frequency: 88, endFrequency: 58, duration: 0.24, gain: 0.094 });
+      playSfxNoise(context, { filterType: "bandpass", frequency: 720, endFrequency: 260, duration: 0.2, gain: 0.076 });
+    } else if (kind === "extractConfirm") {
+      playSfxTone(context, { type: "triangle", frequency: 294, endFrequency: 587, duration: 0.16, gain: 0.076 });
+      playSfxTone(context, { type: "sine", frequency: 440, endFrequency: 880, duration: 0.12, gain: 0.046, delay: 0.075 });
+    } else if (kind === "shelterLocked") {
+      playSfxTone(context, { type: "square", frequency: 150, endFrequency: 96, duration: 0.11, gain: 0.056 });
+      playSfxNoise(context, { filterType: "lowpass", frequency: 440, duration: 0.11, gain: 0.034 });
+    } else if (kind === "vaultCollect") {
+      playSfxTone(context, { type: "triangle", frequency: 330, endFrequency: 720, duration: 0.13, gain: 0.078 });
+      playSfxNoise(context, { filterType: "bandpass", frequency: 1180, duration: 0.09, gain: 0.046, delay: 0.025 });
+    } else if (kind === "jump") {
       playSfxTone(context, { type: "triangle", frequency: 180, endFrequency: 420, duration: 0.1, gain: 0.055 });
       playSfxNoise(context, { filterType: "highpass", frequency: 900, duration: 0.08, gain: 0.026 });
     } else if (kind === "wallJump" || kind === "braceVault") {
@@ -3931,6 +3991,93 @@ function playGameSfx(kind, options = {}) {
     }
   } catch {
     // Procedural audio is optional; gameplay should never depend on it.
+  }
+}
+
+function createLoopingNoiseBuffer(context, duration = 2.8) {
+  const sampleCount = Math.max(1, Math.floor(context.sampleRate * duration));
+  const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  let smoothed = 0;
+  for (let index = 0; index < sampleCount; index += 1) {
+    const white = Math.random() * 2 - 1;
+    smoothed = smoothed * 0.86 + white * 0.14;
+    channel[index] = white * 0.58 + smoothed * 0.42;
+  }
+  return buffer;
+}
+
+function createRainAmbience(context) {
+  const source = context.createBufferSource();
+  const highpass = context.createBiquadFilter();
+  const lowpass = context.createBiquadFilter();
+  const color = context.createBiquadFilter();
+  const gain = context.createGain();
+  source.buffer = createLoopingNoiseBuffer(context, 3.4);
+  source.loop = true;
+  highpass.type = "highpass";
+  highpass.frequency.setValueAtTime(620, context.currentTime);
+  highpass.Q.setValueAtTime(0.25, context.currentTime);
+  lowpass.type = "lowpass";
+  lowpass.frequency.setValueAtTime(4300, context.currentTime);
+  lowpass.Q.setValueAtTime(0.4, context.currentTime);
+  color.type = "peaking";
+  color.frequency.setValueAtTime(1700, context.currentTime);
+  color.Q.setValueAtTime(0.7, context.currentTime);
+  color.gain.setValueAtTime(1.8, context.currentTime);
+  gain.gain.setValueAtTime(0.0001, context.currentTime);
+  source.connect(highpass);
+  highpass.connect(lowpass);
+  lowpass.connect(color);
+  color.connect(gain);
+  gain.connect(context.destination);
+  source.start(context.currentTime);
+  return {
+    context,
+    source,
+    highpass,
+    lowpass,
+    color,
+    gain,
+  };
+}
+
+function getRainAmbienceTargetVolume(state, data) {
+  if (state?.scene !== SCENES.EXPEDITION || !state.run || isMovementLab(data)) {
+    return 0;
+  }
+  const run = state.run;
+  const phase = run.timePhase || "day";
+  const outdoorsVolume = phase === "night" ? 0.078 : phase === "dusk" ? 0.064 : 0.052;
+  const shelterVolume = run.shelterRest?.active ? 0.028 : outdoorsVolume;
+  const vaultBoost = isVaultEscapeActive(run) || isVaultLockdownActive(run) ? 0.01 : 0;
+  const faceOffDip = run.faceOff?.active ? 0.68 : 1;
+  return getAudioChannelVolume("sfx", Math.min(0.092, shelterVolume + vaultBoost) * faceOffDip);
+}
+
+function updateRainAmbience(state, data) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const targetVolume = getRainAmbienceTargetVolume(state, data);
+  let ambience = window.__silentPassageRainAmbience;
+  if (targetVolume <= 0.0001 && !ambience) {
+    return;
+  }
+  try {
+    if (!ambience) {
+      const context = getGameAudioContext();
+      if (!context) {
+        return;
+      }
+      ambience = createRainAmbience(context);
+      window.__silentPassageRainAmbience = ambience;
+    }
+    const now = ambience.context.currentTime;
+    ambience.gain.gain.setTargetAtTime(Math.max(0.0001, targetVolume), now, targetVolume > 0.0001 ? 0.85 : 0.55);
+    ambience.lowpass.frequency.setTargetAtTime(targetVolume > 0.035 ? 4700 : 3900, now, 0.8);
+  } catch {
+    window.__silentPassageRainAmbience = null;
   }
 }
 
@@ -5222,7 +5369,7 @@ function updateFaceOff(state, data, dt, activeDt = dt) {
     }
   }
 
-  if (state.mouse?.primaryJustPressed) {
+  if (consumeEitherPress(state, ATTACK_KEYS) || consumeEitherPress(state, FIRE_KEYS)) {
     applyFaceOffAttack(run, data, enemy);
   }
   if (state.mouse) {
@@ -11031,6 +11178,7 @@ export function beginVaultEscape(run, door) {
   closeLootCrate(run);
   pushNotice(run, "Vault alarm armed. Grab supplies and escape.");
   spawnParticles(run, door.x + door.width / 2, door.y + door.height / 2, 18, "#ff7a66");
+  playGameSfx("terminalStart", { cooldownMs: 180 });
   startVaultEscapeMusic(run);
   return true;
 }
@@ -11050,6 +11198,7 @@ function beginVaultLockdown(run) {
   run.noticeTimer = Math.max(run.noticeTimer ?? 0, run.vaultEscape.lockdownDuration);
   pushNotice(run, run.message);
   spawnParticles(run, run.player.x + run.player.width / 2, run.player.y + run.player.height / 2, 24, "#ff7a66");
+  playGameSfx("lockdownStart", { cooldownMs: 260 });
   updateVaultEscapeMusic(run);
   return true;
 }
@@ -11072,6 +11221,7 @@ function collectVaultLoot(run, loot) {
   );
   pushNotice(run, `${loot.label || "Supplies"} secured.`);
   spawnParticles(run, loot.x + loot.width / 2, loot.y + loot.height / 2, 12, "#e7f47e");
+  playGameSfx("vaultCollect", { cooldownMs: 90 });
   return true;
 }
 
@@ -13479,11 +13629,17 @@ function updateInteractions(state, data, canInteract) {
 
   const nearest = getInteractionTargets(run, data);
   if (!nearest) {
+    run.lastPromptTargetId = "";
     return;
   }
 
   run.prompt = nearest.text;
   run.promptWorld = { x: nearest.x, y: nearest.y };
+  const promptTargetId = `${nearest.kind}:${nearest.id || ""}`;
+  if (run.lastPromptTargetId !== promptTargetId) {
+    run.lastPromptTargetId = promptTargetId;
+    playGameSfx("promptFocus", { cooldownMs: 180 });
+  }
 
   if (!canInteract) {
     return;
@@ -13505,6 +13661,7 @@ function updateInteractions(state, data, canInteract) {
   }
 
   if (nearest.kind === "extract") {
+    playGameSfx("extractConfirm", { cooldownMs: 220 });
     applyExtraction(state, data);
     return;
   }
@@ -13517,11 +13674,13 @@ function updateInteractions(state, data, canInteract) {
       run.vaultEscape.lockdownTimer = 0;
     }
     pushNotice(run, "Escaped before lockdown.");
+    playGameSfx("extractConfirm", { cooldownMs: 220 });
     applyExtraction(state, data);
     return;
   }
 
   if (nearest.kind === "shelterLocked") {
+    playGameSfx("shelterLocked", { cooldownMs: 180 });
     setRunNotice(run, nearest.text, 2);
     setStatus(state, nearest.text);
     return;
@@ -13613,6 +13772,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "menu";
       rest.timer = 0;
       rest.menuIndex = clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1);
+      playGameSfx("shelterMenuOpen", { cooldownMs: 240 });
       setStatus(state, "?쇰궃泥??湲?");
       const talk = ensureShelterTalkState(rest);
       const autoEventState = updateShelterAutoEvent(talk, state, data, rest);
@@ -13652,16 +13812,20 @@ function updateShelterRestMode(state, data, dt) {
     }
     if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
       rest.menuIndex = (Math.max(0, Math.floor(rest.menuIndex || 0)) + SHELTER_MENU_ITEMS.length - 1) % SHELTER_MENU_ITEMS.length;
+      playGameSfx("uiMove", { cooldownMs: 50 });
     }
     if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
       rest.menuIndex = (Math.max(0, Math.floor(rest.menuIndex || 0)) + 1) % SHELTER_MENU_ITEMS.length;
+      playGameSfx("uiMove", { cooldownMs: 50 });
     }
     if (consumeEitherPress(state, SHELTER_EXIT_KEYS)) {
+      playGameSfx("uiBack", { cooldownMs: 120 });
       leaveShelterRest(state, data);
       return true;
     }
     if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, CONFIRM_KEYS)) {
       const item = SHELTER_MENU_ITEMS[clamp(Math.floor(rest.menuIndex || 0), 0, SHELTER_MENU_ITEMS.length - 1)];
+      playGameSfx(item === "exit" ? "uiBack" : "uiConfirm", { cooldownMs: 120 });
       if (item === "talk") {
         rest.phase = "talk";
         rest.timer = 0;
@@ -13728,7 +13892,10 @@ function updateShelterRestMode(state, data, dt) {
       return true;
     }
     if (isShelterEventResultReady(talk, state)) {
-      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      const closeConfirmed = consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS);
+      const closeBack = !closeConfirmed && consumeEitherPress(state, SHELTER_BACK_KEYS);
+      if (closeConfirmed || closeBack) {
+        playGameSfx(closeBack ? "uiBack" : "uiConfirm", { cooldownMs: 120 });
         beginShelterTalkExit(talk, state);
       } else {
         setStatus(state, "Shelter result. Z close.");
@@ -13737,6 +13904,7 @@ function updateShelterRestMode(state, data, dt) {
       return true;
     }
     if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      playGameSfx("uiBack", { cooldownMs: 120 });
       beginShelterTalkExit(talk, state);
       updateAutoSave(state, data, dt);
       return true;
@@ -13747,6 +13915,7 @@ function updateShelterRestMode(state, data, dt) {
     }
     if (!talk.pending) {
       if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
+        playGameSfx("uiConfirm", { cooldownMs: 90 });
         if (!isShelterCurrentLineTypedComplete(talk, state)) {
           completeShelterCurrentLineTyping(talk, state);
           updateAutoSave(state, data, dt);
@@ -13763,9 +13932,11 @@ function updateShelterRestMode(state, data, dt) {
       } else if (isShelterLineComplete(talk) && canSelectShelterTalkChoice(talk, state)) {
         if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
           talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+          playGameSfx("uiMove", { cooldownMs: 50 });
         }
         if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
           talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+          playGameSfx("uiMove", { cooldownMs: 50 });
         }
       }
     }
@@ -13784,11 +13955,13 @@ function updateShelterRestMode(state, data, dt) {
     rest.photo.frameY = clamp(Number(rest.photo.frameY || 0) + moveY * dt * 1.18, -1, 1);
     if (consumeEitherPress(state, RESTART_KEYS) || consumeEitherPress(state, RELOAD_KEYS)) {
       resetShelterPhoto(rest);
+      playGameSfx("uiBack", { cooldownMs: 120 });
     }
     if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
       rest.phase = "menu";
       rest.timer = 0;
       resetShelterPhoto(rest);
+      playGameSfx("uiBack", { cooldownMs: 120 });
     } else if (consumeEitherPress(state, INTERACT_KEYS)) {
       if (!isShelterCgIllustrationReady(data, getShelterConfig(data).backgroundId, run.day)) {
         preloadShelterCgIllustration(data, run.day);
@@ -13800,6 +13973,7 @@ function updateShelterRestMode(state, data, dt) {
       rest.photo.flashTimer = 0.22;
       rest.phase = "photoPreview";
       rest.timer = 0;
+      playGameSfx("photoShutter", { cooldownMs: 180 });
       setStatus(state, "CG 확인 · C 저장 / R 다시");
     } else {
       setStatus(state, "CG 珥ъ쁺 쨌 諛⑺뼢??WASD ?꾨젅??쨌 Z 珥ъ쁺");
@@ -13813,15 +13987,18 @@ function updateShelterRestMode(state, data, dt) {
       rest.phase = "photo";
       rest.timer = 0;
       rest.photo.capturedImage = null;
+      playGameSfx("uiBack", { cooldownMs: 120 });
     } else if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
       rest.phase = "menu";
       rest.timer = 0;
       resetShelterPhoto(rest);
+      playGameSfx("uiBack", { cooldownMs: 120 });
     } else if (consumeEitherPress(state, CONFIRM_KEYS)) {
       if (saveShelterPhoto(state, data)) {
         rest.phase = "records";
         rest.timer = 0;
         saveCurrentGame(state, data);
+        playGameSfx("uiConfirm", { cooldownMs: 120 });
       }
     } else {
       setStatus(state, "CG ?뺤씤 쨌 C ???/ R ?ъ눋??/ Esc 痍⑥냼");
@@ -13834,13 +14011,16 @@ function updateShelterRestMode(state, data, dt) {
     const photos = ensureCgArchive(state.meta || {}).photos;
     if (consumeEitherPress(state, SHELTER_VIEW_LEFT_KEYS)) {
       rest.recordsIndex = photos.length ? (Math.max(0, Math.floor(rest.recordsIndex || 0)) + photos.length - 1) % photos.length : 0;
+      playGameSfx("recordFlip", { cooldownMs: 90 });
     }
     if (consumeEitherPress(state, SHELTER_VIEW_RIGHT_KEYS)) {
       rest.recordsIndex = photos.length ? (Math.max(0, Math.floor(rest.recordsIndex || 0)) + 1) % photos.length : 0;
+      playGameSfx("recordFlip", { cooldownMs: 90 });
     }
     if (consumeEitherPress(state, SHELTER_BACK_KEYS) || consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
       rest.phase = "menu";
       rest.timer = 0;
+      playGameSfx("uiBack", { cooldownMs: 120 });
     } else {
       setStatus(state, "湲곕줉 蹂닿린 쨌 A/D ?섍린湲?쨌 Esc ?ㅻ줈");
     }
@@ -13852,13 +14032,16 @@ function updateShelterRestMode(state, data, dt) {
     const backgrounds = ensureCgArchive(state.meta || {}).unlockedBackgroundIds;
     if (consumeEitherPress(state, SHELTER_VIEW_LEFT_KEYS)) {
       rest.backgroundIndex = backgrounds.length ? (Math.max(0, Math.floor(rest.backgroundIndex || 0)) + backgrounds.length - 1) % backgrounds.length : 0;
+      playGameSfx("recordFlip", { cooldownMs: 90 });
     }
     if (consumeEitherPress(state, SHELTER_VIEW_RIGHT_KEYS)) {
       rest.backgroundIndex = backgrounds.length ? (Math.max(0, Math.floor(rest.backgroundIndex || 0)) + 1) % backgrounds.length : 0;
+      playGameSfx("recordFlip", { cooldownMs: 90 });
     }
     if (consumeEitherPress(state, SHELTER_BACK_KEYS) || consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
       rest.phase = "menu";
       rest.timer = 0;
+      playGameSfx("uiBack", { cooldownMs: 120 });
     } else {
       setStatus(state, "諛곌꼍 蹂닿린 쨌 A/D ?섍린湲?쨌 Esc ?ㅻ줈");
     }
@@ -13954,16 +14137,11 @@ function updateExpedition(state, data, dt) {
     updateRecoilAim(run, data, state, dt);
   }
   const selectedWeaponAutomatic = !lootWasActive && !meleeSlotSelected && isSelectedWeaponAutomatic(run, data);
-  const heldAutoFire = selectedWeaponAutomatic
-    && useLegacyControls(state)
-    && Boolean(state.mouse?.primaryDown)
-    && canFireWeaponPose(run.player);
-  const queuedRecoilShotPressed = !lootWasActive && !meleeSlotSelected && (keyboardRecoilShotPressed || Boolean(state.mouse?.primaryJustPressed) || heldAutoFire);
+  const queuedRecoilShotPressed = !lootWasActive && !meleeSlotSelected && keyboardRecoilShotPressed;
   const reserveRecoilShotForWeapon = queuedRecoilShotPressed
     && (Boolean(run.recoilAim?.aiming) || selectedWeaponAutomatic);
   if (queuedRecoilShotPressed || state.mouse?.secondaryDown || run.recoilAim?.aiming || run.focusActive) {
     pushInputTrace(state, "preFace", {
-      pj: Number(Boolean(state.mouse?.primaryJustPressed)),
       sec: Number(Boolean(state.mouse?.secondaryDown)),
       aim: Number(Boolean(run.recoilAim?.aiming)),
       focus: Number(Boolean(run.focusActive)),
@@ -14022,17 +14200,13 @@ function updateExpedition(state, data, dt) {
     setStatus(state, "LOCKDOWN. All exits sealed.");
     return;
   }
-  let attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
-  if (!lootWasActive && meleeSlotSelected && Boolean(state.mouse?.primaryJustPressed)) {
-    attackPressed = true;
-  }
+  const attackPressed = lootWasActive ? false : consumeEitherPress(state, ATTACK_KEYS);
   const recoilShotPressed = reserveRecoilShotForWeapon
-    || (!lootWasActive && !meleeSlotSelected && (keyboardRecoilShotPressed || Boolean(state.mouse?.primaryJustPressed)));
+    || (!lootWasActive && !meleeSlotSelected && keyboardRecoilShotPressed);
   if (recoilShotPressed || queuedRecoilShotPressed) {
     pushInputTrace(state, "shotQueued", {
       shot: Number(Boolean(recoilShotPressed)),
       reserve: Number(Boolean(reserveRecoilShotForWeapon)),
-      pj: Number(Boolean(state.mouse?.primaryJustPressed)),
     });
   }
   if (state.mouse) {
@@ -14156,10 +14330,12 @@ function updateShelter(state) {
     const cost = getShelterUpgradeCost(upgrade, level);
     if (cost === null) {
       setStatus(state, `${upgrade.label} 최대 단계`);
+      playGameSfx("uiDenied", { cooldownMs: 140 });
       return true;
     }
     if ((state.meta.bankedMaterials || 0) < cost) {
       setStatus(state, `자재 부족 · ${cost} 필요`);
+      playGameSfx("uiDenied", { cooldownMs: 140 });
       return true;
     }
     state.meta.upgrades = normalizeMetaUpgrades(state.meta.upgrades);
@@ -14167,6 +14343,7 @@ function updateShelter(state) {
     state.meta.upgrades[upgrade.id] = level + 1;
     saveMetaState(state.meta);
     setStatus(state, `${upgrade.label} Lv.${level + 1} 업그레이드 완료`);
+    playGameSfx("shelterUpgrade", { cooldownMs: 180 });
     return true;
   };
 
@@ -14189,7 +14366,10 @@ function updateShelter(state) {
       return;
     }
     if (isShelterEventResultReady(talk, state)) {
-      if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS) || consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      const closeConfirmed = consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS);
+      const closeBack = !closeConfirmed && consumeEitherPress(state, SHELTER_BACK_KEYS);
+      if (closeConfirmed || closeBack) {
+        playGameSfx(closeBack ? "uiBack" : "uiConfirm", { cooldownMs: 120 });
         beginShelterTalkExit(talk, state);
       } else {
         setStatus(state, "Shelter result. Z close.");
@@ -14197,6 +14377,7 @@ function updateShelter(state) {
       return;
     }
     if (consumeEitherPress(state, SHELTER_BACK_KEYS)) {
+      playGameSfx("uiBack", { cooldownMs: 120 });
       beginShelterTalkExit(talk, state);
       return;
     }
@@ -14206,6 +14387,7 @@ function updateShelter(state) {
         talk.line = "……말해도 돼. 듣고 있어.";
       }
       if (consumeEitherPress(state, SHELTER_TALK_CONFIRM_KEYS)) {
+        playGameSfx("uiConfirm", { cooldownMs: 90 });
         if (!isShelterCurrentLineTypedComplete(talk, state)) {
           completeShelterCurrentLineTyping(talk, state);
           return;
@@ -14221,9 +14403,11 @@ function updateShelter(state) {
       } else if (isShelterLineComplete(talk) && canSelectShelterTalkChoice(talk, state)) {
         if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
           talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + talk.choices.length - 1) % talk.choices.length;
+          playGameSfx("uiMove", { cooldownMs: 50 });
         }
         if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
           talk.choiceIndex = (Math.max(0, Math.floor(talk.choiceIndex || 0)) + 1) % talk.choices.length;
+          playGameSfx("uiMove", { cooldownMs: 50 });
         }
       }
     }
@@ -14235,46 +14419,55 @@ function updateShelter(state) {
   if (pointerAction) {
     state.mouse.primaryJustPressed = false;
     if (pointerAction === "talk") {
+      playGameSfx("uiConfirm", { cooldownMs: 120 });
       startShelterTalk();
       return;
     }
     if (pointerAction === "upgrade") {
       state.shelter.menuIndex = SHELTER_HOME_MENU_ITEMS.indexOf("upgrade");
+      playGameSfx("shelterMenuOpen", { cooldownMs: 160 });
       setStatus(state, "업그레이드 선택");
       return;
     }
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     startShelterSortie();
     return;
   }
 
   if (consumeEitherPress(state, SHELTER_MENU_UP_KEYS)) {
     state.shelter.menuIndex = (Math.max(0, Math.floor(state.shelter.menuIndex || 0)) + SHELTER_HOME_MENU_ITEMS.length - 1) % SHELTER_HOME_MENU_ITEMS.length;
+    playGameSfx("uiMove", { cooldownMs: 50 });
   }
   if (consumeEitherPress(state, SHELTER_MENU_DOWN_KEYS)) {
     state.shelter.menuIndex = (Math.max(0, Math.floor(state.shelter.menuIndex || 0)) + 1) % SHELTER_HOME_MENU_ITEMS.length;
+    playGameSfx("uiMove", { cooldownMs: 50 });
   }
 
   const selected = SHELTER_HOME_MENU_ITEMS[clamp(Math.floor(state.shelter.menuIndex || 0), 0, SHELTER_HOME_MENU_ITEMS.length - 1)];
   if (selected === "upgrade") {
     if (consumeEitherPress(state, SHELTER_VIEW_LEFT_KEYS)) {
       state.shelter.upgradeIndex = (state.shelter.upgradeIndex + SHELTER_UPGRADES.length - 1) % SHELTER_UPGRADES.length;
+      playGameSfx("uiMove", { cooldownMs: 50 });
       setStatus(state, "업그레이드 선택");
       return;
     }
     if (consumeEitherPress(state, SHELTER_VIEW_RIGHT_KEYS)) {
       state.shelter.upgradeIndex = (state.shelter.upgradeIndex + 1) % SHELTER_UPGRADES.length;
+      playGameSfx("uiMove", { cooldownMs: 50 });
       setStatus(state, "업그레이드 선택");
       return;
     }
   }
 
   if (consumeEitherPress(state, SHELTER_EXIT_KEYS)) {
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     startShelterSortie();
     return;
   }
 
   if (consumeEitherPress(state, INTERACT_KEYS) || consumeEitherPress(state, CONFIRM_KEYS)) {
     if (selected === "talk") {
+      playGameSfx("uiConfirm", { cooldownMs: 120 });
       startShelterTalk();
       return;
     }
@@ -14282,6 +14475,7 @@ function updateShelter(state) {
       handleShelterUpgrade();
       return;
     }
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     startShelterSortie();
     return;
   }
@@ -14354,15 +14548,18 @@ function updateTitle(state) {
   if (titleMenu.confirmingNewRun) {
     if (consumeEitherPress(state, TITLE_MENU_CANCEL_KEYS)) {
       titleMenu.confirmingNewRun = false;
+      playGameSfx("uiBack", { cooldownMs: 120 });
       setStatus(state, "????痍⑥냼");
       return;
     }
     if (consumeEitherPress(state, TITLE_MENU_UP_KEYS) || consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
       titleMenu.confirmingNewRun = false;
+      playGameSfx("uiMove", { cooldownMs: 50 });
       setStatus(state, "硫붿씤 硫붾돱");
       return;
     }
     if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+      playGameSfx("uiConfirm", { cooldownMs: 120 });
       enterTitleNewRun(state, hasRun);
       return;
     }
@@ -14372,17 +14569,20 @@ function updateTitle(state) {
 
   if (consumeEitherPress(state, TITLE_MENU_UP_KEYS)) {
     moveTitleMenu(titleMenu, hasRun, -1);
+    playGameSfx("uiMove", { cooldownMs: 50 });
     setStatus(state, "硫붿씤 硫붾돱");
     return;
   }
   if (consumeEitherPress(state, TITLE_MENU_DOWN_KEYS)) {
     moveTitleMenu(titleMenu, hasRun, 1);
+    playGameSfx("uiMove", { cooldownMs: 50 });
     setStatus(state, "硫붿씤 硫붾돱");
     return;
   }
 
   if (consumeEitherPress(state, NEW_RUN_KEYS)) {
     titleMenu.menuIndex = 0;
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     if (hasRun) {
       titleMenu.confirmingNewRun = true;
       setStatus(state, "湲곗〈 ?????젣 ?뺤씤");
@@ -14394,6 +14594,7 @@ function updateTitle(state) {
 
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     const selected = TITLE_MENU_ITEMS[clamp(Math.floor(titleMenu.menuIndex || 0), 0, TITLE_MENU_ITEMS.length - 1)];
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     if (selected === "continue") {
       if (hasRun && restoreSavedGame(state, state.data)) {
         return;
@@ -14419,6 +14620,7 @@ function updateTitle(state) {
 function updateResults(state) {
   setStatus(state, isMovementLab(state.data) ? "寃곌낵 ?붾㈃. C/Z" : "洹??寃곌낵. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
   }
@@ -14427,6 +14629,7 @@ function updateResults(state) {
 function updateGameOver(state) {
   setStatus(state, isMovementLab(state.data) ? "?ㅽ뙣 ?붾㈃. C/Z" : "???ㅽ뙣. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     state.scene = SCENES.SHELTER;
     state.sceneTimer = 0;
   }
@@ -14552,6 +14755,7 @@ export function updateGame(state, data, dt) {
   }
 
   updateShelterMusic(state);
+  updateRainAmbience(state, data);
   updateLoopingAudioFades();
 
   if (state.mouse) {

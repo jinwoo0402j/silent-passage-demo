@@ -108,6 +108,18 @@ async function loadVoiceBankManifest() {
   return voiceBankManifestPromises.get(VOICE_BANK_MANIFEST_URL);
 }
 
+async function loadDefaultVoiceBankManifest() {
+  if (typeof fetch === "undefined") {
+    return null;
+  }
+  if (!voiceBankManifestPromises.has(VOICE_BANK_MANIFEST_URL)) {
+    voiceBankManifestPromises.set(VOICE_BANK_MANIFEST_URL, fetch(VOICE_BANK_MANIFEST_URL)
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null));
+  }
+  return voiceBankManifestPromises.get(VOICE_BANK_MANIFEST_URL);
+}
+
 function normalizeVoicePresetId(value = "") {
   const presetId = String(value || "").trim().toLowerCase();
   if (!presetId || presetId === "default" || presetId === "main" || presetId === "off") {
@@ -171,6 +183,21 @@ function scoreVoiceLine(entry, text, options = {}) {
     score += 12;
   }
   return score;
+}
+
+function isScriptedVoiceLine(options = {}) {
+  return Boolean(options.eventId || options.nodeId || Number.isFinite(options.lineIndex));
+}
+
+function hasExactVoiceLine(manifest, text) {
+  const entries = Array.isArray(manifest?.lines)
+    ? manifest.lines.map((entry) => ({
+      scene: manifest.scene || SHELTER_CHARACTER_SCENE,
+      speaker: manifest.speaker || manifest.character || manifest.voice || "type-07a",
+      ...entry,
+    }))
+    : [];
+  return entries.some((entry) => scoreVoiceLine(entry, text, {}) >= 12);
 }
 
 function pickVoiceBankLine(manifest, text, options = {}) {
@@ -262,9 +289,24 @@ async function trySpeakVoiceBankLine(text, options = {}) {
   if (!shouldUseVoiceBank(options) || typeof window === "undefined" || typeof window.Audio === "undefined") {
     return false;
   }
-  const manifest = await loadVoiceBankManifest();
-  const line = pickVoiceBankLine(manifest, text, options);
-  const source = getVoiceLineSrc(line);
+  let manifest = await loadVoiceBankManifest();
+  let line = pickVoiceBankLine(manifest, text, options);
+  let source = getVoiceLineSrc(line);
+  const selectedManifestUrl = getVoiceBankManifestUrl();
+  if (
+    isScriptedVoiceLine(options)
+    && selectedManifestUrl !== VOICE_BANK_MANIFEST_URL
+    && !hasExactVoiceLine(manifest, text)
+  ) {
+    const fallbackManifest = await loadDefaultVoiceBankManifest();
+    const fallbackLine = pickVoiceBankLine(fallbackManifest, text, options);
+    const fallbackSource = getVoiceLineSrc(fallbackLine);
+    if (fallbackSource) {
+      manifest = fallbackManifest;
+      line = fallbackLine;
+      source = fallbackSource;
+    }
+  }
   if (!source) {
     return false;
   }

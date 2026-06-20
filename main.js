@@ -25,7 +25,7 @@ import {
   loadTtsEnabled,
   resetTtsEnabled,
   saveTtsEnabled,
-} from "./tts-client.js?v=20260619-shelter-voice-v9";
+} from "./tts-client.js?v=20260620-sfx-v1";
 import {
   GAME_OPTION_CONTROLS,
   applyGameOptions,
@@ -46,7 +46,7 @@ import {
   normalizePartInstance,
   saveMetaState,
 } from "./state.js?v=20260619-shelter-voice-v9";
-import { beginVaultEscape, bindInput, updateGame } from "./systems.js?v=20260619-shelter-voice-v9";
+import { beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260620-sfx-rain-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -1796,6 +1796,7 @@ function bindUi(currentDom, currentState, data) {
   setSoundOptionsPanelOpen(false);
 
   currentDom.sceneActionButton?.addEventListener("click", () => {
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     pressVirtualKey(currentState, "KeyC");
     window.setTimeout(() => releaseVirtualKey(currentState, "KeyC"), 80);
   });
@@ -1850,6 +1851,7 @@ function bindUi(currentDom, currentState, data) {
   });
 
   currentDom.soundOptionsButton?.addEventListener("click", () => {
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
     const nextOpen = currentDom.soundOptionsPanel?.hidden ?? true;
     if (nextOpen) {
       setTestDebugPanelOpen(currentDom, currentState, false);
