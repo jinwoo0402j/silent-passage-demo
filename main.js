@@ -1702,6 +1702,14 @@ function bindUi(currentDom, currentState, data) {
       return false;
     }
 
+    if (!currentState.capsLockActive && !isFaceOffVirtualCursorActive()) {
+      currentState.mouse.primaryDown = false;
+      currentState.mouse.secondaryDown = false;
+      currentState.mouse.primaryJustPressed = false;
+      currentState.mouse.secondaryJustPressed = false;
+      return false;
+    }
+
     const buttons = typeof event.buttons === "number" ? event.buttons : 0;
     const secondaryPressed = event.button === 2 || (buttons & 2) !== 0;
     const primaryPressed = event.button === 0 || (buttons & 1) !== 0;

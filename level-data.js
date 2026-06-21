@@ -835,7 +835,7 @@ export const GAME_DATA = {
       "wallRunExitHorizontal": 150,
       "wallJumpHorizontal": 560,
       "wallJumpVertical": 940,
-      "wallJumpLockMs": 100,
+      "wallJumpLockMs": 160,
       "braceDetectPaddingX": 24,
       "braceDetectPaddingY": 24,
       "braceHoldStartSpeed": 24,

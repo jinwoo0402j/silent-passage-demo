@@ -8173,7 +8173,7 @@ function updatePlayer(run, data, state, dt, input) {
   const moveLeft = isEitherPressed(state, getMoveLeftKeys(state));
   const moveRight = isEitherPressed(state, getMoveRightKeys(state));
   const rawMoveAxis = (moveRight ? 1 : 0) - (moveLeft ? 1 : 0);
-  const airDashDirection = useLegacyControls(state) ? null : getKeyboardDirectionPressedVector(state);
+  const airDashDirection = getKeyboardDirectionPressedVector(state);
   let moveAxis = rawMoveAxis;
   const crouchHeld = isEitherPressed(state, getCrouchKeys(state));
   const crouchPressed = consumeEitherPress(state, getCrouchKeys(state));
@@ -8652,7 +8652,7 @@ function updatePlayer(run, data, state, dt, input) {
     }
 
     const dashCarryDirection = player.dashVectorX ?? player.dashDirection ?? 0;
-    if ((landed || player.dashTimer === 0) && dashStartedAirborne) {
+    if ((landed || player.dashTimer === 0) && dashStartedAirborne && !airDashHitTerrain) {
       player.vx = retainAirDashInertia(player.vx);
       player.vy = retainAirDashInertia(player.vy);
       player.dashCarrySpeed = retainAirDashInertia(player.dashCarrySpeed);
