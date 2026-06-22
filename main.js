@@ -5,7 +5,7 @@ import {
   extractEditableLevelData,
   saveLevelOverride,
   shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260619-shelter-voice-v9";
+} from "./level-store.js?v=20260622-npc-v1";
 import {
   SPRINT_TUNING_FIELDS,
   applySprintTuning,
@@ -33,8 +33,8 @@ import {
   resetGameOptions,
   saveGameOptions,
 } from "./game-options.js?v=20260619-text-speed-v1";
-import { renderGame } from "./render.js?v=20260619-shelter-voice-v9";
-import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260619-shelter-voice-v9";
+import { renderGame } from "./render.js?v=20260622-npc-v1";
+import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260622-npc-v1";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -45,8 +45,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260619-shelter-voice-v9";
-import { beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260620-no-mouse-combat-v1";
+} from "./state.js?v=20260622-npc-v1";
+import { beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260622-npc-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

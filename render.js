@@ -7,7 +7,7 @@ import {
   getShelterUpgradeCost,
   getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260619-shelter-voice-v9";
+} from "./state.js?v=20260622-npc-v1";
 import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
@@ -103,6 +103,38 @@ function isShelterPortalOpen(run) {
   }
   return run.timePhase === "night"
     && !(Number.isFinite(run.shelterExitCooldown) && run.shelterExitCooldown > 0);
+}
+
+function getRenderStoryFlags(state) {
+  return Array.isArray(state?.meta?.storyFlags) ? state.meta.storyFlags : [];
+}
+
+function npcPlacementVisible(state, placement) {
+  const flags = getRenderStoryFlags(state);
+  const showWhen = placement?.showWhen && typeof placement.showWhen === "object" ? placement.showWhen : {};
+  const required = Array.isArray(showWhen.requiredStoryFlags) ? showWhen.requiredStoryFlags : [];
+  const missing = Array.isArray(showWhen.missingStoryFlags) ? showWhen.missingStoryFlags : [];
+  return required.every((flag) => flags.includes(flag))
+    && missing.every((flag) => !flags.includes(flag));
+}
+
+function getActiveNpcPlacementsForRender(state, data) {
+  const levelId = data?.currentLevelId || state?.run?.currentLevelId || data?.levelId || "";
+  return Array.isArray(data?.npcPlacements)
+    ? data.npcPlacements.filter((placement) => (
+      placement
+      && placement.levelId === levelId
+      && npcPlacementVisible(state, placement)
+    ))
+    : [];
+}
+
+function getNpcProfileForRender(data, placement) {
+  return data?.npcProfiles?.[placement?.npcId] || {
+    name: placement?.npcId || "NPC",
+    role: "",
+    visual: { color: "#d7e7dc", accentColor: "#93eaff" },
+  };
 }
 
 function getDuskProgress(run, data) {
@@ -6170,6 +6202,177 @@ function drawWorldPrompt(ctx, run, theme) {
   ctx.textAlign = "left";
 }
 
+function drawNpcPlacements(ctx, state, data, theme) {
+  getActiveNpcPlacementsForRender(state, data).forEach((placement) => {
+    const profile = getNpcProfileForRender(data, placement);
+    const visual = profile.visual || {};
+    const pulse = Math.sin((state.pulse || 0) * 2.4 + placement.x * 0.01) * 0.5 + 0.5;
+    const x = placement.x;
+    const y = placement.y;
+    const w = placement.width;
+    const h = placement.height;
+    const cx = x + w * 0.5;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    const glow = ctx.createRadialGradient(cx, y + h * 0.55, 8, cx, y + h * 0.55, Math.max(w, h) * 0.85);
+    glow.addColorStop(0, "rgba(147,234,255,0.14)");
+    glow.addColorStop(1, "rgba(147,234,255,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(x - w, y - h * 0.4, w * 3, h * 1.8);
+
+    ctx.fillStyle = "rgba(4, 8, 12, 0.82)";
+    ctx.strokeStyle = visual.accentColor || "rgba(147,234,255,0.72)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, y + h * 0.28, w * 0.32, h * 0.26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx, y + h * 0.38);
+    ctx.quadraticCurveTo(x + w * 0.1, y + h * 0.54, x + w * 0.16, y + h);
+    ctx.lineTo(x + w * 0.84, y + h);
+    ctx.quadraticCurveTo(x + w * 0.9, y + h * 0.54, cx, y + h * 0.38);
+    ctx.closePath();
+    ctx.fillStyle = visual.color || "#d7e7dc";
+    ctx.globalAlpha = 0.78;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(147,234,255,${0.42 + pulse * 0.22})`;
+    ctx.beginPath();
+    ctx.arc(cx - w * 0.12, y + h * 0.24, 3, 0, Math.PI * 2);
+    ctx.arc(cx + w * 0.12, y + h * 0.24, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.font = "700 13px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = theme.textMain;
+    ctx.fillText(profile.name || "NPC", cx, y - 10);
+    ctx.textAlign = "left";
+    ctx.restore();
+  });
+}
+
+function measureWrappedLineCount(ctx, text, maxWidth, font = ctx.font) {
+  ctx.save();
+  ctx.font = font;
+  let lineCount = 0;
+  String(text || "").split("\n").forEach((paragraph) => {
+    const words = paragraph.split(" ");
+    let line = "";
+    if (!words.length) {
+      lineCount += 1;
+      return;
+    }
+    words.forEach((word) => {
+      const testLine = line ? `${line} ${word}` : word;
+      if (ctx.measureText(testLine).width > maxWidth && line) {
+        lineCount += 1;
+        line = word;
+      } else {
+        line = testLine;
+      }
+    });
+    lineCount += 1;
+  });
+  ctx.restore();
+  return Math.max(1, lineCount);
+}
+
+function drawNpcDialogueBubble(ctx, state, data, theme) {
+  const run = state.run;
+  const dialogue = run?.npcDialogue;
+  if (!dialogue?.active) {
+    return;
+  }
+  const placement = (data.npcPlacements || []).find((candidate) => candidate.id === dialogue.placementId);
+  if (!placement) {
+    return;
+  }
+  const profile = getNpcProfileForRender(data, placement);
+  const choices = Array.isArray(dialogue.choices) ? dialogue.choices : [];
+  const selectedIndex = clamp(Math.floor(dialogue.choiceIndex || 0), 0, Math.max(0, choices.length - 1));
+  const cameraZoom = getRunCameraZoom(run, data);
+  const anchorX = (placement.x + placement.width * 0.5 - run.cameraX) * cameraZoom;
+  const anchorY = (placement.y + placement.height * 0.12 - run.cameraY) * cameraZoom;
+  const width = 536;
+  const textFont = "900 18px 'Segoe UI', sans-serif";
+  const lineHeight = 24;
+  const textWidth = width - 52;
+  const lineCount = measureWrappedLineCount(ctx, dialogue.line || "", textWidth, textFont);
+  const choiceRowHeight = 30;
+  const choiceHeight = choices.length ? 30 + choices.length * choiceRowHeight : 34;
+  const height = clamp(72 + lineCount * lineHeight + choiceHeight, 132, 292);
+  const x = clamp(anchorX - width * 0.5, 24, SCREEN_WIDTH - width - 24);
+  const y = clamp(anchorY - height - 34, 26, SCREEN_HEIGHT - height - 28);
+  const tailX = clamp(anchorX, x + 56, x + width - 56);
+  const tailBottom = y + height - 2;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+  ctx.shadowBlur = 22;
+  ctx.shadowOffsetY = 8;
+  drawBeveledPanel(ctx, theme, x, y, width, height, {
+    cut: 16,
+    fill: "rgba(2, 7, 10, 0.94)",
+    stroke: "rgba(223, 247, 238, 0.52)",
+    glow: true,
+    innerLines: true,
+  });
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  ctx.fillStyle = "rgba(2, 7, 10, 0.94)";
+  ctx.strokeStyle = "rgba(223, 247, 238, 0.48)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(tailX - 13, tailBottom);
+  ctx.lineTo(tailX + 13, tailBottom);
+  ctx.lineTo(clamp(anchorX, 18, SCREEN_WIDTH - 18), clamp(anchorY - 2, 18, SCREEN_HEIGHT - 18));
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(147, 234, 255, 0.12)";
+  ctx.fillRect(x + 18, y + 18, 88, 24);
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = "800 13px 'Segoe UI', sans-serif";
+  ctx.fillText(profile.name || "NPC", x + 28, y + 35);
+  wrapText(ctx, dialogue.line || "", x + 26, y + 66, textWidth, lineHeight, theme.textMain, textFont);
+
+  if (choices.length) {
+    const progress = clamp(Number(dialogue.timerElapsed || 0) / Math.max(0.1, Number(dialogue.timerSeconds || 6)), 0, 1);
+    const barX = x + 26;
+    const barY = y + height - choices.length * choiceRowHeight - 30;
+    ctx.fillStyle = "rgba(255,255,255,0.16)";
+    ctx.fillRect(barX, barY, width - 52, 6);
+    ctx.fillStyle = progress > 0.72 ? "#ffba8c" : theme.accent;
+    ctx.fillRect(barX, barY, (width - 52) * (1 - progress), 6);
+
+    choices.forEach((choice, index) => {
+      const rowY = y + height - choices.length * choiceRowHeight + index * choiceRowHeight - 20;
+      const selected = index === selectedIndex;
+      if (selected) {
+        ctx.fillStyle = "rgba(231, 244, 126, 0.14)";
+        ctx.fillRect(x + 22, rowY - 17, width - 44, 25);
+      }
+      ctx.fillStyle = selected ? theme.accent : "rgba(223, 247, 238, 0.78)";
+      ctx.font = selected ? "900 17px 'Segoe UI', sans-serif" : "800 16px 'Segoe UI', sans-serif";
+      ctx.fillText(`${selected ? "> " : "  "}${choice.label || ""}`, x + 30, rowY);
+    });
+  } else {
+    ctx.fillStyle = theme.textDim;
+    ctx.font = "800 14px 'Segoe UI', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText("Z 계속", x + width - 24, y + height - 20);
+    ctx.textAlign = "left";
+  }
+  ctx.restore();
+}
+
 function drawLiveEditWorldOverlay(ctx, state, data) {
   const liveEdit = state.liveEdit;
   if (!liveEdit?.active) {
@@ -8476,6 +8679,7 @@ function renderExpedition(ctx, state, data) {
   drawSpilledLoot(ctx, run);
   drawVaultSecurityObjects(ctx, run, theme, state.pulse);
   drawRouteExits(ctx, data, theme, state.pulse, run);
+  drawNpcPlacements(ctx, state, data, theme);
   drawEntity(ctx, run.encounters.guard, {
     body: "#86a9c7",
     flash: "#eef5ff",
@@ -8534,6 +8738,7 @@ function renderExpedition(ctx, state, data) {
   drawThreatSense(ctx, run, state);
   drawWorldPrompt(ctx, run, theme);
   ctx.restore();
+  drawNpcDialogueBubble(ctx, state, data, theme);
 
   if (drawShelterRestOverlay(ctx, state, data, theme)) {
     return;

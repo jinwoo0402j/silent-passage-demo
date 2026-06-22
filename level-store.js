@@ -1881,6 +1881,116 @@ export function clearLevelOverride(baseDataOrLevelId = null, requestedLevelId = 
 }
 
 const DEFAULT_LEVEL_MANIFEST_URL = "./levels/manifest.json";
+const DEFAULT_NPC_MANIFEST_URL = "./npcs/manifest.json";
+
+function normalizeStoryFlagList(value) {
+  if (Array.isArray(value)) {
+    return value.map((flag) => safeString(flag, "").trim()).filter(Boolean);
+  }
+  const single = safeString(value, "").trim();
+  return single ? [single] : [];
+}
+
+function normalizeNpcShowWhen(showWhen = {}) {
+  const source = safeRecord(showWhen);
+  return {
+    requiredStoryFlags: [
+      ...normalizeStoryFlagList(source.requiredStoryFlag),
+      ...normalizeStoryFlagList(source.requiredStoryFlags),
+    ],
+    missingStoryFlags: [
+      ...normalizeStoryFlagList(source.missingStoryFlag),
+      ...normalizeStoryFlagList(source.missingStoryFlags),
+    ],
+  };
+}
+
+function normalizeNpcChoice(choice = {}, index = 0) {
+  const source = safeRecord(choice);
+  const id = safeId(source.id, `choice-${index + 1}`);
+  return {
+    id,
+    label: safeString(source.label, id),
+    reply: safeString(source.reply, ""),
+    nextNodeId: safeString(source.nextNodeId, ""),
+    effects: safeRecord(source.effects),
+    postAction: safeRecord(source.postAction),
+  };
+}
+
+function normalizeNpcDialogueNode(node = {}, index = 0) {
+  const source = safeRecord(node);
+  const id = safeId(source.id, index === 0 ? "start" : `node-${index + 1}`);
+  return {
+    id,
+    line: safeString(source.line, ""),
+    choices: Array.isArray(source.choices)
+      ? source.choices.map((choice, choiceIndex) => normalizeNpcChoice(choice, choiceIndex)).slice(0, 3)
+      : [],
+    timeoutChoice: source.timeoutChoice ? normalizeNpcChoice(source.timeoutChoice, 99) : null,
+    timeoutChoiceId: safeString(source.timeoutChoiceId, ""),
+  };
+}
+
+function normalizeNpcDialogue(dialogue = {}) {
+  const source = safeRecord(dialogue);
+  const nodes = Array.isArray(source.nodes)
+    ? source.nodes.map((node, index) => normalizeNpcDialogueNode(node, index)).filter((node) => node.line || node.choices.length)
+    : [];
+  const startNodeId = safeId(source.startNodeId, nodes[0]?.id || "start");
+  return {
+    startNodeId,
+    timerSeconds: safeRange(source.timerSeconds, 6, 1, 30),
+    timeoutChoiceId: safeString(source.timeoutChoiceId, ""),
+    nodes,
+  };
+}
+
+function normalizeNpcProfile(profile = {}, fallbackId = "npc") {
+  const source = safeRecord(profile);
+  const id = safeId(source.id, fallbackId);
+  const visual = safeRecord(source.visual);
+  return {
+    id,
+    name: safeString(source.name, id),
+    role: safeString(source.role, ""),
+    visual: {
+      kind: safeString(visual.kind, "silhouette"),
+      color: safeString(visual.color, "#d7e7dc"),
+      accentColor: safeString(visual.accentColor, "#93eaff"),
+    },
+  };
+}
+
+function normalizeNpcPlacement(placement = {}, profile, index = 0) {
+  const source = safeRecord(placement);
+  const id = safeId(source.id, `${profile.id}-placement-${index + 1}`);
+  return {
+    id,
+    npcId: profile.id,
+    levelId: safeId(source.levelId, ""),
+    x: safeNumber(source.x, 0),
+    y: safeNumber(source.y, 0),
+    width: safeNumber(source.width, 54, 12),
+    height: safeNumber(source.height, 94, 12),
+    facing: Math.sign(safeNumber(source.facing, 1)) || 1,
+    interactPrompt: safeString(source.interactPrompt, `Z: ${profile.name}`),
+    interceptRouteExitId: safeString(source.interceptRouteExitId, ""),
+    showWhen: normalizeNpcShowWhen(source.showWhen),
+    dialogue: normalizeNpcDialogue(source.dialogue),
+  };
+}
+
+function normalizeNpcDocument(document, fallbackNpcId = "npc") {
+  const source = safeRecord(document);
+  const profile = normalizeNpcProfile(source.profile || source, fallbackNpcId);
+  return {
+    profile,
+    placements: Array.isArray(source.placements)
+      ? source.placements.map((placement, index) => normalizeNpcPlacement(placement, profile, index))
+      : [],
+  };
+}
 
 function getManifestLevelEntries(manifest) {
   if (!manifest || typeof manifest !== "object") {
@@ -1902,6 +2012,37 @@ function getManifestLevelEntries(manifest) {
 
   if (Array.isArray(manifest.levels)) {
     manifest.levels.forEach((entry) => addPath(entry, "level"));
+  }
+  if (Array.isArray(manifest.drafts)) {
+    manifest.drafts.forEach((entry) => addPath(entry, "draft"));
+  }
+  if (Array.isArray(manifest.accepted)) {
+    manifest.accepted.forEach((entry) => addPath(entry, "accepted"));
+  }
+
+  return entries;
+}
+
+function getManifestNpcEntries(manifest) {
+  if (!manifest || typeof manifest !== "object") {
+    return [];
+  }
+
+  const entries = [];
+  const addPath = (source, kind = "npc") => {
+    if (typeof source === "string" && source.trim()) {
+      entries.push({ path: source.trim(), kind });
+    } else if (source && typeof source === "object" && typeof source.path === "string" && source.path.trim()) {
+      entries.push({
+        ...source,
+        path: source.path.trim(),
+        kind: source.kind || kind,
+      });
+    }
+  };
+
+  if (Array.isArray(manifest.npcs)) {
+    manifest.npcs.forEach((entry) => addPath(entry, "npc"));
   }
   if (Array.isArray(manifest.drafts)) {
     manifest.drafts.forEach((entry) => addPath(entry, "draft"));
@@ -1936,6 +2077,17 @@ function getExternalLevelFallbackId(entryPath) {
       .pop()
       ?.replace(/\.json$/i, "") || "external-level",
     "external-level",
+  );
+}
+
+function getExternalNpcFallbackId(entryPath) {
+  return safeId(
+    String(entryPath || "external-npc")
+      .split("/")
+      .pop()
+      ?.replace(/\.v\d+\.json$/i, "")
+      ?.replace(/\.json$/i, "") || "external-npc",
+    "external-npc",
   );
 }
 
@@ -1990,6 +2142,11 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
     ...(next.levels || {}),
   };
   next.externalLevelSources = {};
+  next.npcProfiles = {
+    ...(next.npcProfiles || {}),
+  };
+  next.npcPlacements = Array.isArray(next.npcPlacements) ? next.npcPlacements.slice() : [];
+  next.externalNpcSources = {};
 
   if (typeof fetch !== "function") {
     return next;
@@ -2019,50 +2176,87 @@ export async function createGameDataWithExternalLevels(baseData, manifestUrl = D
   let manifest = null;
   try {
     const response = await fetchJson(manifestUrl);
-    if (!response.ok) {
-      return next;
+    if (response.ok) {
+      manifest = response.document;
     }
-    manifest = response.document;
   } catch (error) {
     console.warn("Failed to load level manifest", error);
-    return next;
   }
 
-  const entries = getManifestLevelEntries(manifest);
-  for (const entry of entries) {
-    const entryUrl = toManifestUrl(entry.path, manifestUrl);
-    try {
-      const response = await fetchJson(entryUrl);
-      if (!response.ok) {
-        console.warn(`Failed to load external level ${entry.path}: ${response.status}`);
-        continue;
-      }
-      const document = response.document;
-      getExternalLevelDocuments(document, getExternalLevelFallbackId(entry.path)).forEach((levelDocument) => {
-        const levelId = safeId(levelDocument.levelId || levelDocument.id, getExternalLevelFallbackId(entry.path));
-        const source = {
-          path: entry.path,
-          kind: entry.kind || "level",
-        };
-        if (!shouldReplaceExternalLevelSource(next.externalLevelSources[levelId], source)) {
-          return;
+  if (manifest) {
+    const entries = getManifestLevelEntries(manifest);
+    for (const entry of entries) {
+      const entryUrl = toManifestUrl(entry.path, manifestUrl);
+      try {
+        const response = await fetchJson(entryUrl);
+        if (!response.ok) {
+          console.warn(`Failed to load external level ${entry.path}: ${response.status}`);
+          continue;
         }
-        const baseLevel = createBaseLevelData(next, levelId);
-        const normalized = normalizeEditableLevelData({
-          ...levelDocument,
-          levelId,
-        }, baseLevel);
-        next.levels[levelId] = {
-          ...normalized,
-          id: levelId,
-          levelId,
-          label: normalized.label || levelDocument.label || levelId,
-        };
-        next.externalLevelSources[levelId] = source;
-      });
-    } catch (error) {
-      console.warn(`Failed to load external level ${entry.path}`, error);
+        const document = response.document;
+        getExternalLevelDocuments(document, getExternalLevelFallbackId(entry.path)).forEach((levelDocument) => {
+          const levelId = safeId(levelDocument.levelId || levelDocument.id, getExternalLevelFallbackId(entry.path));
+          const source = {
+            path: entry.path,
+            kind: entry.kind || "level",
+          };
+          if (!shouldReplaceExternalLevelSource(next.externalLevelSources[levelId], source)) {
+            return;
+          }
+          const baseLevel = createBaseLevelData(next, levelId);
+          const normalized = normalizeEditableLevelData({
+            ...levelDocument,
+            levelId,
+          }, baseLevel);
+          next.levels[levelId] = {
+            ...normalized,
+            id: levelId,
+            levelId,
+            label: normalized.label || levelDocument.label || levelId,
+          };
+          next.externalLevelSources[levelId] = source;
+        });
+      } catch (error) {
+        console.warn(`Failed to load external level ${entry.path}`, error);
+      }
     }
+  }
+
+  let npcManifest = null;
+  try {
+    const response = await fetchJson(DEFAULT_NPC_MANIFEST_URL);
+    if (response.ok) {
+      npcManifest = response.document;
+    }
+  } catch (error) {
+    console.warn("Failed to load NPC manifest", error);
+  }
+
+  if (npcManifest) {
+    const entries = getManifestNpcEntries(npcManifest);
+    const placementById = new Map(next.npcPlacements.map((placement) => [placement.id, placement]));
+    for (const entry of entries) {
+      const entryUrl = toManifestUrl(entry.path, DEFAULT_NPC_MANIFEST_URL);
+      try {
+        const response = await fetchJson(entryUrl);
+        if (!response.ok) {
+          console.warn(`Failed to load external NPC ${entry.path}: ${response.status}`);
+          continue;
+        }
+        const normalized = normalizeNpcDocument(response.document, getExternalNpcFallbackId(entry.path));
+        next.npcProfiles[normalized.profile.id] = normalized.profile;
+        next.externalNpcSources[normalized.profile.id] = {
+          path: entry.path,
+          kind: entry.kind || "npc",
+        };
+        normalized.placements.forEach((placement) => {
+          placementById.set(placement.id, placement);
+        });
+      } catch (error) {
+        console.warn(`Failed to load external NPC ${entry.path}`, error);
+      }
+    }
+    next.npcPlacements = [...placementById.values()];
   }
 
   return next;

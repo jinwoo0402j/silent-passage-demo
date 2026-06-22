@@ -12,8 +12,8 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260619-shelter-voice-v9";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260619-shelter-voice-v9";
+} from "./state.js?v=20260622-npc-v1";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260622-npc-v1";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -109,6 +109,9 @@ const RECOIL_FLIGHT_CAMERA_MAX_SECONDS = 0.72;
 const RECOIL_CAMERA_RETURN_ZOOM_PER_SECOND = 0.72;
 const INTERACT_KEYS = ["KeyZ", "KeyF", "KeyE"];
 const WORLD_INTERACT_KEYS = ["ArrowUp", "KeyE", "KeyZ"];
+const NPC_DIALOGUE_UP_KEYS = ["ArrowUp", "KeyW"];
+const NPC_DIALOGUE_DOWN_KEYS = ["ArrowDown", "KeyS"];
+const NPC_DIALOGUE_CONFIRM_KEYS = ["KeyZ", "Enter", "Space"];
 const ATTACK_KEYS = ["KeyV", "KeyF"];
 const CONFIRM_KEYS = ["KeyC", "Enter", "KeyZ"];
 const INVENTORY_KEYS = ["Tab"];
@@ -350,6 +353,10 @@ const AIR_DASH_HOVER_BRAKE = 420;
 const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
 const SHELTER_MUSIC_SRC = "./assets/audio/bloom-through-concrete.mp3";
 const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
+const NPC_DIALOGUE_MUSIC_VOLUME = 0.16;
+const NPC_DIALOGUE_MUSIC_FADE_SECONDS = 0.65;
+const NPC_DIALOGUE_CAMERA_LERP = 8.5;
+const NPC_DIALOGUE_CAMERA_HEAD_FOCUS_Y = 0.46;
 const PROCEDURAL_SFX_OUTPUT_BOOST = 1.8;
 const AIR_DASH_DIAGONAL_GRACE_SECONDS = 0.08;
 const AIR_DASH_DISTANCE_MULTIPLIER = 1.25;
@@ -4396,7 +4403,7 @@ function updateLoopingAudioFades() {
   if (typeof window === "undefined") {
     return;
   }
-  ["__searchMusic", "__shelterMusic", "__vaultEscapeMusic"].forEach((slotName) => {
+  ["__searchMusic", "__shelterMusic", "__npcDialogueMusic", "__vaultEscapeMusic"].forEach((slotName) => {
     const track = window[slotName];
     if (track?.kind === "file") {
       updateLoopingAudioTrackFade(track);
@@ -4532,12 +4539,28 @@ function updateSearchMusic(run) {
     stopLoopingAudioTrack("__searchMusic", false, 0.75);
     return;
   }
+  stopLoopingAudioTrack("__npcDialogueMusic", false, NPC_DIALOGUE_MUSIC_FADE_SECONDS);
   stopLoopingAudioTrack("__shelterMusic", false, 0.9);
   playLoopingAudioTrack("__searchMusic", SEARCH_MUSIC_SRC, 0.34, 1, { fadeSeconds: 0.9 });
 }
 
 function stopSearchMusic(reset = false, fadeSeconds = 0.75) {
   stopLoopingAudioTrack("__searchMusic", reset, fadeSeconds);
+}
+
+function updateNpcDialogueMusic(active) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (!active) {
+    stopLoopingAudioTrack("__npcDialogueMusic", false, NPC_DIALOGUE_MUSIC_FADE_SECONDS);
+    return;
+  }
+  stopSearchMusic(false, 0.45);
+  stopLoopingAudioTrack("__shelterMusic", false, 0.45);
+  playLoopingAudioTrack("__npcDialogueMusic", SHELTER_MUSIC_SRC, NPC_DIALOGUE_MUSIC_VOLUME, 1, {
+    fadeSeconds: NPC_DIALOGUE_MUSIC_FADE_SECONDS,
+  });
 }
 
 function updateShelterMusic(state) {
@@ -10986,7 +11009,7 @@ function updateLootInteraction(state, data, dt) {
   return true;
 }
 
-function getInteractionTargets(run, data) {
+function getInteractionTargets(state, run, data) {
   const playerCenter = getCenter(run.player);
   const targets = [];
   const escapeActive = isVaultEscapeActive(run);
@@ -11058,6 +11081,19 @@ function getInteractionTargets(run, data) {
         text: shelterBlockReason || normalizeInteractionPrompt(routeExit.prompt || "Z: ?ㅼ쓬 援ъ뿭"),
         x: routeExit.x + routeExit.width / 2,
         y: routeExit.y - 12,
+      });
+    }
+  }
+
+  for (const placement of getActiveNpcPlacements(state, data)) {
+    if (distanceBetween(playerCenter, getCenter(placement)) < 104) {
+      targets.push({
+        id: placement.id,
+        kind: "npc",
+        npcPlacement: placement,
+        text: normalizeInteractionPrompt(placement.interactPrompt || "Z: 대화"),
+        x: placement.x + placement.width / 2,
+        y: placement.y - 12,
       });
     }
   }
@@ -11182,6 +11218,327 @@ function normalizeInteractionPrompt(prompt) {
 
 function normalizeExtractionPrompt(prompt) {
   return (prompt || "Z: Exit").replace(/^(?:D\/Z|D|C|E|Z|Up)\s*:/i, "Z:");
+}
+
+function getMetaStoryFlags(state) {
+  state.meta = state.meta && typeof state.meta === "object" ? state.meta : {};
+  state.meta.storyFlags = Array.isArray(state.meta.storyFlags) ? state.meta.storyFlags : [];
+  return state.meta.storyFlags;
+}
+
+function npcShowWhenMatches(state, showWhen = {}) {
+  const flags = getMetaStoryFlags(state);
+  const required = Array.isArray(showWhen.requiredStoryFlags) ? showWhen.requiredStoryFlags : [];
+  const missing = Array.isArray(showWhen.missingStoryFlags) ? showWhen.missingStoryFlags : [];
+  return required.every((flag) => flags.includes(flag))
+    && missing.every((flag) => !flags.includes(flag));
+}
+
+function getActiveNpcPlacements(state, data) {
+  const levelId = data.currentLevelId || state.run?.currentLevelId || data.levelId || data.defaultLevelId || "";
+  return Array.isArray(data.npcPlacements)
+    ? data.npcPlacements.filter((placement) => (
+      placement
+      && placement.levelId === levelId
+      && npcShowWhenMatches(state, placement.showWhen)
+      && Array.isArray(placement.dialogue?.nodes)
+      && placement.dialogue.nodes.length > 0
+    ))
+    : [];
+}
+
+function getNpcRouteInterceptPlacement(state, data, routeExitId) {
+  const targetRouteId = String(routeExitId || "");
+  if (!targetRouteId) {
+    return null;
+  }
+  return getActiveNpcPlacements(state, data).find((placement) => placement.interceptRouteExitId === targetRouteId) || null;
+}
+
+function getNpcProfile(data, placement) {
+  return data.npcProfiles?.[placement?.npcId] || {
+    id: placement?.npcId || "npc",
+    name: placement?.npcId || "NPC",
+    role: "",
+    visual: { kind: "silhouette" },
+  };
+}
+
+function getNpcDialogueNode(placement, nodeId = "") {
+  const nodes = Array.isArray(placement?.dialogue?.nodes) ? placement.dialogue.nodes : [];
+  const targetId = nodeId || placement?.dialogue?.startNodeId || nodes[0]?.id || "";
+  return nodes.find((node) => node.id === targetId) || nodes[0] || null;
+}
+
+function getNpcDialogueChoice(dialogue, choiceId = "") {
+  const choices = Array.isArray(dialogue?.choices) ? dialogue.choices : [];
+  if (choiceId) {
+    return choices.find((choice) => choice.id === choiceId) || null;
+  }
+  return choices[clamp(Math.floor(dialogue?.choiceIndex || 0), 0, Math.max(0, choices.length - 1))] || null;
+}
+
+function getNpcDialoguePlacement(run, data) {
+  const placementId = run?.npcDialogue?.placementId || "";
+  if (!placementId) {
+    return null;
+  }
+  return (Array.isArray(data?.npcPlacements) ? data.npcPlacements : [])
+    .find((placement) => placement.id === placementId) || null;
+}
+
+function syncNpcDialogueCamera(run, data, dt, snap = false, placementOverride = null) {
+  const placement = placementOverride || getNpcDialoguePlacement(run, data);
+  const player = run?.player;
+  if (!run || !player || !placement) {
+    return false;
+  }
+
+  const config = getEffectiveCameraConfig(data, run);
+  const baseZoom = clamp(config.zoom ?? run.cameraZoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  const npcCenterX = placement.x + placement.width * 0.5;
+  const npcHeadY = placement.y + placement.height * 0.18;
+  const playerCenterX = player.x + player.width * 0.5;
+  const playerCenterY = player.y + player.height * 0.46;
+  const desiredViewportWidth = Math.max(720, Math.abs(npcCenterX - playerCenterX) + 520);
+  const desiredViewportHeight = Math.max(420, Math.abs(npcHeadY - playerCenterY) + 360);
+  const fitZoom = Math.min(
+    CAMERA_SCREEN_WIDTH / desiredViewportWidth,
+    CAMERA_SCREEN_HEIGHT / desiredViewportHeight,
+  );
+  const targetZoom = clamp(Math.min(baseZoom, fitZoom), CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  const viewportWidth = CAMERA_SCREEN_WIDTH / targetZoom;
+  const viewportHeight = CAMERA_SCREEN_HEIGHT / targetZoom;
+  const focusX = (npcCenterX + playerCenterX) * 0.5;
+  const targetX = focusX - viewportWidth * 0.5;
+  const targetY = npcHeadY - viewportHeight * NPC_DIALOGUE_CAMERA_HEAD_FOCUS_Y;
+  const maxX = Math.max(0, data.world.width - viewportWidth);
+  const maxY = Math.max(0, data.world.height - viewportHeight);
+  const cameraX = clamp(targetX, 0, maxX);
+  const cameraY = clamp(targetY, 0, maxY);
+  const lerpRatio = snap ? 1 : Math.min(1, Math.max(0, dt) * NPC_DIALOGUE_CAMERA_LERP);
+
+  run.cameraFocusX = 0.5;
+  run.cameraFocusY = NPC_DIALOGUE_CAMERA_HEAD_FOCUS_Y;
+  run.cameraTargetX = cameraX;
+  run.cameraTargetY = cameraY;
+  run.cameraTargetZoom = targetZoom;
+  run.cameraLookAhead = 0;
+  run.cameraSpeedRatio = 0;
+  run.cameraZoom = snap
+    ? targetZoom
+    : clamp(lerp(run.cameraZoom ?? targetZoom, targetZoom, lerpRatio), CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  run.cameraX = snap ? cameraX : clamp(lerp(run.cameraX, cameraX, lerpRatio), 0, maxX);
+  run.cameraY = snap ? cameraY : clamp(lerp(run.cameraY, cameraY, lerpRatio), 0, maxY);
+  return true;
+}
+
+function setNpcDialogueNode(run, placement, nodeId, state) {
+  const node = getNpcDialogueNode(placement, nodeId);
+  if (!node || !run?.npcDialogue) {
+    return false;
+  }
+  const dialogue = run.npcDialogue;
+  dialogue.nodeId = node.id;
+  dialogue.line = String(node.line || "");
+  dialogue.choices = Array.isArray(node.choices) ? deepClone(node.choices).slice(0, 3) : [];
+  dialogue.choiceIndex = 0;
+  dialogue.timerSeconds = clamp(Number(placement.dialogue?.timerSeconds ?? 6), 1, 30);
+  dialogue.timeoutChoice = node.timeoutChoice ? deepClone(node.timeoutChoice) : null;
+  dialogue.timeoutChoiceId = String(node.timeoutChoiceId || placement.dialogue?.timeoutChoiceId || "");
+  dialogue.timerElapsed = 0;
+  dialogue.completed = false;
+  dialogue.postAction = null;
+  dialogue.completedAt = 0;
+  dialogue.startedAt = Number.isFinite(state?.pulse) ? state.pulse : 0;
+  return true;
+}
+
+function applyNpcChoiceEffects(state, effects = {}) {
+  const storyFlags = Array.isArray(effects.storyFlags) ? effects.storyFlags : [];
+  let changed = false;
+  storyFlags.forEach((flag) => {
+    changed = addMetaStoryFlag(state, String(flag || "")) || changed;
+  });
+  if (changed) {
+    saveMetaState(state.meta);
+  }
+  return changed;
+}
+
+function finishNpcDialogue(state, data) {
+  const run = state.run;
+  const dialogue = run?.npcDialogue;
+  if (!dialogue?.active) {
+    return false;
+  }
+  const postAction = dialogue.postAction && typeof dialogue.postAction === "object" ? dialogue.postAction : {};
+  const pendingRouteExit = dialogue.pendingRouteExit ? deepClone(dialogue.pendingRouteExit) : null;
+  run.npcDialogue = {
+    active: false,
+    placementId: "",
+    npcId: "",
+    nodeId: "",
+    line: "",
+    choices: [],
+    choiceIndex: 0,
+    timerSeconds: 6,
+    timerElapsed: 0,
+    timeoutChoiceId: "",
+    timeoutChoice: null,
+    completed: false,
+    completedAt: 0,
+    postAction: null,
+    pendingRouteExit: null,
+  };
+  run.prompt = "";
+  run.promptWorld = null;
+  updateNpcDialogueMusic(false);
+  if (postAction.type === "route" && pendingRouteExit) {
+    const routeExit = {
+      ...pendingRouteExit,
+      toLevelId: postAction.toLevelId || pendingRouteExit.toLevelId,
+      toEntranceId: postAction.toEntranceId || pendingRouteExit.toEntranceId || "start",
+      returnEntranceId: postAction.returnEntranceId || pendingRouteExit.returnEntranceId || "start",
+    };
+    beginRouteFadeTransition(state, data, routeExit);
+  } else {
+    saveCurrentGame(state, data);
+  }
+  return true;
+}
+
+function chooseNpcDialogueChoice(state, data, choice) {
+  const run = state.run;
+  const dialogue = run?.npcDialogue;
+  if (!dialogue?.active || !choice) {
+    return false;
+  }
+  const placement = getActiveNpcPlacements(state, data).find((candidate) => candidate.id === dialogue.placementId)
+    || (Array.isArray(data.npcPlacements) ? data.npcPlacements.find((candidate) => candidate.id === dialogue.placementId) : null);
+  applyNpcChoiceEffects(state, choice.effects || {});
+  playGameSfx("uiConfirm", { cooldownMs: 120 });
+  if (choice.nextNodeId && placement && setNpcDialogueNode(run, placement, choice.nextNodeId, state)) {
+    return true;
+  }
+  dialogue.line = String(choice.reply || "");
+  dialogue.choices = [];
+  dialogue.choiceIndex = 0;
+  dialogue.timerElapsed = 0;
+  dialogue.completed = true;
+  dialogue.completedAt = Number.isFinite(state?.pulse) ? state.pulse : 0;
+  dialogue.postAction = choice.postAction && typeof choice.postAction === "object" ? deepClone(choice.postAction) : null;
+  return true;
+}
+
+function beginNpcDialogue(state, data, placement, options = {}) {
+  const run = state.run;
+  if (!run || !placement) {
+    return false;
+  }
+  const profile = getNpcProfile(data, placement);
+  run.npcDialogue = {
+    active: true,
+    placementId: placement.id,
+    npcId: profile.id,
+    nodeId: "",
+    line: "",
+    choices: [],
+    choiceIndex: 0,
+    timerSeconds: 6,
+    timerElapsed: 0,
+    timeoutChoiceId: "",
+    timeoutChoice: null,
+    completed: false,
+    completedAt: 0,
+    postAction: null,
+    pendingRouteExit: options.routeExit ? deepClone(options.routeExit) : null,
+    startedAt: Number.isFinite(state?.pulse) ? state.pulse : 0,
+  };
+  run.prompt = "";
+  run.promptWorld = null;
+  playGameSfx("promptFocus", { cooldownMs: 120 });
+  const started = setNpcDialogueNode(run, placement, placement.dialogue?.startNodeId, state);
+  if (started) {
+    updateNpcDialogueMusic(true);
+    syncNpcDialogueCamera(run, data, 0, true, placement);
+    setStatus(state, `${profile.name}: 대화`);
+  } else {
+    run.npcDialogue.active = false;
+    updateNpcDialogueMusic(false);
+  }
+  return started;
+}
+
+function updateNpcDialogue(state, data, dt) {
+  const run = state.run;
+  const dialogue = run?.npcDialogue;
+  if (!dialogue?.active) {
+    return false;
+  }
+
+  updateNpcDialogueMusic(true);
+  syncNpcDialogueCamera(run, data, dt);
+  run.prompt = "";
+  run.promptWorld = null;
+  if (run.mapOverlay) {
+    run.mapOverlay.active = false;
+  }
+  if (run.recoilAim) {
+    run.recoilAim.active = false;
+    run.recoilAim.aiming = false;
+  }
+  run.focusActive = false;
+  run.player.recoilFocusActive = false;
+
+  if (dialogue.completed) {
+    const postAction = dialogue.postAction && typeof dialogue.postAction === "object" ? dialogue.postAction : {};
+    const elapsed = Math.max(0, (Number.isFinite(state?.pulse) ? state.pulse : 0) - (dialogue.completedAt || 0));
+    const delay = clamp(Number(postAction.delaySeconds ?? 0), 0, 4);
+    if ((postAction.type === "route" && elapsed >= delay) || consumeEitherPress(state, NPC_DIALOGUE_CONFIRM_KEYS)) {
+      finishNpcDialogue(state, data);
+    }
+    setStatus(state, "NPC 대화. Z 계속.");
+    return true;
+  }
+
+  const choices = Array.isArray(dialogue.choices) ? dialogue.choices : [];
+  if (!choices.length) {
+    if (consumeEitherPress(state, NPC_DIALOGUE_CONFIRM_KEYS)) {
+      finishNpcDialogue(state, data);
+    }
+    setStatus(state, "NPC 대화. Z 닫기.");
+    return true;
+  }
+
+  if (consumeEitherPress(state, NPC_DIALOGUE_UP_KEYS)) {
+    dialogue.choiceIndex = (Math.max(0, Math.floor(dialogue.choiceIndex || 0)) + choices.length - 1) % choices.length;
+    dialogue.timerElapsed = 0;
+    playGameSfx("uiMove", { cooldownMs: 80 });
+  }
+  if (consumeEitherPress(state, NPC_DIALOGUE_DOWN_KEYS)) {
+    dialogue.choiceIndex = (Math.max(0, Math.floor(dialogue.choiceIndex || 0)) + 1) % choices.length;
+    dialogue.timerElapsed = 0;
+    playGameSfx("uiMove", { cooldownMs: 80 });
+  }
+
+  dialogue.timerSeconds = clamp(Number(dialogue.timerSeconds || 6), 1, 30);
+  dialogue.timerElapsed = clamp(Number(dialogue.timerElapsed || 0) + dt, 0, dialogue.timerSeconds);
+  if (dialogue.timerElapsed >= dialogue.timerSeconds) {
+    const timeoutChoice = dialogue.timeoutChoice
+      || getNpcDialogueChoice(dialogue, dialogue.timeoutChoiceId)
+      || choices[choices.length - 1]
+      || choices[0];
+    chooseNpcDialogueChoice(state, data, timeoutChoice);
+    return true;
+  }
+
+  if (consumeEitherPress(state, NPC_DIALOGUE_CONFIRM_KEYS)) {
+    chooseNpcDialogueChoice(state, data, getNpcDialogueChoice(dialogue));
+  }
+
+  setStatus(state, "NPC 대화. W/S 선택, Z 응답.");
+  return true;
 }
 
 function isVaultEscapeActive(run) {
@@ -11805,6 +12162,23 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
 }
 
 function clearLevelTransitionEffects(run) {
+  run.npcDialogue = {
+    active: false,
+    placementId: "",
+    npcId: "",
+    nodeId: "",
+    line: "",
+    choices: [],
+    choiceIndex: 0,
+    timerSeconds: 6,
+    timerElapsed: 0,
+    timeoutChoiceId: "",
+    timeoutChoice: null,
+    completed: false,
+    completedAt: 0,
+    postAction: null,
+    pendingRouteExit: null,
+  };
   if (run.mapOverlay) {
     run.mapOverlay.active = false;
   }
@@ -13613,6 +13987,10 @@ function handleTouchRouteExits(state, data) {
     }
     const exitRect = createRect(routeExit.x, routeExit.y, routeExit.width, routeExit.height);
     if (rectsOverlap(player, exitRect)) {
+      const intercept = getNpcRouteInterceptPlacement(state, data, routeExit.id);
+      if (intercept) {
+        return beginNpcDialogue(state, data, intercept, { routeExit });
+      }
       return beginRouteFadeTransition(state, data, routeExit);
     }
   }
@@ -13664,7 +14042,7 @@ function updateInteractions(state, data, canInteract) {
     return;
   }
 
-  const nearest = getInteractionTargets(run, data);
+  const nearest = getInteractionTargets(state, run, data);
   if (!nearest) {
     run.lastPromptTargetId = "";
     return;
@@ -13723,7 +14101,17 @@ function updateInteractions(state, data, canInteract) {
     return;
   }
 
+  if (nearest.kind === "npc") {
+    beginNpcDialogue(state, data, nearest.npcPlacement);
+    return;
+  }
+
   if (nearest.kind === "routeExit") {
+    const intercept = getNpcRouteInterceptPlacement(state, data, nearest.routeExit?.id);
+    if (intercept) {
+      beginNpcDialogue(state, data, intercept, { routeExit: nearest.routeExit });
+      return;
+    }
     transitionToRouteExit(state, data, nearest.routeExit);
     return;
   }
@@ -14095,6 +14483,9 @@ function updateShelterRestMode(state, data, dt) {
 function updateExpedition(state, data, dt) {
   const run = state.run;
   if (updateShelterRestMode(state, data, dt)) {
+    return;
+  }
+  if (updateNpcDialogue(state, data, dt)) {
     return;
   }
   if (Number.isFinite(run.shelterExitCooldown) && run.shelterExitCooldown > 0) {
@@ -14808,4 +15199,3 @@ export function updateGame(state, data, dt) {
 export function hasThreatSense(state) {
   return hasUnlocked(state.meta, "threatSense");
 }
-

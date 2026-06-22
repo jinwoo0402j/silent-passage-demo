@@ -1,5 +1,5 @@
-import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260526-sfx-v1";
-import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260526-sfx-v1";
+import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260622-npc-v1";
+import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260622-npc-v1";
 
 const SAVE_SLOT_KEY = "rulebound-local-profile-v1";
 const SAVE_VERSION = 1;

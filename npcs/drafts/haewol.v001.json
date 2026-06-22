@@ -1,0 +1,457 @@
+{
+  "version": 1,
+  "profile": {
+    "id": "haewol",
+    "name": "해월",
+    "role": "지역 거주민",
+    "visual": {
+      "kind": "silhouette",
+      "color": "#d7e7dc",
+      "accentColor": "#93eaff"
+    }
+  },
+  "placements": [
+    {
+      "id": "haewol-start-01",
+      "levelId": "movement-lab-01",
+      "x": 1168,
+      "y": 1840,
+      "width": 58,
+      "height": 96,
+      "facing": 1,
+      "interactPrompt": "Z: 해월",
+      "showWhen": {
+        "missingStoryFlags": ["npc:haewol:intro-complete"]
+      },
+      "dialogue": {
+        "startNodeId": "start",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "silent",
+        "nodes": [
+          {
+            "id": "start",
+            "line": "해월이 비닐 우산을 접고, 네 발끝을 먼저 살핀다.\n“아가, 잠깐만. 발끝이 떨리면 길이 먼저 알아채. 숨부터 크게 쉬자.”",
+            "choices": [
+              {
+                "id": "obey",
+                "label": "알겠어요",
+                "reply": "“말 잘 들어서 예쁜 게 아니라, 살아 돌아올 줄 아는 게 예쁜 거야.”\n“그래, 착하다. 앞 난간까지만 천천히. 넘어지면 내가 먼저 달려갈게.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:intro-complete",
+                    "npc:haewol:relation-obey"
+                  ]
+                }
+              },
+              {
+                "id": "rebel",
+                "label": "혼자 갈 수 있어요",
+                "nextNodeId": "rebel-check"
+              },
+              {
+                "id": "joke",
+                "label": "발밑이 먼저 도망가겠네요",
+                "reply": "“농담할 힘은 있네. 다행이다.”\n“그래도 넘어지면 내가 웃기 전에 울어버릴걸. 그러니 멋있게 말고 안전하게 가자.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:intro-complete",
+                    "npc:haewol:relation-joke"
+                  ]
+                }
+              }
+            ],
+            "timeoutChoice": {
+              "id": "silent",
+              "label": "……",
+              "reply": "“말 안 해도 돼. 무서운 날엔 입보다 손이 먼저 차가워져.”\n“내가 알아서 천천히 물을게. 고개만 끄덕여도 충분해.”",
+              "effects": {
+                "storyFlags": [
+                  "npc:haewol:intro-complete",
+                  "npc:haewol:relation-silent"
+                ]
+              }
+            }
+          },
+          {
+            "id": "rebel-check",
+            "line": "“네 고집도 네 힘인 거 알아. 그래서 더 조심히 만지고 싶은 거야.”\n“너를 믿어서 보내는 거고, 걱정돼서 한 번 더 묻는 거야. 정말 혼자 가겠니?”",
+            "timeoutChoiceId": "silent",
+            "choices": [
+              {
+                "id": "careful",
+                "label": "알겠어요, 조심할게요",
+                "reply": "“그래, 우리 아가. 씩씩한 척은 조금만 하자.”\n“무서우면 뒤돌아봐. 내가 보고 있을게. 손이 떨려도 괜찮아.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:intro-complete",
+                    "npc:haewol:relation-rebel-soft"
+                  ]
+                }
+              },
+              {
+                "id": "still-go",
+                "label": "그래도 갈래요",
+                "reply": "“그래. 고집쟁이. 그 마음을 내가 꺾지는 않을게.”\n“대신 약속해. 숨이 작아지면 바로 멈추기. 돌아보면 내가 여기 있어.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:intro-complete",
+                    "npc:haewol:relation-rebel"
+                  ]
+                }
+              },
+              {
+                "id": "fall-joke",
+                "label": "멋있게 넘어져볼게요",
+                "reply": "“그건 멋있는 게 아니라 치료비 드는 거야.”\n“그래도 웃는 얼굴은 좋네. 가봐. 아주 천천히. 넘어지면 혼난다.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:intro-complete",
+                    "npc:haewol:relation-joke"
+                  ]
+                }
+              }
+            ],
+            "timeoutChoice": {
+              "id": "silent",
+              "label": "……",
+              "reply": "“응. 대답 못 해도 알아.”\n“무섭지? 그럼 더 천천히 가면 된다. 오늘은 빨리보다 무사히가 먼저야.”",
+              "effects": {
+                "storyFlags": [
+                  "npc:haewol:intro-complete",
+                  "npc:haewol:relation-silent"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "haewol-exit-01",
+      "levelId": "movement-lab-01",
+      "x": 7768,
+      "y": 1728,
+      "width": 58,
+      "height": 96,
+      "facing": -1,
+      "interactPrompt": "Z: 해월",
+      "interceptRouteExitId": "route-exit-1777804540897",
+      "showWhen": {
+        "missingStoryFlags": ["npc:haewol:tutorial-complete"]
+      },
+      "dialogue": {
+        "startNodeId": "gate",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "silent",
+        "nodes": [
+          {
+            "id": "gate",
+            "line": "해월이 길목 앞에서 먼저 기다린다.\n“여기부터 공기가 달라. 괜찮은 척하고 들어가면, 위험이 네 심장 소리부터 듣는다.”",
+            "choices": [
+              {
+                "id": "brave",
+                "label": "다녀올게요",
+                "reply": "“그래, 다녀오렴. 말은 짧아도 마음은 들었어.”\n“비켜줄게. 대신 돌아오는 길을 잊지 마. 늦으면 나 진짜 화낼 거야.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:tutorial-complete",
+                    "npc:haewol:exit-brave"
+                  ]
+                },
+                "postAction": {
+                  "type": "route",
+                  "delaySeconds": 1.1,
+                  "toLevelId": "faceoff-checkpoint-01",
+                  "toEntranceId": "start"
+                }
+              },
+              {
+                "id": "careful",
+                "label": "위험하면 돌아올게요",
+                "reply": "“그 말을 들으려고 여기까지 먼저 왔어, 착하다.”\n“돌아오는 건 부끄러운 일이 아니야. 살아서 문을 두드리면 그게 제일 잘한 거야.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:tutorial-complete",
+                    "npc:haewol:exit-careful"
+                  ]
+                },
+                "postAction": {
+                  "type": "route",
+                  "delaySeconds": 1.1,
+                  "toLevelId": "faceoff-checkpoint-01",
+                  "toEntranceId": "start"
+                }
+              },
+              {
+                "id": "joke",
+                "label": "해월 씨도 빠르네요",
+                "reply": "“오래 살면 지름길을 좀 알게 돼. 너도 오래 살아야 해.”\n“그래야 내가 더 많이 잔소리할 수 있잖니. 자, 천천히 가.”",
+                "effects": {
+                  "storyFlags": [
+                    "npc:haewol:tutorial-complete",
+                    "npc:haewol:exit-joke"
+                  ]
+                },
+                "postAction": {
+                  "type": "route",
+                  "delaySeconds": 1.1,
+                  "toLevelId": "faceoff-checkpoint-01",
+                  "toEntranceId": "start"
+                }
+              }
+            ],
+            "timeoutChoice": {
+              "id": "silent",
+              "label": "……",
+              "reply": "“무서우면 말이 짧아져. 알아.”\n“내가 조금만 비켜설게. 네 속도로 지나가. 뒤통수까지 보고 있을 테니까.”",
+              "effects": {
+                "storyFlags": [
+                  "npc:haewol:tutorial-complete",
+                  "npc:haewol:exit-silent"
+                ]
+              },
+              "postAction": {
+                "type": "route",
+                "delaySeconds": 1.1,
+                "toLevelId": "faceoff-checkpoint-01",
+                "toEntranceId": "start"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "haewol-faceoff-obey-01",
+      "levelId": "faceoff-checkpoint-01",
+      "x": 760,
+      "y": 1792,
+      "width": 58,
+      "height": 96,
+      "facing": 1,
+      "interactPrompt": "Z: 해월",
+      "showWhen": {
+        "requiredStoryFlags": [
+          "npc:haewol:tutorial-complete",
+          "npc:haewol:relation-obey"
+        ],
+        "missingStoryFlags": ["npc:haewol:faceoff-greeted"]
+      },
+      "dialogue": {
+        "startNodeId": "greet",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "nod",
+        "nodes": [
+          {
+            "id": "greet",
+            "line": "“착하다. 내 말 기억하고 여기까지 왔구나.”\n“하지만 이제는 착한 아이보다 살아 돌아오는 아이가 더 예뻐. 눈 크게 뜨자.”",
+            "choices": [
+              {
+                "id": "nod",
+                "label": "고개를 끄덕인다",
+                "reply": "“응. 그렇게만 해. 나도 계속 보고 있을게.”",
+                "effects": {
+                  "storyFlags": ["npc:haewol:faceoff-greeted"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "haewol-faceoff-rebel-01",
+      "levelId": "faceoff-checkpoint-01",
+      "x": 760,
+      "y": 1792,
+      "width": 58,
+      "height": 96,
+      "facing": 1,
+      "interactPrompt": "Z: 해월",
+      "showWhen": {
+        "requiredStoryFlags": [
+          "npc:haewol:tutorial-complete",
+          "npc:haewol:relation-rebel"
+        ],
+        "missingStoryFlags": ["npc:haewol:faceoff-greeted"]
+      },
+      "dialogue": {
+        "startNodeId": "greet",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "nod",
+        "nodes": [
+          {
+            "id": "greet",
+            "line": "“고집쟁이. 혼자 갈 수 있다더니 정말 여기까지 왔네.”\n“자랑스럽지만 걱정도 된다. 둘 다 내가 할 거야. 너는 숨부터 챙겨.”",
+            "choices": [
+              {
+                "id": "nod",
+                "label": "고개를 끄덕인다",
+                "reply": "“좋아. 한 걸음 더. 무리하면 바로 혼난다.”",
+                "effects": {
+                  "storyFlags": ["npc:haewol:faceoff-greeted"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "haewol-faceoff-rebel-soft-01",
+      "levelId": "faceoff-checkpoint-01",
+      "x": 760,
+      "y": 1792,
+      "width": 58,
+      "height": 96,
+      "facing": 1,
+      "interactPrompt": "Z: 해월",
+      "showWhen": {
+        "requiredStoryFlags": [
+          "npc:haewol:tutorial-complete",
+          "npc:haewol:relation-rebel-soft"
+        ],
+        "missingStoryFlags": ["npc:haewol:faceoff-greeted"]
+      },
+      "dialogue": {
+        "startNodeId": "greet",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "nod",
+        "nodes": [
+          {
+            "id": "greet",
+            "line": "“봐. 조심하겠다고 한 사람이 제일 오래 간다니까.”\n“그래도 방심은 하지 마. 친절한 얼굴에도 이빨은 숨어 있을 수 있어.”",
+            "choices": [
+              {
+                "id": "nod",
+                "label": "고개를 끄덕인다",
+                "reply": "“그래. 예쁘게 잘 듣고 있네. 계속 그렇게.”",
+                "effects": {
+                  "storyFlags": ["npc:haewol:faceoff-greeted"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "haewol-faceoff-joke-01",
+      "levelId": "faceoff-checkpoint-01",
+      "x": 760,
+      "y": 1792,
+      "width": 58,
+      "height": 96,
+      "facing": 1,
+      "interactPrompt": "Z: 해월",
+      "showWhen": {
+        "requiredStoryFlags": [
+          "npc:haewol:tutorial-complete",
+          "npc:haewol:relation-joke"
+        ],
+        "missingStoryFlags": ["npc:haewol:faceoff-greeted"]
+      },
+      "dialogue": {
+        "startNodeId": "greet",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "nod",
+        "nodes": [
+          {
+            "id": "greet",
+            "line": "“아직 농담할 얼굴이네. 다행이다, 정말 다행이야.”\n“웃을 힘은 남겨두자. 대신 발은 웃기 전에 움직여야 해. 알겠지?”",
+            "choices": [
+              {
+                "id": "nod",
+                "label": "고개를 끄덕인다",
+                "reply": "“후후. 표정 보니 반은 들었네. 나머지 반도 꼭 들어.”",
+                "effects": {
+                  "storyFlags": ["npc:haewol:faceoff-greeted"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "haewol-faceoff-silent-01",
+      "levelId": "faceoff-checkpoint-01",
+      "x": 760,
+      "y": 1792,
+      "width": 58,
+      "height": 96,
+      "facing": 1,
+      "interactPrompt": "Z: 해월",
+      "showWhen": {
+        "requiredStoryFlags": [
+          "npc:haewol:tutorial-complete",
+          "npc:haewol:relation-silent"
+        ],
+        "missingStoryFlags": ["npc:haewol:faceoff-greeted"]
+      },
+      "dialogue": {
+        "startNodeId": "greet",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "nod",
+        "nodes": [
+          {
+            "id": "greet",
+            "line": "“말은 아껴도 돼. 대신 숨은 아끼지 마.”\n“네가 조용하면 내가 더 자세히 볼게. 손끝, 어깨, 걸음까지.”",
+            "choices": [
+              {
+                "id": "nod",
+                "label": "고개를 끄덕인다",
+                "reply": "“응. 그렇게 천천히. 아주 잘하고 있어.”",
+                "effects": {
+                  "storyFlags": ["npc:haewol:faceoff-greeted"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "haewol-faceoff-fallback-01",
+      "levelId": "faceoff-checkpoint-01",
+      "x": 760,
+      "y": 1792,
+      "width": 58,
+      "height": 96,
+      "facing": 1,
+      "interactPrompt": "Z: 해월",
+      "showWhen": {
+        "requiredStoryFlags": ["npc:haewol:tutorial-complete"],
+        "missingStoryFlags": [
+          "npc:haewol:faceoff-greeted",
+          "npc:haewol:relation-obey",
+          "npc:haewol:relation-rebel",
+          "npc:haewol:relation-rebel-soft",
+          "npc:haewol:relation-joke",
+          "npc:haewol:relation-silent"
+        ]
+      },
+      "dialogue": {
+        "startNodeId": "greet",
+        "timerSeconds": 6,
+        "timeoutChoiceId": "nod",
+        "nodes": [
+          {
+            "id": "greet",
+            "line": "“여기까지 왔구나. 잘했다, 정말 잘했다.”\n“대답을 고르지 못했어도 괜찮아. 살아서 다시 고르면 된다.”",
+            "choices": [
+              {
+                "id": "nod",
+                "label": "고개를 끄덕인다",
+                "reply": "“그래. 계속 가자. 내가 뒤에서 지켜볼게.”",
+                "effects": {
+                  "storyFlags": ["npc:haewol:faceoff-greeted"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

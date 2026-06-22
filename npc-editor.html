@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>윤회무명2 NPC 에디터</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./editor.css">
+</head>
+<body class="editor-page">
+  <main class="editor-shell">
+    <aside class="editor-sidebar">
+      <header class="editor-header">
+        <p class="eyebrow">NPC Editor</p>
+        <h1>NPC 에디터</h1>
+        <p class="editor-summary">NPC별 JSON에서 위치, 출현 조건, 필드 말풍선 대화와 route 가로채기를 편집한다.</p>
+        <div class="editor-header-actions">
+          <a class="ghost-button" href="./index.html">게임</a>
+          <a class="ghost-button" href="./editor.html">레벨 에디터</a>
+        </div>
+      </header>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>NPC</span>
+          <span class="panel-toggle-meta">file</span>
+        </summary>
+        <div class="panel-body">
+          <label class="field full">
+            <span>NPC File</span>
+            <select id="npcSelect"></select>
+          </label>
+          <div class="panel-row">
+            <button type="button" class="ghost-button" id="addNpcButton">New NPC</button>
+            <button type="button" class="ghost-button" id="saveNpcButton">JSON 저장</button>
+          </div>
+          <p class="panel-helper" id="statusLabel">NPC 데이터 로딩 중.</p>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>Profile</span>
+          <span class="panel-toggle-meta">shared</span>
+        </summary>
+        <div class="panel-body">
+          <div class="field-grid" id="profileFields"></div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>Placement</span>
+          <span class="panel-toggle-meta">position + dialogue</span>
+        </summary>
+        <div class="panel-body">
+          <label class="field full">
+            <span>Placement</span>
+            <select id="placementSelect"></select>
+          </label>
+          <div class="panel-row">
+            <button type="button" class="ghost-button" id="addPlacementButton">Add</button>
+            <button type="button" class="ghost-button" id="deletePlacementButton">Delete</button>
+          </div>
+          <div class="field-grid" id="placementFields"></div>
+        </div>
+      </details>
+
+      <details class="editor-panel is-collapsible" open>
+        <summary class="panel-toggle">
+          <span>Dialogue</span>
+          <span class="panel-toggle-meta">nodes</span>
+        </summary>
+        <div class="panel-body">
+          <div class="field-grid" id="dialogueFields"></div>
+          <label class="field full">
+            <span>Node</span>
+            <select id="nodeSelect"></select>
+          </label>
+          <div class="panel-row">
+            <button type="button" class="ghost-button" id="addNodeButton">Add Node</button>
+            <button type="button" class="ghost-button" id="deleteNodeButton">Delete Node</button>
+          </div>
+          <div class="field-grid" id="nodeFields"></div>
+          <div id="choiceFields"></div>
+        </div>
+      </details>
+    </aside>
+
+    <section class="editor-stage">
+      <div class="editor-stage-bar">
+        <div>
+          <p class="eyebrow">Map</p>
+          <h2 id="stageTitle">NPC Placement</h2>
+        </div>
+        <label class="inline-select">
+          <span>Level</span>
+          <select id="levelSelect"></select>
+        </label>
+      </div>
+      <div class="editor-canvas-wrap">
+        <canvas id="npcCanvas" width="1600" height="900" aria-label="NPC 에디터 캔버스"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./npc-editor.js?v=20260622-npc-v1"></script>
+</body>
+</html>
