@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>윤회 무명 — Shelter</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #ece9df;
+      --ink-dim: rgba(236, 233, 223, 0.58);
+      --ink-faint: rgba(236, 233, 223, 0.24);
+      --warm: #e8b66b;
+      --green: #8fae7a;
+      --panel-bg: rgba(16, 14, 12, 0.84);
+      --panel-line: rgba(236, 233, 223, 0.18);
+      --sanity-light: 1;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #090807;
+      font-family: Consolas, "D2Coding", "Cascadia Mono", monospace;
+    }
+
+    .shelter-shell {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 70% 24%, rgba(232, 182, 107, calc(0.12 * var(--sanity-light))), transparent 34%),
+        linear-gradient(180deg, #11110f 0%, #080807 100%);
+      color: var(--ink);
+    }
+
+    .scene {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      width: 100dvw;
+      height: 100dvh;
+      overflow: hidden;
+      background: #11100e;
+      isolation: isolate;
+    }
+
+    .bg-layer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(43, 41, 35, 0.78) 0%, rgba(22, 20, 17, 0.92) 100%),
+        radial-gradient(circle at 76% 30%, rgba(232, 182, 107, 0.22), transparent 28%),
+        radial-gradient(circle at 22% 68%, rgba(107, 139, 100, 0.18), transparent 26%);
+    }
+
+    .bg-placeholder {
+      position: absolute;
+      inset: clamp(18px, 4vw, 54px);
+      border: 1px dashed rgba(236, 233, 223, 0.22);
+      background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 52px 52px,
+        linear-gradient(0deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px) 0 0 / 52px 52px,
+        rgba(22, 20, 17, 0.3);
+      box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.45);
+    }
+
+    .placeholder-label {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      color: rgba(236, 233, 223, 0.38);
+      font-size: 13px;
+      letter-spacing: 0;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .room-sketch {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.9;
+    }
+
+    .window-glow {
+      position: absolute;
+      right: 7%;
+      top: 11%;
+      width: 26%;
+      height: 33%;
+      border: 1px solid rgba(236, 233, 223, 0.18);
+      background:
+        linear-gradient(180deg, rgba(219, 220, 207, 0.28), rgba(113, 139, 145, 0.18)),
+        repeating-linear-gradient(90deg, rgba(236, 233, 223, 0.14) 0 1px, transparent 1px 46px);
+      box-shadow: 0 0 80px rgba(232, 182, 107, calc(0.22 * var(--sanity-light)));
+    }
+
+    .floor {
+      position: absolute;
+      left: -6%;
+      right: -6%;
+      bottom: -8%;
+      height: 35%;
+      transform: skewY(-3deg);
+      background:
+        linear-gradient(90deg, rgba(236, 233, 223, 0.07) 1px, transparent 1px) 0 0 / 76px 100%,
+        linear-gradient(180deg, rgba(67, 54, 39, 0.42), rgba(19, 16, 14, 0.72));
+      border-top: 1px solid rgba(236, 233, 223, 0.08);
+    }
+
+    .soft-dust {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 18% 30%, rgba(143, 174, 122, 0.08), transparent 18%),
+        radial-gradient(circle at 50% 72%, rgba(232, 182, 107, 0.07), transparent 28%),
+        radial-gradient(circle at 75% 65%, rgba(236, 233, 223, 0.04), transparent 24%);
+      mix-blend-mode: screen;
+    }
+
+    .drone-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 50% 48%, transparent 0 58%, rgba(0, 0, 0, 0.26) 82%, rgba(0, 0, 0, 0.64) 100%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 16%, transparent 84%, rgba(0, 0, 0, 0.14));
+      z-index: 5;
+    }
+
+    .hud {
+      position: absolute;
+      left: clamp(18px, 3vw, 38px);
+      top: clamp(18px, 3vw, 34px);
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      z-index: 8;
+      color: rgba(236, 233, 223, 0.64);
+      font-size: 12px;
+      text-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+    }
+
+    .hud span {
+      color: rgba(236, 233, 223, 0.38);
+    }
+
+    .sanity-aura {
+      position: absolute;
+      left: 53%;
+      top: 42%;
+      width: 13vmin;
+      height: 13vmin;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(232, 182, 107, calc(0.18 * var(--sanity-light))), transparent 68%);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .hotspot {
+      position: absolute;
+      z-index: 7;
+      border: 1px solid transparent;
+      border-radius: 50%;
+      background: rgba(232, 182, 107, 0);
+      box-shadow: none;
+      cursor: pointer;
+      transform: translate(-50%, -50%);
+      transition: border-color 120ms linear, background 120ms linear, box-shadow 120ms linear;
+    }
+
+    .hotspot::before {
+      content: "";
+      position: absolute;
+      inset: 18%;
+      border-radius: 50%;
+      border: 1px solid rgba(236, 233, 223, 0.08);
+    }
+
+    .hotspot::after {
+      content: attr(data-label);
+      position: absolute;
+      left: 50%;
+      top: -12px;
+      transform: translate(-50%, -100%);
+      padding: 5px 8px;
+      border: 1px solid rgba(236, 233, 223, 0.16);
+      background: rgba(13, 12, 10, 0.76);
+      color: rgba(236, 233, 223, 0.78);
+      font: 12px/1.2 Consolas, "D2Coding", monospace;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms linear, transform 120ms linear;
+    }
+
+    .hotspot:hover,
+    .hotspot.is-focused,
+    .hotspot:focus-visible {
+      border-color: rgba(232, 182, 107, 0.46);
+      background: rgba(232, 182, 107, 0.08);
+      box-shadow: 0 0 30px rgba(232, 182, 107, 0.24), inset 0 0 28px rgba(232, 182, 107, 0.08);
+      outline: none;
+    }
+
+    .hotspot:hover::after,
+    .hotspot.is-focused::after,
+    .hotspot:focus-visible::after {
+      opacity: 1;
+      transform: translate(-50%, -108%);
+    }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      z-index: 20;
+      background: rgba(6, 5, 4, 0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 150ms linear;
+    }
+
+    .modal.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .panel {
+      min-width: min(420px, calc(100vw - 38px));
+      max-width: min(620px, calc(100vw - 38px));
+      border: 1px solid var(--panel-line);
+      background: var(--panel-bg);
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+      padding: 24px;
+      color: rgba(236, 233, 223, 0.76);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .panel-title {
+      margin: 0;
+      font: 16px/1.2 Consolas, "D2Coding", monospace;
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+
+    .close-button {
+      border: 0;
+      background: transparent;
+      color: rgba(236, 233, 223, 0.46);
+      cursor: pointer;
+      font: 13px/1 Consolas, "D2Coding", monospace;
+      padding: 4px 0;
+    }
+
+    .close-button:hover,
+    .close-button:focus-visible {
+      color: var(--ink);
+      outline: none;
+    }
+
+    .panel-body {
+      min-height: 110px;
+      border: 1px dashed rgba(236, 233, 223, 0.12);
+      display: grid;
+      align-content: center;
+      gap: 10px;
+      padding: 18px;
+      color: rgba(236, 233, 223, 0.45);
+      font-size: 13px;
+    }
+
+    .panel-record-meta {
+      color: rgba(232, 182, 107, 0.72);
+    }
+
+    .panel-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+      margin-top: 6px;
+    }
+
+    .panel-action-button {
+      border: 1px solid rgba(232, 182, 107, 0.34);
+      background: rgba(232, 182, 107, 0.1);
+      color: rgba(236, 233, 223, 0.86);
+      cursor: pointer;
+      font: 13px/1 Consolas, "D2Coding", monospace;
+      padding: 10px 12px;
+    }
+
+    .panel-action-button:hover,
+    .panel-action-button:focus-visible {
+      border-color: rgba(232, 182, 107, 0.64);
+      background: rgba(232, 182, 107, 0.18);
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="shelter-shell">
+    <section id="scene" class="scene" aria-label="Drone view of shelter hub">
+      <div class="bg-layer" aria-hidden="true">
+        <div class="bg-placeholder">
+          <div class="placeholder-label">PLACEHOLDER ASSET: shelter_bg.png</div>
+        </div>
+        <div class="room-sketch">
+          <div class="window-glow"></div>
+          <div class="floor"></div>
+          <div class="soft-dust"></div>
+          <div class="sanity-aura" id="sanityAura"></div>
+        </div>
+      </div>
+
+      <div class="hud" aria-label="resources">
+        <div><span>MAT</span> 018</div>
+        <div><span>PARTS</span> 03</div>
+        <div><span>BAT</span> 82%</div>
+      </div>
+
+      <div id="hotspotLayer" aria-label="shelter objects"></div>
+      <div class="drone-vignette" aria-hidden="true"></div>
+    </section>
+  </main>
+
+  <section id="modal" class="modal" aria-modal="true" aria-hidden="true" role="dialog">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 id="panelTitle" class="panel-title">PANEL</h2>
+        <button id="closePanelButton" class="close-button" type="button">닫기</button>
+      </div>
+      <div id="panelBody" class="panel-body"></div>
+    </div>
+  </section>
+
+  <script>
+    "use strict";
+
+    // SAVE: shared with the title screen. Step 2/3 can add fields here, but the
+    // localStorage key and base shape should stay compatible with index.html.
+    const SAVE_KEY = "yunhoe_save";
+    const GAME_ENTRY_PATH = "./index.html";
+    const DEFAULT_SAVE = {
+      deaths: 0,
+      sanity: 100,
+      reachedLettingGoEnding: false,
+      managers: {
+        N: "active",
+        E: "active",
+        S: "active",
+        W: "active",
+        C: "active"
+      },
+      stage: 1,
+      cycle: 1,
+      day: 1,
+      exists: false,
+      entryIntent: null
+    };
+
+    // ART HOOKS: every drawn element in this shell is a placeholder. Replace
+    // these null hooks with loaded PNGs/sprites/sequences when final art exists.
+    const ART_HOOKS = {
+      shelter: {
+        background: null, // REPLACE: load shelter_bg.png here.
+        dronePovOverlay: null // REPLACE: optional drone-lens overlay image/sequence.
+      },
+      hotspots: {
+        repairBench: null, // REPLACE: precise hotspot mask or sprite highlight.
+        droneCradle: null,
+        recordTerminal: null,
+        bedCapsule: null,
+        child: null,
+        window: null,
+        plants: null
+      }
+    };
+
+    // DIEGETIC HOTSPOTS: positions are percentages over the background art.
+    // When shelter_bg.png is swapped in, tune x/y/w/h without changing handlers.
+    const HOTSPOTS = [
+      {
+        id: "repairBench",
+        label: "REPAIR BENCH",
+        handler: "openRepair",
+        x: 25,
+        y: 67,
+        w: 18,
+        h: 18,
+        panel: "REPAIR"
+      },
+      {
+        id: "droneCradle",
+        label: "DRONE CRADLE",
+        handler: "departToCity",
+        x: 50,
+        y: 72,
+        w: 19,
+        h: 16,
+        panel: "DEPART"
+      },
+      {
+        id: "recordTerminal",
+        label: "RECORD TERMINAL",
+        handler: "openRecords",
+        x: 36,
+        y: 43,
+        w: 15,
+        h: 17,
+        panel: "RECORDS"
+      },
+      {
+        id: "bedCapsule",
+        label: "BED / CAPSULE",
+        handler: "sleepSave",
+        x: 71,
+        y: 70,
+        w: 20,
+        h: 15,
+        panel: "SLEEP"
+      },
+      {
+        id: "child",
+        label: "CHILD",
+        handler: "talkToChild",
+        x: 53,
+        y: 47,
+        w: 12,
+        h: 20,
+        panel: "TALK"
+      },
+      {
+        id: "window",
+        label: "WINDOW",
+        handler: "lookOutside",
+        x: 79,
+        y: 29,
+        w: 24,
+        h: 32,
+        panel: "WINDOW"
+      },
+      {
+        id: "plants",
+        label: "PLANTS",
+        handler: "tendPlants",
+        x: 18,
+        y: 43,
+        w: 15,
+        h: 24,
+        panel: "PLANTS"
+      }
+    ];
+
+    const scene = document.getElementById("scene");
+    const hotspotLayer = document.getElementById("hotspotLayer");
+    const modal = document.getElementById("modal");
+    const panelTitle = document.getElementById("panelTitle");
+    const panelBody = document.getElementById("panelBody");
+    const closePanelButton = document.getElementById("closePanelButton");
+
+    let saveState = normalizeSave(loadSave() || DEFAULT_SAVE);
+    let focusedIndex = 0;
+    let activePanel = null;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function normalizeSave(state) {
+      const sanity = clamp(Math.floor(Number(state?.sanity ?? 100) || 0), 0, 100);
+      const deaths = Math.max(0, Math.floor(Number(state?.deaths) || 0));
+      const cycle = Math.max(1, Math.floor(Number(state?.cycle ?? state?.day ?? deaths + 1) || 1));
+      return {
+        ...DEFAULT_SAVE,
+        ...state,
+        deaths,
+        sanity,
+        cycle,
+        day: Math.max(1, Math.floor(Number(state?.day ?? cycle) || cycle)),
+        exists: Boolean(state?.exists)
+      };
+    }
+
+    function loadSave() {
+      try {
+        const raw = localStorage.getItem(SAVE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function saveGame(state) {
+      const next = normalizeSave({
+        ...DEFAULT_SAVE,
+        ...state,
+        exists: true
+      });
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify(next));
+      } catch (error) {
+        console.warn("shelter save failed before expedition", error);
+      }
+      saveState = next;
+      syncSaveDrivenVisuals();
+      return next;
+    }
+
+    function createStageEntryUrl(state) {
+      const params = new URLSearchParams();
+      params.set("directLevel", "1");
+      params.set("entry", "shelter");
+      params.set("stage", String(Math.max(1, Math.floor(Number(state.stage) || 1))));
+      return `${GAME_ENTRY_PATH}?${params.toString()}`;
+    }
+
+    // SAVE-DRIVEN VISUALS: sanity is not shown as a bare number in the room.
+    // Instead it subtly changes the warmth/brightness around the child.
+    function syncSaveDrivenVisuals() {
+      const light = 0.45 + saveState.sanity / 100 * 0.75;
+      document.documentElement.style.setProperty("--sanity-light", light.toFixed(3));
+      document.documentElement.dataset.shelterSanity = String(saveState.sanity);
+      document.documentElement.dataset.shelterCycle = String(saveState.cycle);
+      document.documentElement.dataset.shelterDay = String(saveState.day);
+    }
+
+    // MOUSE: each object is a real button, so hover/click and accessibility
+    // focus use the same hotspot definitions.
+    function createHotspotButton(hotspot, index) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "hotspot";
+      button.dataset.hotspotId = hotspot.id;
+      button.dataset.handler = hotspot.handler;
+      button.dataset.label = hotspot.label;
+      button.style.left = `${hotspot.x}%`;
+      button.style.top = `${hotspot.y}%`;
+      button.style.width = `clamp(44px, ${hotspot.w}vmin, ${hotspot.w * 7}px)`;
+      button.style.height = `clamp(44px, ${hotspot.h}vmin, ${hotspot.h * 7}px)`;
+      button.setAttribute("aria-label", hotspot.label);
+
+      button.addEventListener("pointerenter", () => setFocusedHotspot(index, false));
+      button.addEventListener("focus", () => setFocusedHotspot(index, false));
+      button.addEventListener("click", () => activateHotspot(index));
+      return button;
+    }
+
+    function renderHotspots() {
+      hotspotLayer.innerHTML = "";
+      HOTSPOTS.forEach((hotspot, index) => {
+        hotspotLayer.append(createHotspotButton(hotspot, index));
+      });
+      setFocusedHotspot(0, false);
+      document.documentElement.dataset.hotspotCount = String(HOTSPOTS.length);
+    }
+
+    function getHotspotButtons() {
+      return Array.from(hotspotLayer.querySelectorAll(".hotspot"));
+    }
+
+    function setFocusedHotspot(index, shouldFocus = true) {
+      focusedIndex = (index + HOTSPOTS.length) % HOTSPOTS.length;
+      getHotspotButtons().forEach((button, buttonIndex) => {
+        button.classList.toggle("is-focused", buttonIndex === focusedIndex);
+        button.tabIndex = buttonIndex === focusedIndex ? 0 : -1;
+      });
+      if (shouldFocus) {
+        getHotspotButtons()[focusedIndex]?.focus();
+      }
+      document.documentElement.dataset.focusedHotspot = HOTSPOTS[focusedIndex]?.id || "";
+    }
+
+    function activateHotspot(index = focusedIndex) {
+      const hotspot = HOTSPOTS[(index + HOTSPOTS.length) % HOTSPOTS.length];
+      window.SHELTER_HANDLERS[hotspot.handler]();
+    }
+
+    // STEP 1 HANDLER STUB: later steps replace these empty panels with real
+    // repair, expedition, records, sleep, dialogue, window, and plant screens.
+    function openStubPanel(title, extraHtml = "") {
+      activePanel = title;
+      panelTitle.textContent = `${title} — (not built)`;
+      panelBody.innerHTML = extraHtml || "<div>STEP 1 shell stub.</div>";
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      closePanelButton.focus();
+      document.documentElement.dataset.activeShelterPanel = title;
+      console.log("shelter panel:", title);
+    }
+
+    function closePanel() {
+      activePanel = null;
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+      document.documentElement.dataset.activeShelterPanel = "";
+      setFocusedHotspot(focusedIndex, true);
+    }
+
+    function openRepair() {
+      openStubPanel("REPAIR");
+    }
+
+    function enterStageFromShelter() {
+      const departing = saveGame({
+        ...saveState,
+        stage: Math.max(1, Math.floor(Number(saveState.stage) || 1)),
+        entryIntent: "continue",
+        lastShelterExitAt: Date.now()
+      });
+      document.documentElement.dataset.shelterDeparting = "true";
+      console.log("shelter depart:", departing);
+      window.location.href = createStageEntryUrl(departing);
+    }
+
+    function departToCity() {
+      openStubPanel("DEPART", `
+        <div>Drone cradle link is ready.</div>
+        <div class="panel-actions">
+          <button class="panel-action-button" type="button" data-action="depart-stage">탐사 시작</button>
+        </div>
+      `);
+      const departButton = panelBody.querySelector("[data-action='depart-stage']");
+      departButton?.addEventListener("click", enterStageFromShelter);
+      departButton?.focus();
+    }
+
+    function openRecords() {
+      openStubPanel("RECORDS", `
+        <div class="panel-record-meta">CYCLE ${saveState.cycle} / DAY ${saveState.day}</div>
+        <div>Found records, lore, and city map will live here.</div>
+      `);
+    }
+
+    function sleepSave() {
+      openStubPanel("SLEEP");
+    }
+
+    function talkToChild() {
+      openStubPanel("TALK");
+    }
+
+    function lookOutside() {
+      openStubPanel("WINDOW");
+    }
+
+    function tendPlants() {
+      openStubPanel("PLANTS");
+    }
+
+    window.SHELTER_HANDLERS = {
+      openRepair,
+      departToCity,
+      enterStageFromShelter,
+      openRecords,
+      sleepSave,
+      talkToChild,
+      lookOutside,
+      tendPlants
+    };
+    document.documentElement.dataset.shelterHandlers = Object.keys(window.SHELTER_HANDLERS).join(",");
+
+    // KEYBOARD/GAMEPAD-FRIENDLY INPUT: arrows and Tab cycle focus; Enter/Space
+    // activates the selected diegetic object. Escape closes the current panel.
+    document.addEventListener("keydown", (event) => {
+      if (activePanel) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closePanel();
+        }
+        return;
+      }
+
+      if (event.key === "Tab" || event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        setFocusedHotspot(focusedIndex + (event.shiftKey ? -1 : 1));
+        return;
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        setFocusedHotspot(focusedIndex - 1);
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activateHotspot();
+      }
+    });
+
+    closePanelButton.addEventListener("click", closePanel);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) closePanel();
+    });
+
+    window.addEventListener("resize", () => {
+      document.documentElement.dataset.viewport = `${window.innerWidth}x${window.innerHeight}`;
+    });
+
+    syncSaveDrivenVisuals();
+    renderHotspots();
+    document.documentElement.dataset.shelterReady = "true";
+    document.documentElement.dataset.assetFallback = "placeholder:shelter_bg.png";
+    document.documentElement.dataset.viewport = `${window.innerWidth}x${window.innerHeight}`;
+  </script>
+</body>
+</html>

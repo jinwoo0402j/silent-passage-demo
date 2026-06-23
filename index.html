@@ -1,15 +1,375 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>윤회무명2</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>輪廻 無明 / 윤회 무명</title>
   <link rel="icon" href="data:,">
   <link rel="preload" as="image" href="./assets/cg/shelter-home-charm-01.png?v=20260618-home-charm-2">
-  <link rel="stylesheet" href="./styles.css?v=20260619-text-speed-v2">
+  <link rel="preload" as="image" href="./assets/backgrounds/cctv-north-cascade.png?v=20260623-user-cctv">
+  <link rel="preload" as="image" href="./assets/backgrounds/cctv-center-phonebooth.png?v=20260623-user-cctv">
+  <link rel="stylesheet" href="./styles.css?v=20260622-hidden-dev-controls-v2">
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #e8e9e6;
+      --ink-dim: rgba(232, 233, 230, 0.46);
+      --ink-faint: rgba(232, 233, 230, 0.22);
+      --panel-bg: rgba(9, 12, 13, 0.78);
+      --panel-line: rgba(232, 233, 230, 0.18);
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: Consolas, "D2Coding", "Cascadia Mono", monospace;
+    }
+
+    #scene {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      background: #000;
+    }
+
+    #gameRoot[hidden] {
+      display: none !important;
+    }
+
+    body.is-game-running #scene,
+    body.is-game-running #menu,
+    body.is-game-running #audioToggle,
+    body.is-game-running #endingPrompt,
+    body.is-game-running #overwritePrompt,
+    body.is-game-running #devPanel {
+      display: none !important;
+    }
+
+    .menu {
+      position: fixed;
+      right: clamp(18px, 4vw, 64px);
+      bottom: clamp(18px, 6vh, 70px);
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms linear;
+      animation: titleUiCssReveal 180ms linear 7s forwards;
+      user-select: none;
+    }
+
+    .menu button,
+    .ending-choice,
+    .audio-toggle {
+      border: 0;
+      background: transparent;
+      color: var(--ink-dim);
+      font: 13px/1.2 Consolas, "D2Coding", "Cascadia Mono", monospace;
+      letter-spacing: 0;
+      padding: 3px 0;
+      cursor: pointer;
+      text-align: right;
+      text-shadow: 0 0 12px rgba(232, 233, 230, 0.18);
+    }
+
+    .menu button:hover,
+    .menu button:focus-visible,
+    .audio-toggle:hover,
+    .audio-toggle:focus-visible {
+      color: rgba(248, 249, 245, 0.82);
+      outline: none;
+    }
+
+    .menu button:disabled {
+      color: rgba(232, 233, 230, 0.17);
+      cursor: default;
+      text-shadow: none;
+    }
+
+    .audio-toggle {
+      position: fixed;
+      left: clamp(16px, 3vw, 42px);
+      bottom: clamp(16px, 4vh, 42px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms linear;
+      animation: titleUiCssReveal 180ms linear 7s forwards;
+    }
+
+    @keyframes titleUiCssReveal {
+      from {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      to {
+        opacity: 1;
+        pointer-events: auto;
+      }
+    }
+
+    .ending-prompt {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(14, 16, 16, 0.44);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms linear;
+    }
+
+    .ending-prompt-inner {
+      display: grid;
+      justify-items: center;
+      gap: 20px;
+      transform: translateY(6vh);
+      color: rgba(232, 233, 230, 0.72);
+      text-shadow: 0 0 18px rgba(216, 155, 74, 0.12);
+      user-select: none;
+    }
+
+    .ending-line {
+      font: 18px/1.5 "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .ending-choices {
+      display: flex;
+      align-items: center;
+      gap: 34px;
+    }
+
+    .ending-choice {
+      font-size: 14px;
+      color: rgba(245, 246, 242, 0.76);
+    }
+
+    .ending-choice:hover,
+    .ending-choice:focus-visible {
+      color: #f8e4b0;
+      outline: none;
+    }
+
+    .ending-choice.dim {
+      color: rgba(232, 233, 230, 0.25);
+    }
+
+    .title-confirm-prompt {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(7, 9, 10, 0.48);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms linear;
+      z-index: 8;
+    }
+
+    .title-confirm-prompt.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .title-confirm-panel {
+      display: grid;
+      justify-items: center;
+      gap: 18px;
+      min-width: min(360px, calc(100vw - 42px));
+      box-sizing: border-box;
+      padding: 28px 30px 24px;
+      border: 1px solid rgba(232, 233, 230, 0.16);
+      background: rgba(9, 12, 13, 0.84);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.34);
+      color: rgba(232, 233, 230, 0.74);
+      text-align: center;
+    }
+
+    .title-confirm-line {
+      font: 15px/1.55 "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .title-confirm-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+    }
+
+    .title-confirm-button {
+      border: 0;
+      background: transparent;
+      color: rgba(232, 233, 230, 0.38);
+      font: 13px/1.2 Consolas, "D2Coding", "Cascadia Mono", monospace;
+      letter-spacing: 0;
+      padding: 4px 0;
+      cursor: pointer;
+      text-shadow: 0 0 12px rgba(232, 233, 230, 0.12);
+    }
+
+    .title-confirm-button:hover,
+    .title-confirm-button:focus-visible {
+      color: rgba(248, 249, 245, 0.82);
+      outline: none;
+    }
+
+    .title-confirm-button.is-primary {
+      color: rgba(248, 228, 176, 0.82);
+    }
+
+    .dev-panel {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      width: min(310px, calc(100vw - 28px));
+      box-sizing: border-box;
+      padding: 14px;
+      border: 1px solid var(--panel-line);
+      background: var(--panel-bg);
+      color: rgba(232, 233, 230, 0.84);
+      font: 12px/1.4 Consolas, "D2Coding", "Cascadia Mono", monospace;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 120ms linear, transform 120ms linear;
+    }
+
+    .dev-panel.is-open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+
+    .dev-panel h2 {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font: 13px/1.2 Consolas, "D2Coding", "Cascadia Mono", monospace;
+      letter-spacing: 0;
+    }
+
+    .field {
+      display: grid;
+      grid-template-columns: 68px 1fr 54px;
+      align-items: center;
+      gap: 8px;
+      margin: 9px 0;
+    }
+
+    .field input[type="range"] {
+      width: 100%;
+    }
+
+    .field input[type="number"] {
+      width: 54px;
+      box-sizing: border-box;
+      border: 1px solid rgba(232, 233, 230, 0.22);
+      background: rgba(0, 0, 0, 0.3);
+      color: var(--ink);
+      font: inherit;
+      padding: 3px 4px;
+    }
+
+    .manager-grid {
+      display: grid;
+      gap: 7px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(232, 233, 230, 0.12);
+    }
+
+    .manager-row {
+      display: grid;
+      grid-template-columns: 52px 1fr;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .manager-row select {
+      min-width: 0;
+      border: 1px solid rgba(232, 233, 230, 0.22);
+      background: rgba(0, 0, 0, 0.3);
+      color: var(--ink);
+      font: inherit;
+      padding: 3px 4px;
+    }
+
+    .checkbox-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .hint {
+      margin-top: 12px;
+      color: rgba(232, 233, 230, 0.42);
+    }
+  </style>
 </head>
 <body>
-  <main class="app-shell">
+  <canvas id="scene" aria-label="輪廻 無明 title screen"></canvas>
+
+  <nav id="menu" class="menu" aria-label="title menu">
+    <button type="button" data-choice="new-game">새로 시작</button>
+    <button id="continueButton" type="button" data-choice="continue">이어하기</button>
+    <button type="button" data-choice="settings">설정</button>
+    <button type="button" data-choice="quit">종료</button>
+  </nav>
+
+  <button id="audioToggle" class="audio-toggle" type="button">소리 켜짐</button>
+  <audio id="bgmAudio" src="assets/audio/still-water-dawn.mp3" preload="auto" loop></audio>
+
+  <section id="endingPrompt" class="ending-prompt" aria-label="letting go prompt">
+    <div class="ending-prompt-inner">
+      <div class="ending-line">또 부르시겠어요?</div>
+      <div class="ending-choices">
+        <button class="ending-choice" type="button" data-ending-choice="again">다시 부른다</button>
+        <button class="ending-choice dim" type="button" data-ending-choice="silence">…</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="overwritePrompt" class="title-confirm-prompt" aria-label="overwrite save prompt" aria-modal="true" aria-hidden="true" role="dialog">
+    <div class="title-confirm-panel">
+      <div class="title-confirm-line">기존 기록을 지우고 새로 시작할까요?</div>
+      <div class="title-confirm-actions">
+        <button class="title-confirm-button is-primary" type="button" data-overwrite-choice="confirm">새로 시작</button>
+        <button class="title-confirm-button" type="button" data-overwrite-choice="cancel">취소</button>
+      </div>
+    </div>
+  </section>
+
+  <aside id="devPanel" class="dev-panel" aria-label="title screen dev panel">
+    <h2>Title State</h2>
+    <label class="field">
+      <span>deaths</span>
+      <input id="deathsRange" type="range" min="0" max="40" step="1">
+      <input id="deathsNumber" type="number" min="0" max="999" step="1">
+    </label>
+    <label class="field">
+      <span>sanity</span>
+      <input id="sanityRange" type="range" min="0" max="100" step="1">
+      <input id="sanityNumber" type="number" min="0" max="100" step="1">
+    </label>
+    <label class="checkbox-field">
+      <input id="endingCheckbox" type="checkbox">
+      <span>reachedLettingGoEnding</span>
+    </label>
+    <div id="managerControls" class="manager-grid" aria-label="CCTV manager states"></div>
+    <div class="hint">Arrows/A/D switch CCTV. Shift+D toggles this panel. Values mutate saveState.</div>
+  </aside>
+
+  <main id="gameRoot" class="app-shell" hidden aria-hidden="true">
     <div class="stage-shell">
       <nav class="app-links" aria-label="이동">
         <a class="app-link is-current" href="./index.html">게임</a>
@@ -88,6 +448,1987 @@
     </div>
   </main>
 
-  <script type="module" src="./main.js?v=20260622-npc-v1"></script>
+  <script>
+    "use strict";
+
+    const SAVE_KEY = "yunhoe_save";
+    const GAME_ENTRY_PATH = "index.html"; // Same-page title/game shell; title state is passed through localStorage.
+    const GAME_MODULE_PATH = "./main.js?v=20260623-title-entry-v5";
+    const SHELTER_ENTRY_PATH = "./shelter.html";
+    const DEFAULT_SAVE = {
+      deaths: 0,
+      sanity: 100,
+      reachedLettingGoEnding: false,
+      managers: {
+        N: "active",
+        E: "active",
+        S: "active",
+        W: "active",
+        C: "active"
+      },
+      stage: 1,
+      exists: false,
+      entryIntent: null
+    };
+
+    function cloneSave(state) {
+      return {
+        deaths: Math.max(0, Math.floor(Number(state?.deaths) || 0)),
+        sanity: clamp(Math.floor(Number(state?.sanity ?? 100) || 0), 0, 100),
+        reachedLettingGoEnding: Boolean(state?.reachedLettingGoEnding),
+        managers: {
+          N: state?.managers?.N || "active",
+          E: state?.managers?.E || "active",
+          S: state?.managers?.S || "active",
+          W: state?.managers?.W || "active",
+          C: state?.managers?.C || "active"
+        },
+        stage: Math.max(1, Math.floor(Number(state?.stage) || 1)),
+        exists: Boolean(state?.exists),
+        entryIntent: ["new", "continue"].includes(state?.entryIntent) ? state.entryIntent : null
+      };
+    }
+
+    function normalizeSave(state, exists) {
+      const normalized = cloneSave(state || DEFAULT_SAVE);
+      normalized.exists = Boolean(exists);
+      for (const key of ["N", "E", "S", "W", "C"]) {
+        if (!["active", "stopped", "destroyed"].includes(normalized.managers[key])) {
+          normalized.managers[key] = "active";
+        }
+      }
+      return normalized;
+    }
+
+    function loadSave() {
+      try {
+        const raw = localStorage.getItem(SAVE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        const normalized = normalizeSave(parsed, parsed?.exists === true);
+        return normalized.exists ? normalized : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function saveGame(state) {
+      const next = normalizeSave(state, true);
+      localStorage.setItem(SAVE_KEY, JSON.stringify(next));
+      return next;
+    }
+
+    try {
+      if (new URLSearchParams(window.location.search).get("clearSave") === "1") {
+        localStorage.removeItem(SAVE_KEY);
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    } catch {}
+
+    const loadedSaveAtBoot = loadSave();
+    const saveState = normalizeSave(loadedSaveAtBoot || DEFAULT_SAVE, loadedSaveAtBoot !== null);
+    Object.defineProperty(window, "saveState", {
+      value: saveState,
+      writable: true,
+      configurable: true
+    });
+    globalThis.saveState = saveState;
+
+    /*
+      Boot timeline, in milliseconds from first load.
+      Tune these numbers to change pacing without touching draw code.
+
+      0.0s-2.5s   black screen
+      2.5s-4.0s   logo fades in and rises from the waterline of the frame
+      4.0s-5.5s   still logo hold
+      5.5s-7.0s   dawn flooded city fades in behind the logo
+      7.0s-8.2s   menu and audio toggle fade in last
+    */
+    const BOOT = {
+      blackEnd: 2500,
+      logoFadeEnd: 4000,
+      logoHoldEnd: 5500,
+      backgroundFadeEnd: 7000,
+      menuFadeEnd: 8200
+    };
+
+    const CONNECT_SEQUENCE = {
+      handshakeEnd: 1400,
+      droneLinkEnd: 3000,
+      shelterBootEnd: 5200
+    };
+
+    /*
+      Deaths -> water height mapping.
+      0 deaths: water near the lower third, figure only ankle-deep.
+      12+ deaths: city and child progressively drowned.
+      36+ deaths: figure no longer visible; only the drone stays above water.
+    */
+    const DEATHS_TO_FULL_FLOOD = 36;
+    const CCTV_NORTH_CASCADE_SRC = "./assets/backgrounds/cctv-north-cascade.png?v=20260623-user-cctv";
+    const CCTV_CENTER_PHONEBOOTH_SRC = "./assets/backgrounds/cctv-center-phonebooth.png?v=20260623-user-cctv";
+
+    function loadImageAsset(src, assetName, datasetKey) {
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = () => {
+        image.dataset.loaded = "true";
+        image.dataset.assetName = assetName;
+        if (datasetKey) document.documentElement.dataset[datasetKey] = "true";
+        if (typeof syncDebugDataset === "function") syncDebugDataset();
+      };
+      image.onerror = () => {
+        image.dataset.error = "true";
+        image.dataset.assetName = assetName;
+        if (datasetKey) document.documentElement.dataset[datasetKey] = "false";
+      };
+      image.src = src;
+      return image;
+    }
+
+    const CCTV_NORTH_ASSETS = {
+      active: loadImageAsset(CCTV_NORTH_CASCADE_SRC, "cctv_N_power_plant_active.png", "cctvNorthAssetLoaded"),
+      stopped: loadImageAsset(CCTV_NORTH_CASCADE_SRC, "cctv_N_power_plant_stopped.png"),
+      destroyed: loadImageAsset(CCTV_NORTH_CASCADE_SRC, "cctv_N_power_plant_destroyed.png")
+    };
+
+    const CCTV_CENTER_ASSETS = {
+      active: loadImageAsset(CCTV_CENTER_PHONEBOOTH_SRC, "cctv_C_station_core_active.png", "cctvCenterAssetLoaded"),
+      stopped: loadImageAsset(CCTV_CENTER_PHONEBOOTH_SRC, "cctv_C_station_core_stopped.png"),
+      destroyed: loadImageAsset(CCTV_CENTER_PHONEBOOTH_SRC, "cctv_C_station_core_destroyed.png")
+    };
+
+    /*
+      Visual replacement hooks.
+      This file is an animated wireframe: every canvas layer below has a matching
+      hook here and a drawLayer* function. Later, replace placeholder drawing with
+      loaded images, sprites, or image sequences without touching save/menu/audio
+      state logic.
+    */
+    const ART_HOOKS = {
+      sky: null, // REPLACE: load sky-dawn.png here.
+      distantSkyline: null, // REPLACE: load distant-skyline.png here.
+      nearSkyline: null, // REPLACE: load near-skyline.png here.
+      brokenBridge: null, // REPLACE: load broken-bridge.png here.
+      water: null, // REPLACE: load water-plane.png or water animation frames here.
+      childAndDrone: null, // REPLACE: load child/drone sprites or sequence here.
+      logo: null, // REPLACE: load title logo image or 예서 webfont render here.
+      shelter: {
+        background: null, // REPLACE: shelter_bg.png
+        child: null // REPLACE: child shelter sprite
+      },
+      cctv: {
+        N: {
+          active: CCTV_NORTH_ASSETS.active, // REPLACE: cctv_N_power_plant_active.png
+          stopped: CCTV_NORTH_ASSETS.stopped, // REPLACE: cctv_N_power_plant_stopped.png
+          destroyed: CCTV_NORTH_ASSETS.destroyed // REPLACE: cctv_N_power_plant_destroyed.png
+        },
+        E: {
+          active: null, // REPLACE: cctv_E_munitions_active.png
+          stopped: null, // REPLACE: cctv_E_munitions_stopped.png
+          destroyed: null // REPLACE: cctv_E_munitions_destroyed.png
+        },
+        S: {
+          active: null, // REPLACE: cctv_S_control_tower_active.png
+          stopped: null, // REPLACE: cctv_S_control_tower_stopped.png
+          destroyed: null // REPLACE: cctv_S_control_tower_destroyed.png
+        },
+        W: {
+          active: null, // REPLACE: cctv_W_cultivation_active.png
+          stopped: null, // REPLACE: cctv_W_cultivation_stopped.png
+          destroyed: null // REPLACE: cctv_W_cultivation_destroyed.png
+        },
+        C: {
+          active: CCTV_CENTER_ASSETS.active, // REPLACE: cctv_C_station_core_active.png
+          stopped: CCTV_CENTER_ASSETS.stopped, // REPLACE: cctv_C_station_core_stopped.png
+          destroyed: CCTV_CENTER_ASSETS.destroyed // REPLACE: cctv_C_station_core_destroyed.png
+        }
+      }
+    };
+
+    const TITLE_GLYPHS = ["輪", "廻", " ", "無", "明"];
+    const KOREAN_TITLE = "윤회 무명";
+    const LETTING_GO_GLYPH = "明";
+
+    const SKYLINE_BUILDINGS = {
+      distant: [
+        { x: 0.08, w: 0.045, h: 0.22 },
+        { x: 0.235, w: 0.052, h: 0.25 },
+        { x: 0.43, w: 0.052, h: 0.28 },
+        { x: 0.61, w: 0.048, h: 0.22 },
+        { x: 0.81, w: 0.056, h: 0.27 },
+        { x: 0.89, w: 0.07, h: 0.24 }
+      ],
+      near: [
+        { x: 0.145, w: 0.07, h: 0.38 },
+        { x: 0.32, w: 0.085, h: 0.45 },
+        { x: 0.51, w: 0.074, h: 0.42 },
+        { x: 0.69, w: 0.09, h: 0.47 }
+      ]
+    };
+
+    const CCTV_CHANNELS = [
+      {
+        key: "N",
+        code: "CH-N",
+        district: "North",
+        title: "POWER PLANT",
+        emotion: "doubt",
+        description: "distant furnace / smoke",
+        outdoor: true,
+        baseSignal: 86
+      },
+      {
+        key: "E",
+        code: "CH-E",
+        district: "East",
+        title: "MUNITIONS FACTORY",
+        emotion: "anger",
+        description: "conveyors / weapon piles",
+        outdoor: true,
+        baseSignal: 78
+      },
+      {
+        key: "S",
+        code: "CH-S",
+        district: "South",
+        title: "CONTROL TOWER",
+        emotion: "pride",
+        description: "sealed floodgates / blinking lights",
+        outdoor: false,
+        baseSignal: 82
+      },
+      {
+        key: "W",
+        code: "CH-W",
+        district: "West",
+        title: "FOOD CULTIVATION",
+        emotion: "greed",
+        description: "vats / nutrient slurry",
+        outdoor: true,
+        baseSignal: 74
+      },
+      {
+        key: "C",
+        code: "CH-C",
+        district: "Center",
+        title: "JANGSAN STATION CORE",
+        emotion: "ignorance",
+        description: "empty heart / fog",
+        outdoor: false,
+        baseSignal: 42
+      }
+    ];
+
+    const MANAGER_STATES = ["active", "stopped", "destroyed"];
+
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const menu = document.getElementById("menu");
+    const continueButton = document.getElementById("continueButton");
+    const audioToggle = document.getElementById("audioToggle");
+    const bgmAudio = document.getElementById("bgmAudio");
+    const endingPrompt = document.getElementById("endingPrompt");
+    const overwritePrompt = document.getElementById("overwritePrompt");
+    const devPanel = document.getElementById("devPanel");
+    const deathsRange = document.getElementById("deathsRange");
+    const deathsNumber = document.getElementById("deathsNumber");
+    const sanityRange = document.getElementById("sanityRange");
+    const sanityNumber = document.getElementById("sanityNumber");
+    const endingCheckbox = document.getElementById("endingCheckbox");
+    const managerControls = document.getElementById("managerControls");
+    const gameRoot = document.getElementById("gameRoot");
+    const cctvDistortionCanvas = document.createElement("canvas");
+    const cctvDistortionCtx = cctvDistortionCanvas.getContext("2d", { alpha: false });
+
+    let viewport = { width: 0, height: 0, dpr: 1 };
+    let layout = null;
+    let startedAt = performance.now();
+    let latestMenuOpacity = 0;
+    let currentChannelIndex = Math.max(0, CCTV_CHANNELS.findIndex((channel) => channel.key === "C"));
+    let channelSwitchStartedAt = -Infinity;
+    let channelSwitchDirection = 0;
+    let screenMode = "title";
+    let droneConnectStartedAt = null;
+    let shelterArrivedAt = null;
+    let pendingEnterState = null;
+    let entryCompletionStarted = false;
+    let animationFrameId = null;
+    let menuRevealFallbackTimer = null;
+    let connectCompletionTimer = null;
+    let gameBootPromise = null;
+    let overwritePromptOpen = false;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * clamp(t, 0, 1);
+    }
+
+    function smoothstep(t) {
+      t = clamp(t, 0, 1);
+      return t * t * (3 - 2 * t);
+    }
+
+    function easeOutCubic(t) {
+      t = clamp(t, 0, 1);
+      return 1 - Math.pow(1 - t, 3);
+    }
+
+    function resizeCanvas() {
+      const width = Math.max(1, window.innerWidth);
+      const height = Math.max(1, window.innerHeight);
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+      if (viewport.width === width && viewport.height === height && viewport.dpr === dpr) {
+        return;
+      }
+
+      viewport = { width, height, dpr };
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = width + "px";
+      canvas.style.height = height + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      layout = computeLayout(width, height);
+    }
+
+    function computeLayout(width, height) {
+      const minDim = Math.min(width, height);
+      const logoSize = clamp(minDim * 0.13, 60, 132);
+      const koreanSize = clamp(minDim * 0.027, 13, 21);
+      const calmWaterY = height * 0.76;
+      const floodWaterY = height * 0.43;
+      const buildingBaseY = height * 0.805;
+
+      return {
+        cx: width * 0.5,
+        logoStartY: height * 0.50,
+        logoEndY: height * 0.32,
+        logoSize,
+        koreanSize,
+        calmWaterY,
+        floodWaterY,
+        buildingBaseY,
+        figureX: clamp(width * 0.18, 86, 250),
+        figureFootY: calmWaterY + clamp(height * 0.025, 10, 28),
+        bridgeY: height * 0.57
+      };
+    }
+
+    function bootProgress(elapsed) {
+      const logoFade = smoothstep((elapsed - BOOT.blackEnd) / (BOOT.logoFadeEnd - BOOT.blackEnd));
+      const logoRise = easeOutCubic((elapsed - BOOT.blackEnd) / (BOOT.logoFadeEnd - BOOT.blackEnd));
+      const background = smoothstep((elapsed - BOOT.logoHoldEnd) / (BOOT.backgroundFadeEnd - BOOT.logoHoldEnd));
+      const menuIn = smoothstep((elapsed - BOOT.backgroundFadeEnd) / (BOOT.menuFadeEnd - BOOT.backgroundFadeEnd));
+      return { logoFade, logoRise, background, menuIn };
+    }
+
+    function deathFactor() {
+      // SYSTEM: deaths -> water level.
+      // 0 deaths keeps the flood low; accumulated deaths lerp toward full flood.
+      return smoothstep(clamp(Number(saveState.deaths) / DEATHS_TO_FULL_FLOOD, 0, 1));
+    }
+
+    function sanityProfile() {
+      // SYSTEM: sanity -> logo state.
+      // 100-67 clean, 66-34 misted, 33-10 partially lost, <10 name-slip.
+      const sanity = clamp(Number(saveState.sanity), 0, 100);
+      if (sanity >= 67) {
+        return { stage: "clean", logoOpacity: 1, jitter: 0.28, erosion: 0.05, slip: 0, submerge: 0 };
+      }
+      if (sanity >= 34) {
+        const t = (66 - sanity) / 32;
+        return { stage: "misted", logoOpacity: lerp(0.94, 0.84, t), jitter: lerp(0.38, 0.64, t), erosion: 0.16, slip: 0, submerge: 0.12 };
+      }
+      if (sanity >= 10) {
+        const t = (33 - sanity) / 23;
+        return { stage: "submerged", logoOpacity: lerp(0.78, 0.58, t), jitter: lerp(0.75, 1.25, t), erosion: lerp(0.24, 0.42, t), slip: 0, submerge: lerp(0.28, 0.52, t) };
+      }
+      const t = (9 - sanity) / 9;
+      return { stage: "nameSlip", logoOpacity: lerp(0.52, 0.28, t), jitter: lerp(1.4, 2.4, t), erosion: lerp(0.46, 0.65, t), slip: lerp(0.45, 1, t), submerge: lerp(0.55, 0.76, t) };
+    }
+
+    function getCurrentCctvChannel() {
+      return CCTV_CHANNELS[currentChannelIndex];
+    }
+
+    function managerStateFor(channelKey) {
+      ensureManagerState();
+      return saveState.managers[channelKey] || "active";
+    }
+
+    function ensureManagerState() {
+      if (!saveState.managers) saveState.managers = {};
+      for (const channel of CCTV_CHANNELS) {
+        if (!MANAGER_STATES.includes(saveState.managers[channel.key])) {
+          saveState.managers[channel.key] = "active";
+        }
+      }
+    }
+
+    function syncDebugDataset() {
+      const channel = getCurrentCctvChannel();
+      const managerState = managerStateFor(channel.key);
+      const channelAsset = ART_HOOKS.cctv[channel.key]?.[managerState];
+      document.documentElement.dataset.currentCctvChannel = channel.code;
+      document.documentElement.dataset.assetFallback = screenMode === "stage-placeholder"
+        ? `placeholder:${GAME_ENTRY_PATH}`
+        : screenMode === "shelter"
+          ? "placeholder:shelter_bg.png/child sprite"
+        : channelAsset?.dataset.loaded === "true"
+          ? `asset:${channelAsset.dataset.assetName || `cctv_${channel.key}_${managerState}.png`}`
+          : `placeholder:cctv_${channel.key}_${managerState}.png`;
+      document.documentElement.dataset.saveExists = String(loadSave() !== null);
+      document.documentElement.dataset.entryPath = GAME_ENTRY_PATH;
+      document.documentElement.dataset.currentManagerStatus = cctvStatusFor(managerState);
+      document.documentElement.dataset.deathFloodFactor = deathFactor().toFixed(3);
+      document.documentElement.dataset.sanityStage = sanityProfile().stage;
+      document.documentElement.dataset.childGhostEligible = String(Number(saveState.sanity) < 34);
+      document.documentElement.dataset.centerDawn = String(channel.key === "C" && Boolean(saveState.reachedLettingGoEnding));
+      document.documentElement.dataset.endingPrompt = String(Boolean(saveState.reachedLettingGoEnding));
+      document.documentElement.dataset.saveStateMirror = JSON.stringify(saveState);
+      document.documentElement.dataset.screenMode = screenMode;
+      document.documentElement.dataset.rafActive = animationFrameId === null ? "no" : "yes";
+      document.documentElement.dataset.cctvCameraDistortion = "barrel-vignette-rgb";
+    }
+
+    function cctvSignalStrength(channel, state, time) {
+      const floodPenalty = deathFactor() * 42;
+      const sanityPenalty = Number(saveState.sanity) < 10 ? 18 : Number(saveState.sanity) < 34 ? 9 : 0;
+      const statePenalty = state === "destroyed" ? 72 : state === "stopped" ? 56 : 0;
+      const flicker = Math.sin(time * 0.004 + channel.key.charCodeAt(0)) * 4;
+      return Math.round(clamp(channel.baseSignal - floodPenalty - sanityPenalty - statePenalty + flicker, 0, 99));
+    }
+
+    function cctvStatusFor(state) {
+      if (state === "stopped") return "OFFLINE";
+      if (state === "destroyed") return "COLLAPSED";
+      return "LIVE";
+    }
+
+    function formatCctvTimestamp(time) {
+      const totalSeconds = Math.floor((time - startedAt) / 1000);
+      const hh = String(Math.floor(totalSeconds / 3600) % 24).padStart(2, "0");
+      const mm = String(Math.floor(totalSeconds / 60) % 60).padStart(2, "0");
+      const ss = String(totalSeconds % 60).padStart(2, "0");
+      return `2041-10-03 ${hh}:${mm}:${ss}`;
+    }
+
+    function cycleCctvChannel(delta, time) {
+      currentChannelIndex = (currentChannelIndex + delta + CCTV_CHANNELS.length) % CCTV_CHANNELS.length;
+      channelSwitchStartedAt = time;
+      channelSwitchDirection = Math.sign(delta) || 1;
+      document.documentElement.dataset.lastGlitchAt = String(Math.round(time));
+      document.documentElement.dataset.glitchDirection = String(channelSwitchDirection);
+      syncDebugDataset();
+    }
+
+    function drawCctvModeLayer(width, height, alpha, time) {
+      // CCTV MODE BACKGROUND: one selected security feed fills the title screen.
+      // REPLACE: each channel/state still goes through ART_HOOKS.cctv[key][state].
+      const channel = getCurrentCctvChannel();
+      const state = managerStateFor(channel.key);
+      const flood = deathFactor();
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      drawCctvBaseFrame(width, height);
+      drawCctvChannelPlaceholder(width, height, channel, state, time);
+      if (channel.outdoor) drawCctvFloodOverlay(width, height, flood, time);
+      drawCctvChildGhost(width, height, channel, time);
+      if (channel.key === "C" && saveState.reachedLettingGoEnding) {
+        drawCenterDawnLight(width, height);
+      }
+      drawCctvCameraDistortion(width, height, channel, state, time);
+      drawCctvFilter(width, height, channel, state, time);
+      drawCctvHud(width, height, channel, state, time);
+      drawCctvSwitchGlitch(width, height, time);
+      drawDroneConnectTransition(width, height, time);
+      ctx.restore();
+    }
+
+    function drawCctvBaseFrame(width, height) {
+      const base = ctx.createLinearGradient(0, 0, 0, height);
+      base.addColorStop(0, "#d7dcda");
+      base.addColorStop(1, "#8ea3aa");
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    function drawImageCover(image, width, height, focusX = 0.5, focusY = 0.5) {
+      const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+      const drawW = image.naturalWidth * scale;
+      const drawH = image.naturalHeight * scale;
+      const dx = (width - drawW) * focusX;
+      const dy = (height - drawH) * focusY;
+      ctx.drawImage(image, dx, dy, drawW, drawH);
+    }
+
+    function drawCctvChannelAsset(width, height, channel, state) {
+      const image = ART_HOOKS.cctv[channel.key]?.[state];
+      if (!image || image.dataset.loaded !== "true" || !image.naturalWidth || !image.naturalHeight) {
+        return false;
+      }
+
+      ctx.save();
+      // CCTV ASSET HOOK: draw the selected channel/state still, then overlay CCTV treatment.
+      ctx.filter = "saturate(0.64) contrast(0.92) brightness(0.9)";
+      drawImageCover(image, width, height, 0.5, 0.5);
+      ctx.filter = "none";
+
+      if (state === "stopped") {
+        ctx.fillStyle = "rgba(5, 8, 9, 0.46)";
+        ctx.fillRect(0, 0, width, height);
+      } else if (state === "destroyed") {
+        ctx.fillStyle = "rgba(44, 24, 18, 0.22)";
+        ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = "rgba(230, 234, 229, 0.16)";
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 9; i += 1) {
+          const x = width * ((i * 0.173 + channel.key.charCodeAt(0) * 0.013) % 1);
+          ctx.beginPath();
+          ctx.moveTo(x, height * 0.08);
+          ctx.lineTo(x + width * 0.06, height * 0.9);
+          ctx.stroke();
+        }
+      }
+
+      ctx.fillStyle = "rgba(4, 7, 8, 0.22)";
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+      return true;
+    }
+
+    function ensureCctvDistortionBuffer(width, height) {
+      if (!cctvDistortionCtx) return false;
+      if (cctvDistortionCanvas.width !== width || cctvDistortionCanvas.height !== height) {
+        cctvDistortionCanvas.width = width;
+        cctvDistortionCanvas.height = height;
+      }
+      return true;
+    }
+
+    function drawCctvCameraDistortion(width, height, channel, state, time) {
+      if (!ensureCctvDistortionBuffer(width, height)) return;
+
+      cctvDistortionCtx.save();
+      cctvDistortionCtx.setTransform(1, 0, 0, 1, 0, 0);
+      cctvDistortionCtx.globalCompositeOperation = "source-over";
+      cctvDistortionCtx.filter = "none";
+      cctvDistortionCtx.clearRect(0, 0, width, height);
+      cctvDistortionCtx.drawImage(canvas, 0, 0, width, height);
+      cctvDistortionCtx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.filter = "none";
+      ctx.clearRect(0, 0, width, height);
+
+      const sliceH = Math.max(2, Math.floor(height / 210));
+      const maxBulge = width * 0.034;
+      const wobbleBase = state === "destroyed" ? 5.2 : state === "stopped" ? 2.6 : 1.35;
+
+      for (let y = 0; y < height; y += sliceH) {
+        const centerY = ((y + sliceH * 0.5) / height) * 2 - 1;
+        const edge = centerY * centerY;
+        const barrel = maxBulge * edge;
+        const wave = Math.sin(y * 0.026 + time * 0.0022 + channel.key.charCodeAt(0)) * wobbleBase * (0.35 + edge);
+        const scanTear = Math.sin(time * 0.004 + y * 0.11) > 0.988 ? width * 0.014 : 0;
+        ctx.drawImage(
+          cctvDistortionCanvas,
+          0,
+          y,
+          width,
+          sliceH,
+          wave + scanTear - barrel * 0.5,
+          y,
+          width + barrel,
+          sliceH + 0.75
+        );
+      }
+
+      ctx.globalCompositeOperation = "screen";
+      ctx.globalAlpha = 0.045;
+      ctx.filter = "sepia(1) saturate(2.8) hue-rotate(300deg)";
+      ctx.drawImage(cctvDistortionCanvas, -2, 0, width, height);
+      ctx.filter = "sepia(1) saturate(2.4) hue-rotate(145deg)";
+      ctx.drawImage(cctvDistortionCanvas, 2, 0, width, height);
+
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      ctx.filter = "none";
+      const glass = ctx.createRadialGradient(width * 0.5, height * 0.5, 0, width * 0.5, height * 0.5, Math.max(width, height) * 0.72);
+      glass.addColorStop(0, "rgba(255, 255, 255, 0)");
+      glass.addColorStop(0.58, "rgba(255, 255, 255, 0)");
+      glass.addColorStop(0.82, "rgba(4, 8, 9, 0.18)");
+      glass.addColorStop(1, "rgba(1, 3, 4, 0.66)");
+      ctx.fillStyle = glass;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = "rgba(232, 238, 236, 0.08)";
+      ctx.lineWidth = Math.max(1, Math.min(width, height) * 0.006);
+      ctx.beginPath();
+      ctx.ellipse(width * 0.5, height * 0.5, width * 0.515, height * 0.535, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawCctvChannelPlaceholder(width, height, channel, state, time) {
+      // REPLACE: draw ART_HOOKS.cctv[channel.key][state] here.
+      // Example: ctx.drawImage(ART_HOOKS.cctv.N.active, 0, 0, width, height)
+      ctx.save();
+      if (state === "stopped") ctx.globalAlpha *= 0.66;
+      if (state === "destroyed") ctx.globalAlpha *= 0.82;
+
+      if (drawCctvChannelAsset(width, height, channel, state)) {
+        ctx.restore();
+        return;
+      }
+
+      if (channel.key === "N") drawPowerPlantPlaceholder(width, height, state, time);
+      if (channel.key === "E") drawMunitionsPlaceholder(width, height, state, time);
+      if (channel.key === "S") drawControlTowerPlaceholder(width, height, state, time);
+      if (channel.key === "W") drawCultivationPlaceholder(width, height, state, time);
+      if (channel.key === "C") drawStationCorePlaceholder(width, height, state, time);
+
+      drawMissingAssetPlaceholder(width, height, channel, state);
+
+      if (state === "stopped") {
+        ctx.fillStyle = "rgba(12, 17, 18, 0.34)";
+        ctx.fillRect(0, 0, width, height);
+      }
+      if (state === "destroyed") {
+        drawDestroyedOverlay(width, height, time);
+      }
+      ctx.restore();
+    }
+
+    function drawMissingAssetPlaceholder(width, height, channel, state) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(235, 240, 236, 0.28)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([10, 8]);
+      const boxW = Math.min(width * 0.52, 520);
+      const boxH = Math.min(height * 0.2, 150);
+      const x = width * 0.5 - boxW * 0.5;
+      const y = height * 0.5 - boxH * 0.5;
+      ctx.strokeRect(x, y, boxW, boxH);
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(8, 12, 13, 0.18)";
+      ctx.fillRect(x, y, boxW, boxH);
+      ctx.fillStyle = "rgba(235, 240, 236, 0.72)";
+      ctx.font = "16px Consolas, 'D2Coding', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`${channel.code} ${channel.district} // ${channel.title}`, width * 0.5, y + boxH * 0.42);
+      ctx.fillStyle = "rgba(235, 240, 236, 0.46)";
+      ctx.font = "12px Consolas, 'D2Coding', monospace";
+      ctx.fillText(`PLACEHOLDER ASSET: cctv_${channel.key}_${state}.png`, width * 0.5, y + boxH * 0.62);
+      ctx.restore();
+    }
+
+    function drawPowerPlantPlaceholder(width, height, state, time) {
+      // CH-N North / doubt. REPLACE: cctv_N_power_plant_*.png
+      ctx.fillStyle = "rgba(77, 91, 94, 0.2)";
+      ctx.fillRect(width * 0.08, height * 0.44, width * 0.84, height * 0.24);
+      ctx.fillStyle = "rgba(53, 64, 68, 0.42)";
+      ctx.fillRect(width * 0.2, height * 0.28, width * 0.13, height * 0.4);
+      ctx.fillRect(width * 0.58, height * 0.22, width * 0.15, height * 0.46);
+      ctx.beginPath();
+      ctx.arc(width * 0.44, height * 0.56, height * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+      if (state === "active") {
+        const pulse = 0.18 + 0.12 * Math.sin(time * 0.004);
+        ctx.fillStyle = `rgba(240, 240, 230, ${pulse})`;
+        ctx.beginPath();
+        ctx.arc(width * 0.44, height * 0.56, height * 0.055, 0, Math.PI * 2);
+        ctx.fill();
+        drawSmoke(width * 0.66, height * 0.22, time);
+      }
+    }
+
+    function drawMunitionsPlaceholder(width, height, state, time) {
+      // CH-E East / anger. REPLACE: cctv_E_munitions_*.png
+      ctx.fillStyle = "rgba(45, 54, 58, 0.38)";
+      ctx.fillRect(width * 0.08, height * 0.58, width * 0.84, height * 0.08);
+      ctx.fillRect(width * 0.14, height * 0.35, width * 0.16, height * 0.18);
+      ctx.fillRect(width * 0.68, height * 0.34, width * 0.17, height * 0.2);
+      const beltOffset = state === "active" ? (time * 0.06) % 48 : 0;
+      ctx.strokeStyle = "rgba(230, 235, 232, 0.18)";
+      ctx.lineWidth = 2;
+      for (let x = -48 + beltOffset; x < width; x += 48) {
+        ctx.beginPath();
+        ctx.moveTo(x, height * 0.62);
+        ctx.lineTo(x + 18, height * 0.62);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(30, 36, 38, 0.46)";
+      for (let i = 0; i < 9; i += 1) {
+        ctx.fillRect(width * (0.38 + i * 0.035), height * (0.48 + (i % 3) * 0.03), width * 0.025, height * 0.08);
+      }
+    }
+
+    function drawControlTowerPlaceholder(width, height, state, time) {
+      // CH-S South / pride. REPLACE: cctv_S_control_tower_*.png
+      ctx.fillStyle = "rgba(43, 55, 60, 0.45)";
+      ctx.fillRect(width * 0.42, height * 0.2, width * 0.16, height * 0.48);
+      ctx.fillRect(width * 0.22, height * 0.62, width * 0.56, height * 0.12);
+      ctx.strokeStyle = "rgba(30, 38, 42, 0.48)";
+      ctx.lineWidth = 5;
+      for (let i = 0; i < 5; i += 1) {
+        const x = width * (0.28 + i * 0.11);
+        ctx.beginPath();
+        ctx.moveTo(x, height * 0.62);
+        ctx.lineTo(x, height * 0.75);
+        ctx.stroke();
+      }
+      if (state === "active") {
+        ctx.fillStyle = Math.sin(time * 0.01) > 0 ? "rgba(235, 238, 232, 0.5)" : "rgba(235, 238, 232, 0.14)";
+        ctx.fillRect(width * 0.47, height * 0.27, width * 0.06, height * 0.025);
+      }
+    }
+
+    function drawCultivationPlaceholder(width, height, state, time) {
+      // CH-W West / greed. REPLACE: cctv_W_cultivation_*.png
+      ctx.fillStyle = "rgba(42, 58, 55, 0.35)";
+      for (let i = 0; i < 5; i += 1) {
+        const x = width * (0.12 + i * 0.16);
+        ctx.beginPath();
+        ctx.ellipse(x, height * 0.48, width * 0.045, height * 0.18, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const flow = state === "active" ? Math.sin(time * 0.006) * 8 : 0;
+      ctx.strokeStyle = "rgba(235, 240, 232, 0.2)";
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(width * 0.08, height * 0.68 + flow);
+      ctx.bezierCurveTo(width * 0.25, height * 0.62, width * 0.5, height * 0.74, width * 0.88, height * 0.64);
+      ctx.stroke();
+    }
+
+    function drawStationCorePlaceholder(width, height, state, time) {
+      // CH-C Center / ignorance. REPLACE: cctv_C_station_core_*.png
+      const centerGlow = ctx.createRadialGradient(width * 0.5, height * 0.5, 0, width * 0.5, height * 0.5, width * 0.42);
+      centerGlow.addColorStop(0, "rgba(232, 235, 230, 0.18)");
+      centerGlow.addColorStop(0.42, "rgba(130, 145, 148, 0.1)");
+      centerGlow.addColorStop(1, "rgba(50, 62, 66, 0.36)");
+      ctx.fillStyle = centerGlow;
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = "rgba(42, 50, 54, 0.42)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(width * 0.5, height * 0.5, height * 0.21, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha *= 0.65 + Math.sin(time * 0.001) * 0.1;
+      drawMistHaze(width, height, height * 0.74, time, 1.4);
+    }
+
+    function drawSmoke(x, y, time) {
+      ctx.save();
+      ctx.fillStyle = "rgba(230, 234, 232, 0.12)";
+      for (let i = 0; i < 5; i += 1) {
+        const drift = Math.sin(time * 0.0008 + i) * 12;
+        ctx.beginPath();
+        ctx.ellipse(x + drift + i * 9, y - i * 18, 18 + i * 5, 8 + i * 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawDestroyedOverlay(width, height, time) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(16, 19, 20, 0.42)";
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 7; i += 1) {
+        const x = width * (0.12 + i * 0.12);
+        ctx.beginPath();
+        ctx.moveTo(x, height * 0.22);
+        ctx.lineTo(x + Math.sin(i * 3.1) * 60, height * 0.74);
+        ctx.stroke();
+      }
+      ctx.fillStyle = `rgba(235, 236, 230, ${0.04 + Math.max(0, Math.sin(time * 0.009)) * 0.08})`;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    function drawCctvFloodOverlay(width, height, flood, time) {
+      const waterTop = lerp(height * 0.91, height * 0.58, flood);
+      ctx.save();
+      const water = ctx.createLinearGradient(0, waterTop, 0, height);
+      water.addColorStop(0, "rgba(170, 191, 199, 0.38)");
+      water.addColorStop(1, "rgba(82, 106, 116, 0.62)");
+      ctx.fillStyle = water;
+      ctx.fillRect(0, waterTop, width, height - waterTop);
+      ctx.strokeStyle = "rgba(235, 240, 238, 0.18)";
+      ctx.lineWidth = 1;
+      for (let y = waterTop + 12; y < height; y += 24) {
+        ctx.beginPath();
+        ctx.moveTo(width * 0.08, y);
+        ctx.lineTo(width * 0.9, y + Math.sin(time * 0.001 + y) * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawCctvChildGhost(width, height, channel, time) {
+      const sanity = Number(saveState.sanity);
+      if (sanity >= 34) return;
+      const flashWindow = (Math.floor(time / 130) + channel.key.charCodeAt(0)) % (sanity < 10 ? 37 : 71);
+      if (flashWindow !== 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = sanity < 10 ? 0.28 : 0.17;
+      ctx.fillStyle = "rgba(246, 248, 244, 0.92)";
+      const x = width * (0.26 + ((channel.key.charCodeAt(0) % 5) * 0.11));
+      const y = height * 0.63;
+      ctx.beginPath();
+      ctx.arc(x, y - 28, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(x - 5, y - 20, 10, 28);
+      ctx.fillStyle = "rgba(20, 26, 28, 0.28)";
+      ctx.fillRect(x + 3, y - 14, 16, 3);
+      ctx.restore();
+    }
+
+    function drawCenterDawnLight(width, height) {
+      const dawn = ctx.createRadialGradient(width * 0.5, height * 0.42, 0, width * 0.5, height * 0.42, width * 0.52);
+      dawn.addColorStop(0, "rgba(248, 228, 176, 0.28)");
+      dawn.addColorStop(0.28, "rgba(236, 201, 131, 0.16)");
+      dawn.addColorStop(1, "rgba(216, 155, 74, 0)");
+      ctx.fillStyle = dawn;
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    function drawCctvFilter(width, height, channel, state, time) {
+      const flood = deathFactor();
+      const noiseAlpha = 0.08 + flood * 0.16 + (Number(saveState.sanity) < 34 ? 0.08 : 0);
+
+      ctx.save();
+      ctx.fillStyle = "rgba(16, 23, 25, 0.13)";
+      for (let y = 0; y < height; y += 4) {
+        ctx.fillRect(0, y, width, 1);
+      }
+
+      const specks = Math.floor(120 + flood * 260);
+      for (let i = 0; i < specks; i += 1) {
+        const x = Math.random() * width;
+        const y = Math.random() * height;
+        ctx.fillStyle = Math.random() > 0.5 ? `rgba(255,255,255,${noiseAlpha})` : `rgba(0,0,0,${noiseAlpha})`;
+        ctx.fillRect(x, y, 1.2, 1.2);
+      }
+
+      if (state !== "active" || Math.sin(time * 0.004 + channel.key.charCodeAt(0)) > 0.94) {
+        ctx.fillStyle = state === "destroyed" ? "rgba(245,245,235,0.18)" : "rgba(0,0,0,0.22)";
+        const y = height * (0.18 + ((Math.floor(time / 180) % 5) * 0.13));
+        ctx.fillRect(0, y, width, 18 + flood * 26);
+      }
+
+      ctx.fillStyle = "rgba(220, 225, 222, 0.11)";
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    function drawCctvHud(width, height, channel, state, time) {
+      const signal = cctvSignalStrength(channel, state, time);
+      ctx.save();
+      ctx.font = "13px Consolas, 'D2Coding', monospace";
+      ctx.fillStyle = "rgba(235, 240, 236, 0.82)";
+      ctx.textAlign = "left";
+      ctx.fillText(`${channel.code} ${channel.district.toUpperCase()} :: ${channel.title}`, 26, 30);
+      ctx.fillStyle = "rgba(235, 240, 236, 0.52)";
+      ctx.fillText(`[${channel.emotion}] ${channel.description}`, 26, 51);
+      ctx.fillText(formatCctvTimestamp(time), 26, height - 28);
+
+      ctx.textAlign = "right";
+      const status = cctvStatusFor(state);
+      ctx.fillStyle = state === "active" ? "rgba(235, 240, 236, 0.82)" : "rgba(235, 240, 236, 0.46)";
+      ctx.fillText(`${status} / SIGNAL ${signal}%`, width - 26, 30);
+      drawSignalBars(width - 128, 42, signal);
+      ctx.restore();
+    }
+
+    function drawSignalBars(x, y, signal) {
+      ctx.save();
+      for (let i = 0; i < 5; i += 1) {
+        const on = signal >= (i + 1) * 18;
+        ctx.fillStyle = on ? "rgba(235, 240, 236, 0.72)" : "rgba(235, 240, 236, 0.18)";
+        ctx.fillRect(x + i * 14, y + (4 - i) * 3, 9, 6 + i * 3);
+      }
+      ctx.restore();
+    }
+
+    function drawCctvSwitchGlitch(width, height, time) {
+      const age = time - channelSwitchStartedAt;
+      if (age < 0 || age > 420) return;
+      const t = 1 - age / 420;
+      ctx.save();
+      ctx.globalAlpha = t;
+      ctx.fillStyle = "rgba(235, 240, 236, 0.22)";
+      for (let i = 0; i < 9; i += 1) {
+        const y = (i * 57 + age * 0.7) % height;
+        const x = channelSwitchDirection * (10 + i * 4);
+        ctx.fillRect(x, y, width, 8 + (i % 3) * 8);
+      }
+      ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
+      ctx.fillRect(0, height * 0.46, width, height * 0.08);
+      ctx.restore();
+    }
+
+    function drawDroneConnectTransition(width, height, time) {
+      if (droneConnectStartedAt === null) return;
+      const age = time - droneConnectStartedAt;
+      const t = clamp(age / CONNECT_SEQUENCE.shelterBootEnd, 0, 1);
+      const stage =
+        age < CONNECT_SEQUENCE.handshakeEnd ? "SIGNAL HANDSHAKE" :
+        age < CONNECT_SEQUENCE.droneLinkEnd ? "DRONE LINK" :
+        "SHELTER BOOT";
+      ctx.save();
+      ctx.globalAlpha = clamp(t * 1.4, 0, 1);
+      ctx.fillStyle = "rgba(4, 8, 9, 0.72)";
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = "rgba(232, 233, 230, 0.82)";
+      ctx.font = "15px Consolas, 'D2Coding', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`${stage} // ${Math.round(t * 100)}%`, width * 0.5, height * 0.5 - 10);
+      ctx.fillStyle = "rgba(232, 233, 230, 0.28)";
+      ctx.fillRect(width * 0.35, height * 0.5 + 16, width * 0.3, 3);
+      ctx.fillStyle = "rgba(232, 233, 230, 0.72)";
+      ctx.fillRect(width * 0.35, height * 0.5 + 16, width * 0.3 * t, 3);
+      ctx.restore();
+    }
+
+    function drawShelterViewLayer(width, height, time) {
+      // SHELTER VIEW PLACEHOLDER.
+      // REPLACE: draw ART_HOOKS.shelter.background / shelter_bg.png here.
+      ctx.save();
+      const bg = ctx.createLinearGradient(0, 0, 0, height);
+      bg.addColorStop(0, "#cfd6d3");
+      bg.addColorStop(1, "#8da0a6");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.fillStyle = "rgba(24, 32, 35, 0.28)";
+      ctx.fillRect(width * 0.18, height * 0.28, width * 0.64, height * 0.38);
+      ctx.strokeStyle = "rgba(235, 240, 236, 0.32)";
+      ctx.setLineDash([12, 8]);
+      ctx.strokeRect(width * 0.2, height * 0.31, width * 0.6, height * 0.32);
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = "rgba(235, 240, 236, 0.74)";
+      ctx.font = "18px Consolas, 'D2Coding', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("SHELTER VIEW PLACEHOLDER", width * 0.5, height * 0.45);
+      ctx.font = "12px Consolas, 'D2Coding', monospace";
+      ctx.fillStyle = "rgba(235, 240, 236, 0.5)";
+      ctx.fillText("REPLACE: shelter_bg.png", width * 0.5, height * 0.5);
+
+      // REPLACE: draw ART_HOOKS.shelter.child sprite here.
+      ctx.fillStyle = "rgba(240, 244, 240, 0.82)";
+      ctx.beginPath();
+      ctx.arc(width * 0.3, height * 0.62, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(20, 28, 31, 0.48)";
+      ctx.fillRect(width * 0.3 - 7, height * 0.64, 14, 34);
+      ctx.fillStyle = "rgba(235, 240, 236, 0.42)";
+      ctx.font = "11px Consolas, 'D2Coding', monospace";
+      ctx.fillText("REPLACE: child sprite", width * 0.3, height * 0.74);
+
+      const age = shelterArrivedAt === null ? 0 : time - shelterArrivedAt;
+      ctx.fillStyle = `rgba(248, 228, 176, ${0.08 + Math.sin(age * 0.001) * 0.03})`;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    function drawStagePlaceholderLayer(width, height, time) {
+      ctx.save();
+      const bg = ctx.createLinearGradient(0, 0, 0, height);
+      bg.addColorStop(0, "#d8ddda");
+      bg.addColorStop(1, "#7f969f");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, width, height);
+
+      const panelW = Math.min(width * 0.72, 680);
+      const panelH = Math.min(height * 0.34, 260);
+      const x = width * 0.5 - panelW * 0.5;
+      const y = height * 0.5 - panelH * 0.5;
+      ctx.fillStyle = "rgba(7, 12, 14, 0.36)";
+      ctx.fillRect(x, y, panelW, panelH);
+      ctx.strokeStyle = "rgba(232, 233, 230, 0.34)";
+      ctx.setLineDash([14, 8]);
+      ctx.strokeRect(x + 12, y + 12, panelW - 24, panelH - 24);
+      ctx.setLineDash([]);
+
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(232, 233, 230, 0.88)";
+      ctx.font = "22px Consolas, 'D2Coding', monospace";
+      ctx.fillText(`STAGE ${pendingEnterState?.stage || 1} — (not built yet)`, width * 0.5, y + panelH * 0.38);
+      ctx.fillStyle = "rgba(232, 233, 230, 0.58)";
+      ctx.font = "13px Consolas, 'D2Coding', monospace";
+      ctx.fillText(`Missing entry: ${GAME_ENTRY_PATH}`, width * 0.5, y + panelH * 0.55);
+      ctx.fillText("State has been written to localStorage yunhoe_save.", width * 0.5, y + panelH * 0.68);
+
+      const pulse = 0.06 + Math.sin(time * 0.002) * 0.025;
+      ctx.fillStyle = `rgba(248, 228, 176, ${pulse})`;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    function drawSkyLayer(width, height, alpha) {
+      // LAYER 01: sky. Backmost layer.
+      // REPLACE: draw ART_HOOKS.sky image here when final sky art exists.
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      /*
+        Ending warmth only shifts the sky. Water, ruins, and most text remain cold,
+        making "明" the sole warm icon when letting-go has been reached.
+      */
+      const sky = ctx.createLinearGradient(0, 0, 0, height);
+      if (saveState.reachedLettingGoEnding) {
+        sky.addColorStop(0, "#e4dfd3");
+        sky.addColorStop(0.56, "#eee7d8");
+        sky.addColorStop(1, "#eceeea");
+      } else {
+        sky.addColorStop(0, "#dfe3e1");
+        sky.addColorStop(1, "#eceeea");
+      }
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, width, height);
+
+      const dawn = ctx.createRadialGradient(width * 0.58, height * 0.18, 0, width * 0.58, height * 0.18, width * 0.55);
+      dawn.addColorStop(0, saveState.reachedLettingGoEnding ? "rgba(248, 228, 176, 0.18)" : "rgba(255, 255, 255, 0.14)");
+      dawn.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = dawn;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    function drawDistantSkylineLayer(width, height, waterY, alpha, time) {
+      // LAYER 02: distant skyline. Low contrast, behind bridge and near skyline.
+      // REPLACE: draw ART_HOOKS.distantSkyline image here.
+      drawSkylinePlaceholder(width, height, waterY, alpha, time, SKYLINE_BUILDINGS.distant, {
+        top: "rgba(142, 156, 158, 0.28)",
+        bottom: "rgba(102, 120, 127, 0.22)",
+        haze: 0.5
+      });
+    }
+
+    function drawNearSkylineLayer(width, height, waterY, alpha, time) {
+      // LAYER 03: near skyline. Main flooded building silhouettes.
+      // REPLACE: draw ART_HOOKS.nearSkyline image here.
+      drawSkylinePlaceholder(width, height, waterY, alpha, time, SKYLINE_BUILDINGS.near, {
+        top: "rgba(128, 142, 145, 0.48)",
+        bottom: "rgba(89, 109, 118, 0.36)",
+        haze: 1
+      });
+    }
+
+    function drawSkylinePlaceholder(width, height, waterY, alpha, time, buildings, style) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      for (const b of buildings) {
+        const bw = width * b.w;
+        const bh = height * b.h;
+        const x = width * b.x;
+        const buildingBaseY = layout.buildingBaseY + Math.sin(time * 0.0003 + b.x * 17) * 0.8;
+        const y = buildingBaseY - bh;
+        const shade = ctx.createLinearGradient(0, y, 0, buildingBaseY);
+        shade.addColorStop(0, style.top);
+        shade.addColorStop(1, style.bottom);
+        ctx.fillStyle = shade;
+        ctx.fillRect(x, y, bw, bh);
+
+        ctx.fillStyle = "rgba(238, 240, 236, 0.045)";
+        ctx.fillRect(x + bw * 0.16, y + 12, bw * 0.68, Math.max(1, bh * 0.012));
+        ctx.fillRect(x + bw * 0.12, y + bh * 0.42, bw * 0.76, Math.max(1, bh * 0.01));
+      }
+
+      drawMistHaze(width, height, waterY, time, style.haze);
+      ctx.restore();
+    }
+
+    function drawMistHaze(width, height, waterY, time, alphaScale) {
+      ctx.save();
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 7; i += 1) {
+        const y = lerp(height * 0.34, Math.min(waterY - 28, height * 0.67), i / 6);
+        const drift = Math.sin(time * 0.00025 + i * 1.7) * width * 0.015;
+        const start = width * (0.04 + (i % 3) * 0.08) + drift;
+        const end = width * (0.58 + (i % 4) * 0.11) + drift;
+        ctx.globalAlpha = (0.07 + (i % 2) * 0.035) * alphaScale;
+        ctx.strokeStyle = "rgba(241, 244, 239, 0.62)";
+        ctx.beginPath();
+        ctx.moveTo(start, y);
+        ctx.lineTo(Math.min(width * 0.96, end), y + Math.sin(time * 0.0006 + i) * 1.2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawBrokenBridgeLayer(width, height, waterY, alpha) {
+      // LAYER 04: broken bridge. Separate so final bridge art can slide in.
+      // REPLACE: draw ART_HOOKS.brokenBridge image here.
+      const y = Math.min(layout.bridgeY, waterY - 20);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = "rgba(89, 105, 111, 0.48)";
+      ctx.lineWidth = Math.max(1, width * 0.002);
+      ctx.beginPath();
+      ctx.moveTo(width * 0.05, y + 10);
+      ctx.lineTo(width * 0.27, y - 3);
+      ctx.lineTo(width * 0.38, y + 2);
+      ctx.moveTo(width * 0.48, y + 7);
+      ctx.lineTo(width * 0.67, y - 8);
+      ctx.moveTo(width * 0.76, y - 4);
+      ctx.lineTo(width * 0.95, y + 6);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(89, 105, 111, 0.32)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 9; i += 1) {
+        const x = width * (0.09 + i * 0.095);
+        if (i === 4 || i === 7) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, y + 8);
+        ctx.lineTo(x - 10, waterY + 26);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawWaterLayer(width, height, waterY, alpha, time) {
+      // LAYER 05: water. This is the death-driven samsara layer.
+      // REPLACE: draw ART_HOOKS.water image/animation here, clipped from waterY down.
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      const water = ctx.createLinearGradient(0, waterY, 0, height);
+      water.addColorStop(0, "#a9c0cb");
+      water.addColorStop(1, "#7e9aa8");
+      ctx.fillStyle = water;
+      ctx.fillRect(0, waterY, width, height - waterY);
+
+      ctx.strokeStyle = "rgba(241, 244, 239, 0.33)";
+      ctx.lineWidth = 1;
+      const lineCount = Math.floor(clamp(height / 38, 10, 24));
+      for (let i = 0; i < lineCount; i += 1) {
+        const y = waterY + 14 + i * ((height - waterY) / lineCount);
+        const x0 = width * (0.08 + 0.02 * Math.sin(time * 0.0007 + i));
+        const x1 = width * (0.28 + 0.58 * ((i % 5) / 5));
+        ctx.globalAlpha = alpha * (0.11 + 0.08 * Math.sin(i * 1.7));
+        ctx.beginPath();
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x0 + x1, y + Math.sin(time * 0.001 + i) * 1.5);
+        ctx.stroke();
+      }
+
+      ctx.globalAlpha = alpha * 0.35;
+      ctx.strokeStyle = "rgba(236, 238, 234, 0.62)";
+      ctx.beginPath();
+      ctx.moveTo(0, waterY + 0.5);
+      for (let x = 0; x <= width; x += 24) {
+        const y = waterY + Math.sin(x * 0.012 + time * 0.001) * 1.2;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawChildAndDroneLayer(waterY, deathT, alpha, time) {
+      // LAYER 06: child + drone. Same world position; deathT decides visibility.
+      // REPLACE: draw ART_HOOKS.childAndDrone sprite/sequence here.
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      if (deathT > 0.92) {
+        drawDrone(layout.figureX + 18, waterY - 28, time);
+        ctx.restore();
+        return;
+      }
+
+      const x = layout.figureX;
+      const footY = layout.figureFootY;
+      const scale = clamp(viewport.height / 720, 0.78, 1.25);
+      const headR = 7 * scale;
+      const bodyH = 34 * scale;
+      const shoulderY = footY - bodyH;
+      const headY = shoulderY - headR * 1.35;
+
+      // Because the layer order draws water before the child, clipping preserves
+      // the "submerged by water" read without mixing placeholder layers.
+      ctx.beginPath();
+      ctx.rect(0, 0, viewport.width, waterY);
+      ctx.clip();
+
+      ctx.fillStyle = "rgba(236, 239, 235, 0.88)";
+      ctx.beginPath();
+      ctx.arc(x + 3 * scale, headY, headR, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(30, 38, 42, 0.62)";
+      ctx.beginPath();
+      ctx.moveTo(x - 6 * scale, shoulderY);
+      ctx.lineTo(x + 12 * scale, shoulderY - 2 * scale);
+      ctx.lineTo(x + 17 * scale, footY - 4 * scale);
+      ctx.lineTo(x - 3 * scale, footY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(30, 38, 42, 0.58)";
+      ctx.lineWidth = 2 * scale;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x + 12 * scale, shoulderY + 4 * scale);
+      ctx.lineTo(x + 24 * scale, shoulderY + 13 * scale);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(236, 239, 235, 0.74)";
+      ctx.lineWidth = 1 * scale;
+      ctx.beginPath();
+      ctx.moveTo(x + 8 * scale, headY - 5 * scale);
+      ctx.lineTo(x + 16 * scale, headY - 1 * scale);
+      ctx.stroke();
+
+      drawDrone(x - 20 * scale, headY - 16 * scale + Math.sin(time * 0.0017) * 2, time);
+      ctx.restore();
+    }
+
+    function drawDrone(x, y, time) {
+      const bob = Math.sin(time * 0.002) * 2;
+      ctx.save();
+      ctx.translate(x, y + bob);
+      ctx.fillStyle = "rgba(214, 222, 222, 0.84)";
+      ctx.strokeStyle = "rgba(73, 91, 98, 0.55)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "rgba(83, 104, 113, 0.58)";
+      ctx.beginPath();
+      ctx.arc(3, -1, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(232, 233, 230, 0.35)";
+      ctx.beginPath();
+      ctx.moveTo(-14, -2);
+      ctx.lineTo(-8, 0);
+      ctx.moveTo(8, 0);
+      ctx.lineTo(14, -2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawLogoLayer(y, logoOpacity, time) {
+      // LAYER 07: logo. Placeholder text only; final will be webfont or image.
+      // REPLACE: draw ART_HOOKS.logo here.
+      const profile = sanityProfile();
+      const baseAlpha = logoOpacity * profile.logoOpacity;
+      if (baseAlpha <= 0.001) return;
+
+      ctx.save();
+      ctx.globalAlpha = baseAlpha;
+
+      if (profile.stage === "nameSlip") {
+        const beat = Math.sin(time * 0.0032);
+        drawLogoPass(y + beat * 1.5, time, profile, 1, 0, 0);
+        drawLogoPass(y + 3 + beat * 4, time + 130, profile, 0.38 * profile.slip, 8 + beat * 7, -2);
+      } else {
+        drawLogoPass(y, time, profile, 1, 0, 0);
+      }
+
+      ctx.restore();
+    }
+
+    function drawLogoPass(y, time, profile, passAlpha, offsetX, offsetY) {
+      ctx.save();
+      ctx.globalAlpha *= passAlpha;
+      ctx.translate(offsetX, offsetY);
+
+      /*
+        Real production swap point:
+        replace this system CJK serif stack with a licensed 예서/clerical-script
+        webfont, then keep the same erosion/jitter treatment below.
+      */
+      const fontSize = layout.logoSize;
+      ctx.font = `600 ${fontSize}px "Yu Mincho", "MS Mincho", "Batang", "Noto Serif CJK KR", "Songti SC", serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+
+      const glyphs = TITLE_GLYPHS;
+      const gap = fontSize * 0.08;
+      const widths = glyphs.map((glyph) => glyph === " " ? fontSize * 0.34 : ctx.measureText(glyph).width);
+      const totalWidth = widths.reduce((sum, width) => sum + width, 0) + gap * (glyphs.length - 1);
+      let x = layout.cx - totalWidth * 0.5;
+
+      const alphaBefore = ctx.globalAlpha;
+
+      for (let i = 0; i < glyphs.length; i += 1) {
+        const glyph = glyphs[i];
+        if (glyph !== " ") {
+          const jitterX = lowJitter(time, i, 0) * profile.jitter;
+          const jitterY = lowJitter(time, i, 4) * profile.jitter;
+          const gx = x + jitterX;
+          const gy = y + jitterY;
+
+          ctx.globalAlpha = alphaBefore;
+          ctx.fillStyle = logoFillForGlyph(glyph, gy - fontSize, gy + 8);
+          ctx.fillText(glyph, gx, gy);
+
+          if (profile.submerge > 0) {
+            drawLogoSubmerge(gx, gy, widths[i], fontSize, profile, time, i);
+          }
+        }
+        x += widths[i] + gap;
+      }
+
+      drawKoreanLabel(y + fontSize * 0.42, time, profile);
+      ctx.restore();
+    }
+
+    function logoFillForGlyph(glyph, top, bottom) {
+      // SYSTEM: letting-go ending keeps only the final "明" warm/gold.
+      if (saveState.reachedLettingGoEnding && glyph === LETTING_GO_GLYPH) {
+        const gold = ctx.createLinearGradient(0, top, 0, bottom);
+        gold.addColorStop(0, "#d89b4a");
+        gold.addColorStop(0.5, "#ecc983");
+        gold.addColorStop(1, "#f8e4b0");
+        return gold;
+      }
+      return "#e8e9e6";
+    }
+
+    function drawLogoSubmerge(x, baseline, width, fontSize, profile, time, index) {
+      /*
+        Placeholder for sanity-driven stroke loss. Final logo art can replace
+        this with masks, alternate logo frames, or pre-rendered eroded images.
+      */
+      ctx.save();
+      const top = baseline - fontSize * (0.35 + profile.submerge * 0.34);
+      const bandCount = 3;
+      for (let i = 0; i < bandCount; i += 1) {
+        const y = top + i * fontSize * 0.16 + Math.sin(time * 0.001 + index + i) * 1.5;
+        ctx.globalAlpha *= 0.24 + profile.submerge * 0.34;
+        ctx.fillStyle = "rgba(151, 177, 188, 0.78)";
+        ctx.fillRect(x - 3, y, width + 7, fontSize * (0.055 + profile.submerge * 0.025));
+      }
+      ctx.restore();
+    }
+
+    function drawKoreanLabel(y, time, profile) {
+      const text = KOREAN_TITLE;
+      const size = layout.koreanSize;
+      ctx.save();
+      ctx.font = `300 ${size}px Consolas, "D2Coding", "Cascadia Mono", monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "rgba(232, 233, 230, 0.82)";
+      const jitterX = lowJitter(time, 9, 2) * profile.jitter * 0.35;
+      const jitterY = lowJitter(time, 7, 3) * profile.jitter * 0.22;
+      ctx.fillText(text, layout.cx + jitterX, y + jitterY);
+      ctx.restore();
+    }
+
+    function lowJitter(time, seed, phase) {
+      return (
+        Math.sin(time * 0.00115 + seed * 2.17 + phase) * 0.7 +
+        Math.sin(time * 0.00041 + seed * 4.71 + phase * 1.8) * 0.3
+      );
+    }
+
+    function render(now) {
+      resizeCanvas();
+      const elapsed = now - startedAt;
+      const progress = bootProgress(elapsed);
+      const width = viewport.width;
+      const height = viewport.height;
+
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, height);
+
+      if (screenMode === "connecting" && droneConnectStartedAt !== null && now - droneConnectStartedAt >= CONNECT_SEQUENCE.shelterBootEnd) {
+        completeEnterGame();
+      }
+
+      if (screenMode === "shelter") {
+        drawShelterViewLayer(width, height, now);
+      } else if (screenMode === "stage-placeholder") {
+        drawStagePlaceholderLayer(width, height, now);
+      } else {
+        // Title CCTV draw order, back to front:
+        // selected channel still -> facility state animation -> death flood overlay ->
+        // sanity ghost -> CCTV filter/HUD/glitch -> logo. Menu/UI is DOM overlay.
+        drawCctvModeLayer(width, height, progress.background, now);
+
+        const logoY = lerp(layout.logoStartY, layout.logoEndY, progress.logoRise);
+        drawLogoLayer(logoY, progress.logoFade, now);
+      }
+
+      updateDom(progress.menuIn);
+      animationFrameId = requestAnimationFrame(render);
+    }
+
+    function updateDom(menuOpacity) {
+      // LAYER 08: menu/UI. DOM overlay above every canvas layer.
+      // Kept separate from art replacement path; final UI can restyle HTML/CSS.
+      latestMenuOpacity = menuOpacity;
+      const letCssBootRevealHandleUi = screenMode === "title" && menuOpacity <= 0.001;
+      menu.style.opacity = letCssBootRevealHandleUi ? "" : String(menuOpacity);
+      menu.style.pointerEvents = letCssBootRevealHandleUi ? "" : (menuOpacity > 0.94 ? "auto" : "none");
+      audioToggle.style.opacity = letCssBootRevealHandleUi ? "" : String(menuOpacity);
+      audioToggle.style.pointerEvents = letCssBootRevealHandleUi ? "" : (menuOpacity > 0.94 ? "auto" : "none");
+
+      const primaryButton = menu.querySelector("button[data-choice]");
+      if (primaryButton) {
+        if (screenMode === "shelter" || screenMode === "stage-placeholder") {
+          primaryButton.dataset.choice = "return-title";
+          primaryButton.textContent = "타이틀로";
+          primaryButton.disabled = false;
+        } else {
+          primaryButton.dataset.choice = "new-game";
+          primaryButton.textContent = "새로 시작";
+          primaryButton.disabled = screenMode === "connecting";
+        }
+      }
+
+      // SYSTEM: continue only exists when localStorage has a valid save.
+      continueButton.disabled = loadSave() === null;
+
+      // SYSTEM: reachedLettingGoEnding gates the prompt overlay.
+      const endingOpacity = saveState.reachedLettingGoEnding ? menuOpacity : 0;
+      endingPrompt.style.opacity = String(endingOpacity);
+      endingPrompt.style.pointerEvents = endingOpacity > 0.94 ? "auto" : "none";
+    }
+
+    /*
+      Title audio hook.
+      Still Water Dawn.mp3 is the primary title BGM. It defaults to ON, but
+      browser autoplay rules still require a real user interaction before playback can begin.
+      The WebAudio ambience remains as a quiet procedural backing hook.
+    */
+    class AmbientAudio {
+      constructor() {
+        this.context = null;
+        this.master = null;
+        this.bgm = bgmAudio;
+        this.isMuted = false;
+        this.beepTimer = 0;
+        if (this.bgm) {
+          this.bgm.volume = 0.58;
+          this.bgm.muted = false;
+        }
+        document.documentElement.dataset.audioContextStarted = "false";
+        document.documentElement.dataset.audioMuted = "false";
+      }
+
+      ensureStarted() {
+        this.startBgm();
+
+        if (this.context) {
+          this.context.resume();
+          return;
+        }
+
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+
+        this.context = new AudioContextClass();
+        this.master = this.context.createGain();
+        this.master.gain.value = 0;
+        this.master.connect(this.context.destination);
+        document.documentElement.dataset.audioContextStarted = "true";
+
+        this.createWaterNoise();
+        this.createDroneHum();
+        this.scheduleNextBeep();
+      }
+
+      startBgm() {
+        if (!this.bgm) return;
+        this.bgm.muted = this.isMuted;
+        this.bgm.volume = this.isMuted ? 0 : 0.58;
+
+        const playPromise = this.bgm.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise
+            .then(() => {
+              window.__lastBgmPlayError = "";
+            })
+            .catch((error) => {
+              window.__lastBgmPlayError = error ? `${error.name}: ${error.message}` : "audio play rejected";
+              // Autoplay may be denied before direct interaction; toggle retries.
+            });
+        }
+      }
+
+      createWaterNoise() {
+        const sampleRate = this.context.sampleRate;
+        const buffer = this.context.createBuffer(1, sampleRate * 2, sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i += 1) {
+          data[i] = (Math.random() * 2 - 1) * 0.42;
+        }
+
+        const source = this.context.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+
+        const filter = this.context.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.value = 740;
+        filter.Q.value = 0.45;
+
+        const gain = this.context.createGain();
+        gain.gain.value = 0.028;
+
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.master);
+        source.start();
+      }
+
+      createDroneHum() {
+        const hum = this.context.createOscillator();
+        hum.type = "sine";
+        hum.frequency.value = 58;
+
+        const humGain = this.context.createGain();
+        humGain.gain.value = 0.018;
+
+        const tremolo = this.context.createOscillator();
+        tremolo.type = "sine";
+        tremolo.frequency.value = 0.08;
+
+        const tremoloGain = this.context.createGain();
+        tremoloGain.gain.value = 0.006;
+        tremolo.connect(tremoloGain);
+        tremoloGain.connect(humGain.gain);
+
+        hum.connect(humGain);
+        humGain.connect(this.master);
+        hum.start();
+        tremolo.start();
+      }
+
+      scheduleNextBeep() {
+        window.clearTimeout(this.beepTimer);
+        this.beepTimer = window.setTimeout(() => {
+          this.playBeep();
+          this.scheduleNextBeep();
+        }, 9000 + Math.random() * 10000);
+      }
+
+      playBeep() {
+        if (!this.context || this.isMuted) return;
+        const now = this.context.currentTime;
+        const osc = this.context.createOscillator();
+        const gain = this.context.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(760 + Math.random() * 80, now);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.025, now + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19);
+        osc.connect(gain);
+        gain.connect(this.master);
+        osc.start(now);
+        osc.stop(now + 0.22);
+      }
+
+      setMuted(nextMuted) {
+        this.isMuted = nextMuted;
+        this.ensureStarted();
+        if (this.bgm) {
+          this.bgm.muted = this.isMuted;
+          this.bgm.volume = this.isMuted ? 0 : 0.58;
+        }
+        audioToggle.textContent = this.isMuted ? "소리 꺼짐" : "소리 켜짐";
+        document.documentElement.dataset.audioMuted = String(this.isMuted);
+
+        if (!this.master || !this.context) return;
+        const now = this.context.currentTime;
+        this.master.gain.cancelScheduledValues(now);
+        this.master.gain.setTargetAtTime(this.isMuted ? 0 : 0.8, now, 0.08);
+      }
+
+      toggle() {
+        this.setMuted(!this.isMuted);
+      }
+
+      stop() {
+        window.clearTimeout(this.beepTimer);
+        if (this.bgm) {
+          this.bgm.pause();
+          this.bgm.currentTime = 0;
+        }
+        if (this.master && this.context) {
+          this.master.gain.cancelScheduledValues(this.context.currentTime);
+          this.master.gain.value = 0;
+        }
+        if (this.context) {
+          this.context.suspend();
+        }
+      }
+    }
+
+    const ambientAudio = new AmbientAudio();
+
+    function buildManagerControls() {
+      managerControls.innerHTML = "";
+      for (const channel of CCTV_CHANNELS) {
+        const label = document.createElement("label");
+        label.className = "manager-row";
+
+        const span = document.createElement("span");
+        span.textContent = channel.code;
+
+        const select = document.createElement("select");
+        select.id = `manager${channel.key}`;
+        select.dataset.channel = channel.key;
+        select.setAttribute("aria-label", `${channel.code} manager state`);
+        for (const state of MANAGER_STATES) {
+          const option = document.createElement("option");
+          option.value = state;
+          option.textContent = state;
+          select.appendChild(option);
+        }
+
+        label.appendChild(span);
+        label.appendChild(select);
+        managerControls.appendChild(label);
+      }
+    }
+
+    function syncDevPanel() {
+      ensureManagerState();
+      const deaths = Math.max(0, Math.floor(Number(saveState.deaths) || 0));
+      const sanity = clamp(Math.floor(Number(saveState.sanity) || 0), 0, 100);
+      saveState.deaths = deaths;
+      saveState.sanity = sanity;
+
+      deathsRange.value = String(clamp(deaths, 0, Number(deathsRange.max)));
+      deathsNumber.value = String(deaths);
+      sanityRange.value = String(sanity);
+      sanityNumber.value = String(sanity);
+      endingCheckbox.checked = Boolean(saveState.reachedLettingGoEnding);
+      continueButton.disabled = loadSave() === null;
+
+      for (const channel of CCTV_CHANNELS) {
+        const select = document.getElementById(`manager${channel.key}`);
+        if (select) select.value = saveState.managers[channel.key];
+      }
+      syncDebugDataset();
+    }
+
+    function revealTitleUiIfBootComplete() {
+      if (screenMode === "title" && performance.now() - startedAt >= BOOT.menuFadeEnd) {
+        updateDom(1);
+      }
+    }
+
+    function setDeaths(value) {
+      saveState.deaths = Math.max(0, Math.floor(Number(value) || 0));
+      syncDevPanel();
+    }
+
+    function setSanity(value) {
+      saveState.sanity = clamp(Math.floor(Number(value) || 0), 0, 100);
+      syncDevPanel();
+    }
+
+    function applyStateFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("deaths")) saveState.deaths = Math.max(0, Math.floor(Number(params.get("deaths")) || 0));
+      if (params.has("sanity")) saveState.sanity = clamp(Math.floor(Number(params.get("sanity")) || 0), 0, 100);
+      if (params.has("ending")) saveState.reachedLettingGoEnding = params.get("ending") === "1" || params.get("ending") === "true";
+      ensureManagerState();
+      for (const channel of CCTV_CHANNELS) {
+        const state = params.get(channel.key);
+        if (MANAGER_STATES.includes(state)) saveState.managers[channel.key] = state;
+      }
+    }
+
+    function applySaveToDisplay(state) {
+      const next = normalizeSave(state, Boolean(state?.exists));
+      saveState.deaths = next.deaths;
+      saveState.sanity = next.sanity;
+      saveState.reachedLettingGoEnding = next.reachedLettingGoEnding;
+      saveState.managers = { ...next.managers };
+      saveState.stage = next.stage;
+      saveState.exists = next.exists;
+      saveState.entryIntent = next.entryIntent;
+      syncDevPanel();
+    }
+
+    function setOverwritePromptOpen(open) {
+      overwritePromptOpen = Boolean(open);
+      overwritePrompt.classList.toggle("is-open", overwritePromptOpen);
+      overwritePrompt.setAttribute("aria-hidden", overwritePromptOpen ? "false" : "true");
+      document.documentElement.dataset.overwritePrompt = overwritePromptOpen ? "open" : "closed";
+      if (overwritePromptOpen) {
+        window.setTimeout(() => {
+          overwritePrompt.querySelector("[data-overwrite-choice='confirm']")?.focus();
+        }, 0);
+      }
+    }
+
+    function startFreshGameFromTitle() {
+      setOverwritePromptOpen(false);
+      const fresh = saveGame({ ...DEFAULT_SAVE, entryIntent: "new" });
+      applySaveToDisplay(fresh);
+      enterGame(fresh);
+    }
+
+    function shouldLaunchGameplayImmediately() {
+      const params = new URLSearchParams(window.location.search);
+      return (
+        params.get("directLevel") === "1" ||
+        params.get("mode") === "level-test" ||
+        params.has("shelterCgPreview") ||
+        params.get("partsLoop") === "1"
+      );
+    }
+
+    async function launchGameplay(intent, options = {}) {
+      if (gameBootPromise) return gameBootPromise;
+
+      screenMode = "game";
+      document.documentElement.dataset.screenMode = screenMode;
+      document.documentElement.dataset.droneConnect = options.immediate ? "skipped" : "complete";
+      document.documentElement.dataset.gameLaunchMode = intent;
+
+      setOverwritePromptOpen(false);
+      window.clearTimeout(menuRevealFallbackTimer);
+      window.clearTimeout(connectCompletionTimer);
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+
+      ambientAudio.stop();
+      canvas.hidden = true;
+      menu.hidden = true;
+      audioToggle.hidden = true;
+      endingPrompt.hidden = true;
+      devPanel.hidden = true;
+      gameRoot.hidden = false;
+      gameRoot.setAttribute("aria-hidden", "false");
+      document.body.classList.add("is-game-running");
+      document.title = "윤회무명2";
+
+      gameBootPromise = import(GAME_MODULE_PATH)
+        .then(() => {
+          document.documentElement.dataset.gameModuleLoaded = "true";
+        })
+        .catch((error) => {
+          document.documentElement.dataset.gameModuleError = error ? `${error.name}: ${error.message}` : "unknown";
+          console.error("Gameplay module failed to load", error);
+        });
+
+      return gameBootPromise;
+    }
+
+    function createShelterEntryUrl(intent) {
+      const params = new URLSearchParams();
+      params.set("entry", intent);
+      return `${SHELTER_ENTRY_PATH}?${params.toString()}`;
+    }
+
+    function enterGame(state) {
+      const next = normalizeSave(state, true);
+      pendingEnterState = next;
+      entryCompletionStarted = false;
+      screenMode = "connecting";
+      droneConnectStartedAt = performance.now();
+      shelterArrivedAt = null;
+      document.documentElement.dataset.screenMode = screenMode;
+      document.documentElement.dataset.droneConnect = "started";
+      console.log("enterGame state:", next);
+      syncDebugDataset();
+      updateDom(latestMenuOpacity);
+      window.clearTimeout(connectCompletionTimer);
+      connectCompletionTimer = window.setTimeout(() => {
+        completeEnterGame();
+      }, CONNECT_SEQUENCE.shelterBootEnd + 120);
+    }
+
+    async function completeEnterGame() {
+      if (entryCompletionStarted || !pendingEnterState) return;
+      window.clearTimeout(connectCompletionTimer);
+      connectCompletionTimer = null;
+      entryCompletionStarted = true;
+      const state = pendingEnterState;
+      const intent = state.entryIntent === "continue" ? "continue" : "new";
+      window.location.href = createShelterEntryUrl(intent);
+    }
+
+    menu.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-choice]");
+      if (!button || button.disabled) return;
+      if (button.dataset.choice === "new-game") {
+        const existing = loadSave();
+        if (existing) {
+          setOverwritePromptOpen(true);
+          ambientAudio.ensureStarted();
+          return;
+        }
+        startFreshGameFromTitle();
+      } else if (button.dataset.choice === "continue") {
+        const loaded = loadSave();
+        if (!loaded) return;
+        const continuing = saveGame({ ...loaded, entryIntent: "continue" });
+        applySaveToDisplay(continuing);
+        enterGame(continuing);
+      } else if (button.dataset.choice === "return-title") {
+        screenMode = "title";
+        droneConnectStartedAt = null;
+        shelterArrivedAt = null;
+        pendingEnterState = null;
+        entryCompletionStarted = false;
+        window.clearTimeout(connectCompletionTimer);
+        connectCompletionTimer = null;
+        document.documentElement.dataset.screenMode = screenMode;
+        document.documentElement.dataset.droneConnect = "idle";
+        syncDebugDataset();
+        updateDom(latestMenuOpacity);
+      }
+      console.log("title menu:", button.dataset.choice);
+      ambientAudio.ensureStarted();
+    });
+    menu.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const button = event.target.closest("button[data-choice]");
+      if (!button || button.disabled) return;
+      event.preventDefault();
+      button.click();
+    });
+
+    endingPrompt.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-ending-choice]");
+      if (!button) return;
+      console.log("ending prompt:", button.dataset.endingChoice);
+      ambientAudio.ensureStarted();
+    });
+
+    overwritePrompt.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-overwrite-choice]");
+      if (!button) return;
+      ambientAudio.ensureStarted();
+      if (button.dataset.overwriteChoice === "confirm") {
+        startFreshGameFromTitle();
+        return;
+      }
+      setOverwritePromptOpen(false);
+    });
+
+    overwritePrompt.addEventListener("keydown", (event) => {
+      if (!overwritePromptOpen) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOverwritePromptOpen(false);
+      }
+    });
+
+    audioToggle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      ambientAudio.toggle();
+    });
+    audioToggle.addEventListener("click", (event) => {
+      if (event.detail !== 0) return;
+      ambientAudio.toggle();
+    });
+
+    deathsRange.addEventListener("input", () => setDeaths(deathsRange.value));
+    deathsNumber.addEventListener("input", () => setDeaths(deathsNumber.value));
+    sanityRange.addEventListener("input", () => setSanity(sanityRange.value));
+    sanityNumber.addEventListener("input", () => setSanity(sanityNumber.value));
+    endingCheckbox.addEventListener("change", () => {
+      saveState.reachedLettingGoEnding = endingCheckbox.checked;
+      syncDevPanel();
+    });
+    managerControls.addEventListener("change", (event) => {
+      const select = event.target.closest("select[data-channel]");
+      if (!select) return;
+      ensureManagerState();
+      saveState.managers[select.dataset.channel] = select.value;
+      syncDevPanel();
+    });
+    window.addEventListener("title-dev-state", (event) => {
+      const detail = event.detail || {};
+      if (Object.prototype.hasOwnProperty.call(detail, "deaths")) setDeaths(detail.deaths);
+      if (Object.prototype.hasOwnProperty.call(detail, "sanity")) setSanity(detail.sanity);
+      if (Object.prototype.hasOwnProperty.call(detail, "reachedLettingGoEnding")) {
+        saveState.reachedLettingGoEnding = Boolean(detail.reachedLettingGoEnding);
+      }
+      if (detail.managers) {
+        ensureManagerState();
+        for (const channel of CCTV_CHANNELS) {
+          if (MANAGER_STATES.includes(detail.managers[channel.key])) {
+            saveState.managers[channel.key] = detail.managers[channel.key];
+          }
+        }
+      }
+      syncDevPanel();
+    });
+
+    window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("focus", revealTitleUiIfBootComplete);
+    document.addEventListener("visibilitychange", revealTitleUiIfBootComplete);
+
+    window.addEventListener("pointerdown", () => {
+      if (screenMode !== "game") ambientAudio.ensureStarted();
+    }, { once: true });
+    window.addEventListener("keydown", (event) => {
+      if (screenMode === "game") return;
+      ambientAudio.ensureStarted();
+      if (overwritePromptOpen) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setOverwritePromptOpen(false);
+        }
+        return;
+      }
+      if (event.target instanceof HTMLInputElement) return;
+      if (event.target instanceof HTMLSelectElement) return;
+
+      const key = event.key.toLowerCase();
+      if (event.shiftKey && key === "d") {
+        devPanel.classList.toggle("is-open");
+        event.preventDefault();
+        return;
+      }
+      if (key === "d") {
+        cycleCctvChannel(1, performance.now());
+        devPanel.classList.toggle("is-open");
+        event.preventDefault();
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        cycleCctvChannel(1, performance.now());
+        event.preventDefault();
+        return;
+      }
+      if (event.key === "ArrowLeft" || key === "a") {
+        cycleCctvChannel(-1, performance.now());
+        event.preventDefault();
+      }
+    });
+
+    applyStateFromUrl();
+    buildManagerControls();
+    syncDevPanel();
+    resizeCanvas();
+    if (shouldLaunchGameplayImmediately()) {
+      launchGameplay("direct", { immediate: true });
+    } else {
+      animationFrameId = requestAnimationFrame(render);
+      menuRevealFallbackTimer = window.setTimeout(() => {
+        revealTitleUiIfBootComplete();
+      }, BOOT.menuFadeEnd + 200);
+    }
+  </script>
 </body>
 </html>

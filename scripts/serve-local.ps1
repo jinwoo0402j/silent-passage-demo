@@ -23,6 +23,9 @@ $contentTypes = @{
   ".gif" = "image/gif"
   ".svg" = "image/svg+xml"
   ".ico" = "image/x-icon"
+  ".mp3" = "audio/mpeg"
+  ".ogg" = "audio/ogg"
+  ".wav" = "audio/wav"
   ".bat" = "text/plain; charset=utf-8"
 }
 

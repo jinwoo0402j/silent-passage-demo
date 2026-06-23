@@ -149,7 +149,7 @@ The validator checks:
 
 ## Key Files
 
-- [index.html](index.html): game shell
+- [index.html](index.html): launch title screen and gameplay shell
 - [editor.html](editor.html): level editor shell
 - [level-data.js](level-data.js): built-in level and gameplay data
 - [level-store.js](level-store.js): level save/load, overrides, run start, and editor data normalization
