@@ -611,6 +611,7 @@ const COLORS = {
 };
 
 const BACKGROUND_TILE_COLOR = "#70746f";
+const BACKGROUND_TILE_EDITOR_ALPHA = 0.42;
 const SHADOW_TILE_COLOR = "#24313a";
 const BACKGROUND_TILE_PREVIEW = "rgba(112, 116, 111, 0.5)";
 const SHADOW_TILE_PREVIEW = "rgba(36, 49, 58, 0.44)";
@@ -1082,6 +1083,7 @@ function createEditorState() {
     statusTone: "",
     statusText: "저장됨",
     pointerWorld: { x: 0, y: 0 },
+    capsLockActive: false,
     preview: null,
     drag: null,
     view: {
@@ -1100,6 +1102,12 @@ function createEditorState() {
     clipboard: null,
     renderQueued: false,
   };
+}
+
+function syncCapsLockState(editor, event) {
+  if (event && typeof event.getModifierState === "function") {
+    editor.capsLockActive = event.getModifierState("CapsLock");
+  }
 }
 
 function queueRender(editor, dom) {
@@ -3062,6 +3070,9 @@ function getSelectionsInRect(editor, rect) {
   });
 
   editor.data.props.forEach((prop, index) => {
+    if (isBackgroundTileKind(prop.kind) && !editor.capsLockActive) {
+      return;
+    }
     if (rectsIntersect(rect, getPropRect(prop))) {
       items.push({ kind: "prop", index });
     }
@@ -3145,7 +3156,11 @@ function hitTest(editor, point) {
   }
 
   for (let index = editor.data.props.length - 1; index >= 0; index -= 1) {
-    if (pointInRect(point, getPropRect(editor.data.props[index]))) {
+    const prop = editor.data.props[index];
+    if (isBackgroundTileKind(prop.kind) && !editor.capsLockActive) {
+      continue;
+    }
+    if (pointInRect(point, getPropRect(prop))) {
       return { kind: "prop", index };
     }
   }
@@ -4715,6 +4730,7 @@ function placeGateAt(editor, dom, point) {
 }
 
 function handlePointerDown(editor, dom, event) {
+  syncCapsLockState(editor, event);
   const screen = getCanvasPoint(dom, event);
   const world = screenToWorld(editor, screen.x, screen.y);
   editor.pointerWorld = world;
@@ -5884,6 +5900,7 @@ function bindEvents(editor, dom) {
   window.addEventListener("editor-rerender", () => queueRender(editor, dom));
 
   window.addEventListener("keydown", (event) => {
+    syncCapsLockState(editor, event);
     const isTyping = isTextEditingTarget(event.target);
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
@@ -5968,6 +5985,9 @@ function bindEvents(editor, dom) {
   window.addEventListener("resize", () => {
     resizeCanvas(editor, dom);
     queueRender(editor, dom);
+  });
+  window.addEventListener("keyup", (event) => {
+    syncCapsLockState(editor, event);
   });
 }
 
@@ -6521,10 +6541,11 @@ function drawBackgroundTiles(ctx, editor) {
     }
     const selected = isSelectionItemSelected(editor.selected, { kind: "prop", index });
     const rect = getPropRect(prop);
+    ctx.save();
     ctx.fillStyle = getRectPropTileColor(prop);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = selected ? 0.62 : BACKGROUND_TILE_EDITOR_ALPHA;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-    ctx.globalAlpha = 1;
+    ctx.restore();
     ctx.strokeStyle = selected ? COLORS.accent : COLORS.backgroundTileStroke;
     ctx.lineWidth = (selected ? 3 : 1.5) / editor.view.zoom;
     ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
