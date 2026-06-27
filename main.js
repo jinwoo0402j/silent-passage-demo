@@ -38,7 +38,12 @@ import {
   saveGameOptions,
 } from "./game-options.js?v=20260619-text-speed-v1";
 import { renderGame } from "./render.js?v=20260622-title-npc-v1";
-import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260622-npc-v1";
+import {
+  restoreSavedGame,
+  saveCurrentGame,
+  shouldStartFromUrlLevel,
+  startNewSavedRun,
+} from "./save-game.js?v=20260622-npc-v1";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -302,6 +307,84 @@ function isUrlFlagEnabled(params, name) {
   return value === "1" || value === "true" || value === name;
 }
 
+const TITLE_SAVE_KEY = "yunhoe_save";
+
+function normalizeTitleSave(raw) {
+  if (!raw || typeof raw !== "object" || raw.exists !== true) {
+    return null;
+  }
+  return {
+    deaths: Math.max(0, Math.floor(Number(raw.deaths) || 0)),
+    sanity: Math.max(0, Math.min(100, Math.floor(Number(raw.sanity ?? 100) || 0))),
+    reachedLettingGoEnding: Boolean(raw.reachedLettingGoEnding),
+    managers: {
+      N: raw.managers?.N || "active",
+      E: raw.managers?.E || "active",
+      S: raw.managers?.S || "active",
+      W: raw.managers?.W || "active",
+      C: raw.managers?.C || "active",
+    },
+    stage: Math.max(1, Math.floor(Number(raw.stage) || 1)),
+    exists: true,
+    entryIntent: ["new", "continue"].includes(raw.entryIntent) ? raw.entryIntent : null,
+  };
+}
+
+function loadSave() {
+  try {
+    return normalizeTitleSave(JSON.parse(window.localStorage.getItem(TITLE_SAVE_KEY) || "null"));
+  } catch {
+    return null;
+  }
+}
+
+function applyTitleEntryState(currentState, data, params) {
+  if (shouldStartFromUrlLevel()) {
+    startNewSavedRun(currentState, data, {
+      clearSaved: false,
+      persist: false,
+      useUrlLevel: true,
+    });
+    return;
+  }
+
+  if (params.has("shelterCgPreview") || params.get("partsLoop") === "1") {
+    return;
+  }
+
+  const titleSave = loadSave();
+  if (!titleSave) {
+    window.location.replace("./index.html");
+    return;
+  }
+
+  const entryIntent = params.get("entry") || titleSave.entryIntent || "continue";
+  currentState.titleSave = titleSave;
+  currentState.save = currentState.save || {};
+  document.documentElement.dataset.titleEntryIntent = entryIntent;
+  document.documentElement.dataset.titleSaveLoaded = "true";
+
+  if (entryIntent === "continue") {
+    if (restoreSavedGame(currentState, data)) {
+      return;
+    }
+    console.warn("Title requested continue, but no gameplay save was found. Starting a fresh run.");
+  }
+
+  startNewSavedRun(currentState, data, {
+    clearSaved: true,
+    persist: true,
+    useUrlLevel: false,
+  });
+}
+
+function syncGameEntryDebugDataset(currentState) {
+  document.documentElement.dataset.gameScene = currentState.scene || "";
+  document.documentElement.dataset.gameHasRun = String(Boolean(currentState.save?.hasRun));
+  document.documentElement.dataset.gameCurrentLevelId = currentState.run?.currentLevelId || "";
+  document.documentElement.dataset.gameStatusText = currentState.statusText || "";
+}
+
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
 applyAudioOptions(loadAudioOptions());
 applyGameOptions(loadGameOptions());
@@ -325,6 +408,16 @@ applySprintTuning(
 );
 
 const state = createInitialState(runtimeData);
+window.__faceOffState = state;
+window.__faceOffData = runtimeData;
+try {
+  applyTitleEntryState(state, runtimeData, urlParams);
+} catch (error) {
+  window.__titleEntryError = error ? `${error.name}: ${error.message}` : "Unknown title entry error";
+  document.documentElement.dataset.titleEntryError = window.__titleEntryError;
+  console.error("Title entry failed", error);
+}
+syncGameEntryDebugDataset(state);
 const SHELTER_CG_PREVIEW_ASSETS = {
   neutral: "shelterHomeNeutralCg",
   anxious: "shelterHomeAnxiousCg",

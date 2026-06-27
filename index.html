@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>輪廻 無明 / 윤회 무명</title>
   <link rel="icon" href="data:,">
-  <link rel="preload" as="image" href="./assets/cg/shelter-home-charm-01.png?v=20260618-home-charm-2">
   <link rel="preload" as="image" href="./assets/backgrounds/cctv-north-cascade.png?v=20260623-user-cctv">
   <link rel="preload" as="image" href="./assets/backgrounds/cctv-center-phonebooth.png?v=20260623-user-cctv">
   <link rel="stylesheet" href="./styles.css?v=20260622-hidden-dev-controls-v2">
@@ -552,11 +551,21 @@
       menuFadeEnd: 8200
     };
 
-    const CONNECT_SEQUENCE = {
-      handshakeEnd: 1400,
-      droneLinkEnd: 3000,
-      shelterBootEnd: 5200
-    };
+    /*
+      Title -> shelter transition timeline.
+      This is intentionally one continuous embodied flow:
+      CCTV remote feed -> pulled into the signal -> black drone boot ->
+      first-person focus -> daughter greeting -> shelter hub.
+      Tune only these numbers to adjust pacing.
+    */
+    const CONNECT_SEQUENCE = Object.freeze({
+      pullInEnd: 1700,
+      blackBootEnd: 2700,
+      eyesOpenEnd: 5600,
+      gazeFindsHerEnd: 7200,
+      greetingEnd: 9600,
+      hubFadeEnd: 10800
+    });
 
     /*
       Deaths -> water height mapping.
@@ -722,6 +731,52 @@
 
     const MANAGER_STATES = ["active", "stopped", "destroyed"];
 
+    // CCTV LENS POST-PROCESS CONFIG:
+    // Code-only security-camera lens treatment. WebGL is preferred; the Canvas
+    // path below is a fallback when WebGL is unavailable. Strengths subtly rise
+    // as deaths accumulate or sanity drops, making degraded loops feel warped.
+    const CCTV_LENS_CONFIG = Object.freeze({
+      distortionStrength: 0.25,
+      vignetteStrength: 0.68,
+      aberrationStrength: 0.012,
+      deathDistortionBoost: 0.15,
+      sanityDistortionBoost: 0.13,
+      deathVignetteBoost: 0.13,
+      sanityVignetteBoost: 0.09,
+      deathAberrationBoost: 0.008,
+      sanityAberrationBoost: 0.012
+    });
+
+    // CCTV LIVE FEED MOTION CONFIG:
+    // All motion is procedural over still images. Values stay subtle by default;
+    // degradation boosts make low sanity / high deaths feel like a failing feed.
+    const CCTV_LIVE_FEED_CONFIG = Object.freeze({
+      lensBreathAmplitude: 0.018,
+      lensBreathSpeed: 0.00042,
+      lensBreathDegradationBoost: 0.018,
+      driftPanAmplitude: 0.018,
+      driftZoomAmplitude: 0.032,
+      driftSpeed: 0.000055,
+      grainBaseSpecks: 145,
+      grainDeathSpecks: 320,
+      grainSanitySpecks: 180,
+      grainBaseAlpha: 0.055,
+      grainDeathAlpha: 0.13,
+      grainSanityAlpha: 0.11,
+      rollingBandSpeed: 0.018,
+      rollingBandHeight: 0.2,
+      rollingBandAlpha: 0.105,
+      dropoutPeriodMs: 5600,
+      dropoutMinPeriodMs: 2500,
+      dropoutDurationMs: 220,
+      dropoutDurationBoostMs: 180,
+      dropoutStaticBars: 7,
+      dropoutTearPixels: 24,
+      signalFlickerAmplitude: 5,
+      signalFlickerDegradationBoost: 9,
+      signalFlickerSpeed: 0.0065
+    });
+
     const canvas = document.getElementById("scene");
     const ctx = canvas.getContext("2d", { alpha: false });
     const menu = document.getElementById("menu");
@@ -740,6 +795,9 @@
     const gameRoot = document.getElementById("gameRoot");
     const cctvDistortionCanvas = document.createElement("canvas");
     const cctvDistortionCtx = cctvDistortionCanvas.getContext("2d", { alpha: false });
+    const cctvLensRenderer = createCctvLensRenderer();
+    const transitionFrameCanvas = document.createElement("canvas");
+    const transitionFrameCtx = transitionFrameCanvas.getContext("2d", { alpha: false });
 
     let viewport = { width: 0, height: 0, dpr: 1 };
     let layout = null;
@@ -753,6 +811,8 @@
     let shelterArrivedAt = null;
     let pendingEnterState = null;
     let entryCompletionStarted = false;
+    let connectBootCuePlayed = false;
+    let connectFocusCuePlayed = false;
     let animationFrameId = null;
     let menuRevealFallbackTimer = null;
     let connectCompletionTimer = null;
@@ -775,6 +835,18 @@
     function easeOutCubic(t) {
       t = clamp(t, 0, 1);
       return 1 - Math.pow(1 - t, 3);
+    }
+
+    function easeInCubic(t) {
+      t = clamp(t, 0, 1);
+      return t * t * t;
+    }
+
+    function easeInOutCubic(t) {
+      t = clamp(t, 0, 1);
+      return t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
     }
 
     function resizeCanvas() {
@@ -851,6 +923,68 @@
       return { stage: "nameSlip", logoOpacity: lerp(0.52, 0.28, t), jitter: lerp(1.4, 2.4, t), erosion: lerp(0.46, 0.65, t), slip: lerp(0.45, 1, t), submerge: lerp(0.55, 0.76, t) };
     }
 
+    function cctvDegradation() {
+      const flood = deathFactor();
+      const sanityLoss = 1 - clamp(Number(saveState.sanity) / 100, 0, 1);
+      return clamp(flood * 0.55 + sanityLoss * 0.45, 0, 1);
+    }
+
+    function cctvChannelSeed(channel) {
+      return (channel?.key || "C").charCodeAt(0);
+    }
+
+    function cctvLensSettings(time = performance.now(), channel = getCurrentCctvChannel()) {
+      const flood = deathFactor();
+      const sanityLoss = 1 - clamp(Number(saveState.sanity) / 100, 0, 1);
+      const degradation = cctvDegradation();
+      const seed = cctvChannelSeed(channel);
+      const breath = Math.sin(time * CCTV_LIVE_FEED_CONFIG.lensBreathSpeed + seed * 0.77)
+        * (CCTV_LIVE_FEED_CONFIG.lensBreathAmplitude + degradation * CCTV_LIVE_FEED_CONFIG.lensBreathDegradationBoost);
+      return {
+        distortionStrength: clamp(
+          CCTV_LENS_CONFIG.distortionStrength
+          + flood * CCTV_LENS_CONFIG.deathDistortionBoost
+          + sanityLoss * CCTV_LENS_CONFIG.sanityDistortionBoost
+          + breath,
+          0,
+          1
+        ),
+        vignetteStrength: clamp(
+          CCTV_LENS_CONFIG.vignetteStrength
+          + flood * CCTV_LENS_CONFIG.deathVignetteBoost
+          + sanityLoss * CCTV_LENS_CONFIG.sanityVignetteBoost,
+          0,
+          1
+        ),
+        aberrationStrength: clamp(
+          CCTV_LENS_CONFIG.aberrationStrength
+          + flood * CCTV_LENS_CONFIG.deathAberrationBoost
+          + sanityLoss * CCTV_LENS_CONFIG.sanityAberrationBoost,
+          0,
+          1
+        )
+      };
+    }
+
+    function cctvDropoutAmount(channel, time) {
+      const degradation = cctvDegradation();
+      const seed = cctvChannelSeed(channel);
+      const period = lerp(CCTV_LIVE_FEED_CONFIG.dropoutPeriodMs, CCTV_LIVE_FEED_CONFIG.dropoutMinPeriodMs, degradation);
+      const duration = CCTV_LIVE_FEED_CONFIG.dropoutDurationMs + degradation * CCTV_LIVE_FEED_CONFIG.dropoutDurationBoostMs;
+      const phase = (time + seed * 431) % period;
+      if (phase > duration) return 0;
+      return Math.sin((phase / duration) * Math.PI) * lerp(0.45, 1, degradation);
+    }
+
+    function cctvDrift(channel, time) {
+      const seed = cctvChannelSeed(channel);
+      const t = time * CCTV_LIVE_FEED_CONFIG.driftSpeed;
+      const x = Math.sin(t + seed * 1.91) * CCTV_LIVE_FEED_CONFIG.driftPanAmplitude;
+      const y = Math.cos(t * 0.83 + seed * 2.37) * CCTV_LIVE_FEED_CONFIG.driftPanAmplitude * 0.72;
+      const zoom = (0.5 + 0.5 * Math.sin(t * 0.68 + seed * 0.49)) * CCTV_LIVE_FEED_CONFIG.driftZoomAmplitude;
+      return { focusX: 0.5 + x, focusY: 0.5 + y, zoom };
+    }
+
     function getCurrentCctvChannel() {
       return CCTV_CHANNELS[currentChannelIndex];
     }
@@ -873,6 +1007,7 @@
       const channel = getCurrentCctvChannel();
       const managerState = managerStateFor(channel.key);
       const channelAsset = ART_HOOKS.cctv[channel.key]?.[managerState];
+      const lens = cctvLensSettings();
       document.documentElement.dataset.currentCctvChannel = channel.code;
       document.documentElement.dataset.assetFallback = screenMode === "stage-placeholder"
         ? `placeholder:${GAME_ENTRY_PATH}`
@@ -892,15 +1027,24 @@
       document.documentElement.dataset.saveStateMirror = JSON.stringify(saveState);
       document.documentElement.dataset.screenMode = screenMode;
       document.documentElement.dataset.rafActive = animationFrameId === null ? "no" : "yes";
-      document.documentElement.dataset.cctvCameraDistortion = "barrel-vignette-rgb";
+      document.documentElement.dataset.cctvCameraDistortion = "fisheye-vignette-rgb";
+      document.documentElement.dataset.cctvLensPath = cctvLensRenderer ? cctvLensRenderer.path : "canvas-fallback";
+      document.documentElement.dataset.cctvLensDistortion = lens.distortionStrength.toFixed(3);
+      document.documentElement.dataset.cctvLensVignette = lens.vignetteStrength.toFixed(3);
+      document.documentElement.dataset.cctvLensAberration = lens.aberrationStrength.toFixed(3);
     }
 
     function cctvSignalStrength(channel, state, time) {
+      const degradation = cctvDegradation();
       const floodPenalty = deathFactor() * 42;
       const sanityPenalty = Number(saveState.sanity) < 10 ? 18 : Number(saveState.sanity) < 34 ? 9 : 0;
       const statePenalty = state === "destroyed" ? 72 : state === "stopped" ? 56 : 0;
-      const flicker = Math.sin(time * 0.004 + channel.key.charCodeAt(0)) * 4;
-      return Math.round(clamp(channel.baseSignal - floodPenalty - sanityPenalty - statePenalty + flicker, 0, 99));
+      const dropoutPenalty = cctvDropoutAmount(channel, time) * lerp(8, 22, degradation);
+      const flicker =
+        Math.sin(time * CCTV_LIVE_FEED_CONFIG.signalFlickerSpeed + channel.key.charCodeAt(0)) *
+        (CCTV_LIVE_FEED_CONFIG.signalFlickerAmplitude + degradation * CCTV_LIVE_FEED_CONFIG.signalFlickerDegradationBoost);
+      const microFlicker = Math.sin(time * 0.037 + channel.key.charCodeAt(0) * 1.7) * lerp(1, 4, degradation);
+      return Math.round(clamp(channel.baseSignal - floodPenalty - sanityPenalty - statePenalty - dropoutPenalty + flicker + microFlicker, 0, 99));
     }
 
     function cctvStatusFor(state) {
@@ -946,7 +1090,6 @@
       drawCctvFilter(width, height, channel, state, time);
       drawCctvHud(width, height, channel, state, time);
       drawCctvSwitchGlitch(width, height, time);
-      drawDroneConnectTransition(width, height, time);
       ctx.restore();
     }
 
@@ -958,8 +1101,8 @@
       ctx.fillRect(0, 0, width, height);
     }
 
-    function drawImageCover(image, width, height, focusX = 0.5, focusY = 0.5) {
-      const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+    function drawImageCover(image, width, height, focusX = 0.5, focusY = 0.5, scaleBoost = 0) {
+      const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * (1 + Math.max(0, scaleBoost));
       const drawW = image.naturalWidth * scale;
       const drawH = image.naturalHeight * scale;
       const dx = (width - drawW) * focusX;
@@ -967,7 +1110,7 @@
       ctx.drawImage(image, dx, dy, drawW, drawH);
     }
 
-    function drawCctvChannelAsset(width, height, channel, state) {
+    function drawCctvChannelAsset(width, height, channel, state, time) {
       const image = ART_HOOKS.cctv[channel.key]?.[state];
       if (!image || image.dataset.loaded !== "true" || !image.naturalWidth || !image.naturalHeight) {
         return false;
@@ -976,7 +1119,8 @@
       ctx.save();
       // CCTV ASSET HOOK: draw the selected channel/state still, then overlay CCTV treatment.
       ctx.filter = "saturate(0.64) contrast(0.92) brightness(0.9)";
-      drawImageCover(image, width, height, 0.5, 0.5);
+      const drift = cctvDrift(channel, time);
+      drawImageCover(image, width, height, drift.focusX, drift.focusY, drift.zoom);
       ctx.filter = "none";
 
       if (state === "stopped") {
@@ -1002,6 +1146,183 @@
       return true;
     }
 
+    function createCctvLensRenderer() {
+      const lensCanvas = document.createElement("canvas");
+      const gl = lensCanvas.getContext("webgl", {
+        alpha: false,
+        antialias: false,
+        depth: false,
+        preserveDrawingBuffer: true,
+        premultipliedAlpha: false,
+        stencil: false
+      }) || lensCanvas.getContext("experimental-webgl", {
+        alpha: false,
+        antialias: false,
+        depth: false,
+        preserveDrawingBuffer: true,
+        premultipliedAlpha: false,
+        stencil: false
+      });
+
+      if (!gl) return null;
+
+      const vertexSource = `
+        attribute vec2 a_position;
+        varying vec2 v_uv;
+
+        void main() {
+          v_uv = vec2(a_position.x * 0.5 + 0.5, 0.5 - a_position.y * 0.5);
+          gl_Position = vec4(a_position, 0.0, 1.0);
+        }
+      `;
+
+      const fragmentSource = `
+        precision mediump float;
+
+        uniform sampler2D u_image;
+        uniform vec2 u_resolution;
+        uniform float u_distortionStrength;
+        uniform float u_vignetteStrength;
+        uniform float u_aberrationStrength;
+        varying vec2 v_uv;
+
+        vec2 warpUv(vec2 uv, float strengthScale) {
+          vec2 p = uv * 2.0 - 1.0;
+          float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+          p.x *= aspect;
+          float r2 = dot(p, p);
+          float lens = u_distortionStrength * strengthScale;
+          vec2 warped = p * (1.0 - lens * r2 * 0.42);
+          warped.x /= aspect;
+          return warped * 0.5 + 0.5;
+        }
+
+        void main() {
+          float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+          vec2 p = v_uv * 2.0 - 1.0;
+          p.x *= aspect;
+          float r = length(p);
+          float edge = smoothstep(0.18, 1.22, r);
+          float split = u_aberrationStrength * edge * 5.0;
+
+          vec2 uv = warpUv(v_uv, 1.0);
+          vec2 uvR = warpUv(v_uv, 1.0 + split);
+          vec2 uvB = warpUv(v_uv, max(0.2, 1.0 - split));
+          float inside = step(0.0, uv.x) * step(0.0, uv.y) * step(uv.x, 1.0) * step(uv.y, 1.0);
+
+          vec3 color;
+          color.r = texture2D(u_image, clamp(uvR, vec2(0.0), vec2(1.0))).r;
+          color.g = texture2D(u_image, clamp(uv, vec2(0.0), vec2(1.0))).g;
+          color.b = texture2D(u_image, clamp(uvB, vec2(0.0), vec2(1.0))).b;
+          color *= inside;
+
+          float vignette = 1.0 - smoothstep(0.46, 1.22, r) * u_vignetteStrength;
+          color *= max(0.05, vignette);
+          color = mix(color, color * vec3(0.88, 0.96, 1.04), edge * 0.08);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `;
+
+      function compileShader(type, source) {
+        const shader = gl.createShader(type);
+        if (!shader) return null;
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          gl.deleteShader(shader);
+          return null;
+        }
+        return shader;
+      }
+
+      const vertexShader = compileShader(gl.VERTEX_SHADER, vertexSource);
+      const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentSource);
+      if (!vertexShader || !fragmentShader) return null;
+
+      const program = gl.createProgram();
+      if (!program) return null;
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        gl.deleteProgram(program);
+        return null;
+      }
+
+      const positionBuffer = gl.createBuffer();
+      const texture = gl.createTexture();
+      if (!positionBuffer || !texture) return null;
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([
+          -1, -1,
+           1, -1,
+          -1,  1,
+          -1,  1,
+           1, -1,
+           1,  1
+        ]),
+        gl.STATIC_DRAW
+      );
+
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      const locations = {
+        position: gl.getAttribLocation(program, "a_position"),
+        image: gl.getUniformLocation(program, "u_image"),
+        resolution: gl.getUniformLocation(program, "u_resolution"),
+        distortionStrength: gl.getUniformLocation(program, "u_distortionStrength"),
+        vignetteStrength: gl.getUniformLocation(program, "u_vignetteStrength"),
+        aberrationStrength: gl.getUniformLocation(program, "u_aberrationStrength")
+      };
+
+      return {
+        canvas: lensCanvas,
+        path: "webgl",
+        render(sourceCanvas, targetCtx, width, height, settings) {
+          try {
+            if (gl.isContextLost && gl.isContextLost()) return false;
+            if (lensCanvas.width !== sourceCanvas.width || lensCanvas.height !== sourceCanvas.height) {
+              lensCanvas.width = sourceCanvas.width;
+              lensCanvas.height = sourceCanvas.height;
+            }
+
+            gl.viewport(0, 0, lensCanvas.width, lensCanvas.height);
+            gl.useProgram(program);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.enableVertexAttribArray(locations.position);
+            gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0);
+
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
+
+            gl.uniform1i(locations.image, 0);
+            gl.uniform2f(locations.resolution, lensCanvas.width, lensCanvas.height);
+            gl.uniform1f(locations.distortionStrength, settings.distortionStrength);
+            gl.uniform1f(locations.vignetteStrength, settings.vignetteStrength);
+            gl.uniform1f(locations.aberrationStrength, settings.aberrationStrength);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            targetCtx.clearRect(0, 0, width, height);
+            targetCtx.drawImage(lensCanvas, 0, 0, width, height);
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      };
+    }
+
     function ensureCctvDistortionBuffer(width, height) {
       if (!cctvDistortionCtx) return false;
       if (cctvDistortionCanvas.width !== width || cctvDistortionCanvas.height !== height) {
@@ -1012,6 +1333,25 @@
     }
 
     function drawCctvCameraDistortion(width, height, channel, state, time) {
+      const lens = cctvLensSettings();
+      document.documentElement.dataset.cctvLensDistortion = lens.distortionStrength.toFixed(3);
+      document.documentElement.dataset.cctvLensVignette = lens.vignetteStrength.toFixed(3);
+      document.documentElement.dataset.cctvLensAberration = lens.aberrationStrength.toFixed(3);
+
+      if (cctvLensRenderer) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = "source-over";
+        ctx.filter = "none";
+        const rendered = cctvLensRenderer.render(canvas, ctx, width, height, lens);
+        ctx.restore();
+        if (rendered) {
+          document.documentElement.dataset.cctvLensPath = cctvLensRenderer.path;
+          return;
+        }
+      }
+
+      document.documentElement.dataset.cctvLensPath = "canvas-fallback";
       if (!ensureCctvDistortionBuffer(width, height)) return;
 
       cctvDistortionCtx.save();
@@ -1028,8 +1368,8 @@
       ctx.clearRect(0, 0, width, height);
 
       const sliceH = Math.max(2, Math.floor(height / 210));
-      const maxBulge = width * 0.034;
-      const wobbleBase = state === "destroyed" ? 5.2 : state === "stopped" ? 2.6 : 1.35;
+      const maxBulge = width * lerp(0.024, 0.078, lens.distortionStrength);
+      const wobbleBase = (state === "destroyed" ? 5.2 : state === "stopped" ? 2.6 : 1.35) + lens.distortionStrength * 4.2;
 
       for (let y = 0; y < height; y += sliceH) {
         const centerY = ((y + sliceH * 0.5) / height) * 2 - 1;
@@ -1050,29 +1390,25 @@
         );
       }
 
+      const rgbOffset = clamp(width * lens.aberrationStrength * 0.45, 1.2, 7);
       ctx.globalCompositeOperation = "screen";
-      ctx.globalAlpha = 0.045;
+      ctx.globalAlpha = clamp(0.025 + lens.aberrationStrength * 4.2, 0.035, 0.12);
       ctx.filter = "sepia(1) saturate(2.8) hue-rotate(300deg)";
-      ctx.drawImage(cctvDistortionCanvas, -2, 0, width, height);
+      ctx.drawImage(cctvDistortionCanvas, -rgbOffset, 0, width, height);
       ctx.filter = "sepia(1) saturate(2.4) hue-rotate(145deg)";
-      ctx.drawImage(cctvDistortionCanvas, 2, 0, width, height);
+      ctx.drawImage(cctvDistortionCanvas, rgbOffset, 0, width, height);
 
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
       ctx.filter = "none";
       const glass = ctx.createRadialGradient(width * 0.5, height * 0.5, 0, width * 0.5, height * 0.5, Math.max(width, height) * 0.72);
       glass.addColorStop(0, "rgba(255, 255, 255, 0)");
-      glass.addColorStop(0.58, "rgba(255, 255, 255, 0)");
-      glass.addColorStop(0.82, "rgba(4, 8, 9, 0.18)");
-      glass.addColorStop(1, "rgba(1, 3, 4, 0.66)");
+      glass.addColorStop(0.52, "rgba(255, 255, 255, 0)");
+      glass.addColorStop(0.8, `rgba(4, 8, 9, ${0.22 * lens.vignetteStrength})`);
+      glass.addColorStop(1, `rgba(1, 3, 4, ${clamp(0.42 + lens.vignetteStrength * 0.48, 0, 0.94)})`);
       ctx.fillStyle = glass;
       ctx.fillRect(0, 0, width, height);
 
-      ctx.strokeStyle = "rgba(232, 238, 236, 0.08)";
-      ctx.lineWidth = Math.max(1, Math.min(width, height) * 0.006);
-      ctx.beginPath();
-      ctx.ellipse(width * 0.5, height * 0.5, width * 0.515, height * 0.535, 0, 0, Math.PI * 2);
-      ctx.stroke();
       ctx.restore();
     }
 
@@ -1083,7 +1419,7 @@
       if (state === "stopped") ctx.globalAlpha *= 0.66;
       if (state === "destroyed") ctx.globalAlpha *= 0.82;
 
-      if (drawCctvChannelAsset(width, height, channel, state)) {
+      if (drawCctvChannelAsset(width, height, channel, state, time)) {
         ctx.restore();
         return;
       }
@@ -1301,9 +1637,68 @@
       ctx.fillRect(0, 0, width, height);
     }
 
+    function drawCctvDropoutTear(width, height, channel, state, time, amount) {
+      if (amount <= 0.001 || !ensureCctvDistortionBuffer(width, height)) return;
+
+      cctvDistortionCtx.save();
+      cctvDistortionCtx.setTransform(1, 0, 0, 1, 0, 0);
+      cctvDistortionCtx.clearRect(0, 0, width, height);
+      cctvDistortionCtx.drawImage(canvas, 0, 0, width, height);
+      cctvDistortionCtx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, width, height);
+
+      const seed = cctvChannelSeed(channel);
+      const slices = 10;
+      for (let i = 0; i < slices; i += 1) {
+        const y = Math.floor((i / slices) * height);
+        const sliceH = Math.ceil(height / slices) + 2;
+        const direction = i % 2 === 0 ? 1 : -1;
+        const jitter = Math.sin(time * 0.022 + seed * 0.7 + i * 1.9) * CCTV_LIVE_FEED_CONFIG.dropoutTearPixels * amount;
+        ctx.drawImage(cctvDistortionCanvas, 0, y, width, sliceH, direction * jitter, y, width, sliceH);
+      }
+
+      const bars = CCTV_LIVE_FEED_CONFIG.dropoutStaticBars;
+      for (let i = 0; i < bars; i += 1) {
+        const y = (time * 0.28 + seed * 17 + i * height * 0.17) % height;
+        ctx.fillStyle = i % 2 === 0
+          ? `rgba(235, 240, 236, ${0.06 * amount})`
+          : `rgba(0, 0, 0, ${0.16 * amount})`;
+        ctx.fillRect(0, y, width, 4 + i % 3 * 7);
+      }
+
+      if (state !== "active") {
+        ctx.fillStyle = `rgba(245, 245, 235, ${0.08 * amount})`;
+        ctx.fillRect(0, 0, width, height);
+      }
+      ctx.restore();
+    }
+
+    function drawCctvRollingBand(width, height, time, degradation) {
+      const bandH = Math.max(28, height * CCTV_LIVE_FEED_CONFIG.rollingBandHeight);
+      const y = (time * CCTV_LIVE_FEED_CONFIG.rollingBandSpeed) % (height + bandH) - bandH;
+      const band = ctx.createLinearGradient(0, y, 0, y + bandH);
+      band.addColorStop(0, "rgba(255,255,255,0)");
+      band.addColorStop(0.5, `rgba(235,240,236,${CCTV_LIVE_FEED_CONFIG.rollingBandAlpha + degradation * 0.06})`);
+      band.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = band;
+      ctx.fillRect(0, y, width, bandH);
+    }
+
     function drawCctvFilter(width, height, channel, state, time) {
       const flood = deathFactor();
-      const noiseAlpha = 0.08 + flood * 0.16 + (Number(saveState.sanity) < 34 ? 0.08 : 0);
+      const degradation = cctvDegradation();
+      const dropout = cctvDropoutAmount(channel, time);
+      const noiseAlpha =
+        CCTV_LIVE_FEED_CONFIG.grainBaseAlpha
+        + flood * CCTV_LIVE_FEED_CONFIG.grainDeathAlpha
+        + (1 - clamp(Number(saveState.sanity) / 100, 0, 1)) * CCTV_LIVE_FEED_CONFIG.grainSanityAlpha
+        + dropout * 0.12;
+
+      drawCctvDropoutTear(width, height, channel, state, time, dropout);
 
       ctx.save();
       ctx.fillStyle = "rgba(16, 23, 25, 0.13)";
@@ -1311,21 +1706,29 @@
         ctx.fillRect(0, y, width, 1);
       }
 
-      const specks = Math.floor(120 + flood * 260);
+      drawCctvRollingBand(width, height, time, degradation);
+
+      const specks = Math.floor(
+        CCTV_LIVE_FEED_CONFIG.grainBaseSpecks
+        + flood * CCTV_LIVE_FEED_CONFIG.grainDeathSpecks
+        + (1 - clamp(Number(saveState.sanity) / 100, 0, 1)) * CCTV_LIVE_FEED_CONFIG.grainSanitySpecks
+        + dropout * 260
+      );
       for (let i = 0; i < specks; i += 1) {
         const x = Math.random() * width;
         const y = Math.random() * height;
+        const size = dropout > 0.25 ? 1.6 + Math.random() * 2.5 : 1.1;
         ctx.fillStyle = Math.random() > 0.5 ? `rgba(255,255,255,${noiseAlpha})` : `rgba(0,0,0,${noiseAlpha})`;
-        ctx.fillRect(x, y, 1.2, 1.2);
+        ctx.fillRect(x, y, size, size);
       }
 
-      if (state !== "active" || Math.sin(time * 0.004 + channel.key.charCodeAt(0)) > 0.94) {
-        ctx.fillStyle = state === "destroyed" ? "rgba(245,245,235,0.18)" : "rgba(0,0,0,0.22)";
+      if (state !== "active" || dropout > 0.04 || Math.sin(time * 0.004 + channel.key.charCodeAt(0)) > 0.94) {
+        ctx.fillStyle = state === "destroyed" ? "rgba(245,245,235,0.18)" : `rgba(0,0,0,${0.14 + dropout * 0.16})`;
         const y = height * (0.18 + ((Math.floor(time / 180) % 5) * 0.13));
-        ctx.fillRect(0, y, width, 18 + flood * 26);
+        ctx.fillRect(0, y, width, 18 + flood * 26 + dropout * 36);
       }
 
-      ctx.fillStyle = "rgba(220, 225, 222, 0.11)";
+      ctx.fillStyle = `rgba(220, 225, 222, ${0.09 + dropout * 0.12})`;
       ctx.fillRect(0, 0, width, height);
       ctx.restore();
     }
@@ -1345,15 +1748,19 @@
       const status = cctvStatusFor(state);
       ctx.fillStyle = state === "active" ? "rgba(235, 240, 236, 0.82)" : "rgba(235, 240, 236, 0.46)";
       ctx.fillText(`${status} / SIGNAL ${signal}%`, width - 26, 30);
-      drawSignalBars(width - 128, 42, signal);
+      drawSignalBars(width - 128, 42, signal, time, channel);
       ctx.restore();
     }
 
-    function drawSignalBars(x, y, signal) {
+    function drawSignalBars(x, y, signal, time, channel) {
       ctx.save();
+      const degradation = cctvDegradation();
+      const dropout = cctvDropoutAmount(channel, time);
       for (let i = 0; i < 5; i += 1) {
-        const on = signal >= (i + 1) * 18;
-        ctx.fillStyle = on ? "rgba(235, 240, 236, 0.72)" : "rgba(235, 240, 236, 0.18)";
+        const jitter = Math.sin(time * 0.018 + cctvChannelSeed(channel) + i * 1.37) * lerp(1.5, 8, degradation);
+        const on = signal + jitter - dropout * 18 >= (i + 1) * 18;
+        const alpha = clamp(0.62 + Math.sin(time * 0.02 + i) * 0.1 - dropout * 0.18, 0.24, 0.82);
+        ctx.fillStyle = on ? `rgba(235, 240, 236, ${alpha})` : "rgba(235, 240, 236, 0.18)";
         ctx.fillRect(x + i * 14, y + (4 - i) * 3, 9, 6 + i * 3);
       }
       ctx.restore();
@@ -1376,67 +1783,328 @@
       ctx.restore();
     }
 
-    function drawDroneConnectTransition(width, height, time) {
-      if (droneConnectStartedAt === null) return;
-      const age = time - droneConnectStartedAt;
-      const t = clamp(age / CONNECT_SEQUENCE.shelterBootEnd, 0, 1);
-      const stage =
-        age < CONNECT_SEQUENCE.handshakeEnd ? "SIGNAL HANDSHAKE" :
-        age < CONNECT_SEQUENCE.droneLinkEnd ? "DRONE LINK" :
-        "SHELTER BOOT";
+    function connectPhaseForAge(age) {
+      if (age < CONNECT_SEQUENCE.pullInEnd) return "pull-in";
+      if (age < CONNECT_SEQUENCE.blackBootEnd) return "black-boot";
+      if (age < CONNECT_SEQUENCE.eyesOpenEnd) return "eyes-open";
+      if (age < CONNECT_SEQUENCE.gazeFindsHerEnd) return "gaze-finds-her";
+      if (age < CONNECT_SEQUENCE.greetingEnd) return "greeting";
+      return "hub-fade";
+    }
+
+    function connectProgress(age, start, end) {
+      return smoothstep((age - start) / Math.max(1, end - start));
+    }
+
+    function captureTransitionFrame() {
+      if (!transitionFrameCtx) return false;
+      if (transitionFrameCanvas.width !== canvas.width || transitionFrameCanvas.height !== canvas.height) {
+        transitionFrameCanvas.width = canvas.width;
+        transitionFrameCanvas.height = canvas.height;
+      }
+      transitionFrameCtx.save();
+      transitionFrameCtx.setTransform(1, 0, 0, 1, 0, 0);
+      transitionFrameCtx.globalCompositeOperation = "source-over";
+      transitionFrameCtx.filter = "none";
+      transitionFrameCtx.clearRect(0, 0, transitionFrameCanvas.width, transitionFrameCanvas.height);
+      transitionFrameCtx.drawImage(canvas, 0, 0);
+      transitionFrameCtx.restore();
+      return true;
+    }
+
+    function drawSignalTunnelOverlay(width, height, time, amount) {
       ctx.save();
-      ctx.globalAlpha = clamp(t * 1.4, 0, 1);
-      ctx.fillStyle = "rgba(4, 8, 9, 0.72)";
-      ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = "rgba(232, 233, 230, 0.82)";
-      ctx.font = "15px Consolas, 'D2Coding', monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(`${stage} // ${Math.round(t * 100)}%`, width * 0.5, height * 0.5 - 10);
-      ctx.fillStyle = "rgba(232, 233, 230, 0.28)";
-      ctx.fillRect(width * 0.35, height * 0.5 + 16, width * 0.3, 3);
-      ctx.fillStyle = "rgba(232, 233, 230, 0.72)";
-      ctx.fillRect(width * 0.35, height * 0.5 + 16, width * 0.3 * t, 3);
+      ctx.globalAlpha = amount;
+      ctx.strokeStyle = "rgba(205, 231, 236, 0.18)";
+      ctx.lineWidth = 1;
+      const cx = width * 0.5;
+      const cy = height * 0.5;
+      for (let i = 0; i < 18; i += 1) {
+        const angle = i / 18 * Math.PI * 2 + time * 0.00045;
+        const inner = Math.min(width, height) * (0.04 + amount * 0.03);
+        const outer = Math.max(width, height) * (0.54 + amount * 0.08);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+        ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+      for (let i = 0; i < 44; i += 1) {
+        const y = (i * 31 + time * 0.42) % height;
+        const tearW = width * (0.18 + ((i * 17) % 21) / 100);
+        const x = (Math.sin(time * 0.006 + i) * 0.5 + 0.5) * (width - tearW);
+        ctx.fillRect(x, y, tearW, 1 + (i % 3));
+      }
       ctx.restore();
     }
 
-    function drawShelterViewLayer(width, height, time) {
+    function drawSignalPullIn(width, height, age, time) {
+      drawCctvModeLayer(width, height, 1, time);
+      const captured = captureTransitionFrame();
+      const t = connectProgress(age, 0, CONNECT_SEQUENCE.pullInEnd);
+      const inward = easeInOutCubic(t);
+
+      ctx.save();
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, height);
+
+      if (captured) {
+        const scale = lerp(1, 0.08, inward);
+        const squeezeY = lerp(1, 0.36, inward);
+        const wobble = Math.sin(time * 0.018) * width * 0.006 * (1 - t);
+        const drawW = width * scale;
+        const drawH = height * scale * squeezeY;
+        const dx = width * 0.5 - drawW * 0.5 + wobble;
+        const dy = height * 0.5 - drawH * 0.5;
+        ctx.globalAlpha = lerp(1, 0.58, inward);
+        ctx.drawImage(
+          transitionFrameCanvas,
+          0,
+          0,
+          transitionFrameCanvas.width,
+          transitionFrameCanvas.height,
+          dx,
+          dy,
+          drawW,
+          drawH
+        );
+      }
+
+      const glowRadius = Math.max(width, height) * lerp(0.7, 0.12, inward);
+      const glow = ctx.createRadialGradient(width * 0.5, height * 0.5, 0, width * 0.5, height * 0.5, glowRadius);
+      glow.addColorStop(0, `rgba(202, 232, 238, ${0.16 + inward * 0.18})`);
+      glow.addColorStop(0.35, `rgba(202, 232, 238, ${0.08 * (1 - inward)})`);
+      glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, width, height);
+      drawSignalTunnelOverlay(width, height, time, lerp(0.24, 0.9, inward));
+      ctx.fillStyle = `rgba(0, 0, 0, ${inward * 0.58})`;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    function drawBootBlack(width, height, age, time) {
+      const t = connectProgress(age, CONNECT_SEQUENCE.pullInEnd, CONNECT_SEQUENCE.blackBootEnd);
+      ctx.save();
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, height);
+
+      const cx = width * 0.5;
+      const cy = height * 0.5;
+      const ringR = Math.min(width, height) * lerp(0.018, 0.12, easeOutCubic(t));
+      ctx.strokeStyle = `rgba(210, 228, 230, ${0.18 * (1 - t) + 0.08})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = `rgba(210, 228, 230, ${0.18 * Math.sin(t * Math.PI)})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(2, ringR * 0.12), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawDroneEyeAperture(width, height, open, noise) {
+      ctx.save();
+      const slit = height * lerp(0.01, 0.54, open);
+      const top = Math.max(0, height * 0.5 - slit);
+      const bottom = Math.min(height, height * 0.5 + slit);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, top);
+      ctx.fillRect(0, bottom, width, height - bottom);
+
+      const vignette = ctx.createRadialGradient(width * 0.5, height * 0.5, 0, width * 0.5, height * 0.5, Math.max(width, height) * 0.72);
+      vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+      vignette.addColorStop(0.6, `rgba(0, 0, 0, ${0.08 + noise * 0.08})`);
+      vignette.addColorStop(1, `rgba(0, 0, 0, ${0.52 + noise * 0.22})`);
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    function drawDroneEyeNoise(width, height, time, amount) {
+      if (amount <= 0.001) return;
+      ctx.save();
+      const lines = Math.floor(18 + amount * 40);
+      ctx.globalAlpha = amount;
+      ctx.fillStyle = "rgba(228, 238, 236, 0.16)";
+      for (let i = 0; i < lines; i += 1) {
+        const y = (i * 47 + time * 0.21) % height;
+        ctx.fillRect(0, y, width, 1);
+      }
+      const specks = Math.floor(60 + amount * 180);
+      for (let i = 0; i < specks; i += 1) {
+        ctx.fillStyle = Math.random() > 0.5
+          ? `rgba(255,255,255,${0.06 + amount * 0.1})`
+          : `rgba(0,0,0,${0.05 + amount * 0.09})`;
+        ctx.fillRect(Math.random() * width, Math.random() * height, 1 + Math.random() * 2, 1);
+      }
+      ctx.restore();
+    }
+
+    function drawGreetingLine(width, height, alpha) {
+      if (alpha <= 0.001) return;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const panelW = Math.min(width * 0.72, 620);
+      const panelH = 58;
+      const x = width * 0.5 - panelW * 0.5;
+      const y = height * 0.77;
+      ctx.fillStyle = "rgba(12, 10, 8, 0.34)";
+      ctx.fillRect(x, y, panelW, panelH);
+      ctx.strokeStyle = "rgba(248, 228, 176, 0.16)";
+      ctx.strokeRect(x + 0.5, y + 0.5, panelW - 1, panelH - 1);
+      ctx.fillStyle = "rgba(248, 238, 220, 0.9)";
+      ctx.font = `${Math.round(clamp(width * 0.022, 18, 28))}px 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("…아빠? 깼어?", width * 0.5, y + panelH * 0.5);
+      ctx.restore();
+    }
+
+    function drawShelterHubPreview(width, height, alpha) {
+      if (alpha <= 0.001) return;
+      const previewHotspots = [
+        ["REPAIR", 28, 58],
+        ["CRADLE", 50, 70],
+        ["RECORDS", 67, 42],
+        ["BED", 18, 48],
+        ["CHILD", 45, 55],
+        ["WINDOW", 75, 25],
+        ["PLANTS", 58, 62]
+      ];
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = "12px Consolas, 'D2Coding', monospace";
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(236, 233, 223, 0.58)";
+      ctx.fillText("MAT 018   PARTS 03   BAT 82%", 28, 32);
+      ctx.textAlign = "center";
+      for (const [label, px, py] of previewHotspots) {
+        const x = width * px / 100;
+        const y = height * py / 100;
+        ctx.strokeStyle = "rgba(232, 182, 107, 0.38)";
+        ctx.fillStyle = "rgba(232, 182, 107, 0.07)";
+        ctx.beginPath();
+        ctx.arc(x, y, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "rgba(236, 233, 223, 0.56)";
+        ctx.fillText(label, x, y - 30);
+      }
+      ctx.restore();
+    }
+
+    function drawDroneConnectTransition(width, height, time) {
+      if (droneConnectStartedAt === null) return;
+      const age = time - droneConnectStartedAt;
+      const phase = connectPhaseForAge(age);
+      document.documentElement.dataset.droneConnectPhase = phase;
+      document.documentElement.dataset.droneConnectAge = String(Math.round(age));
+
+      if (age >= CONNECT_SEQUENCE.pullInEnd && !connectBootCuePlayed) {
+        connectBootCuePlayed = true;
+        ambientAudio.playBootIris();
+      }
+      if (age >= CONNECT_SEQUENCE.blackBootEnd && !connectFocusCuePlayed) {
+        connectFocusCuePlayed = true;
+        ambientAudio.fadeToShelterTone();
+      }
+
+      if (phase === "pull-in") {
+        drawSignalPullIn(width, height, age, time);
+        return;
+      }
+
+      if (phase === "black-boot") {
+        drawBootBlack(width, height, age, time);
+        return;
+      }
+
+      const eyeT = connectProgress(age, CONNECT_SEQUENCE.blackBootEnd, CONNECT_SEQUENCE.eyesOpenEnd);
+      const gazeT = connectProgress(age, CONNECT_SEQUENCE.eyesOpenEnd, CONNECT_SEQUENCE.gazeFindsHerEnd);
+      const greetingT = connectProgress(age, CONNECT_SEQUENCE.gazeFindsHerEnd, CONNECT_SEQUENCE.greetingEnd);
+      const hubT = connectProgress(age, CONNECT_SEQUENCE.greetingEnd, CONNECT_SEQUENCE.hubFadeEnd);
+      const focus = clamp(eyeT * 0.78 + gazeT * 0.22, 0, 1);
+      const residualNoise = (1 - focus) * 0.68 + (phase === "greeting" ? 0.04 * (1 - greetingT) : 0);
+      const blur = lerp(18, 0, easeOutCubic(focus));
+      const cameraSettle = 1 - easeOutCubic(gazeT);
+
+      ctx.save();
+      ctx.translate(cameraSettle * width * 0.025, -cameraSettle * height * 0.016);
+      ctx.scale(1 + cameraSettle * 0.035, 1 + cameraSettle * 0.035);
+      ctx.filter = `blur(${blur.toFixed(2)}px) saturate(${lerp(0.58, 1, focus).toFixed(3)}) brightness(${lerp(0.78, 1.04, focus).toFixed(3)})`;
+      drawShelterViewLayer(width, height, time, {
+        childApproach: clamp(gazeT * 0.45 + greetingT * 0.55, 0, 1),
+        showAssetLabels: false,
+        warmth: focus,
+        hubAlpha: 0
+      });
+      ctx.restore();
+
+      drawDroneEyeNoise(width, height, time, residualNoise);
+      drawDroneEyeAperture(width, height, easeOutCubic(eyeT), residualNoise);
+      drawGreetingLine(width, height, phase === "greeting" || phase === "hub-fade" ? easeOutCubic(greetingT) * (1 - hubT * 0.18) : 0);
+      drawShelterHubPreview(width, height, easeOutCubic(hubT));
+    }
+
+    function drawShelterViewLayer(width, height, time, options = {}) {
       // SHELTER VIEW PLACEHOLDER.
       // REPLACE: draw ART_HOOKS.shelter.background / shelter_bg.png here.
+      const childApproach = clamp(options.childApproach ?? 0, 0, 1);
+      const showAssetLabels = options.showAssetLabels ?? true;
+      const warmth = clamp(options.warmth ?? 1, 0, 1);
       ctx.save();
       const bg = ctx.createLinearGradient(0, 0, 0, height);
-      bg.addColorStop(0, "#cfd6d3");
-      bg.addColorStop(1, "#8da0a6");
+      bg.addColorStop(0, `rgba(${Math.round(207 + warmth * 26)}, ${Math.round(214 + warmth * 12)}, ${Math.round(211 - warmth * 18)}, 1)`);
+      bg.addColorStop(1, `rgba(${Math.round(141 + warmth * 24)}, ${Math.round(160 + warmth * 11)}, ${Math.round(166 - warmth * 24)}, 1)`);
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, width, height);
 
-      ctx.fillStyle = "rgba(24, 32, 35, 0.28)";
+      ctx.fillStyle = `rgba(24, 32, 35, ${0.28 - warmth * 0.08})`;
       ctx.fillRect(width * 0.18, height * 0.28, width * 0.64, height * 0.38);
       ctx.strokeStyle = "rgba(235, 240, 236, 0.32)";
       ctx.setLineDash([12, 8]);
       ctx.strokeRect(width * 0.2, height * 0.31, width * 0.6, height * 0.32);
       ctx.setLineDash([]);
 
-      ctx.fillStyle = "rgba(235, 240, 236, 0.74)";
-      ctx.font = "18px Consolas, 'D2Coding', monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("SHELTER VIEW PLACEHOLDER", width * 0.5, height * 0.45);
-      ctx.font = "12px Consolas, 'D2Coding', monospace";
-      ctx.fillStyle = "rgba(235, 240, 236, 0.5)";
-      ctx.fillText("REPLACE: shelter_bg.png", width * 0.5, height * 0.5);
+      if (showAssetLabels) {
+        ctx.fillStyle = "rgba(235, 240, 236, 0.74)";
+        ctx.font = "18px Consolas, 'D2Coding', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("SHELTER VIEW PLACEHOLDER", width * 0.5, height * 0.45);
+        ctx.font = "12px Consolas, 'D2Coding', monospace";
+        ctx.fillStyle = "rgba(235, 240, 236, 0.5)";
+        ctx.fillText("REPLACE: shelter_bg.png", width * 0.5, height * 0.5);
+      }
 
       // REPLACE: draw ART_HOOKS.shelter.child sprite here.
+      const childX = lerp(width * 0.3, width * 0.44, easeOutCubic(childApproach));
+      const childY = lerp(height * 0.62, height * 0.57, easeOutCubic(childApproach));
+      const childScale = lerp(1, 1.42, easeOutCubic(childApproach));
       ctx.fillStyle = "rgba(240, 244, 240, 0.82)";
       ctx.beginPath();
-      ctx.arc(width * 0.3, height * 0.62, 9, 0, Math.PI * 2);
+      ctx.arc(childX, childY, 9 * childScale, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "rgba(20, 28, 31, 0.48)";
-      ctx.fillRect(width * 0.3 - 7, height * 0.64, 14, 34);
-      ctx.fillStyle = "rgba(235, 240, 236, 0.42)";
-      ctx.font = "11px Consolas, 'D2Coding', monospace";
-      ctx.fillText("REPLACE: child sprite", width * 0.3, height * 0.74);
+      ctx.fillRect(childX - 7 * childScale, childY + 13 * childScale, 14 * childScale, 34 * childScale);
+      ctx.strokeStyle = `rgba(248, 228, 176, ${0.12 + childApproach * 0.18})`;
+      ctx.beginPath();
+      ctx.arc(childX, childY + 22 * childScale, 28 * childScale, 0, Math.PI * 2);
+      ctx.stroke();
+      if (showAssetLabels) {
+        ctx.fillStyle = "rgba(235, 240, 236, 0.42)";
+        ctx.font = "11px Consolas, 'D2Coding', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("REPLACE: child sprite", childX, childY + 82 * childScale);
+      }
 
       const age = shelterArrivedAt === null ? 0 : time - shelterArrivedAt;
-      ctx.fillStyle = `rgba(248, 228, 176, ${0.08 + Math.sin(age * 0.001) * 0.03})`;
+      ctx.fillStyle = `rgba(248, 228, 176, ${0.08 + warmth * 0.08 + Math.sin(age * 0.001) * 0.03})`;
       ctx.fillRect(0, 0, width, height);
       ctx.restore();
     }
@@ -1849,11 +2517,13 @@
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, width, height);
 
-      if (screenMode === "connecting" && droneConnectStartedAt !== null && now - droneConnectStartedAt >= CONNECT_SEQUENCE.shelterBootEnd) {
+      if (screenMode === "connecting" && droneConnectStartedAt !== null && now - droneConnectStartedAt >= CONNECT_SEQUENCE.hubFadeEnd) {
         completeEnterGame();
       }
 
-      if (screenMode === "shelter") {
+      if (screenMode === "connecting") {
+        drawDroneConnectTransition(width, height, now);
+      } else if (screenMode === "shelter") {
         drawShelterViewLayer(width, height, now);
       } else if (screenMode === "stage-placeholder") {
         drawStagePlaceholderLayer(width, height, now);
@@ -1875,11 +2545,17 @@
       // LAYER 08: menu/UI. DOM overlay above every canvas layer.
       // Kept separate from art replacement path; final UI can restyle HTML/CSS.
       latestMenuOpacity = menuOpacity;
-      const letCssBootRevealHandleUi = screenMode === "title" && menuOpacity <= 0.001;
-      menu.style.opacity = letCssBootRevealHandleUi ? "" : String(menuOpacity);
-      menu.style.pointerEvents = letCssBootRevealHandleUi ? "" : (menuOpacity > 0.94 ? "auto" : "none");
-      audioToggle.style.opacity = letCssBootRevealHandleUi ? "" : String(menuOpacity);
-      audioToggle.style.pointerEvents = letCssBootRevealHandleUi ? "" : (menuOpacity > 0.94 ? "auto" : "none");
+      const uiOpacity =
+        screenMode === "title" ? menuOpacity :
+        screenMode === "shelter" || screenMode === "stage-placeholder" ? 1 :
+        0;
+      const letCssBootRevealHandleUi = screenMode === "title" && uiOpacity <= 0.001;
+      menu.style.animation = screenMode === "title" ? "" : "none";
+      audioToggle.style.animation = screenMode === "title" ? "" : "none";
+      menu.style.opacity = letCssBootRevealHandleUi ? "" : String(uiOpacity);
+      menu.style.pointerEvents = letCssBootRevealHandleUi ? "" : (uiOpacity > 0.94 ? "auto" : "none");
+      audioToggle.style.opacity = letCssBootRevealHandleUi ? "" : String(uiOpacity);
+      audioToggle.style.pointerEvents = letCssBootRevealHandleUi ? "" : (uiOpacity > 0.94 ? "auto" : "none");
 
       const primaryButton = menu.querySelector("button[data-choice]");
       if (primaryButton) {
@@ -1895,10 +2571,10 @@
       }
 
       // SYSTEM: continue only exists when localStorage has a valid save.
-      continueButton.disabled = loadSave() === null;
+      continueButton.disabled = screenMode === "connecting" || loadSave() === null;
 
       // SYSTEM: reachedLettingGoEnding gates the prompt overlay.
-      const endingOpacity = saveState.reachedLettingGoEnding ? menuOpacity : 0;
+      const endingOpacity = saveState.reachedLettingGoEnding && screenMode === "title" ? uiOpacity : 0;
       endingPrompt.style.opacity = String(endingOpacity);
       endingPrompt.style.pointerEvents = endingOpacity > 0.94 ? "auto" : "none";
     }
@@ -1915,9 +2591,10 @@
         this.master = null;
         this.bgm = bgmAudio;
         this.isMuted = false;
+        this.targetBgmVolume = 0.58;
         this.beepTimer = 0;
         if (this.bgm) {
-          this.bgm.volume = 0.58;
+          this.bgm.volume = this.targetBgmVolume;
           this.bgm.muted = false;
         }
         document.documentElement.dataset.audioContextStarted = "false";
@@ -1944,12 +2621,13 @@
         this.createWaterNoise();
         this.createDroneHum();
         this.scheduleNextBeep();
+        this.master.gain.setTargetAtTime(this.isMuted ? 0 : 0.8, this.context.currentTime, 0.18);
       }
 
       startBgm() {
         if (!this.bgm) return;
         this.bgm.muted = this.isMuted;
-        this.bgm.volume = this.isMuted ? 0 : 0.58;
+        this.bgm.volume = this.isMuted ? 0 : this.targetBgmVolume;
 
         const playPromise = this.bgm.play();
         if (playPromise && typeof playPromise.catch === "function") {
@@ -2037,12 +2715,82 @@
         osc.stop(now + 0.22);
       }
 
+      playSignalPullIn() {
+        if (!this.context || !this.master || this.isMuted) return;
+        const now = this.context.currentTime;
+        const osc = this.context.createOscillator();
+        const gain = this.context.createGain();
+        const filter = this.context.createBiquadFilter();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(980, now);
+        osc.frequency.exponentialRampToValueAtTime(146, now + 1.35);
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(1200, now);
+        filter.frequency.exponentialRampToValueAtTime(240, now + 1.35);
+        filter.Q.value = 7.5;
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.045, now + 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.46);
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.master);
+        osc.start(now);
+        osc.stop(now + 1.5);
+      }
+
+      playBootIris() {
+        if (!this.context || !this.master || this.isMuted) return;
+        const now = this.context.currentTime;
+        const low = this.context.createOscillator();
+        const high = this.context.createOscillator();
+        const lowGain = this.context.createGain();
+        const highGain = this.context.createGain();
+        low.type = "sine";
+        high.type = "triangle";
+        low.frequency.setValueAtTime(48, now);
+        low.frequency.exponentialRampToValueAtTime(92, now + 0.42);
+        high.frequency.setValueAtTime(440, now);
+        high.frequency.exponentialRampToValueAtTime(1180, now + 0.26);
+        lowGain.gain.setValueAtTime(0.0001, now);
+        lowGain.gain.exponentialRampToValueAtTime(0.055, now + 0.05);
+        lowGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
+        highGain.gain.setValueAtTime(0.0001, now + 0.08);
+        highGain.gain.exponentialRampToValueAtTime(0.02, now + 0.14);
+        highGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+        low.connect(lowGain);
+        high.connect(highGain);
+        lowGain.connect(this.master);
+        highGain.connect(this.master);
+        low.start(now);
+        high.start(now + 0.04);
+        low.stop(now + 0.68);
+        high.stop(now + 0.56);
+      }
+
+      fadeToShelterTone() {
+        this.targetBgmVolume = 0.34;
+        if (this.bgm && !this.isMuted) this.bgm.volume = this.targetBgmVolume;
+        if (!this.master || !this.context) return;
+        const now = this.context.currentTime;
+        this.master.gain.cancelScheduledValues(now);
+        this.master.gain.setTargetAtTime(this.isMuted ? 0 : 0.56, now, 0.42);
+      }
+
+      restoreTitleTone() {
+        this.targetBgmVolume = 0.58;
+        if (this.bgm && !this.isMuted) this.bgm.volume = this.targetBgmVolume;
+        if (!this.master || !this.context) return;
+        const now = this.context.currentTime;
+        this.master.gain.cancelScheduledValues(now);
+        this.master.gain.setTargetAtTime(this.isMuted ? 0 : 0.8, now, 0.18);
+      }
+
       setMuted(nextMuted) {
         this.isMuted = nextMuted;
         this.ensureStarted();
         if (this.bgm) {
           this.bgm.muted = this.isMuted;
-          this.bgm.volume = this.isMuted ? 0 : 0.58;
+          this.bgm.volume = this.isMuted ? 0 : this.targetBgmVolume;
         }
         audioToggle.textContent = this.isMuted ? "소리 꺼짐" : "소리 켜짐";
         document.documentElement.dataset.audioMuted = String(this.isMuted);
@@ -2233,6 +2981,7 @@
     function createShelterEntryUrl(intent) {
       const params = new URLSearchParams();
       params.set("entry", intent);
+      params.set("arrival", "drone-wake");
       return `${SHELTER_ENTRY_PATH}?${params.toString()}`;
     }
 
@@ -2243,15 +2992,19 @@
       screenMode = "connecting";
       droneConnectStartedAt = performance.now();
       shelterArrivedAt = null;
+      connectBootCuePlayed = false;
+      connectFocusCuePlayed = false;
       document.documentElement.dataset.screenMode = screenMode;
       document.documentElement.dataset.droneConnect = "started";
       console.log("enterGame state:", next);
+      ambientAudio.ensureStarted();
+      ambientAudio.playSignalPullIn();
       syncDebugDataset();
       updateDom(latestMenuOpacity);
       window.clearTimeout(connectCompletionTimer);
       connectCompletionTimer = window.setTimeout(() => {
         completeEnterGame();
-      }, CONNECT_SEQUENCE.shelterBootEnd + 120);
+      }, CONNECT_SEQUENCE.hubFadeEnd + 120);
     }
 
     async function completeEnterGame() {
@@ -2287,10 +3040,13 @@
         shelterArrivedAt = null;
         pendingEnterState = null;
         entryCompletionStarted = false;
+        connectBootCuePlayed = false;
+        connectFocusCuePlayed = false;
         window.clearTimeout(connectCompletionTimer);
         connectCompletionTimer = null;
         document.documentElement.dataset.screenMode = screenMode;
         document.documentElement.dataset.droneConnect = "idle";
+        ambientAudio.restoreTitleTone();
         syncDebugDataset();
         updateDom(latestMenuOpacity);
       }
