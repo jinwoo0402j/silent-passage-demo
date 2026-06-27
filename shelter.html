@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>윤회 무명 — Shelter</title>
+  <link rel="icon" href="data:,">
   <style>
     :root {
       color-scheme: dark;
@@ -15,6 +16,21 @@
       --panel-bg: rgba(16, 14, 12, 0.84);
       --panel-line: rgba(236, 233, 223, 0.18);
       --sanity-light: 1;
+      --room-drift-x: 0px;
+      --room-drift-y: 0px;
+      --near-drift-x: 0px;
+      --near-drift-y: 0px;
+      --zone-bg-opacity: 1;
+      --zone-bg-scale: 1;
+      --zone-transition-opacity: 0;
+      --zone-transition-scale: 1.08;
+      --drone-x: 0px;
+      --drone-y: 0px;
+      --drone-scale: 1;
+      --child-x: 53%;
+      --child-y: 47%;
+      --child-gaze-x: 0px;
+      --child-gaze-y: 0px;
     }
 
     html,
@@ -38,6 +54,23 @@
       color: var(--ink);
     }
 
+    .shelter-shell::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      pointer-events: none;
+      opacity: 0;
+      background:
+        radial-gradient(circle at 45% 48%, rgba(248, 228, 176, 0.1), transparent 34%),
+        radial-gradient(circle at 50% 50%, transparent 0 52%, rgba(0, 0, 0, 0.24) 78%, rgba(0, 0, 0, 0.56) 100%);
+      transition: opacity 900ms ease;
+    }
+
+    body.is-arriving .shelter-shell::after {
+      opacity: 1;
+    }
+
     .scene {
       position: relative;
       width: 100vw;
@@ -47,72 +80,202 @@
       overflow: hidden;
       background: #11100e;
       isolation: isolate;
+      cursor: crosshair;
+    }
+
+    .scene::before,
+    .scene::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .scene::before {
+      z-index: 6;
+      background:
+        radial-gradient(circle at 50% 47%, transparent 0 48%, rgba(18, 15, 12, 0.18) 70%, rgba(4, 3, 3, 0.5) 100%),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.18), transparent 16%, transparent 84%, rgba(0, 0, 0, 0.2));
+      mix-blend-mode: multiply;
+    }
+
+    .scene::after {
+      z-index: 6;
+      background:
+        radial-gradient(ellipse at 50% 47%, transparent 0 58%, rgba(180, 218, 198, 0.035) 76%, rgba(0, 0, 0, 0.16) 100%);
+      backdrop-filter: blur(0.7px);
+      mask-image: radial-gradient(circle at 50% 47%, transparent 0 55%, #000 76%);
     }
 
     .bg-layer {
       position: absolute;
       inset: 0;
       overflow: hidden;
+      transform: translate3d(var(--room-drift-x), var(--room-drift-y), 0) scale(1.018);
+      transition: transform 520ms ease-out;
       background:
         linear-gradient(180deg, rgba(43, 41, 35, 0.78) 0%, rgba(22, 20, 17, 0.92) 100%),
         radial-gradient(circle at 76% 30%, rgba(232, 182, 107, 0.22), transparent 28%),
         radial-gradient(circle at 22% 68%, rgba(107, 139, 100, 0.18), transparent 26%);
     }
 
-    .bg-placeholder {
+    .shelter-bg-image {
       position: absolute;
-      inset: clamp(18px, 4vw, 54px);
-      border: 1px dashed rgba(236, 233, 223, 0.22);
-      background:
-        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 52px 52px,
-        linear-gradient(0deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px) 0 0 / 52px 52px,
-        rgba(22, 20, 17, 0.3);
-      box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.45);
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center center;
+      opacity: var(--zone-bg-opacity);
+      transform: scale(var(--zone-bg-scale));
+      transition: opacity 120ms linear, transform 120ms ease-out;
+      user-select: none;
+      -webkit-user-drag: none;
     }
 
-    .placeholder-label {
+    .zone-placeholder,
+    .zone-transition-layer {
       position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      color: rgba(236, 233, 223, 0.38);
-      font-size: 13px;
-      letter-spacing: 0;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .zone-placeholder {
+      z-index: 0;
+      display: grid;
+      place-items: center;
+      opacity: 0;
+      transition: opacity 160ms linear, transform 160ms ease-out;
+      transform: scale(var(--zone-bg-scale));
+      background:
+        linear-gradient(120deg, rgba(232, 182, 107, 0.08), transparent 42%),
+        radial-gradient(circle at 50% 42%, rgba(143, 174, 122, 0.14), transparent 34%),
+        repeating-linear-gradient(90deg, rgba(236, 233, 223, 0.035) 0 1px, transparent 1px 72px),
+        repeating-linear-gradient(0deg, rgba(236, 233, 223, 0.03) 0 1px, transparent 1px 72px),
+        linear-gradient(180deg, #191a15 0%, #0f0e0c 100%);
+    }
+
+    .zone-placeholder.is-active {
+      opacity: var(--zone-bg-opacity);
+    }
+
+    .zone-placeholder-card {
+      display: grid;
+      gap: 12px;
+      place-items: center;
+      width: min(520px, calc(100vw - 48px));
+      padding: 32px 24px;
+      border: 1px solid rgba(236, 233, 223, 0.14);
+      background: rgba(10, 9, 8, 0.36);
+      color: rgba(236, 233, 223, 0.62);
       text-align: center;
-      white-space: nowrap;
+      box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.18);
+    }
+
+    .zone-placeholder-title {
+      font-size: clamp(20px, 3.2vw, 42px);
+      color: rgba(236, 233, 223, 0.78);
+      letter-spacing: 0;
+    }
+
+    .zone-placeholder-subtitle {
+      font-size: 12px;
+      color: rgba(236, 233, 223, 0.42);
+    }
+
+    .zone-transition-layer {
+      z-index: 2;
+      opacity: var(--zone-transition-opacity);
+      transform: scale(var(--zone-transition-scale));
+      transform-origin: center center;
+      transition: none;
+    }
+
+    .zone-transition-image {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center center;
+      opacity: 0;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    .zone-transition-layer.has-image .zone-transition-image {
+      opacity: 1;
+    }
+
+    .zone-transition-placeholder {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      opacity: 0;
+      background:
+        linear-gradient(120deg, rgba(232, 182, 107, 0.1), transparent 44%),
+        radial-gradient(circle at 50% 42%, rgba(143, 174, 122, 0.14), transparent 34%),
+        repeating-linear-gradient(90deg, rgba(236, 233, 223, 0.035) 0 1px, transparent 1px 72px),
+        repeating-linear-gradient(0deg, rgba(236, 233, 223, 0.03) 0 1px, transparent 1px 72px),
+        linear-gradient(180deg, #191a15 0%, #0f0e0c 100%);
+    }
+
+    .zone-transition-layer.has-placeholder .zone-transition-placeholder {
+      opacity: 1;
     }
 
     .room-sketch {
       position: absolute;
       inset: 0;
+      z-index: 3;
       pointer-events: none;
-      opacity: 0.9;
+      opacity: 0.68;
+    }
+
+    .room-sketch::after {
+      content: "";
+      position: absolute;
+      left: 34%;
+      top: -8%;
+      width: 34%;
+      height: 88%;
+      pointer-events: none;
+      background: linear-gradient(104deg, rgba(248, 238, 220, 0.22), rgba(184, 237, 225, 0.08) 42%, transparent 70%);
+      mix-blend-mode: screen;
+      opacity: 0.2;
+      filter: blur(10px);
+      transform-origin: top center;
+      animation: lightShaft 12s ease-in-out infinite alternate;
     }
 
     .window-glow {
       position: absolute;
-      right: 7%;
-      top: 11%;
-      width: 26%;
-      height: 33%;
-      border: 1px solid rgba(236, 233, 223, 0.18);
+      left: 30%;
+      top: 13%;
+      width: 42%;
+      height: 52%;
+      border: 0;
+      background: transparent;
+      box-shadow: 0 0 80px rgba(184, 237, 225, calc(0.12 * var(--sanity-light)));
+      overflow: hidden;
+    }
+
+    .water-shimmer {
+      position: absolute;
+      inset: 58% -10% 2%;
       background:
-        linear-gradient(180deg, rgba(219, 220, 207, 0.28), rgba(113, 139, 145, 0.18)),
-        repeating-linear-gradient(90deg, rgba(236, 233, 223, 0.14) 0 1px, transparent 1px 46px);
-      box-shadow: 0 0 80px rgba(232, 182, 107, calc(0.22 * var(--sanity-light)));
+        repeating-linear-gradient(0deg, rgba(236, 247, 245, 0.2) 0 1px, transparent 1px 11px),
+        linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+      opacity: 0.18;
+      transform: skewX(-9deg);
+      animation: waterShimmer 8.6s ease-in-out infinite alternate;
     }
 
     .floor {
-      position: absolute;
-      left: -6%;
-      right: -6%;
-      bottom: -8%;
-      height: 35%;
-      transform: skewY(-3deg);
-      background:
-        linear-gradient(90deg, rgba(236, 233, 223, 0.07) 1px, transparent 1px) 0 0 / 76px 100%,
-        linear-gradient(180deg, rgba(67, 54, 39, 0.42), rgba(19, 16, 14, 0.72));
-      border-top: 1px solid rgba(236, 233, 223, 0.08);
+      display: none;
     }
 
     .soft-dust {
@@ -123,6 +286,274 @@
         radial-gradient(circle at 50% 72%, rgba(232, 182, 107, 0.07), transparent 28%),
         radial-gradient(circle at 75% 65%, rgba(236, 233, 223, 0.04), transparent 24%);
       mix-blend-mode: screen;
+    }
+
+    .room-life {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      pointer-events: none;
+      transform: translate3d(var(--near-drift-x), var(--near-drift-y), 0);
+      transition: transform 520ms ease-out, opacity 420ms ease;
+    }
+
+    .room-life.is-zone-muted {
+      opacity: 0;
+    }
+
+    .hanging-bulb {
+      position: absolute;
+      left: 48%;
+      top: 5%;
+      width: 1px;
+      height: 21%;
+      transform-origin: top center;
+      background: rgba(236, 233, 223, 0.22);
+      animation: bulbSway 7.8s ease-in-out infinite;
+    }
+
+    .hanging-bulb::after {
+      content: "";
+      position: absolute;
+      left: -8px;
+      bottom: -12px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: rgba(248, 228, 176, 0.52);
+      box-shadow: 0 0 34px rgba(232, 182, 107, 0.32), 0 0 90px rgba(232, 182, 107, 0.16);
+      animation: bulbFlicker 5.4s linear infinite;
+    }
+
+    .laundry-line {
+      position: absolute;
+      left: 61%;
+      top: 19%;
+      width: 19%;
+      height: 1px;
+      background: rgba(236, 233, 223, 0.16);
+      transform: rotate(7deg);
+    }
+
+    .laundry-line span {
+      position: absolute;
+      top: 2px;
+      width: 24px;
+      height: 34px;
+      border-radius: 2px 2px 7px 7px;
+      background: rgba(236, 233, 223, 0.12);
+      transform-origin: top center;
+      animation: laundryDrift 9s ease-in-out infinite;
+    }
+
+    .laundry-line span:nth-child(1) {
+      left: 16%;
+      animation-delay: -1.8s;
+    }
+
+    .laundry-line span:nth-child(2) {
+      left: 42%;
+      height: 42px;
+      animation-delay: -4.1s;
+    }
+
+    .laundry-line span:nth-child(3) {
+      left: 68%;
+      animation-delay: -6.3s;
+    }
+
+    .plant-life {
+      position: absolute;
+      left: 54%;
+      top: 48%;
+      width: 82px;
+      height: 80px;
+    }
+
+    .plant-life::before {
+      content: "";
+      position: absolute;
+      left: 22px;
+      bottom: 0;
+      width: 38px;
+      height: 19px;
+      border-radius: 0 0 12px 12px;
+      background: rgba(70, 52, 36, 0.42);
+    }
+
+    .plant-life span {
+      position: absolute;
+      left: 38px;
+      bottom: 16px;
+      width: 9px;
+      height: 42px;
+      border-radius: 50% 50% 0 50%;
+      background: rgba(143, 174, 122, 0.32);
+      transform-origin: bottom center;
+      animation: leafMove 6.8s ease-in-out infinite;
+    }
+
+    .plant-life span:nth-child(1) {
+      transform: rotate(-34deg);
+      animation-delay: -1.4s;
+    }
+
+    .plant-life span:nth-child(2) {
+      height: 54px;
+      transform: rotate(-9deg);
+      animation-delay: -3.7s;
+    }
+
+    .plant-life span:nth-child(3) {
+      transform: rotate(24deg);
+      animation-delay: -5.2s;
+    }
+
+    .record-terminal-glow {
+      position: absolute;
+      left: 77.5%;
+      top: 42%;
+      width: 4.8%;
+      height: 8.4%;
+      border-radius: 2px;
+      background: rgba(183, 226, 208, 0.12);
+      box-shadow: 0 0 18px rgba(183, 226, 208, 0.18);
+      animation: terminalFlicker 4.2s steps(4, end) infinite;
+    }
+
+    .dust-mote {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      background: rgba(248, 238, 220, 0.42);
+      box-shadow: 0 0 7px rgba(248, 238, 220, 0.3);
+      opacity: 0.32;
+      animation: dustFloat var(--dust-dur, 12s) linear infinite;
+      animation-delay: var(--dust-delay, 0s);
+    }
+
+    .child-actor {
+      position: absolute;
+      left: var(--child-x);
+      top: var(--child-y);
+      z-index: 6;
+      width: 44px;
+      height: 96px;
+      transform: translate(-50%, -100%);
+      transition: left 3200ms cubic-bezier(0.22, 0.7, 0.22, 1), top 3200ms cubic-bezier(0.22, 0.7, 0.22, 1), filter 360ms ease;
+      filter: drop-shadow(0 18px 22px rgba(0, 0, 0, 0.34));
+    }
+
+    .child-actor.is-aware {
+      filter: drop-shadow(0 18px 22px rgba(0, 0, 0, 0.34)) drop-shadow(0 0 18px rgba(248, 228, 176, 0.16));
+    }
+
+    .child-head {
+      position: absolute;
+      left: 50%;
+      top: 7px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(238, 240, 235, 0.84);
+      transform: translateX(-50%) translate(var(--child-gaze-x), var(--child-gaze-y));
+      transition: transform 420ms ease;
+    }
+
+    .child-head::after {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 10px;
+      width: 14px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(20, 18, 17, 0.32);
+      opacity: 0.7;
+    }
+
+    .child-body {
+      position: absolute;
+      left: 50%;
+      top: 32px;
+      width: 23px;
+      height: 44px;
+      border-radius: 10px 10px 6px 6px;
+      background: rgba(24, 22, 21, 0.58);
+      transform: translateX(-50%);
+      animation: childBreath 3.8s ease-in-out infinite;
+    }
+
+    .child-arm {
+      position: absolute;
+      top: 40px;
+      width: 7px;
+      height: 34px;
+      border-radius: 999px;
+      background: rgba(35, 31, 29, 0.5);
+      transform-origin: top center;
+      animation: childHands 5.6s ease-in-out infinite;
+    }
+
+    .child-arm.left {
+      left: 8px;
+    }
+
+    .child-arm.right {
+      right: 8px;
+      animation-delay: -2.8s;
+    }
+
+    .child-ambient-line {
+      position: absolute;
+      left: 50%;
+      top: -12px;
+      min-width: 150px;
+      transform: translate(-50%, -100%);
+      padding: 7px 10px;
+      border: 1px solid rgba(248, 228, 176, 0.16);
+      background: rgba(10, 8, 7, 0.52);
+      color: rgba(248, 238, 220, 0.78);
+      font: 13px/1.25 "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      text-align: center;
+      opacity: 0;
+      transition: opacity 620ms ease, transform 620ms ease;
+    }
+
+    .child-ambient-line.is-visible {
+      opacity: 1;
+      transform: translate(-50%, -118%);
+    }
+
+    .drone-reticle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      z-index: 9;
+      width: 42px;
+      height: 42px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0.24;
+      transition: opacity 300ms ease;
+    }
+
+    .drone-reticle::before,
+    .drone-reticle::after {
+      content: "";
+      position: absolute;
+      inset: 50% auto auto 50%;
+      width: 26px;
+      height: 1px;
+      transform: translate(-50%, -50%);
+      background: rgba(236, 233, 223, 0.28);
+    }
+
+    .drone-reticle::after {
+      width: 1px;
+      height: 26px;
     }
 
     .drone-vignette {
@@ -146,6 +577,7 @@
       color: rgba(236, 233, 223, 0.64);
       font-size: 12px;
       text-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+      transition: opacity 900ms ease;
     }
 
     .hud span {
@@ -165,6 +597,22 @@
       z-index: 2;
     }
 
+    #hotspotLayer {
+      position: absolute;
+      inset: 0;
+      z-index: 7;
+      transition: opacity 900ms ease;
+      transform: translate3d(var(--near-drift-x), var(--near-drift-y), 0);
+    }
+
+    body.is-arriving .hud,
+    body.is-arriving .zone-minimap,
+    body.is-arriving .zone-prompt,
+    body.is-arriving #hotspotLayer {
+      opacity: 0;
+      pointer-events: none;
+    }
+
     .hotspot {
       position: absolute;
       z-index: 7;
@@ -174,7 +622,7 @@
       box-shadow: none;
       cursor: pointer;
       transform: translate(-50%, -50%);
-      transition: border-color 120ms linear, background 120ms linear, box-shadow 120ms linear;
+      transition: border-color 420ms ease, background 420ms ease, box-shadow 420ms ease, transform 420ms ease;
     }
 
     .hotspot::before {
@@ -199,23 +647,269 @@
       white-space: nowrap;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 120ms linear, transform 120ms linear;
+      transition: opacity 520ms ease 260ms, transform 520ms ease 260ms;
     }
 
-    .hotspot:hover,
+    .hotspot.is-near,
     .hotspot.is-focused,
     .hotspot:focus-visible {
       border-color: rgba(232, 182, 107, 0.46);
       background: rgba(232, 182, 107, 0.08);
       box-shadow: 0 0 30px rgba(232, 182, 107, 0.24), inset 0 0 28px rgba(232, 182, 107, 0.08);
+      transform: translate(-50%, -50%) scale(1.035);
       outline: none;
     }
 
-    .hotspot:hover::after,
+    .hotspot.is-near::after,
     .hotspot.is-focused::after,
     .hotspot:focus-visible::after {
       opacity: 1;
       transform: translate(-50%, -108%);
+    }
+
+    .hotspot.is-zone-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .zone-minimap {
+      position: absolute;
+      left: clamp(18px, 3vw, 38px);
+      bottom: clamp(18px, 3vw, 34px);
+      z-index: 12;
+      width: clamp(168px, 16vw, 218px);
+      aspect-ratio: 1.32;
+      padding: 8px;
+      border: 1px solid rgba(236, 233, 223, 0.12);
+      background: rgba(8, 7, 6, 0.34);
+      transition: opacity 420ms ease;
+    }
+
+    .zone-map-cell {
+      position: absolute;
+      appearance: none;
+      padding: 0;
+      border: 1px solid rgba(236, 233, 223, 0.14);
+      background: rgba(236, 233, 223, 0.04);
+      opacity: 0.32;
+      cursor: default;
+      transition: opacity 240ms ease, border-color 240ms ease, background 240ms ease, box-shadow 240ms ease;
+    }
+
+    .zone-map-cell.is-room {
+      opacity: 0.62;
+    }
+
+    .zone-map-cell.is-adjacent {
+      border-color: rgba(143, 174, 122, 0.54);
+      background: rgba(143, 174, 122, 0.1);
+      opacity: 0.84;
+      cursor: pointer;
+    }
+
+    .zone-map-cell.is-current {
+      border-color: rgba(232, 182, 107, 0.68);
+      background: rgba(232, 182, 107, 0.22);
+      box-shadow: 0 0 18px rgba(232, 182, 107, 0.24);
+      opacity: 1;
+    }
+
+    .zone-map-cell::after {
+      content: attr(data-short);
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: rgba(236, 233, 223, 0.48);
+      font: 8px/1 Consolas, "D2Coding", monospace;
+      pointer-events: none;
+    }
+
+    .zone-map-cell.is-current::after {
+      color: rgba(248, 228, 176, 0.86);
+    }
+
+    .zone-prompt {
+      position: absolute;
+      left: 50%;
+      bottom: clamp(20px, 4vh, 48px);
+      z-index: 12;
+      min-width: 180px;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border: 1px solid rgba(236, 233, 223, 0.12);
+      background: rgba(8, 7, 6, 0.38);
+      color: rgba(236, 233, 223, 0.58);
+      font: 12px/1.2 Consolas, "D2Coding", monospace;
+      text-align: center;
+      opacity: 0;
+      transition: opacity 420ms ease, transform 420ms ease;
+      pointer-events: none;
+    }
+
+    .zone-prompt.is-visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-4px);
+    }
+
+    .drone-body {
+      position: absolute;
+      left: 50%;
+      bottom: 8.5%;
+      z-index: 8;
+      width: 54px;
+      height: 18px;
+      border-radius: 50%;
+      background: radial-gradient(ellipse at 50% 44%, rgba(236, 233, 223, 0.22), rgba(236, 233, 223, 0.05) 58%, transparent 76%);
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+      opacity: 0.34;
+      transform: translate3d(calc(-50% + var(--drone-x)), var(--drone-y), 0) scale(var(--drone-scale));
+      transition: transform 520ms ease-out, opacity 420ms ease;
+      pointer-events: none;
+    }
+
+    body.is-arriving .drone-body {
+      opacity: 0;
+    }
+
+    .shelter-audio-toggle {
+      position: fixed;
+      right: clamp(18px, 3vw, 38px);
+      top: clamp(18px, 3vw, 34px);
+      z-index: 12;
+      border: 0;
+      background: transparent;
+      color: rgba(236, 233, 223, 0.44);
+      cursor: pointer;
+      font: 12px/1 Consolas, "D2Coding", monospace;
+      padding: 5px 0;
+      text-shadow: 0 0 12px rgba(0, 0, 0, 0.45);
+    }
+
+    .shelter-audio-toggle:hover,
+    .shelter-audio-toggle:focus-visible {
+      color: rgba(236, 233, 223, 0.78);
+      outline: none;
+    }
+
+    @keyframes waterShimmer {
+      from {
+        transform: translateX(-8%) skewX(-9deg);
+        opacity: 0.24;
+      }
+
+      to {
+        transform: translateX(8%) skewX(-9deg);
+        opacity: 0.4;
+      }
+    }
+
+    @keyframes bulbSway {
+      0%, 100% {
+        transform: rotate(-1.2deg);
+      }
+
+      50% {
+        transform: rotate(1.4deg);
+      }
+    }
+
+    @keyframes bulbFlicker {
+      0%, 100% {
+        opacity: 0.88;
+      }
+
+      47% {
+        opacity: 0.74;
+      }
+
+      49% {
+        opacity: 0.94;
+      }
+
+      72% {
+        opacity: 0.8;
+      }
+    }
+
+    @keyframes laundryDrift {
+      0%, 100% {
+        transform: rotate(-2deg);
+      }
+
+      50% {
+        transform: rotate(2.8deg);
+      }
+    }
+
+    @keyframes leafMove {
+      0%, 100% {
+        margin-left: 0;
+      }
+
+      50% {
+        margin-left: 3px;
+      }
+    }
+
+    @keyframes terminalFlicker {
+      0%, 100% {
+        opacity: 0.38;
+      }
+
+      12% {
+        opacity: 0.12;
+      }
+
+      18% {
+        opacity: 0.5;
+      }
+
+      64% {
+        opacity: 0.22;
+      }
+    }
+
+    @keyframes lightShaft {
+      from {
+        opacity: 0.14;
+        transform: translateX(-10px) rotate(2deg);
+      }
+
+      to {
+        opacity: 0.24;
+        transform: translateX(10px) rotate(-1deg);
+      }
+    }
+
+    @keyframes dustFloat {
+      from {
+        transform: translate3d(0, 12px, 0);
+      }
+
+      to {
+        transform: translate3d(28px, -86px, 0);
+      }
+    }
+
+    @keyframes childBreath {
+      0%, 100% {
+        transform: translateX(-50%) scaleY(1);
+      }
+
+      50% {
+        transform: translateX(-50%) scaleY(1.035);
+      }
+    }
+
+    @keyframes childHands {
+      0%, 100% {
+        transform: rotate(4deg);
+      }
+
+      50% {
+        transform: rotate(-8deg);
+      }
     }
 
     .modal {
@@ -319,14 +1013,43 @@
   <main class="shelter-shell">
     <section id="scene" class="scene" aria-label="Drone view of shelter hub">
       <div class="bg-layer" aria-hidden="true">
-        <div class="bg-placeholder">
-          <div class="placeholder-label">PLACEHOLDER ASSET: shelter_bg.png</div>
+        <img id="shelterBgImage" class="shelter-bg-image" alt="" decoding="async">
+        <div id="zonePlaceholder" class="zone-placeholder">
+          <div class="zone-placeholder-card">
+            <div class="zone-placeholder-title"></div>
+            <div class="zone-placeholder-subtitle"></div>
+          </div>
+        </div>
+        <div id="zoneTransitionLayer" class="zone-transition-layer">
+          <img id="zoneTransitionImage" class="zone-transition-image" alt="" decoding="async">
+          <div id="zoneTransitionPlaceholder" class="zone-transition-placeholder">
+            <div class="zone-placeholder-card">
+              <div class="zone-placeholder-title"></div>
+              <div class="zone-placeholder-subtitle"></div>
+            </div>
+          </div>
         </div>
         <div class="room-sketch">
-          <div class="window-glow"></div>
+          <div class="window-glow">
+            <div class="water-shimmer"></div>
+          </div>
           <div class="floor"></div>
           <div class="soft-dust"></div>
           <div class="sanity-aura" id="sanityAura"></div>
+        </div>
+      </div>
+
+      <div id="roomLife" class="room-life" aria-hidden="true">
+        <div class="hanging-bulb"></div>
+        <div class="laundry-line"><span></span><span></span><span></span></div>
+        <div class="plant-life"><span></span><span></span><span></span></div>
+        <div class="record-terminal-glow"></div>
+        <div id="childActor" class="child-actor">
+          <div id="childAmbientLine" class="child-ambient-line"></div>
+          <div class="child-head"></div>
+          <div class="child-body"></div>
+          <div class="child-arm left"></div>
+          <div class="child-arm right"></div>
         </div>
       </div>
 
@@ -337,9 +1060,16 @@
       </div>
 
       <div id="hotspotLayer" aria-label="shelter objects"></div>
+      <div id="zoneMinimap" class="zone-minimap" aria-label="shelter zone map"></div>
+      <div id="zonePrompt" class="zone-prompt" aria-live="polite"></div>
+      <div id="droneBody" class="drone-body" aria-hidden="true"></div>
+      <div class="drone-reticle" aria-hidden="true"></div>
       <div class="drone-vignette" aria-hidden="true"></div>
     </section>
   </main>
+
+  <button id="shelterAudioToggle" class="shelter-audio-toggle" type="button">소리 켜짐</button>
+  <audio id="shelterBgmAudio" src="assets/audio/rain-on-glass.mp3" preload="auto" loop></audio>
 
   <section id="modal" class="modal" aria-modal="true" aria-hidden="true" role="dialog">
     <div class="panel">
@@ -358,6 +1088,12 @@
     // localStorage key and base shape should stay compatible with index.html.
     const SAVE_KEY = "yunhoe_save";
     const GAME_ENTRY_PATH = "./index.html";
+    const SHELTER_BG_SRC = "./assets/backgrounds/shelter_bg.png?v=20260624-temp-art";
+    const SHELTER_ARRIVAL = Object.freeze({
+      queryValue: "drone-wake",
+      holdMs: 180,
+      fadeMs: 900
+    });
     const DEFAULT_SAVE = {
       deaths: 0,
       sanity: 100,
@@ -380,8 +1116,23 @@
     // these null hooks with loaded PNGs/sprites/sequences when final art exists.
     const ART_HOOKS = {
       shelter: {
-        background: null, // REPLACE: load shelter_bg.png here.
-        dronePovOverlay: null // REPLACE: optional drone-lens overlay image/sequence.
+        // TEMP ART HOOK: replace this with the final shelter_bg.png or sprite sequence later.
+        backgroundSrc: SHELTER_BG_SRC,
+        dronePovOverlay: null, // REPLACE: optional drone-lens overlay image/sequence.
+        // ZONE LAYER-SWAP HOOK: later replace each single room image with
+        // separated parallax layers: far city / wall / mid furniture / foreground plants.
+        zones: {
+          living: { backgroundSrc: SHELTER_BG_SRC, replaceWith: "assets/backgrounds/bg_living.png", layers: null },
+          workshop: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_workshop.png", layers: null },
+          kitchen: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_kitchen.png", layers: null },
+          bedroom: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_bedroom.png", layers: null },
+          records: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_records.png", layers: null },
+          balcony_living: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_balcony.png", layers: null },
+          balcony_kitchen: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_balcony.png", layers: null },
+          balcony_bed: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_balcony.png", layers: null },
+          entrance: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_entrance.png", layers: null },
+          bathroom: { backgroundSrc: null, replaceWith: "assets/backgrounds/bg_bathroom.png", layers: null }
+        }
       },
       hotspots: {
         repairBench: null, // REPLACE: precise hotspot mask or sprite highlight.
@@ -394,6 +1145,165 @@
       }
     };
 
+    // ZONE NAVIGATION CONFIG: tuned as a subtle "step into the room" move.
+    // durationMs controls the zoom-in + crossfade. parallaxPx/nearParallaxPx
+    // keep the fake-3D motion gentle over today's single flat images.
+    const ZONE_TRANSITION = Object.freeze({
+      durationMs: 520,
+      zoomScale: 1.065,
+      incomingStartScale: 1.085,
+      parallaxPx: 18,
+      nearParallaxPx: 11,
+      droneMovePx: 34,
+      droneScaleRange: 0.08
+    });
+
+    // FLOOR-PLAN LAYOUT: approximate LH 79m2 apartment schematic until the
+    // exact plan image is available in-repo. Rects are minimap percentages.
+    // See ART_HOOKS.shelter.zones above for the future separated-layer swap.
+    const ZONES = Object.freeze({
+      living: {
+        id: "living",
+        label: "LIVING",
+        short: "LIV",
+        map: { x: 38, y: 42, w: 28, h: 26 },
+        adjacent: ["entrance", "balcony_living", "workshop", "kitchen", "bedroom"],
+        artKey: "living",
+        kind: "image",
+        action: null
+      },
+      entrance: {
+        id: "entrance",
+        label: "ENTRANCE",
+        short: "ENT",
+        map: { x: 8, y: 48, w: 18, h: 18 },
+        adjacent: ["living"],
+        artKey: "entrance",
+        kind: "placeholder",
+        placeholderTitle: "ENTRANCE / CITY EXIT",
+        placeholderSubtitle: "REPLACE: bg_entrance.png / corridor + sealed door layers",
+        action: "departToCity",
+        prompt: "E  DEPART"
+      },
+      workshop: {
+        id: "workshop",
+        label: "WORKSHOP",
+        short: "WRK",
+        map: { x: 70, y: 34, w: 24, h: 32 },
+        adjacent: ["living"],
+        artKey: "workshop",
+        kind: "placeholder",
+        placeholderTitle: "WORKSHOP / DRONE CRADLE",
+        placeholderSubtitle: "REPLACE: bg_workshop.png / bench + drone layers",
+        action: "openWorkshopZone",
+        prompt: "E  WORKSHOP"
+      },
+      kitchen: {
+        id: "kitchen",
+        label: "KITCHEN",
+        short: "KIT",
+        map: { x: 36, y: 72, w: 24, h: 16 },
+        adjacent: ["living", "records", "balcony_kitchen"],
+        artKey: "kitchen",
+        kind: "placeholder",
+        placeholderTitle: "KITCHEN / CHILD LIFE",
+        placeholderSubtitle: "REPLACE: bg_kitchen.png / table + care routine layers",
+        action: "talkToChild",
+        prompt: "E  TALK"
+      },
+      bedroom: {
+        id: "bedroom",
+        label: "BEDROOM",
+        short: "BED",
+        map: { x: 8, y: 22, w: 22, h: 20 },
+        adjacent: ["living", "balcony_bed"],
+        artKey: "bedroom",
+        kind: "placeholder",
+        placeholderTitle: "BEDROOM / COT",
+        placeholderSubtitle: "REPLACE: bg_bedroom.png / cot alcove layers",
+        action: "sleepSave",
+        prompt: "E  SLEEP"
+      },
+      records: {
+        id: "records",
+        label: "RECORDS",
+        short: "REC",
+        map: { x: 64, y: 70, w: 22, h: 18 },
+        adjacent: ["kitchen", "bathroom"],
+        artKey: "records",
+        kind: "placeholder",
+        placeholderTitle: "RECORD TERMINAL",
+        placeholderSubtitle: "REPLACE: bg_records.png / terminal room layers",
+        action: "openRecords",
+        prompt: "E  RECORDS"
+      },
+      balcony_living: {
+        id: "balcony_living",
+        label: "LIVING BALCONY",
+        short: "BAL",
+        map: { x: 40, y: 24, w: 26, h: 10 },
+        adjacent: ["living"],
+        artKey: "balcony_living",
+        kind: "placeholder",
+        placeholderTitle: "LIVING BALCONY / GREENHOUSE",
+        placeholderSubtitle: "REPLACE: bg_balcony.png / flooded-city view layers",
+        action: "lookOutside",
+        prompt: "E  LOOK"
+      },
+      balcony_kitchen: {
+        id: "balcony_kitchen",
+        label: "KITCHEN BALCONY",
+        short: "BAL",
+        map: { x: 36, y: 91, w: 24, h: 8 },
+        adjacent: ["kitchen"],
+        artKey: "balcony_kitchen",
+        kind: "placeholder",
+        placeholderTitle: "KITCHEN BALCONY / PLANTS",
+        placeholderSubtitle: "REPLACE: bg_balcony.png / planters + city view layers",
+        action: "lookOutside",
+        prompt: "E  LOOK"
+      },
+      balcony_bed: {
+        id: "balcony_bed",
+        label: "BEDROOM BALCONY",
+        short: "BAL",
+        map: { x: 8, y: 8, w: 22, h: 9 },
+        adjacent: ["bedroom"],
+        artKey: "balcony_bed",
+        kind: "placeholder",
+        placeholderTitle: "BEDROOM BALCONY / PLANTS",
+        placeholderSubtitle: "REPLACE: bg_balcony.png / quiet flooded view layers",
+        action: "lookOutside",
+        prompt: "E  LOOK"
+      },
+      bathroom: {
+        id: "bathroom",
+        label: "BATHROOM",
+        short: "BTH",
+        map: { x: 88, y: 70, w: 10, h: 18 },
+        adjacent: ["records"],
+        artKey: "bathroom",
+        kind: "placeholder",
+        placeholderTitle: "BATHROOM / WATER CATCH",
+        placeholderSubtitle: "REPLACE: bg_bathroom.png / water collection layers",
+        action: "drawWater",
+        prompt: "E  WATER"
+      }
+    });
+
+    const ZONE_LOOK_POINTS = Object.freeze({
+      living: { x: 0.5, y: 0.54 },
+      entrance: { x: 0.24, y: 0.56 },
+      workshop: { x: 0.72, y: 0.54 },
+      kitchen: { x: 0.5, y: 0.68 },
+      bedroom: { x: 0.28, y: 0.42 },
+      records: { x: 0.66, y: 0.7 },
+      balcony_living: { x: 0.52, y: 0.36 },
+      balcony_kitchen: { x: 0.48, y: 0.78 },
+      balcony_bed: { x: 0.28, y: 0.3 },
+      bathroom: { x: 0.76, y: 0.7 }
+    });
+
     // DIEGETIC HOTSPOTS: positions are percentages over the background art.
     // When shelter_bg.png is swapped in, tune x/y/w/h without changing handlers.
     const HOTSPOTS = [
@@ -401,9 +1311,9 @@
         id: "repairBench",
         label: "REPAIR BENCH",
         handler: "openRepair",
-        x: 25,
-        y: 67,
-        w: 18,
+        x: 80,
+        y: 62,
+        w: 23,
         h: 18,
         panel: "REPAIR"
       },
@@ -411,38 +1321,38 @@
         id: "droneCradle",
         label: "DRONE CRADLE",
         handler: "departToCity",
-        x: 50,
-        y: 72,
-        w: 19,
-        h: 16,
+        x: 84,
+        y: 56,
+        w: 18,
+        h: 14,
         panel: "DEPART"
       },
       {
         id: "recordTerminal",
         label: "RECORD TERMINAL",
         handler: "openRecords",
-        x: 36,
+        x: 77,
         y: 43,
-        w: 15,
-        h: 17,
+        w: 13,
+        h: 14,
         panel: "RECORDS"
       },
       {
         id: "bedCapsule",
         label: "BED / CAPSULE",
         handler: "sleepSave",
-        x: 71,
-        y: 70,
-        w: 20,
-        h: 15,
+        x: 20,
+        y: 68,
+        w: 26,
+        h: 18,
         panel: "SLEEP"
       },
       {
         id: "child",
         label: "CHILD",
         handler: "talkToChild",
-        x: 53,
-        y: 47,
+        x: 42,
+        y: 62,
         w: 12,
         h: 20,
         panel: "TALK"
@@ -451,26 +1361,70 @@
         id: "window",
         label: "WINDOW",
         handler: "lookOutside",
-        x: 79,
-        y: 29,
-        w: 24,
-        h: 32,
+        x: 51,
+        y: 34,
+        w: 42,
+        h: 38,
         panel: "WINDOW"
       },
       {
         id: "plants",
         label: "PLANTS",
         handler: "tendPlants",
-        x: 18,
-        y: 43,
-        w: 15,
-        h: 24,
+        x: 55,
+        y: 57,
+        w: 31,
+        h: 18,
         panel: "PLANTS"
       }
     ];
 
+    // CHILD LIFE LOOP: these are diegetic places she drifts between.
+    // Later, each id can map to real sprite animations instead of placeholder DOM.
+    const CHILD_BEHAVIORS = [
+      { id: "tidyBench", x: 27, y: 66, duration: 8800, line: "작은 부품은 여기 둘게." },
+      { id: "lookWindow", x: 73, y: 50, duration: 9800, line: "밖은 아직 물소리뿐이야." },
+      { id: "waterPlants", x: 19, y: 55, duration: 8400, line: "오늘은 조금만 더 버텨." },
+      { id: "sitBed", x: 69, y: 69, duration: 9200, line: "금방 다시 일어날게." },
+      { id: "listenDrone", x: 53, y: 52, duration: 7600, line: "" }
+    ];
+
+    // TEMP ART LAYOUT: these coordinates match assets/backgrounds/shelter_bg.png.
+    // REPLACE/TUNE when the final shelter art lands.
+    const TEMP_SHELTER_BG_CHILD_LAYOUT = {
+      tidyBench: { x: 77, y: 62 },
+      lookWindow: { x: 47, y: 55 },
+      waterPlants: { x: 55, y: 59 },
+      sitBed: { x: 23, y: 66 },
+      listenDrone: { x: 42, y: 62 }
+    };
+
+    for (const behavior of CHILD_BEHAVIORS) {
+      Object.assign(behavior, TEMP_SHELTER_BG_CHILD_LAYOUT[behavior.id] || {});
+    }
+
+    const CHILD_REACTIVE_LINES = [
+      "여기 있어.",
+      "괜찮아, 천천히 봐.",
+      "그쪽이 궁금해?",
+      "…아빠, 들려?"
+    ];
+
     const scene = document.getElementById("scene");
+    const shelterBgImage = document.getElementById("shelterBgImage");
+    const zonePlaceholder = document.getElementById("zonePlaceholder");
+    const zoneTransitionLayer = document.getElementById("zoneTransitionLayer");
+    const zoneTransitionImage = document.getElementById("zoneTransitionImage");
+    const zoneTransitionPlaceholder = document.getElementById("zoneTransitionPlaceholder");
+    const zoneMinimap = document.getElementById("zoneMinimap");
+    const zonePrompt = document.getElementById("zonePrompt");
+    const droneBody = document.getElementById("droneBody");
+    const roomLife = document.getElementById("roomLife");
+    const childActor = document.getElementById("childActor");
+    const childAmbientLine = document.getElementById("childAmbientLine");
     const hotspotLayer = document.getElementById("hotspotLayer");
+    const shelterAudioToggle = document.getElementById("shelterAudioToggle");
+    const shelterBgmAudio = document.getElementById("shelterBgmAudio");
     const modal = document.getElementById("modal");
     const panelTitle = document.getElementById("panelTitle");
     const panelBody = document.getElementById("panelBody");
@@ -479,10 +1433,473 @@
     let saveState = normalizeSave(loadSave() || DEFAULT_SAVE);
     let focusedIndex = 0;
     let activePanel = null;
+    let childBehaviorIndex = 0;
+    let childBehaviorTimer = 0;
+    let childLineTimer = 0;
+    let roomLifeFrameId = 0;
+    let zoneTransitionFrameId = 0;
+    let currentZoneId = "living";
+    let zoneTransitionState = null;
+    let lastReactiveLineAt = -Infinity;
+    const droneLook = {
+      x: 0.5,
+      y: 0.5,
+      source: "arrival",
+      nearestHotspotId: "",
+      lastMovedAt: performance.now()
+    };
 
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
     }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * clamp(t, 0, 1);
+    }
+
+    function distance2d(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function hotspotPoint(hotspot) {
+      return { x: hotspot.x / 100, y: hotspot.y / 100 };
+    }
+
+    function childPoint() {
+      const behavior = CHILD_BEHAVIORS[childBehaviorIndex] || CHILD_BEHAVIORS[0];
+      return { x: behavior.x / 100, y: behavior.y / 100 };
+    }
+
+    function easeInOutCubic(t) {
+      const n = clamp(t, 0, 1);
+      return n < 0.5 ? 4 * n * n * n : 1 - Math.pow(-2 * n + 2, 3) / 2;
+    }
+
+    function zoneById(zoneId) {
+      return ZONES[zoneId] || ZONES.living;
+    }
+
+    function zoneArt(zone) {
+      return ART_HOOKS.shelter.zones[zone.artKey] || {};
+    }
+
+    function zoneImageSrc(zone) {
+      return zoneArt(zone).backgroundSrc || (zone.id === "living" ? SHELTER_BG_SRC : "");
+    }
+
+    function zoneHasUsableImage(zone) {
+      if (zone.kind !== "image") return false;
+      if (!zoneImageSrc(zone)) return false;
+      return !(zone.id === "living" && document.documentElement.dataset.shelterBackground === "missing:shelter_bg.png");
+    }
+
+    function setPlaceholderContent(surface, zone) {
+      if (!surface) return;
+      const title = surface.querySelector(".zone-placeholder-title");
+      const subtitle = surface.querySelector(".zone-placeholder-subtitle");
+      if (title) title.textContent = zone.placeholderTitle || zone.label || zone.id;
+      if (subtitle) subtitle.textContent = zone.placeholderSubtitle || "REPLACE: room asset hook";
+    }
+
+    function setActiveZoneSurface(zone) {
+      const useImage = zoneHasUsableImage(zone);
+      if (shelterBgImage) {
+        shelterBgImage.hidden = !useImage;
+      }
+      if (zonePlaceholder) {
+        if (useImage) {
+          zonePlaceholder.classList.remove("is-active");
+        } else {
+          setPlaceholderContent(zonePlaceholder, zone);
+          zonePlaceholder.classList.add("is-active");
+        }
+      }
+    }
+
+    function setTransitionZoneSurface(zone) {
+      if (!zoneTransitionLayer) return;
+      zoneTransitionLayer.classList.remove("has-image", "has-placeholder");
+      const useImage = zoneHasUsableImage(zone);
+      if (useImage && zoneTransitionImage) {
+        zoneTransitionImage.onload = () => {
+          zoneTransitionLayer.classList.add("has-image");
+          zoneTransitionLayer.classList.remove("has-placeholder");
+        };
+        zoneTransitionImage.onerror = () => {
+          setPlaceholderContent(zoneTransitionPlaceholder, {
+            ...zone,
+            placeholderSubtitle: "missing room image; using placeholder"
+          });
+          zoneTransitionLayer.classList.remove("has-image");
+          zoneTransitionLayer.classList.add("has-placeholder");
+        };
+        if (zoneTransitionImage.getAttribute("src") !== zoneImageSrc(zone)) {
+          zoneTransitionImage.src = zoneImageSrc(zone);
+        } else {
+          zoneTransitionLayer.classList.add("has-image");
+        }
+        return;
+      }
+
+      if (zoneTransitionImage) {
+        zoneTransitionImage.removeAttribute("src");
+      }
+      setPlaceholderContent(zoneTransitionPlaceholder, zone);
+      zoneTransitionLayer.classList.add("has-placeholder");
+    }
+
+    function setZoneTransitionProgress(progress) {
+      const t = clamp(progress, 0, 1);
+      const activeScale = lerp(1, ZONE_TRANSITION.zoomScale, t);
+      const incomingScale = lerp(ZONE_TRANSITION.incomingStartScale, 1, t);
+      document.documentElement.style.setProperty("--zone-bg-opacity", (1 - t).toFixed(3));
+      document.documentElement.style.setProperty("--zone-bg-scale", activeScale.toFixed(4));
+      document.documentElement.style.setProperty("--zone-transition-opacity", t.toFixed(3));
+      document.documentElement.style.setProperty("--zone-transition-scale", incomingScale.toFixed(4));
+    }
+
+    function resetZoneTransitionSurface() {
+      document.documentElement.style.setProperty("--zone-bg-opacity", "1");
+      document.documentElement.style.setProperty("--zone-bg-scale", "1");
+      document.documentElement.style.setProperty("--zone-transition-opacity", "0");
+      document.documentElement.style.setProperty("--zone-transition-scale", String(ZONE_TRANSITION.incomingStartScale));
+      zoneTransitionLayer?.classList.remove("has-image", "has-placeholder");
+      if (zoneTransitionImage) {
+        zoneTransitionImage.onload = null;
+        zoneTransitionImage.onerror = null;
+        zoneTransitionImage.removeAttribute("src");
+      }
+    }
+
+    function renderZoneMinimap() {
+      if (!zoneMinimap) return;
+      zoneMinimap.innerHTML = "";
+      Object.values(ZONES).forEach((zone) => {
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "zone-map-cell is-room";
+        cell.dataset.zoneId = zone.id;
+        cell.dataset.short = zone.short || zone.label.slice(0, 3).toUpperCase();
+        cell.title = zone.label;
+        cell.setAttribute("aria-label", zone.label);
+        cell.style.left = `${zone.map.x}%`;
+        cell.style.top = `${zone.map.y}%`;
+        cell.style.width = `${zone.map.w}%`;
+        cell.style.height = `${zone.map.h}%`;
+        cell.addEventListener("click", () => {
+          if (canMoveToZone(zone.id)) beginZoneTransition(zone.id);
+        });
+        zoneMinimap.append(cell);
+      });
+    }
+
+    function updateZoneUi() {
+      const zone = zoneById(currentZoneId);
+      document.documentElement.dataset.shelterZone = zone.id;
+      document.documentElement.dataset.zoneTransitionMs = String(ZONE_TRANSITION.durationMs);
+      document.documentElement.dataset.zoneParallaxPx = String(ZONE_TRANSITION.parallaxPx);
+
+      zoneMinimap?.querySelectorAll(".zone-map-cell").forEach((cell) => {
+        const zoneId = cell.dataset.zoneId;
+        cell.classList.toggle("is-current", zoneId === zone.id);
+        cell.classList.toggle("is-adjacent", zone.adjacent.includes(zoneId));
+        cell.disabled = zoneId !== zone.id && !zone.adjacent.includes(zoneId);
+      });
+
+      const showLivingHotspots = zone.id === "living";
+      getHotspotButtons().forEach((button) => {
+        button.classList.toggle("is-zone-hidden", !showLivingHotspots);
+        button.tabIndex = showLivingHotspots && button.classList.contains("is-focused") ? 0 : -1;
+      });
+      roomLife?.classList.toggle("is-zone-muted", !showLivingHotspots);
+
+      if (zonePrompt) {
+        const prompt = zone.prompt || "";
+        zonePrompt.textContent = prompt;
+        zonePrompt.classList.toggle("is-visible", Boolean(prompt));
+      }
+    }
+
+    function zoneCenter(zone) {
+      return {
+        x: zone.map.x + zone.map.w / 2,
+        y: zone.map.y + zone.map.h / 2
+      };
+    }
+
+    function canMoveToZone(zoneId) {
+      if (zoneId === currentZoneId) return false;
+      return zoneById(currentZoneId).adjacent.includes(zoneId);
+    }
+
+    function directionVectorForKey(key) {
+      const keyId = key.length === 1 ? key.toLowerCase() : key.toLowerCase();
+      if (keyId === "w" || keyId === "arrowup") return { x: 0, y: -1 };
+      if (keyId === "s" || keyId === "arrowdown") return { x: 0, y: 1 };
+      if (keyId === "a" || keyId === "arrowleft") return { x: -1, y: 0 };
+      if (keyId === "d" || keyId === "arrowright") return { x: 1, y: 0 };
+      return null;
+    }
+
+    function adjacentZoneTowardKey(key) {
+      const direction = directionVectorForKey(key);
+      if (!direction) return null;
+
+      const currentZone = zoneById(currentZoneId);
+      const currentCenter = zoneCenter(currentZone);
+      let best = null;
+      for (const adjacentId of currentZone.adjacent) {
+        const adjacentZone = zoneById(adjacentId);
+        const adjacentCenter = zoneCenter(adjacentZone);
+        const dx = adjacentCenter.x - currentCenter.x;
+        const dy = adjacentCenter.y - currentCenter.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        const score = (dx / distance) * direction.x + (dy / distance) * direction.y;
+        if (!best || score > best.score) {
+          best = { zoneId: adjacentZone.id, score };
+        }
+      }
+      return best && best.score > 0.22 ? best.zoneId : null;
+    }
+
+    function finishZoneTransition(nextZoneId) {
+      currentZoneId = nextZoneId;
+      setActiveZoneSurface(zoneById(currentZoneId));
+      resetZoneTransitionSurface();
+      zoneTransitionState = null;
+      document.documentElement.dataset.shelterZoneTransition = "";
+      updateZoneUi();
+    }
+
+    function beginZoneTransition(nextZoneId) {
+      if (zoneTransitionState || nextZoneId === currentZoneId) return false;
+      const fromZone = zoneById(currentZoneId);
+      const toZone = zoneById(nextZoneId);
+      const startedAt = performance.now();
+      zoneTransitionState = { from: fromZone.id, to: toZone.id, startedAt };
+      document.documentElement.dataset.shelterZoneTransition = `${fromZone.id}>${toZone.id}`;
+      setTransitionZoneSurface(toZone);
+      const lookPoint = ZONE_LOOK_POINTS[toZone.id] || ZONE_LOOK_POINTS.living;
+      setDroneLook(lookPoint.x, lookPoint.y, "zone-transition");
+
+      const tick = (time) => {
+        if (!zoneTransitionState) return;
+        const eased = easeInOutCubic((time - startedAt) / ZONE_TRANSITION.durationMs);
+        setZoneTransitionProgress(eased);
+        if (eased >= 1) {
+          finishZoneTransition(toZone.id);
+          return;
+        }
+        zoneTransitionFrameId = requestAnimationFrame(tick);
+      };
+
+      cancelAnimationFrame(zoneTransitionFrameId);
+      zoneTransitionFrameId = requestAnimationFrame(tick);
+      return true;
+    }
+
+    function moveZoneForKey(key) {
+      const nextZoneId = adjacentZoneTowardKey(key);
+      if (!nextZoneId) return false;
+      if (zoneTransitionState) return true;
+      return beginZoneTransition(nextZoneId);
+    }
+
+    function activateCurrentZone() {
+      const zone = zoneById(currentZoneId);
+      if (zone.id === "living") {
+        activateHotspot();
+        return true;
+      }
+      if (!zone.action) return false;
+      window.SHELTER_HANDLERS[zone.action]?.();
+      return true;
+    }
+
+    class ShelterAudio {
+      constructor() {
+        this.context = null;
+        this.master = null;
+        this.bgm = shelterBgmAudio;
+        this.isMuted = false;
+        this.childTimer = 0;
+        if (this.bgm) {
+          this.bgm.volume = 0.42;
+          this.bgm.muted = false;
+        }
+        document.documentElement.dataset.shelterAudioStarted = "false";
+        document.documentElement.dataset.shelterAudioMuted = "false";
+        document.documentElement.dataset.shelterBgm = "assets/audio/rain-on-glass.mp3";
+      }
+
+      ensureStarted() {
+        this.startBgm();
+
+        if (this.context) {
+          this.context.resume();
+          return;
+        }
+
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+
+        this.context = new AudioContextClass();
+        this.master = this.context.createGain();
+        this.master.gain.value = this.isMuted ? 0 : 0.58;
+        this.master.connect(this.context.destination);
+        document.documentElement.dataset.shelterAudioStarted = "true";
+
+        this.createRainBed();
+        this.createWaterBed();
+        this.createBulbHum();
+        this.scheduleChildMovement();
+      }
+
+      startBgm() {
+        if (!this.bgm) return;
+        this.bgm.muted = this.isMuted;
+        this.bgm.volume = this.isMuted ? 0 : 0.42;
+        const playPromise = this.bgm.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise
+            .then(() => {
+              window.__lastShelterBgmPlayError = "";
+              document.documentElement.dataset.shelterBgmPlaying = this.isMuted ? "muted" : "true";
+            })
+            .catch((error) => {
+              window.__lastShelterBgmPlayError = error ? `${error.name}: ${error.message}` : "audio play rejected";
+              document.documentElement.dataset.shelterBgmPlaying = "blocked";
+            });
+        }
+      }
+
+      createNoiseBuffer(seconds = 2) {
+        const sampleRate = this.context.sampleRate;
+        const buffer = this.context.createBuffer(1, sampleRate * seconds, sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i += 1) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        return buffer;
+      }
+
+      createLoopedNoise({ filterType, frequency, gainValue, panValue }) {
+        const source = this.context.createBufferSource();
+        source.buffer = this.createNoiseBuffer();
+        source.loop = true;
+
+        const filter = this.context.createBiquadFilter();
+        filter.type = filterType;
+        filter.frequency.value = frequency;
+        filter.Q.value = 0.6;
+
+        const gain = this.context.createGain();
+        gain.gain.value = gainValue;
+
+        const pan = this.context.createStereoPanner ? this.context.createStereoPanner() : null;
+        if (pan) pan.pan.value = panValue;
+
+        source.connect(filter);
+        filter.connect(gain);
+        if (pan) {
+          gain.connect(pan);
+          pan.connect(this.master);
+        } else {
+          gain.connect(this.master);
+        }
+        source.start();
+      }
+
+      createRainBed() {
+        this.createLoopedNoise({
+          filterType: "bandpass",
+          frequency: 1180,
+          gainValue: 0.026,
+          panValue: -0.18
+        });
+      }
+
+      createWaterBed() {
+        this.createLoopedNoise({
+          filterType: "lowpass",
+          frequency: 420,
+          gainValue: 0.032,
+          panValue: 0.42
+        });
+      }
+
+      createBulbHum() {
+        const osc = this.context.createOscillator();
+        const gain = this.context.createGain();
+        const pan = this.context.createStereoPanner ? this.context.createStereoPanner() : null;
+        osc.type = "sine";
+        osc.frequency.value = 93;
+        gain.gain.value = 0.012;
+        if (pan) pan.pan.value = -0.08;
+        osc.connect(gain);
+        if (pan) {
+          gain.connect(pan);
+          pan.connect(this.master);
+        } else {
+          gain.connect(this.master);
+        }
+        osc.start();
+      }
+
+      playChildMovement() {
+        if (!this.context || this.isMuted) return;
+        const now = this.context.currentTime;
+        const osc = this.context.createOscillator();
+        const gain = this.context.createGain();
+        const pan = this.context.createStereoPanner ? this.context.createStereoPanner() : null;
+        const point = childPoint();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(220 + Math.random() * 80, now);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.012, now + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+        if (pan) pan.pan.value = clamp((point.x - 0.5) * 1.4, -0.75, 0.75);
+        osc.connect(gain);
+        if (pan) {
+          gain.connect(pan);
+          pan.connect(this.master);
+        } else {
+          gain.connect(this.master);
+        }
+        osc.start(now);
+        osc.stop(now + 0.18);
+      }
+
+      scheduleChildMovement() {
+        window.clearTimeout(this.childTimer);
+        this.childTimer = window.setTimeout(() => {
+          this.playChildMovement();
+          this.scheduleChildMovement();
+        }, 6200 + Math.random() * 6800);
+      }
+
+      setMuted(nextMuted) {
+        this.isMuted = Boolean(nextMuted);
+        this.ensureStarted();
+        if (this.bgm) {
+          this.bgm.muted = this.isMuted;
+          this.bgm.volume = this.isMuted ? 0 : 0.42;
+          document.documentElement.dataset.shelterBgmPlaying = this.isMuted ? "muted" : "true";
+        }
+        document.documentElement.dataset.shelterAudioMuted = String(this.isMuted);
+        shelterAudioToggle.textContent = this.isMuted ? "소리 꺼짐" : "소리 켜짐";
+        if (!this.master || !this.context) return;
+        const now = this.context.currentTime;
+        this.master.gain.cancelScheduledValues(now);
+        this.master.gain.setTargetAtTime(this.isMuted ? 0 : 0.58, now, 0.18);
+      }
+
+      toggle() {
+        this.setMuted(!this.isMuted);
+      }
+    }
+
+    const shelterAudio = new ShelterAudio();
 
     function normalizeSave(state) {
       const sanity = clamp(Math.floor(Number(state?.sanity ?? 100) || 0), 0, 100);
@@ -542,6 +1959,190 @@
       document.documentElement.dataset.shelterDay = String(saveState.day);
     }
 
+    function applyArrivalFade() {
+      const params = new URLSearchParams(window.location.search);
+      const isDroneWakeArrival = params.get("arrival") === SHELTER_ARRIVAL.queryValue;
+      document.documentElement.dataset.shelterArrival = isDroneWakeArrival ? "drone-wake" : "direct";
+      document.documentElement.dataset.shelterArrivalFadeMs = String(SHELTER_ARRIVAL.fadeMs);
+
+      if (!isDroneWakeArrival) {
+        document.body.classList.add("is-arrival-ready");
+        document.documentElement.dataset.shelterArrivalReady = "true";
+        return;
+      }
+
+      document.body.classList.add("is-arriving");
+      document.documentElement.dataset.shelterArrivalReady = "false";
+      window.setTimeout(() => {
+        document.body.classList.add("is-arrival-ready");
+        document.body.classList.remove("is-arriving");
+        document.documentElement.dataset.shelterArrivalReady = "true";
+      }, SHELTER_ARRIVAL.holdMs);
+    }
+
+    function setupShelterBackground() {
+      if (!shelterBgImage) return;
+      shelterBgImage.onload = () => {
+        document.documentElement.dataset.shelterBackground = "asset:shelter_bg.png";
+        document.documentElement.dataset.assetFallback = "asset:shelter_bg.png";
+        if (currentZoneId === "living") setActiveZoneSurface(ZONES.living);
+      };
+      shelterBgImage.onerror = () => {
+        shelterBgImage.hidden = true;
+        document.documentElement.dataset.shelterBackground = "missing:shelter_bg.png";
+        document.documentElement.dataset.assetFallback = "missing:shelter_bg.png";
+        if (currentZoneId === "living") setActiveZoneSurface({
+          ...ZONES.living,
+          kind: "placeholder",
+          placeholderTitle: "LIVING",
+          placeholderSubtitle: "missing shelter_bg.png; using placeholder"
+        });
+      };
+      shelterBgImage.src = ART_HOOKS.shelter.backgroundSrc;
+    }
+
+    function createDustMotes() {
+      if (!roomLife || roomLife.dataset.dustReady === "true") return;
+      for (let i = 0; i < 26; i += 1) {
+        const mote = document.createElement("span");
+        mote.className = "dust-mote";
+        mote.style.left = `${18 + Math.random() * 62}%`;
+        mote.style.top = `${22 + Math.random() * 58}%`;
+        mote.style.setProperty("--dust-dur", `${10 + Math.random() * 13}s`);
+        mote.style.setProperty("--dust-delay", `${-Math.random() * 16}s`);
+        roomLife.append(mote);
+      }
+      roomLife.dataset.dustReady = "true";
+    }
+
+    function showChildLine(text, duration = 2600) {
+      if (!text || !childAmbientLine) return;
+      window.clearTimeout(childLineTimer);
+      childAmbientLine.textContent = text;
+      childAmbientLine.classList.add("is-visible");
+      document.documentElement.dataset.childAmbientLine = text;
+      childLineTimer = window.setTimeout(() => {
+        childAmbientLine.classList.remove("is-visible");
+        document.documentElement.dataset.childAmbientLine = "";
+      }, duration);
+    }
+
+    function setChildBehavior(index, reason = "loop") {
+      childBehaviorIndex = (index + CHILD_BEHAVIORS.length) % CHILD_BEHAVIORS.length;
+      const behavior = CHILD_BEHAVIORS[childBehaviorIndex];
+      document.documentElement.style.setProperty("--child-x", `${behavior.x}%`);
+      document.documentElement.style.setProperty("--child-y", `${behavior.y}%`);
+      childActor.dataset.behavior = behavior.id;
+      document.documentElement.dataset.childBehavior = behavior.id;
+
+      if (reason === "loop" && behavior.line && Math.random() > 0.38) {
+        window.setTimeout(() => showChildLine(behavior.line, 2300), 1200);
+      }
+      shelterAudio.playChildMovement();
+    }
+
+    function scheduleNextChildBehavior() {
+      window.clearTimeout(childBehaviorTimer);
+      const behavior = CHILD_BEHAVIORS[childBehaviorIndex] || CHILD_BEHAVIORS[0];
+      childBehaviorTimer = window.setTimeout(() => {
+        setChildBehavior(childBehaviorIndex + 1, "loop");
+        scheduleNextChildBehavior();
+      }, behavior.duration);
+    }
+
+    function startChildLifeLoop() {
+      setChildBehavior(4, "arrival");
+      scheduleNextChildBehavior();
+    }
+
+    function setDroneLook(x, y, source = "pointer") {
+      droneLook.x = clamp(x, 0.02, 0.98);
+      droneLook.y = clamp(y, 0.02, 0.98);
+      droneLook.source = source;
+      if (source !== "idle-drift") {
+        droneLook.lastMovedAt = performance.now();
+      }
+
+      const driftX = (0.5 - droneLook.x) * ZONE_TRANSITION.parallaxPx;
+      const driftY = (0.5 - droneLook.y) * (ZONE_TRANSITION.parallaxPx * 0.66);
+      const nearScale = ZONE_TRANSITION.nearParallaxPx / ZONE_TRANSITION.parallaxPx;
+      const droneX = (droneLook.x - 0.5) * ZONE_TRANSITION.droneMovePx;
+      const droneY = (droneLook.y - 0.5) * (ZONE_TRANSITION.droneMovePx * 0.46);
+      const droneScale = 1 + (droneLook.y - 0.5) * ZONE_TRANSITION.droneScaleRange;
+      document.documentElement.style.setProperty("--room-drift-x", `${driftX.toFixed(2)}px`);
+      document.documentElement.style.setProperty("--room-drift-y", `${driftY.toFixed(2)}px`);
+      document.documentElement.style.setProperty("--near-drift-x", `${(driftX * nearScale).toFixed(2)}px`);
+      document.documentElement.style.setProperty("--near-drift-y", `${(driftY * nearScale).toFixed(2)}px`);
+      document.documentElement.style.setProperty("--drone-x", `${droneX.toFixed(2)}px`);
+      document.documentElement.style.setProperty("--drone-y", `${droneY.toFixed(2)}px`);
+      document.documentElement.style.setProperty("--drone-scale", droneScale.toFixed(3));
+      document.documentElement.dataset.droneLook = `${droneLook.x.toFixed(3)},${droneLook.y.toFixed(3)}`;
+      updatePresence();
+    }
+
+    function setDroneLookToHotspot(index, source = "focus") {
+      const hotspot = HOTSPOTS[(index + HOTSPOTS.length) % HOTSPOTS.length];
+      const point = hotspotPoint(hotspot);
+      setDroneLook(point.x, point.y, source);
+    }
+
+    function updatePresence() {
+      const buttons = getHotspotButtons();
+      let nearest = null;
+      let nearestDistance = Infinity;
+      HOTSPOTS.forEach((hotspot, index) => {
+        const distance = distance2d(droneLook, hotspotPoint(hotspot));
+        if (distance < nearestDistance) {
+          nearest = { hotspot, index, distance };
+          nearestDistance = distance;
+        }
+      });
+
+      const nearThreshold = 0.145;
+      droneLook.nearestHotspotId = nearest && nearest.distance < nearThreshold ? nearest.hotspot.id : "";
+      buttons.forEach((button, index) => {
+        const isNear = Boolean(nearest && nearest.index === index && nearest.distance < nearThreshold);
+        button.classList.toggle("is-near", isNear);
+      });
+      document.documentElement.dataset.nearestHotspot = droneLook.nearestHotspotId;
+
+      const child = childPoint();
+      const childDx = clamp((droneLook.x - child.x) * 42, -7, 7);
+      const childDy = clamp((droneLook.y - child.y) * 34, -4, 5);
+      document.documentElement.style.setProperty("--child-gaze-x", `${childDx.toFixed(2)}px`);
+      document.documentElement.style.setProperty("--child-gaze-y", `${childDy.toFixed(2)}px`);
+      document.documentElement.dataset.childGaze = `${childDx.toFixed(2)},${childDy.toFixed(2)}`;
+
+      const childDistance = distance2d(droneLook, child);
+      const focusedHotspot = HOTSPOTS[focusedIndex];
+      const isChildFocused = focusedHotspot?.id === "child" || droneLook.nearestHotspotId === "child";
+      const isAware = childDistance < 0.18 || isChildFocused;
+      childActor.classList.toggle("is-aware", isAware);
+      document.documentElement.dataset.childAware = String(isAware);
+
+      const now = performance.now();
+      if (isAware && now - lastReactiveLineAt > 9000) {
+        lastReactiveLineAt = now;
+        const line = CHILD_REACTIVE_LINES[Math.floor(Math.random() * CHILD_REACTIVE_LINES.length)];
+        showChildLine(line, 2600);
+      }
+    }
+
+    function startRoomLifeLoop() {
+      if (roomLifeFrameId) return;
+      const tick = (time) => {
+        const idleDriftX = Math.sin(time * 0.00022) * 0.008;
+        const idleDriftY = Math.cos(time * 0.00018) * 0.006;
+        if (performance.now() - droneLook.lastMovedAt > 2400) {
+          setDroneLook(0.5 + idleDriftX, 0.5 + idleDriftY, "idle-drift");
+        } else {
+          updatePresence();
+        }
+        roomLifeFrameId = requestAnimationFrame(tick);
+      };
+      roomLifeFrameId = requestAnimationFrame(tick);
+    }
+
     // MOUSE: each object is a real button, so hover/click and accessibility
     // focus use the same hotspot definitions.
     function createHotspotButton(hotspot, index) {
@@ -557,7 +2158,7 @@
       button.style.height = `clamp(44px, ${hotspot.h}vmin, ${hotspot.h * 7}px)`;
       button.setAttribute("aria-label", hotspot.label);
 
-      button.addEventListener("pointerenter", () => setFocusedHotspot(index, false));
+      button.addEventListener("pointerdown", () => setFocusedHotspot(index, false));
       button.addEventListener("focus", () => setFocusedHotspot(index, false));
       button.addEventListener("click", () => activateHotspot(index));
       return button;
@@ -585,6 +2186,7 @@
       if (shouldFocus) {
         getHotspotButtons()[focusedIndex]?.focus();
       }
+      setDroneLookToHotspot(focusedIndex, shouldFocus ? "keyboard-focus" : "focus");
       document.documentElement.dataset.focusedHotspot = HOTSPOTS[focusedIndex]?.id || "";
     }
 
@@ -611,7 +2213,11 @@
       modal.classList.remove("is-open");
       modal.setAttribute("aria-hidden", "true");
       document.documentElement.dataset.activeShelterPanel = "";
-      setFocusedHotspot(focusedIndex, true);
+      if (currentZoneId === "living") {
+        setFocusedHotspot(focusedIndex, true);
+      } else {
+        updateZoneUi();
+      }
     }
 
     function openRepair() {
@@ -642,6 +2248,19 @@
       departButton?.focus();
     }
 
+    function openWorkshopZone() {
+      openStubPanel("WORKSHOP", `
+        <div>Workbench and drone cradle are both reachable from this zone.</div>
+        <div class="panel-actions">
+          <button class="panel-action-button" type="button" data-action="open-repair">REPAIR</button>
+          <button class="panel-action-button" type="button" data-action="depart-stage">DEPART</button>
+        </div>
+      `);
+      panelBody.querySelector("[data-action='open-repair']")?.addEventListener("click", openRepair);
+      panelBody.querySelector("[data-action='depart-stage']")?.addEventListener("click", enterStageFromShelter);
+      panelBody.querySelector("[data-action='open-repair']")?.focus();
+    }
+
     function openRecords() {
       openStubPanel("RECORDS", `
         <div class="panel-record-meta">CYCLE ${saveState.cycle} / DAY ${saveState.day}</div>
@@ -661,6 +2280,10 @@
       openStubPanel("WINDOW");
     }
 
+    function drawWater() {
+      openStubPanel("WATER");
+    }
+
     function tendPlants() {
       openStubPanel("PLANTS");
     }
@@ -668,18 +2291,22 @@
     window.SHELTER_HANDLERS = {
       openRepair,
       departToCity,
+      openWorkshopZone,
       enterStageFromShelter,
       openRecords,
       sleepSave,
       talkToChild,
       lookOutside,
+      drawWater,
       tendPlants
     };
     document.documentElement.dataset.shelterHandlers = Object.keys(window.SHELTER_HANDLERS).join(",");
 
-    // KEYBOARD/GAMEPAD-FRIENDLY INPUT: arrows and Tab cycle focus; Enter/Space
-    // activates the selected diegetic object. Escape closes the current panel.
+    // KEYBOARD/GAMEPAD-FRIENDLY INPUT: WASD/arrows move between shelter zones.
+    // Tab still cycles diegetic objects inside living; E/Enter/Space activates
+    // the focused object or the current zone prompt.
     document.addEventListener("keydown", (event) => {
+      shelterAudio.ensureStarted();
       if (activePanel) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -688,21 +2315,26 @@
         return;
       }
 
-      if (event.key === "Tab" || event.key === "ArrowRight" || event.key === "ArrowDown") {
+      if (moveZoneForKey(event.key)) {
+        event.preventDefault();
+        return;
+      }
+
+      if (event.key === "Tab" && currentZoneId === "living") {
         event.preventDefault();
         setFocusedHotspot(focusedIndex + (event.shiftKey ? -1 : 1));
         return;
       }
 
-      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      if ((event.key === "e" || event.key === "E") && currentZoneId !== "living") {
         event.preventDefault();
-        setFocusedHotspot(focusedIndex - 1);
+        activateCurrentZone();
         return;
       }
 
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        activateHotspot();
+        activateCurrentZone();
       }
     });
 
@@ -711,14 +2343,41 @@
       if (event.target === modal) closePanel();
     });
 
+    scene.addEventListener("pointermove", (event) => {
+      const rect = scene.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      setDroneLook(
+        (event.clientX - rect.left) / rect.width,
+        (event.clientY - rect.top) / rect.height,
+        "pointer"
+      );
+    });
+
+    scene.addEventListener("pointerdown", () => {
+      shelterAudio.ensureStarted();
+    });
+
+    shelterAudioToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      shelterAudio.toggle();
+    });
+
     window.addEventListener("resize", () => {
       document.documentElement.dataset.viewport = `${window.innerWidth}x${window.innerHeight}`;
     });
 
+    setupShelterBackground();
+    applyArrivalFade();
     syncSaveDrivenVisuals();
+    createDustMotes();
+    startChildLifeLoop();
     renderHotspots();
+    renderZoneMinimap();
+    setActiveZoneSurface(ZONES.living);
+    updateZoneUi();
+    startRoomLifeLoop();
     document.documentElement.dataset.shelterReady = "true";
-    document.documentElement.dataset.assetFallback = "placeholder:shelter_bg.png";
+    document.documentElement.dataset.assetFallback = "loading:shelter_bg.png";
     document.documentElement.dataset.viewport = `${window.innerWidth}x${window.innerHeight}`;
   </script>
 </body>
