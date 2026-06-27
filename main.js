@@ -1,5 +1,8 @@
-import { GAME_DATA } from "./level-data.js?v=20260619-shelter-voice-v9";
+import { GAME_DATA } from "./level-data.js?v=20260622-title-npc-v1";
 import {
+  LEVEL_OVERRIDE_KEY,
+  LEVEL_OVERRIDES_KEY,
+  RUN_CONFIG_KEY,
   createGameDataWithExternalLevels,
   createRuntimeGameData,
   extractEditableLevelData,
@@ -8,6 +11,7 @@ import {
 } from "./level-store.js?v=20260622-npc-v1";
 import {
   SPRINT_TUNING_FIELDS,
+  SPRINT_TUNING_KEY,
   applySprintTuning,
   clearSprintTuning,
   extractSprintTuning,
@@ -33,7 +37,7 @@ import {
   resetGameOptions,
   saveGameOptions,
 } from "./game-options.js?v=20260619-text-speed-v1";
-import { renderGame } from "./render.js?v=20260622-npc-v1";
+import { renderGame } from "./render.js?v=20260622-title-npc-v1";
 import { saveCurrentGame, shouldStartFromUrlLevel } from "./save-game.js?v=20260622-npc-v1";
 import {
   MOVEMENT_STATES,
@@ -45,8 +49,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260622-npc-v1";
-import { beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260622-npc-v1";
+} from "./state.js?v=20260622-title-npc-v1";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260622-title-npc-v1";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -72,6 +76,14 @@ const touchControls = document.getElementById("touchControls");
 const touchButtons = Array.from(document.querySelectorAll(".touch-button"));
 const stageShell = document.querySelector(".stage-shell");
 const MOVEMENT_TUNING_TEST_KEY = "rulebound-movement-tuning-test-v1";
+const LOCAL_OVERRIDE_STORAGE_KEYS = Object.freeze([
+  LEVEL_OVERRIDE_KEY,
+  LEVEL_OVERRIDES_KEY,
+  RUN_CONFIG_KEY,
+  SPRINT_TUNING_KEY,
+  MOVEMENT_TUNING_TEST_KEY,
+  "face-off-input-trace",
+]);
 const testDebugButton = document.createElement("button");
 testDebugButton.id = "testDebugButton";
 testDebugButton.className = "test-debug-button";
@@ -285,11 +297,19 @@ const dom = {
   touchButtons,
 };
 
+function isUrlFlagEnabled(params, name) {
+  const value = params.get(name);
+  return value === "1" || value === "true" || value === name;
+}
+
 const BASE_GAME_DATA = await createGameDataWithExternalLevels(GAME_DATA);
 applyAudioOptions(loadAudioOptions());
 applyGameOptions(loadGameOptions());
 const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.get("resetMeta") === "1" || urlParams.get("resetShelter") === "1") {
+if (isUrlFlagEnabled(urlParams, "resetOverrides")) {
+  LOCAL_OVERRIDE_STORAGE_KEYS.forEach((key) => window.localStorage.removeItem(key));
+}
+if (isUrlFlagEnabled(urlParams, "resetMeta") || isUrlFlagEnabled(urlParams, "resetShelter")) {
   window.localStorage.removeItem("rulebound-extraction-meta-v1");
   window.localStorage.removeItem("rulebound-local-profile-v1");
 }
@@ -640,6 +660,26 @@ function getSceneActionLabel(currentState) {
     return "재시도";
   }
   return "";
+}
+
+function getTitleCanvasMenuIndex(point, currentState) {
+  if (!point || currentState.scene !== SCENES.TITLE) {
+    return null;
+  }
+  const hasRun = Boolean(currentState.save?.hasRun);
+  const rowX = 82;
+  const rowY = 316;
+  const rowW = 344;
+  const rowH = 56;
+  const rowGap = 68;
+  const count = hasRun ? 2 : 1;
+  for (let index = 0; index < count; index += 1) {
+    const top = rowY + index * rowGap;
+    if (point.x >= rowX && point.x <= rowX + rowW && point.y >= top && point.y <= top + rowH) {
+      return index;
+    }
+  }
+  return null;
 }
 
 function formatVolumePercent(value) {
@@ -1433,6 +1473,16 @@ function isTestDebugToggleKey(event) {
   return event.code === "NumpadMultiply" || event.key === "*";
 }
 
+function setDevControlsOpen(currentDom, currentState, open) {
+  currentState.devControlsOpen = Boolean(open);
+  if (!currentState.devControlsOpen) {
+    setSoundOptionsPanelOpen(false);
+    setMovementTuningPanelOpen(currentDom, false);
+    setTestDebugPanelOpen(currentDom, currentState, false);
+  }
+  syncBrowserControls(currentDom, currentState);
+}
+
 function syncBrowserControls(currentDom, currentState) {
   const shelterTalkActive = currentState.scene === SCENES.SHELTER && (
     Boolean(currentState.shelter?.talk?.active)
@@ -1442,10 +1492,13 @@ function syncBrowserControls(currentDom, currentState) {
     Boolean(currentState.shelter?.autoEventBridge)
     || Boolean(currentState.run?.shelterRest?.active && currentState.run.shelterRest.autoEventBridge)
   );
-  const shelterCinematicActive = shelterTalkActive || shelterBridgeActive;
+  const shelterOpeningActive = currentState.scene === SCENES.SHELTER && Boolean(currentState.openingIntro?.active);
+  const shelterCinematicActive = shelterTalkActive || shelterBridgeActive || shelterOpeningActive;
+  const devControlsOpen = Boolean(currentState.devControlsOpen);
   document.body.classList.toggle("is-map-overlay-active", Boolean(currentState.run?.mapOverlay?.active));
   document.body.classList.toggle("is-inventory-overlay-active", Boolean(currentState.run?.inventoryOverlay?.active));
   document.body.classList.toggle("is-shelter-talk-active", shelterCinematicActive);
+  document.body.classList.toggle("is-dev-controls-open", devControlsOpen);
 
   if (currentDom.sceneActionButton) {
     const sceneActionVisible = currentState.scene !== SCENES.EXPEDITION && !shelterCinematicActive;
@@ -1803,11 +1856,48 @@ function bindUi(currentDom, currentState, data) {
   renderSoundOptionsFields();
   setSoundOptionsPanelOpen(false);
 
-  currentDom.sceneActionButton?.addEventListener("click", () => {
+  let sceneActionTitleActivationTime = 0;
+  const activateSceneAction = (event = null) => {
+    const now = window.performance?.now?.() ?? Date.now();
+    if (activateTitleMenuSelection(currentState, data)) {
+      sceneActionTitleActivationTime = now;
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      return;
+    }
+    if (event?.type === "pointerdown") {
+      return;
+    }
+    if (event?.type === "click" && sceneActionTitleActivationTime > 0 && now - sceneActionTitleActivationTime < 500) {
+      event.preventDefault();
+      return;
+    }
     playGameSfx("uiConfirm", { cooldownMs: 120 });
     pressVirtualKey(currentState, "KeyC");
     window.setTimeout(() => releaseVirtualKey(currentState, "KeyC"), 80);
-  });
+  };
+
+  currentDom.sceneActionButton?.addEventListener("pointerdown", activateSceneAction);
+  currentDom.sceneActionButton?.addEventListener("click", activateSceneAction);
+
+  const activateTitleCanvasSelection = (event) => {
+    if (event.button !== undefined && event.button !== 0) {
+      return false;
+    }
+    const point = getCanvasPoint(currentDom.canvas, event);
+    const titleMenuIndex = getTitleCanvasMenuIndex(point, currentState);
+    if (titleMenuIndex === null) {
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    activateTitleMenuSelection(currentState, data, titleMenuIndex);
+    return true;
+  };
+
+  currentDom.canvas?.addEventListener("pointerdown", activateTitleCanvasSelection);
+  currentDom.canvas?.addEventListener("click", activateTitleCanvasSelection);
 
   currentDom.debugButton?.addEventListener("click", () => {
     currentState.debug.active = !currentState.debug.active;
@@ -2281,8 +2371,22 @@ function bindUi(currentDom, currentState, data) {
       return;
     }
 
-    if (event.repeat && ["KeyP", "KeyL", "KeyB", "KeyM", "KeyT", "F5"].includes(code)) {
+    if (event.repeat && ["BracketLeft", "KeyP", "KeyL", "KeyB", "KeyM", "KeyT", "F5"].includes(code)) {
       event.preventDefault();
+      return;
+    }
+
+    if (code === "BracketLeft") {
+      event.preventDefault();
+      consumeShortcutState(currentState, code);
+      setDevControlsOpen(currentDom, currentState, !currentState.devControlsOpen);
+      return;
+    }
+
+    if (currentState.scene === SCENES.TITLE && ["Enter", "NumpadEnter", "KeyC", "KeyZ"].includes(code)) {
+      event.preventDefault();
+      consumeShortcutState(currentState, code);
+      activateTitleMenuSelection(currentState, data);
       return;
     }
 

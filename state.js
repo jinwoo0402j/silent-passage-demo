@@ -1448,10 +1448,17 @@ export function createInitialState(data) {
       hasRun: false,
       lastSavedAt: null,
     },
+    devControlsOpen: false,
     titleMenu: {
       menuIndex: 0,
       confirmingNewRun: false,
       lastHasRun: null,
+    },
+    openingIntro: {
+      active: false,
+      cutIndex: 0,
+      timer: 0,
+      completed: false,
     },
     shelterMenu: {
       menuIndex: 0,

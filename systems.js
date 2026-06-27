@@ -12,7 +12,7 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260622-npc-v1";
+} from "./state.js?v=20260622-title-npc-v1";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260622-npc-v1";
 import {
   clearSavedGame,
@@ -120,6 +120,8 @@ const TITLE_MENU_ITEMS = ["new", "continue"];
 const TITLE_MENU_UP_KEYS = ["ArrowUp", "KeyW"];
 const TITLE_MENU_DOWN_KEYS = ["ArrowDown", "KeyS"];
 const TITLE_MENU_CANCEL_KEYS = ["Escape"];
+const OPENING_INTRO_ADVANCE_KEYS = ["KeyZ", "Enter", "KeyC"];
+const OPENING_INTRO_SKIP_KEYS = ["Escape"];
 const LOOT_PREV_KEYS = ["ArrowUp", "KeyW"];
 const LOOT_NEXT_KEYS = ["ArrowDown", "KeyS"];
 const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyA"];
@@ -14712,12 +14714,16 @@ function updateExpedition(state, data, dt) {
   updateAutoSave(state, data, dt);
 }
 
-function updateShelter(state) {
+function updateShelter(state, dt = 0) {
   state.shelter = state.shelter && typeof state.shelter === "object" ? state.shelter : { menuIndex: 0 };
   state.shelter.menuIndex = clamp(Math.floor(state.shelter.menuIndex || 0), 0, SHELTER_HOME_MENU_ITEMS.length - 1);
   state.shelter.upgradeIndex = clamp(Math.floor(state.shelter.upgradeIndex || 0), 0, Math.max(0, SHELTER_UPGRADES.length - 1));
   state.shelterMenu = state.shelter;
   const talk = ensureHomeShelterTalkState(state);
+
+  if (updateOpeningIntro(state, state.data, dt)) {
+    return;
+  }
 
   if (!talk.active) {
     const autoEventState = updateShelterAutoEvent(talk, state, state.data, state.shelter);
@@ -14946,6 +14952,120 @@ function moveTitleMenu(titleMenu, hasRun, direction) {
   titleMenu.menuIndex = (Math.floor(titleMenu.menuIndex || 0) + direction + count) % count;
 }
 
+function getTitlePointerMenuIndex(state, hasRun) {
+  const mouse = state.mouse;
+  if (!mouse?.primaryJustPressed || mouse.onCanvas === false) {
+    return null;
+  }
+  const x = Number(mouse.screenX);
+  const y = Number(mouse.screenY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  const rowX = 82;
+  const rowY = 316;
+  const rowW = 344;
+  const rowH = 56;
+  const rowGap = 68;
+  const count = hasRun ? TITLE_MENU_ITEMS.length : 1;
+  for (let index = 0; index < count; index += 1) {
+    const top = rowY + index * rowGap;
+    if (x >= rowX && x <= rowX + rowW && y >= top && y <= top + rowH) {
+      return index;
+    }
+  }
+  return null;
+}
+
+function getOpeningIntroCuts(data) {
+  return Array.isArray(data?.opening?.cuts)
+    ? data.opening.cuts.filter((cut) => cut && typeof cut === "object")
+    : [];
+}
+
+function getOpeningIntroCutDuration(cut) {
+  const configured = Number(cut?.duration);
+  const lineDuration = getShelterLineTypeDuration(String(cut?.line || "")) + 0.45;
+  return Number.isFinite(configured)
+    ? Math.max(clamp(configured, 0.8, 6), lineDuration)
+    : clamp(lineDuration, 1.2, 6);
+}
+
+function beginOpeningIntro(state, data) {
+  if (getOpeningIntroCuts(data).length <= 0) {
+    return false;
+  }
+  state.openingIntro = {
+    active: true,
+    cutIndex: 0,
+    timer: 0,
+    completed: false,
+  };
+  state.sceneTimer = 0;
+  setStatus(state, "Opening. Z/Enter advance. Esc skip.");
+  return true;
+}
+
+function finishOpeningIntro(state) {
+  state.openingIntro = {
+    active: false,
+    cutIndex: 0,
+    timer: 0,
+    completed: true,
+  };
+  state.sceneTimer = 0;
+  setStatus(state, "쉘터 연결");
+}
+
+function updateOpeningIntro(state, data, dt = 0) {
+  const intro = state.openingIntro && typeof state.openingIntro === "object"
+    ? state.openingIntro
+    : { active: false };
+  if (!intro.active) {
+    return false;
+  }
+
+  const cuts = getOpeningIntroCuts(data);
+  if (cuts.length <= 0) {
+    finishOpeningIntro(state);
+    return true;
+  }
+
+  const skip = consumeEitherPress(state, OPENING_INTRO_SKIP_KEYS);
+  const keyAdvance = !skip && consumeEitherPress(state, OPENING_INTRO_ADVANCE_KEYS);
+  const pointerAdvance = !skip && !keyAdvance && Boolean(state.mouse?.primaryJustPressed && state.mouse.onCanvas !== false);
+  if (pointerAdvance && state.mouse) {
+    state.mouse.primaryJustPressed = false;
+  }
+
+  if (skip) {
+    playGameSfx("uiBack", { cooldownMs: 120 });
+    finishOpeningIntro(state);
+    return true;
+  }
+
+  const cutIndex = clamp(Math.floor(intro.cutIndex || 0), 0, cuts.length - 1);
+  const cut = cuts[cutIndex];
+  intro.cutIndex = cutIndex;
+  intro.timer = Math.max(0, Number(intro.timer || 0) + Math.max(0, dt));
+  const done = intro.timer >= getOpeningIntroCutDuration(cut);
+
+  if (keyAdvance || pointerAdvance || done) {
+    if (keyAdvance || pointerAdvance) {
+      playGameSfx("uiConfirm", { cooldownMs: 80 });
+    }
+    if (cutIndex >= cuts.length - 1) {
+      finishOpeningIntro(state);
+      return true;
+    }
+    intro.cutIndex = cutIndex + 1;
+    intro.timer = 0;
+  }
+
+  setStatus(state, "Opening. Z/Enter advance. Esc skip.");
+  return true;
+}
+
 function enterTitleNewRun(state, hasRun) {
   if (hasRun) {
     clearSavedGame();
@@ -14959,7 +15079,51 @@ function enterTitleNewRun(state, hasRun) {
   };
   state.scene = SCENES.SHELTER;
   state.sceneTimer = 0;
-  setStatus(state, "출격 준비");
+  if (!beginOpeningIntro(state, state.data)) {
+    setStatus(state, "출격 준비");
+  }
+}
+
+export function activateTitleMenuSelection(state, data, menuIndex = null) {
+  if (!state || state.scene !== SCENES.TITLE) {
+    return false;
+  }
+  state.data = state.data || data;
+  state.save = state.save || {};
+  const hasRun = hasSavedGame();
+  state.save.hasRun = hasRun;
+  const titleMenu = ensureTitleMenuState(state, hasRun);
+  if (Number.isFinite(menuIndex)) {
+    titleMenu.menuIndex = clamp(Math.floor(menuIndex), 0, TITLE_MENU_ITEMS.length - 1);
+  }
+
+  if (titleMenu.confirmingNewRun) {
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
+    enterTitleNewRun(state, hasRun);
+    return true;
+  }
+
+  const selected = TITLE_MENU_ITEMS[clamp(Math.floor(titleMenu.menuIndex || 0), 0, TITLE_MENU_ITEMS.length - 1)];
+  playGameSfx("uiConfirm", { cooldownMs: 120 });
+  if (selected === "continue") {
+    if (hasRun && restoreSavedGame(state, state.data)) {
+      return true;
+    }
+    state.save.hasRun = false;
+    titleMenu.menuIndex = 0;
+    titleMenu.lastHasRun = false;
+    setStatus(state, "저장된 런 없음");
+    return true;
+  }
+
+  if (hasRun) {
+    titleMenu.confirmingNewRun = true;
+    setStatus(state, "기존 저장 삭제 확인");
+    return true;
+  }
+
+  enterTitleNewRun(state, false);
+  return true;
 }
 
 function updateTitle(state) {
@@ -14973,6 +15137,31 @@ function updateTitle(state) {
   const hasRun = hasSavedGame();
   state.save.hasRun = hasRun;
   const titleMenu = ensureTitleMenuState(state, hasRun);
+  const pointerMenuIndex = getTitlePointerMenuIndex(state, hasRun);
+  if (pointerMenuIndex !== null) {
+    state.mouse.primaryJustPressed = false;
+    titleMenu.menuIndex = pointerMenuIndex;
+    titleMenu.confirmingNewRun = false;
+    playGameSfx("uiConfirm", { cooldownMs: 120 });
+    const selected = TITLE_MENU_ITEMS[clamp(pointerMenuIndex, 0, TITLE_MENU_ITEMS.length - 1)];
+    if (selected === "continue") {
+      if (hasRun && restoreSavedGame(state, state.data)) {
+        return;
+      }
+      state.save.hasRun = false;
+      titleMenu.menuIndex = 0;
+      titleMenu.lastHasRun = false;
+      setStatus(state, "저장된 런 없음");
+      return;
+    }
+    if (hasRun) {
+      titleMenu.confirmingNewRun = true;
+      setStatus(state, "기존 저장 삭제 확인");
+      return;
+    }
+    enterTitleNewRun(state, false);
+    return;
+  }
 
   if (titleMenu.confirmingNewRun) {
     if (consumeEitherPress(state, TITLE_MENU_CANCEL_KEYS)) {
@@ -15174,7 +15363,7 @@ export function updateGame(state, data, dt) {
   if (state.scene === SCENES.TITLE) {
     updateTitle(state);
   } else if (state.scene === SCENES.SHELTER) {
-    updateShelter(state);
+    updateShelter(state, dt);
   } else if (state.scene === SCENES.EXPEDITION) {
     updateExpedition(state, data, dt);
   } else if (state.scene === SCENES.RESULTS) {

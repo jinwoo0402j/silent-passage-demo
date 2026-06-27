@@ -15,6 +15,41 @@ export const GAME_DATA = {
     "subtitle": "TYPE-07A Movement Lab",
     "description": "움직임, HUD, 배치를 빠르게 검증하는 브라우저 프로토타입."
   },
+  "opening": {
+    "enabled": true,
+    "cuts": [
+      {
+        "id": "rain-city",
+        "label": "03:17 / FLOOD DISTRICT",
+        "assetKey": "shelterHubConcept",
+        "line": "비는 멈추지 않았다.",
+        "duration": 1.7
+      },
+      {
+        "id": "shelter-door",
+        "label": "SHELTER LINK",
+        "assetKey": "shelterFirstArrivalCg",
+        "line": "쉘터 문이 닫히고, 잠금 장치가 세 번 울렸다.",
+        "duration": 2.3
+      },
+      {
+        "id": "type07a-wakes",
+        "label": "TYPE-07A",
+        "assetKey": "shelterHomeAnxiousCg",
+        "speaker": "Type-07A",
+        "line": "아빠, 아직 밖에 비 와?",
+        "duration": 2.1
+      },
+      {
+        "id": "first-question",
+        "label": "FIRST CONTACT",
+        "assetKey": "shelterHomeCharmCg",
+        "speaker": "Type-07A",
+        "line": "그럼 오늘도 나가는 거야?",
+        "duration": 2.1
+      }
+    ]
+  },
   "art": {
     "operatorStanding": {
       "src": "./assets/characters/type-07a-standing.png?v=20260424-2"

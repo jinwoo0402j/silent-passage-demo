@@ -7,7 +7,7 @@ import {
   getShelterUpgradeCost,
   getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260622-npc-v1";
+} from "./state.js?v=20260622-title-npc-v1";
 import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
@@ -9253,16 +9253,17 @@ function drawTitleSceneV3(ctx, state, data) {
 
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "700 13px 'Segoe UI', sans-serif";
-  ctx.fillText("브라우저 프로토타입", 84, 96);
+  ctx.fillText("SHELTER LINK / FLOOD CITY", 84, 96);
 
   ctx.fillStyle = theme.textMain;
-  ctx.font = "700 62px 'Trebuchet MS', sans-serif";
-  ctx.fillText("TYPE-07A", 82, 160);
+  ctx.font = "700 52px 'Trebuchet MS', sans-serif";
+  ctx.fillText("SILENT", 82, 150);
+  ctx.fillText("PASSAGE", 82, 206);
 
   ctx.fillStyle = theme.textDim;
   ctx.font = "18px 'Segoe UI', sans-serif";
-  ctx.fillText("규칙 해석 익스트랙션", 86, 194);
-  ctx.fillText("저텍스트 HUD · SD 플레이어", 86, 224);
+  ctx.fillText("TYPE-07A / Shelter Opening Prototype", 86, 238);
+  ctx.fillText("비가 멈추지 않는 도시에서 시작한다.", 86, 266);
 
   const hasRun = Boolean(state.save?.hasRun);
   const selectedIndex = hasRun
@@ -9272,14 +9273,14 @@ function drawTitleSceneV3(ctx, state, data) {
 
   ctx.fillStyle = theme.accentSecondary;
   ctx.font = "800 12px 'Segoe UI', sans-serif";
-  ctx.fillText("MAIN MENU", 84, 260);
+  ctx.fillText("MAIN MENU", 84, 300);
   TITLE_MENU_OPTIONS.forEach((option, index) => {
     drawTitleMenuOption(
       ctx,
       theme,
       option,
       82,
-      276 + index * 68,
+      316 + index * 68,
       344,
       56,
       index === selectedIndex && !confirmingNewRun,
@@ -9292,7 +9293,7 @@ function drawTitleSceneV3(ctx, state, data) {
   } else {
     ctx.fillStyle = theme.accent;
     ctx.font = "800 13px 'Segoe UI', sans-serif";
-    ctx.fillText(hasRun ? "W/S 선택    C/Z 실행" : "C/Z 처음부터", 84, 454);
+    ctx.fillText(hasRun ? "W/S 선택    C/Z 실행" : "C/Z 시작", 84, 492);
   }
 
   drawArtPanel(ctx, theme, data, "titlePanel", 540, 74, 664, 574, {
@@ -9311,10 +9312,127 @@ function drawTitleSceneV3(ctx, state, data) {
   });
   ctx.fillStyle = theme.textMain;
   ctx.font = "700 12px 'Segoe UI', sans-serif";
-  ctx.fillText("Movement Lab", 82, 612);
+  ctx.fillText("Opening Test", 82, 612);
   ctx.fillStyle = theme.textDim;
   ctx.font = "15px 'Segoe UI', sans-serif";
-  ctx.fillText("움직임과 HUD 배치를 점검한다.", 82, 640);
+  ctx.fillText("시작 → 인트로 → 첫 대화", 82, 640);
+}
+
+function getOpeningIntroCuts(data) {
+  return Array.isArray(data?.opening?.cuts)
+    ? data.opening.cuts.filter((cut) => cut && typeof cut === "object")
+    : [];
+}
+
+function getOpeningIntroCutDuration(cut) {
+  const configured = Number(cut?.duration);
+  const lineDuration = getShelterLineTypeDuration(String(cut?.line || "")) + 0.45;
+  return Number.isFinite(configured)
+    ? Math.max(clamp(configured, 0.8, 6), lineDuration)
+    : clamp(lineDuration, 1.2, 6);
+}
+
+function drawOpeningIntroProgress(ctx, theme, cuts, cutIndex, progress) {
+  const width = 178;
+  const gap = 10;
+  const total = cuts.length * width + Math.max(0, cuts.length - 1) * gap;
+  const startX = (SCREEN_WIDTH - total) / 2;
+  const y = 668;
+
+  cuts.forEach((cut, index) => {
+    const x = startX + index * (width + gap);
+    ctx.fillStyle = "rgba(255,255,255,0.16)";
+    ctx.fillRect(x, y, width, 3);
+    if (index < cutIndex) {
+      ctx.fillStyle = theme.accentSecondary;
+      ctx.fillRect(x, y, width, 3);
+    } else if (index === cutIndex) {
+      ctx.fillStyle = theme.accent;
+      ctx.fillRect(x, y, width * progress, 3);
+    }
+  });
+}
+
+function drawOpeningIntroOverlay(ctx, state, data) {
+  const theme = getUiTheme(data);
+  const cuts = getOpeningIntroCuts(data);
+  if (cuts.length <= 0) {
+    drawShelterSceneV3(ctx, state, data);
+    return;
+  }
+
+  const intro = state.openingIntro && typeof state.openingIntro === "object"
+    ? state.openingIntro
+    : {};
+  const cutIndex = clamp(Math.floor(intro.cutIndex || 0), 0, cuts.length - 1);
+  const cut = cuts[cutIndex];
+  const duration = getOpeningIntroCutDuration(cut);
+  const progress = clamp(Number(intro.timer || 0) / Math.max(0.01, duration), 0, 1);
+  const line = String(cut.line || "").trim();
+  const typeDuration = Math.max(0.01, getShelterLineTypeDuration(line));
+  const typedLine = getVisibleShelterTypedText(line, clamp(Number(intro.timer || 0) / typeDuration, 0, 1));
+  const assetKey = typeof cut.assetKey === "string" ? cut.assetKey.trim() : "";
+  const image = getImageAsset(data.art?.[assetKey]?.src);
+
+  if (image && image.complete && image.naturalWidth) {
+    const panX = (cutIndex - (cuts.length - 1) / 2) * 0.018 + Math.sin((state.pulse || 0) * 0.12) * 0.006;
+    const panY = Math.cos((state.pulse || 0) * 0.1 + cutIndex) * 0.006;
+    const zoom = 1.035 + cutIndex * 0.004 + progress * 0.018;
+    drawImageCoverPan(ctx, image, -8, -8, SCREEN_WIDTH + 16, SCREEN_HEIGHT + 16, panX, panY, zoom, 1);
+  } else {
+    drawShelterHubBackdrop(ctx, theme, state, data);
+  }
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.26)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  const topShade = ctx.createLinearGradient(0, 0, 0, 210);
+  topShade.addColorStop(0, "rgba(0,0,0,0.68)");
+  topShade.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = topShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, 220);
+  const bottomShade = ctx.createLinearGradient(0, SCREEN_HEIGHT * 0.48, 0, SCREEN_HEIGHT);
+  bottomShade.addColorStop(0, "rgba(0,0,0,0)");
+  bottomShade.addColorStop(1, "rgba(0,0,0,0.78)");
+  ctx.fillStyle = bottomShade;
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = theme.accentSecondary;
+  ctx.font = `800 12px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+  ctx.fillText(String(cut.label || "OPENING"), 56, 54);
+  ctx.fillStyle = "rgba(245,248,251,0.82)";
+  ctx.font = `700 15px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+  ctx.fillText("SILENT PASSAGE", 56, 82);
+
+  if (cut.speaker) {
+    ctx.fillStyle = theme.accent;
+    ctx.font = `800 13px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+    ctx.fillText(String(cut.speaker), 92, 566);
+  }
+
+  drawCinematicSingleLine(ctx, typedLine, SCREEN_WIDTH / 2, 616, 960, {
+    measureText: line,
+    color: "#fffaf1",
+    stroke: "rgba(0,0,0,0.86)",
+    weight: 700,
+    size: 25,
+    minSize: 16,
+    lineWidth: 4,
+    shadowBlur: 14,
+    shadowOffsetY: 3,
+  });
+
+  drawOpeningIntroProgress(ctx, theme, cuts, cutIndex, progress);
+
+  ctx.textAlign = "left";
+  ctx.font = `600 12px ${SHELTER_CINEMATIC_SERIF_FONT}`;
+  ctx.fillStyle = "rgba(245,248,251,0.66)";
+  ctx.strokeStyle = "rgba(0,0,0,0.72)";
+  ctx.lineWidth = 3;
+  ctx.strokeText("Z / Enter  넘기기     Esc  생략", 42, 696);
+  ctx.fillText("Z / Enter  넘기기     Esc  생략", 42, 696);
+  ctx.restore();
 }
 
 function drawShelterDreamEventV3(ctx, theme, state) {
@@ -13764,7 +13882,9 @@ export function renderGame(dom, state, data) {
     const restTalk = state.run?.shelterRest?.active && state.run.shelterRest.phase === "talk"
       ? state.run.shelterRest.talk
       : null;
-    if (state.shelter?.talk?.active || restTalk) {
+    if (state.openingIntro?.active) {
+      drawOpeningIntroOverlay(ctx, state, data);
+    } else if (state.shelter?.talk?.active || restTalk) {
       drawShelterTalkOverlay(ctx, state, data, getUiTheme(data), { talk: restTalk || state.shelter.talk });
     } else if (state.shelter?.autoEventBridge) {
       drawShelterAutoEventBridgeOverlay(ctx, state, data, getUiTheme(data), state.shelter.autoEventBridge);

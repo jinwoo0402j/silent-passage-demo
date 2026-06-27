@@ -105,9 +105,22 @@ body.is-shelter-talk-active .app-links,
 body.is-shelter-talk-active .live-edit-button,
 body.is-shelter-talk-active .debug-button,
 body.is-shelter-talk-active .movement-tuning-button,
+body.is-shelter-talk-active .sound-options-button,
+body.is-shelter-talk-active .sound-options-panel,
 body.is-shelter-talk-active .scene-action-button,
 body.is-shelter-talk-active .test-debug-button,
 body.is-shelter-talk-active .test-debug-panel {
+  display: none;
+}
+
+body:not(.is-dev-controls-open) .app-links,
+body:not(.is-dev-controls-open) .live-edit-button,
+body:not(.is-dev-controls-open) .debug-button,
+body:not(.is-dev-controls-open) .movement-tuning-button,
+body:not(.is-dev-controls-open) .sound-options-button,
+body:not(.is-dev-controls-open) .sound-options-panel,
+body:not(.is-dev-controls-open) .test-debug-button,
+body:not(.is-dev-controls-open) .test-debug-panel {
   display: none;
 }
 
