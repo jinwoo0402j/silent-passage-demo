@@ -141,12 +141,16 @@ const CAMERA_NUMBER_FIELDS = [
   ["braceZoom", 0.96, 0.1, 1],
   ["directionLerp", 6, 0, 30],
   ["focusLerp", 5.5, 0, 30],
+  ["positionFollowLerp", 0, 0, 120],
   ["zoomLerp", 4.2, 0, 30],
 ];
 const CAMERA_BOOLEAN_FIELDS = [
   ["lookAheadEnabled", true],
   ["dashAffectsCamera", false],
   ["braceAffectsCamera", false],
+];
+const CAMERA_STRING_FIELDS = [
+  ["positionFollowMode", ""],
 ];
 const HOSTILE_DRONE_NUMBER_FIELDS = [
   ["x", 0, null],
@@ -731,6 +735,12 @@ function extractCamera(camera = {}) {
         safeBoolean(camera?.[field], fallback),
       ]),
     ),
+    ...Object.fromEntries(
+      CAMERA_STRING_FIELDS.map(([field, fallback]) => [
+        field,
+        safeString(camera?.[field], fallback),
+      ]),
+    ),
   };
 }
 
@@ -746,6 +756,12 @@ function sanitizeCamera(camera, baseCamera) {
       CAMERA_BOOLEAN_FIELDS.map(([field, fallback]) => [
         field,
         safeBoolean(camera?.[field], baseCamera?.[field] ?? fallback),
+      ]),
+    ),
+    ...Object.fromEntries(
+      CAMERA_STRING_FIELDS.map(([field, fallback]) => [
+        field,
+        safeString(camera?.[field], baseCamera?.[field] ?? fallback),
       ]),
     ),
   };

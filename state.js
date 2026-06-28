@@ -1410,6 +1410,7 @@ export function createRunState(data, meta) {
     cameraDashSuppressTimer: 0,
     cameraIntent: "",
     cameraIntentPriority: 0,
+    cameraFollowOnlyMode: false,
     activeCameraZoneId: null,
     activeCameraZoneLabel: null,
     cameraFallActive: false,

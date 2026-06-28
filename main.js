@@ -8,7 +8,7 @@ import {
   extractEditableLevelData,
   saveLevelOverride,
   shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260628-camera-mouse-pan-removed";
+} from "./level-store.js?v=20260628-camera-priority-controller-v23";
 import {
   SPRINT_TUNING_FIELDS,
   SPRINT_TUNING_KEY,
@@ -54,8 +54,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260628-camera-priority-controller-v18";
-import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-priority-controller-v18";
+} from "./state.js?v=20260628-camera-priority-controller-v23";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-priority-controller-v23";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

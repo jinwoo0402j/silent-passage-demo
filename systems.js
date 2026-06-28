@@ -12,8 +12,8 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260628-camera-priority-controller-v18";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-mouse-pan-removed";
+} from "./state.js?v=20260628-camera-priority-controller-v23";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-priority-controller-v23";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -136,6 +136,7 @@ const LOOT_LEFT_KEYS = ["ArrowLeft", "KeyA"];
 const LOOT_RIGHT_KEYS = ["ArrowRight", "KeyD"];
 const LOOT_CLOSE_KEYS = ["Escape", "KeyQ"];
 const DEBUG_KEYS = ["F3", "Backquote"];
+const CAMERA_FOLLOW_ONLY_TOGGLE_KEYS = ["F6"];
 const DEBUG_SET_NIGHT_KEYS = ["Digit8"];
 const NIGHT_TRANSITION_SECONDS = 1.4;
 const RESTART_KEYS = ["F5"];
@@ -1372,6 +1373,7 @@ function getEffectiveCameraConfig(data, run) {
   const config = getCameraConfig(data);
   const activeZone = getActiveCameraZone(run, data);
   const zoneFrame = getCameraZoneFrame(activeZone);
+  const urlPositionFollowMode = getUrlCameraPositionFollowMode();
   const zoneConfig = activeZone
     ? {
       zoom: zoneFrame.zoom,
@@ -1396,8 +1398,18 @@ function getEffectiveCameraConfig(data, run) {
   }
   return {
     ...mergedConfig,
+    ...(urlPositionFollowMode ? { positionFollowMode: urlPositionFollowMode } : {}),
     zoom: clamp(baseZoom * userZoom, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX),
   };
+}
+
+function getUrlCameraPositionFollowMode() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const rawMode = params.get("cameraPositionFollow") || params.get("cameraFollow");
+  return rawMode === "instant" ? "instant" : null;
 }
 
 function isBraceCameraState(player) {
@@ -2034,8 +2046,88 @@ function constrainCameraToPlayer(cameraX, cameraY, run, data, viewportWidth, vie
   };
 }
 
+function getCameraPositionLerp(config, fallbackLerp, cameraDt) {
+  if (config.positionFollowMode === "instant" || config.instantPositionFollow === true) {
+    return 1;
+  }
+  const configuredRate = Number(config.positionFollowLerp ?? config.cameraFollowLerp);
+  if (Number.isFinite(configuredRate) && configuredRate > 0) {
+    return Math.min(1, cameraDt * configuredRate);
+  }
+  return fallbackLerp;
+}
+
+function clearCameraCorrectionState(run) {
+  run.cameraLookAhead = 0;
+  run.cameraDownLookAhead = 0;
+  run.cameraSpeedRatio = 0;
+  run.cameraSpeedRawRatio = 0;
+  run.cameraSpeedHoldRatio = 0;
+  run.cameraSpeedHoldReturning = false;
+  run.cameraDashSuppressTimer = 0;
+  run.cameraFallActive = false;
+  run.cameraFallHeld = false;
+  run.cameraFallHoldTimer = 0;
+  run.cameraFallRatio = 0;
+  run.cameraFallTargetYOffset = 0;
+  if (run.player) {
+    run.player.recoilCameraReturning = false;
+    run.player.recoilCameraHoldUntilLanding = false;
+    run.player.recoilCameraTimer = 0;
+  }
+}
+
+function syncPlayerOnlyCamera(run, data) {
+  const baseConfig = getCameraConfig(data);
+  const userZoom = clamp(run?.cameraUserZoom ?? 1, CAMERA_USER_ZOOM_MIN, CAMERA_USER_ZOOM_MAX);
+  const zoom = clamp(
+    (baseConfig.zoom ?? 1) * userZoom,
+    CAMERA_ABSOLUTE_ZOOM_MIN,
+    CAMERA_ABSOLUTE_ZOOM_MAX,
+  );
+  const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
+  const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
+  const player = run.player;
+  const focusX = 0.5;
+  const focusY = 0.5;
+  const targetX = player.x + player.width * 0.5 - viewportWidth * focusX;
+  const targetY = player.y + player.height * 0.5 - viewportHeight * focusY;
+  const camera = constrainCameraToPlayer(
+    targetX,
+    targetY,
+    run,
+    data,
+    viewportWidth,
+    viewportHeight,
+    baseConfig,
+  );
+
+  run.cameraZoom = zoom;
+  run.cameraFocusX = focusX;
+  run.cameraFocusY = focusY;
+  run.cameraLookDirection = player.facing || run.cameraLookDirection || 1;
+  run.cameraTargetX = targetX;
+  run.cameraTargetY = targetY;
+  run.cameraTargetZoom = zoom;
+  run.cameraX = camera.x;
+  run.cameraY = camera.y;
+  run.cameraIntent = "player-only";
+  run.cameraIntentPriority = 120;
+  run.activeCameraZoneId = null;
+  run.activeCameraZoneLabel = null;
+  run.aimCameraPanX = 0;
+  run.aimCameraPanY = 0;
+  clearCameraCorrectionState(run);
+  run.cameraPlayerScreenX = (player.x + player.width * 0.5 - run.cameraX) / viewportWidth;
+  run.cameraPlayerScreenY = (player.y + player.height * 0.5 - run.cameraY) / viewportHeight;
+}
+
 function syncCamera(run, data, dt) {
   const config = getEffectiveCameraConfig(data, run);
+  if (run.cameraFollowOnlyMode) {
+    syncPlayerOnlyCamera(run, data);
+    return;
+  }
   const cameraDt = Math.min(
     Math.max(0, dt),
     config.maxLerpStepSeconds ?? CAMERA_MAX_LERP_STEP_SECONDS,
@@ -2068,8 +2160,10 @@ function syncCamera(run, data, dt) {
     run.cameraFallActive = false;
     run.cameraFallHeld = false;
     clearSpeedCameraState(run);
-    const nextX = clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX);
-    const nextY = clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY);
+    const fallbackPositionLerp = Math.min(1, cameraDt * 4.5);
+    const positionLerp = getCameraPositionLerp(config, fallbackPositionLerp, cameraDt);
+    const nextX = clamp(lerp(run.cameraX, targetX, positionLerp), 0, maxX);
+    const nextY = clamp(lerp(run.cameraY, targetY, positionLerp), 0, maxY);
     const camera = zoneFrame
       ? { x: nextX, y: nextY }
       : constrainCameraToPlayer(
@@ -2282,8 +2376,10 @@ function syncCamera(run, data, dt) {
   run.cameraSpeedRatio = speedZoom.ratio;
   run.cameraIntent = cameraIntent.id;
   run.cameraIntentPriority = cameraIntent.priority;
-  const nextX = clamp(lerp(run.cameraX, targetX, horizontalFocusLerp), 0, maxX);
-  const nextY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
+  const horizontalPositionLerp = getCameraPositionLerp(config, horizontalFocusLerp, cameraDt);
+  const verticalPositionLerp = getCameraPositionLerp(config, verticalFocusLerp, cameraDt);
+  const nextX = clamp(lerp(run.cameraX, targetX, horizontalPositionLerp), 0, maxX);
+  const nextY = clamp(lerp(run.cameraY, targetY, verticalPositionLerp), 0, maxY);
   const camera = zoneFrame
     ? { x: nextX, y: nextY }
     : constrainCameraToPlayer(
@@ -15703,7 +15799,7 @@ export function bindInput(state) {
       document.documentElement.dataset.lastKeyDownCode = event.code || "";
       document.documentElement.dataset.lastKeyDownKey = event.key || "";
     }
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Tab", "CapsLock", "Digit1", "Digit2", "Digit3", "Digit8", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "Minus", "Equal", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyE", "KeyF", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "KeyL", "Backquote"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "Tab", "CapsLock", "Digit1", "Digit2", "Digit3", "Digit8", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "Minus", "Equal", "KeyA", "KeyD", "KeyS", "KeyW", "KeyC", "KeyE", "KeyF", "KeyM", "KeyN", "KeyQ", "KeyR", "KeyX", "KeyZ", "KeyV", "ShiftLeft", "ShiftRight", "Escape", "F2", "F3", "F5", "F6", "KeyL", "Backquote"].includes(event.code)) {
       event.preventDefault();
     }
     if (state.forceModernControls) {
@@ -15769,6 +15865,8 @@ function syncRuntimeDebugDataset(state) {
   dataset.cameraSpeedHoldReturning = String(Boolean(state.run?.cameraSpeedHoldReturning));
   dataset.cameraIntent = state.run?.cameraIntent || "";
   dataset.cameraIntentPriority = String(Number(state.run?.cameraIntentPriority ?? 0));
+  dataset.cameraFollowOnlyMode = String(Boolean(state.run?.cameraFollowOnlyMode));
+  dataset.cameraPositionFollowMode = getEffectiveCameraConfig(state.data, state.run).positionFollowMode || "";
   dataset.cameraFallActive = String(Boolean(state.run?.cameraFallActive));
   dataset.cameraFallHeld = String(Boolean(state.run?.cameraFallHeld));
   dataset.cameraFallRatio = String(Number(state.run?.cameraFallRatio ?? 0).toFixed(3));
@@ -15776,6 +15874,10 @@ function syncRuntimeDebugDataset(state) {
   dataset.cameraFallTargetYOffset = String(Number(state.run?.cameraFallTargetYOffset ?? 0).toFixed(1));
   dataset.cameraFocusX = String(Number(state.run?.cameraFocusX ?? 0).toFixed(3));
   dataset.cameraFocusY = String(Number(state.run?.cameraFocusY ?? 0).toFixed(3));
+  dataset.cameraX = String(Number(state.run?.cameraX ?? 0).toFixed(1));
+  dataset.cameraY = String(Number(state.run?.cameraY ?? 0).toFixed(1));
+  dataset.cameraTargetX = String(Number(state.run?.cameraTargetX ?? 0).toFixed(1));
+  dataset.cameraTargetY = String(Number(state.run?.cameraTargetY ?? 0).toFixed(1));
   dataset.cameraPlayerScreenX = String(Number(state.run?.cameraPlayerScreenX ?? 0).toFixed(3));
   dataset.cameraPlayerScreenY = String(Number(state.run?.cameraPlayerScreenY ?? 0).toFixed(3));
   dataset.cameraZoom = String(Number(state.run?.cameraZoom ?? 0).toFixed(3));
@@ -15792,6 +15894,20 @@ export function updateGame(state, data, dt) {
 
   if (consumeEitherPress(state, DEBUG_KEYS)) {
     state.debug.active = !state.debug.active;
+  }
+
+  if (
+    state.scene === SCENES.EXPEDITION &&
+    state.run &&
+    consumeEitherPress(state, CAMERA_FOLLOW_ONLY_TOGGLE_KEYS)
+  ) {
+    state.run.cameraFollowOnlyMode = !state.run.cameraFollowOnlyMode;
+    clearCameraCorrectionState(state.run);
+    pushNotice(
+      state.run,
+      state.run.cameraFollowOnlyMode ? "Camera follow-only ON" : "Camera follow-only OFF",
+      1.4,
+    );
   }
 
   if (
