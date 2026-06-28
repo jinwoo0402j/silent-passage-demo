@@ -12,7 +12,7 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260628-camera-mouse-pan-removed";
+} from "./state.js?v=20260628-camera-priority-controller-v15";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-mouse-pan-removed";
 import {
   clearSavedGame,
@@ -108,6 +108,13 @@ const RECOIL_FLIGHT_CAMERA_MAX_SECONDS = 0.72;
 const RECOIL_CAMERA_RETURN_ZOOM_PER_SECOND = 0.72;
 const RECOIL_CAMERA_RETURN_FOCUS_LERP = 1.45;
 const RECOIL_CAMERA_LANDING_HOLD_CHARGE_LEVEL = 0.75;
+const CAMERA_INTENT_PRIORITY = Object.freeze({
+  freeze: 100,
+  return: 90,
+  recoil: 80,
+  fall: 70,
+  motion: 40,
+});
 const INTERACT_KEYS = ["KeyZ", "KeyF", "KeyE"];
 const WORLD_INTERACT_KEYS = ["ArrowUp", "KeyE", "KeyZ"];
 const NPC_DIALOGUE_UP_KEYS = ["ArrowUp", "KeyW"];
@@ -1516,6 +1523,10 @@ function getCameraLookAhead(player, config) {
   if (!player.onGround && player.vy > 220) {
     return withInputBoost(config.fallLookAhead ?? 0.12);
   }
+  const walkCameraMinSpeed = config.walkCameraMinSpeed ?? config.directionSpeedThreshold ?? 70;
+  if (Math.abs(player.vx) <= walkCameraMinSpeed && !isCameraInputLookActive(player, config)) {
+    return 0;
+  }
   return withInputBoost(config.walkLookAhead ?? 0.08);
 }
 
@@ -1729,6 +1740,26 @@ function getSpeedZoomFromRatio(config, ratio, speed = 0) {
   };
 }
 
+function isDashCameraSuppressed(player, config) {
+  return config.dashAffectsCamera === false && (
+    player.dashTimer > 0 ||
+    player.dashWindupTimer > 0 ||
+    player.dashCarryTimer > 0
+  );
+}
+
+function updateDashCameraSuppressState(run, player, config, dt) {
+  const current = Math.max(0, Number(run?.cameraDashSuppressTimer ?? 0));
+  if (isDashCameraSuppressed(player, config)) {
+    const suppressSeconds = Math.max(0, (config.dashCameraSuppressMs ?? 320) / 1000);
+    run.cameraDashSuppressTimer = Math.max(current, suppressSeconds);
+    return true;
+  }
+
+  run.cameraDashSuppressTimer = Math.max(0, current - dt);
+  return run.cameraDashSuppressTimer > 0;
+}
+
 function clearSpeedCameraState(run) {
   if (!run) {
     return;
@@ -1817,6 +1848,91 @@ function releaseRecoilCameraAfterLanding(player, run = null) {
   player.recoilCameraHoldUntilLanding = false;
   player.recoilCameraTimer = 0;
   beginRecoilCameraReturn(player, run);
+}
+
+function createCameraPriorityIntent(id, overrides = {}) {
+  return {
+    id,
+    priority: CAMERA_INTENT_PRIORITY[id] ?? 0,
+    useMotionDirection: true,
+    useMotionLookAhead: true,
+    useRecoilDirection: false,
+    useRecoilFocus: false,
+    useFallFocus: false,
+    useFallOffset: false,
+    useFallCatchUp: false,
+    clampFallFocusToAnchor: false,
+    lockHorizontalToPlayer: false,
+    useSpeedDownFocus: false,
+    useSpeedZoom: true,
+    targetNeutralFocus: false,
+    holdFocus: false,
+    holdZoom: false,
+    resetSpeedHold: false,
+    ...overrides,
+  };
+}
+
+function resolveCameraPriorityIntent({
+  freezeActionCamera,
+  recoilCamera,
+  recoilReturning,
+  fallCamera,
+  recoilFallFollow,
+  player,
+}) {
+  if (freezeActionCamera) {
+    return createCameraPriorityIntent("freeze", {
+      useMotionDirection: false,
+      useMotionLookAhead: false,
+      useSpeedZoom: false,
+      holdFocus: true,
+      holdZoom: true,
+    });
+  }
+
+  if (recoilReturning) {
+    const returnDuringFall = fallCamera.ratio > 0 || (!player.onGround && player.vy > 0);
+    return createCameraPriorityIntent("return", {
+      useMotionDirection: false,
+      useMotionLookAhead: false,
+      useSpeedZoom: false,
+      useFallFocus: returnDuringFall,
+      useFallCatchUp: returnDuringFall && fallCamera.active,
+      clampFallFocusToAnchor: returnDuringFall,
+      lockHorizontalToPlayer: true,
+      targetNeutralFocus: !returnDuringFall,
+      resetSpeedHold: true,
+    });
+  }
+
+  if (recoilCamera) {
+    return createCameraPriorityIntent("recoil", {
+      useMotionDirection: false,
+      useMotionLookAhead: false,
+      useRecoilDirection: true,
+      useRecoilFocus: true,
+      useFallFocus: recoilFallFollow,
+      useFallCatchUp: recoilFallFollow,
+      clampFallFocusToAnchor: recoilFallFollow,
+      lockHorizontalToPlayer: true,
+    });
+  }
+
+  if (fallCamera.ratio > 0) {
+    return createCameraPriorityIntent("fall", {
+      useMotionDirection: false,
+      useMotionLookAhead: false,
+      useFallFocus: true,
+      useFallCatchUp: fallCamera.active,
+      clampFallFocusToAnchor: true,
+      lockHorizontalToPlayer: true,
+    });
+  }
+
+  return createCameraPriorityIntent("motion", {
+    useSpeedDownFocus: true,
+  });
 }
 
 function getCameraTargetZoom(player, config, fallCamera = null, speedZoomOverride = null) {
@@ -1943,6 +2059,9 @@ function syncCamera(run, data, dt) {
     run.cameraLookAhead = 0;
     run.cameraDownLookAhead = 0;
     run.cameraSpeedRatio = 0;
+    run.cameraIntent = "disabled";
+    run.cameraIntentPriority = 0;
+    run.cameraDashSuppressTimer = 0;
     clearSpeedCameraState(run);
     const nextX = clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX);
     const nextY = clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY);
@@ -1963,10 +2082,7 @@ function syncCamera(run, data, dt) {
   }
 
   const player = run.player;
-  const freezeActionCamera = (
-    (player.dashTimer > 0 && config.dashAffectsCamera === false)
-    || (isBraceCameraState(player) && config.braceAffectsCamera === false)
-  );
+  const freezeActionCamera = isBraceCameraState(player) && config.braceAffectsCamera === false;
   const recoilCamera = freezeActionCamera ? null : getRecoilCameraState(run, config);
   const recoilReturning = !freezeActionCamera && Boolean(player.recoilCameraReturning);
   const fallCamera = updateFallCameraState(run, player, data, config, cameraDt);
@@ -1975,18 +2091,22 @@ function syncCamera(run, data, dt) {
     player.recoilCameraHoldUntilLanding &&
     fallCamera.ratio > 0
   );
-  const applyFallCamera = !freezeActionCamera && !recoilReturning && fallCamera.ratio > 0 && (
-    recoilFallFollow ||
-    (!recoilCamera && (fallCamera.active || player.onGround))
-  );
-  const speedDownCameraRatio = (!freezeActionCamera && !recoilCamera && !recoilReturning && fallCamera.ratio <= 0)
+  const cameraIntent = resolveCameraPriorityIntent({
+    freezeActionCamera,
+    recoilCamera,
+    recoilReturning,
+    fallCamera,
+    recoilFallFollow,
+    player,
+  });
+  const speedDownCameraRatio = cameraIntent.useSpeedDownFocus
     ? getSpeedDownCameraRatio(player, config)
     : 0;
   const targetLookDirection = freezeActionCamera
     ? (run.cameraLookDirection || player.facing || 1)
-    : recoilCamera && Math.abs(recoilCamera.directionX) > 0.08
+    : cameraIntent.useRecoilDirection && Math.abs(recoilCamera.directionX) > 0.08
       ? Math.sign(recoilCamera.directionX)
-    : recoilReturning
+    : !cameraIntent.useMotionDirection
       ? (run.cameraLookDirection || player.facing || 1)
     : getCameraLookDirection(player, run, config);
   const directionLerpRate = isCameraInputLookActive(player, config)
@@ -1998,9 +2118,11 @@ function syncCamera(run, data, dt) {
 
   const lookAhead = freezeActionCamera
     ? (run.cameraLookAhead ?? 0)
-    : recoilReturning
+    : cameraIntent.lockHorizontalToPlayer
       ? 0
-    : recoilCamera
+    : !cameraIntent.useMotionLookAhead && !cameraIntent.useRecoilFocus
+      ? 0
+    : cameraIntent.useRecoilFocus
       ? Math.abs(recoilCamera.directionX) * recoilCamera.horizontalLookAhead
       : getCameraLookAhead(player, config);
   const focusXMin = clamp(config.lookAheadMinFocusX ?? 0.24, 0.08, 0.5);
@@ -2009,24 +2131,35 @@ function syncCamera(run, data, dt) {
   const neutralFocusY = config.neutralFocusY ?? 0.5;
   const targetFocusX = zoneFrame
     ? 0.5
-    : freezeActionCamera
+    : cameraIntent.holdFocus
     ? clamp(run.cameraFocusX ?? neutralFocusX, focusXMin, focusXMax)
-    : recoilReturning
+    : cameraIntent.lockHorizontalToPlayer
+    ? 0.5
+    : cameraIntent.targetNeutralFocus
     ? clamp(neutralFocusX, focusXMin, focusXMax)
     : clamp(
       neutralFocusX - focusLookDirection * lookAhead,
       focusXMin,
       focusXMax,
     );
-  const minFocusY = fallCamera.ratio > 0
-    ? (config.fallMinFocusY ?? 0.18)
+  const configuredFallMinFocusY = config.fallMinFocusY ?? 0.18;
+  const anchoredFallMinFocusY = cameraIntent.clampFallFocusToAnchor
+    ? Math.max(configuredFallMinFocusY, config.fallAnchorMinFocusY ?? 0.28)
+    : configuredFallMinFocusY;
+  const minFocusY = cameraIntent.useFallFocus
+    ? anchoredFallMinFocusY
     : 0.28;
   const fallTargetFocusY = clamp(
-    getCameraVerticalFocus(player, config, fallCamera, speedDownCameraRatio),
+    getCameraVerticalFocus(
+      player,
+      config,
+      cameraIntent.useFallFocus ? fallCamera : null,
+      speedDownCameraRatio,
+    ),
     minFocusY,
     0.72,
   );
-  const recoilTargetFocusY = recoilCamera
+  const recoilTargetFocusY = cameraIntent.useRecoilFocus
     ? clamp(
       neutralFocusY - recoilCamera.directionY * recoilCamera.verticalLookAhead,
       recoilFallFollow ? minFocusY : 0.28,
@@ -2035,54 +2168,63 @@ function syncCamera(run, data, dt) {
     : null;
   const targetFocusY = zoneFrame
     ? 0.5
-    : freezeActionCamera
+    : cameraIntent.holdFocus
     ? clamp(run.cameraFocusY ?? neutralFocusY, 0.28, 0.72)
-    : recoilReturning
+    : cameraIntent.targetNeutralFocus
     ? clamp(neutralFocusY, 0.28, 0.72)
-    : recoilCamera
+    : cameraIntent.useRecoilFocus
       ? recoilFallFollow
         ? Math.min(recoilTargetFocusY, fallTargetFocusY)
         : recoilTargetFocusY
     : fallTargetFocusY;
-  const focusLerp = Math.min(1, cameraDt * (
-    player.recoilCameraReturning
-      ? RECOIL_CAMERA_RETURN_FOCUS_LERP
-      : (config.focusLerp ?? 5.5)
-  ));
   const fallFocusRate = lerp(
     config.fallFocusLerp ?? 8.5,
     config.fallCatchUpLerp ?? Math.max(config.fallFocusLerp ?? 8.5, 12),
     fallCamera.ratio,
   );
+  const shouldLockFallHorizontalCamera = cameraIntent.lockHorizontalToPlayer;
+  const horizontalFocusLerp = shouldLockFallHorizontalCamera
+    ? 1
+    : Math.min(1, cameraDt * (
+      player.recoilCameraReturning
+        ? RECOIL_CAMERA_RETURN_FOCUS_LERP
+        : (config.focusLerp ?? 5.5)
+    ));
   const verticalFocusLerp = Math.min(1, cameraDt * (
     player.recoilCameraReturning
       ? RECOIL_CAMERA_RETURN_FOCUS_LERP
-    : applyFallCamera
+    : cameraIntent.useFallCatchUp
       ? fallFocusRate
-      : speedDownCameraRatio > 0
-        ? (config.speedDownFocusLerp ?? config.focusLerp ?? 5.5)
-      : fallCamera.ratio > 0
+    : speedDownCameraRatio > 0
+      ? (config.speedDownFocusLerp ?? config.focusLerp ?? 5.5)
+      : cameraIntent.useFallFocus
         ? (config.fallReturnLerp ?? 3.6)
         : (config.focusLerp ?? 5.5)
   ));
-  run.cameraFocusX = lerp(run.cameraFocusX ?? targetFocusX, targetFocusX, focusLerp);
+  run.cameraFocusX = lerp(run.cameraFocusX ?? targetFocusX, targetFocusX, horizontalFocusLerp);
   run.cameraFocusY = lerp(run.cameraFocusY ?? targetFocusY, targetFocusY, verticalFocusLerp);
 
   const baseCameraZoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
-  const rawSpeedZoom = freezeActionCamera || recoilReturning
-    ? { ratio: 0, zoom: freezeActionCamera ? clamp(run.cameraZoom ?? baseCameraZoom, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX) : baseCameraZoom, speed: 0 }
-    : getSpeedZoomState(player, config);
-  const speedZoom = freezeActionCamera || recoilReturning
-    ? rawSpeedZoom
-    : updateSpeedCameraHoldState(run, player, config, cameraDt, rawSpeedZoom);
-  if (recoilReturning) {
+  const suppressDashSpeedCamera = updateDashCameraSuppressState(run, player, config, cameraDt);
+  const rawSpeedZoom = cameraIntent.useSpeedZoom && !suppressDashSpeedCamera
+    ? getSpeedZoomState(player, config)
+    : { ratio: 0, zoom: cameraIntent.holdZoom ? clamp(run.cameraZoom ?? baseCameraZoom, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX) : baseCameraZoom, speed: 0 };
+  const speedZoom = cameraIntent.useSpeedZoom && !suppressDashSpeedCamera
+    ? updateSpeedCameraHoldState(run, player, config, cameraDt, rawSpeedZoom)
+    : rawSpeedZoom;
+  if (cameraIntent.resetSpeedHold || suppressDashSpeedCamera) {
     clearSpeedCameraState(run);
   }
-  const targetZoom = freezeActionCamera
+  const targetZoom = cameraIntent.holdZoom
     ? rawSpeedZoom.zoom
-    : recoilReturning
+    : cameraIntent.targetNeutralFocus
       ? baseCameraZoom
-    : getCameraTargetZoom(player, config, fallCamera, speedZoom);
+    : getCameraTargetZoom(
+      player,
+      config,
+      cameraIntent.useFallFocus ? fallCamera : null,
+      speedZoom,
+    );
   const zoomLerp = Math.min(1, cameraDt * (config.zoomLerp ?? 4.2));
   const linearRecoilCameraReturn = !freezeActionCamera && Boolean(player.recoilCameraReturning);
   const currentZoom = clamp(run.cameraZoom ?? (config.zoom ?? 1), CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
@@ -2119,7 +2261,7 @@ function syncCamera(run, data, dt) {
   const targetX = zoneFrame
     ? zoneFrame.x + zoneFrame.width * 0.5 - viewportWidth * 0.5
     : player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX;
-  const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
+  const fallTargetYOffset = cameraIntent.useFallOffset ? fallCamera.targetYOffset : 0;
   const targetY = zoneFrame
     ? zoneFrame.y + zoneFrame.height * 0.5 - viewportHeight * 0.5
     : player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY;
@@ -2131,7 +2273,9 @@ function syncCamera(run, data, dt) {
   run.cameraLookAhead = lookAhead;
   run.cameraDownLookAhead = speedDownCameraRatio;
   run.cameraSpeedRatio = speedZoom.ratio;
-  const nextX = clamp(lerp(run.cameraX, targetX, focusLerp), 0, maxX);
+  run.cameraIntent = cameraIntent.id;
+  run.cameraIntentPriority = cameraIntent.priority;
+  const nextX = clamp(lerp(run.cameraX, targetX, horizontalFocusLerp), 0, maxX);
   const nextY = clamp(lerp(run.cameraY, targetY, verticalFocusLerp), 0, maxY);
   const camera = zoneFrame
     ? { x: nextX, y: nextY }
@@ -2146,6 +2290,8 @@ function syncCamera(run, data, dt) {
     );
   run.cameraX = camera.x;
   run.cameraY = camera.y;
+  run.cameraPlayerScreenX = (player.x + player.width * 0.5 - run.cameraX) / viewportWidth;
+  run.cameraPlayerScreenY = (player.y + player.height * 0.5 - run.cameraY) / viewportHeight;
 }
 
 function getFaceOffCameraTarget(run) {
@@ -11565,6 +11711,8 @@ function syncNpcDialogueCamera(run, data, dt, snap = false, placementOverride = 
   run.cameraTargetZoom = targetZoom;
   run.cameraLookAhead = 0;
   run.cameraSpeedRatio = 0;
+  run.cameraIntent = "npc-dialogue";
+  run.cameraIntentPriority = 100;
   run.cameraZoom = snap
     ? targetZoom
     : clamp(lerp(run.cameraZoom ?? targetZoom, targetZoom, lerpRatio), CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
@@ -12487,6 +12635,8 @@ function snapCameraToPlayer(run, data) {
   run.cameraLookAhead = 0;
   run.cameraDownLookAhead = 0;
   run.cameraSpeedRatio = 0;
+  run.cameraIntent = "snap";
+  run.cameraIntentPriority = 100;
   clearSpeedCameraState(run);
   run.cameraFallHoldTimer = 0;
   run.cameraFallRatio = 0;
@@ -15599,10 +15749,25 @@ function syncRuntimeDebugDataset(state) {
   dataset.recoilCameraHoldUntilLanding = String(Boolean(state.run?.player?.recoilCameraHoldUntilLanding));
   dataset.recoilCameraReturning = String(Boolean(state.run?.player?.recoilCameraReturning));
   dataset.recoilCameraTimer = String(Number(state.run?.player?.recoilCameraTimer ?? 0).toFixed(3));
+  dataset.playerVx = String(Number(state.run?.player?.vx ?? 0).toFixed(1));
+  dataset.playerVy = String(Number(state.run?.player?.vy ?? 0).toFixed(1));
+  dataset.playerDashTimer = String(Number(state.run?.player?.dashTimer ?? 0).toFixed(3));
+  dataset.playerDashWindupTimer = String(Number(state.run?.player?.dashWindupTimer ?? 0).toFixed(3));
+  dataset.playerDashCarryTimer = String(Number(state.run?.player?.dashCarryTimer ?? 0).toFixed(3));
+  dataset.playerSprintCharge = String(Number(state.run?.player?.sprintCharge ?? 0).toFixed(3));
+  dataset.cameraDashSuppressTimer = String(Number(state.run?.cameraDashSuppressTimer ?? 0).toFixed(3));
   dataset.cameraSpeedRatio = String(Number(state.run?.cameraSpeedRatio ?? 0).toFixed(3));
   dataset.cameraSpeedRawRatio = String(Number(state.run?.cameraSpeedRawRatio ?? 0).toFixed(3));
   dataset.cameraSpeedHoldRatio = String(Number(state.run?.cameraSpeedHoldRatio ?? 0).toFixed(3));
   dataset.cameraSpeedHoldReturning = String(Boolean(state.run?.cameraSpeedHoldReturning));
+  dataset.cameraIntent = state.run?.cameraIntent || "";
+  dataset.cameraIntentPriority = String(Number(state.run?.cameraIntentPriority ?? 0));
+  dataset.cameraFocusX = String(Number(state.run?.cameraFocusX ?? 0).toFixed(3));
+  dataset.cameraFocusY = String(Number(state.run?.cameraFocusY ?? 0).toFixed(3));
+  dataset.cameraPlayerScreenX = String(Number(state.run?.cameraPlayerScreenX ?? 0).toFixed(3));
+  dataset.cameraPlayerScreenY = String(Number(state.run?.cameraPlayerScreenY ?? 0).toFixed(3));
+  dataset.cameraZoom = String(Number(state.run?.cameraZoom ?? 0).toFixed(3));
+  dataset.cameraTargetZoom = String(Number(state.run?.cameraTargetZoom ?? 0).toFixed(3));
   dataset.playerBulletCount = String(state.run?.playerBullets?.length ?? 0);
   dataset.mousePrimaryDown = String(Boolean(state.mouse?.primaryDown));
   dataset.mouseSecondaryDown = String(Boolean(state.mouse?.secondaryDown));
