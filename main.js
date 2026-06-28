@@ -54,8 +54,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260628-camera-priority-controller-v15";
-import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-priority-controller-v15";
+} from "./state.js?v=20260628-camera-priority-controller-v18";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-priority-controller-v18";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

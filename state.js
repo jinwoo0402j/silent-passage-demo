@@ -1412,6 +1412,8 @@ export function createRunState(data, meta) {
     cameraIntentPriority: 0,
     activeCameraZoneId: null,
     activeCameraZoneLabel: null,
+    cameraFallActive: false,
+    cameraFallHeld: false,
     cameraFallHoldTimer: 0,
     cameraFallRatio: 0,
     cameraFallTargetYOffset: 0,

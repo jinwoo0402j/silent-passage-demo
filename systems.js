@@ -12,7 +12,7 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260628-camera-priority-controller-v15";
+} from "./state.js?v=20260628-camera-priority-controller-v18";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-mouse-pan-removed";
 import {
   clearSavedGame,
@@ -1533,7 +1533,11 @@ function getCameraLookAhead(player, config) {
 function getFallCameraRatio(player, config) {
   const start = config.fallDownSpeedStart ?? 240;
   const full = Math.max(start + 1, config.fallDownSpeedFull ?? 1120);
-  if (player.onGround || player.vy <= start) {
+  const fallDrop = Number.isFinite(player.lastSafeGroundY)
+    ? Math.max(0, player.y - player.lastSafeGroundY)
+    : 0;
+  const minFallDrop = Math.max(0, Number(config.fallCameraMinDrop ?? 96) || 0);
+  if (player.onGround || player.vy <= start || fallDrop < minFallDrop) {
     return 0;
   }
   return clamp((player.vy - start) / (full - start), 0, 1);
@@ -1673,9 +1677,6 @@ function getCameraVerticalFocus(player, config, fallCamera = null, speedDownRati
   }
   if (isBraceCameraState(player)) {
     return neutralFocusY + (config.upwardFocusOffset ?? 0.18) * 0.7;
-  }
-  if (!player.onGround && player.vy < -240) {
-    return neutralFocusY + (config.upwardFocusOffset ?? 0.18) * 0.45;
   }
   const fallRatio = fallCamera?.ratio ?? getFallCameraRatio(player, config);
   if (fallRatio > 0) {
@@ -1920,13 +1921,15 @@ function resolveCameraPriorityIntent({
   }
 
   if (fallCamera.ratio > 0) {
+    const useActiveFallCamera = fallCamera.active;
     return createCameraPriorityIntent("fall", {
       useMotionDirection: false,
       useMotionLookAhead: false,
-      useFallFocus: true,
-      useFallCatchUp: fallCamera.active,
-      clampFallFocusToAnchor: true,
+      useFallFocus: useActiveFallCamera,
+      useFallCatchUp: useActiveFallCamera,
+      clampFallFocusToAnchor: useActiveFallCamera,
       lockHorizontalToPlayer: true,
+      targetNeutralFocus: !useActiveFallCamera,
     });
   }
 
@@ -2062,6 +2065,8 @@ function syncCamera(run, data, dt) {
     run.cameraIntent = "disabled";
     run.cameraIntentPriority = 0;
     run.cameraDashSuppressTimer = 0;
+    run.cameraFallActive = false;
+    run.cameraFallHeld = false;
     clearSpeedCameraState(run);
     const nextX = clamp(lerp(run.cameraX, targetX, Math.min(1, cameraDt * 4.5)), 0, maxX);
     const nextY = clamp(lerp(run.cameraY, targetY, Math.min(1, cameraDt * 4.5)), 0, maxY);
@@ -2086,6 +2091,9 @@ function syncCamera(run, data, dt) {
   const recoilCamera = freezeActionCamera ? null : getRecoilCameraState(run, config);
   const recoilReturning = !freezeActionCamera && Boolean(player.recoilCameraReturning);
   const fallCamera = updateFallCameraState(run, player, data, config, cameraDt);
+  run.cameraFallActive = fallCamera.active;
+  run.cameraFallHeld = fallCamera.held;
+  const suppressDashSpeedCamera = updateDashCameraSuppressState(run, player, config, cameraDt);
   const recoilFallFollow = Boolean(
     recoilCamera &&
     player.recoilCameraHoldUntilLanding &&
@@ -2099,7 +2107,7 @@ function syncCamera(run, data, dt) {
     recoilFallFollow,
     player,
   });
-  const speedDownCameraRatio = cameraIntent.useSpeedDownFocus
+  const speedDownCameraRatio = cameraIntent.useSpeedDownFocus && !suppressDashSpeedCamera
     ? getSpeedDownCameraRatio(player, config)
     : 0;
   const targetLookDirection = freezeActionCamera
@@ -2205,7 +2213,6 @@ function syncCamera(run, data, dt) {
   run.cameraFocusY = lerp(run.cameraFocusY ?? targetFocusY, targetFocusY, verticalFocusLerp);
 
   const baseCameraZoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
-  const suppressDashSpeedCamera = updateDashCameraSuppressState(run, player, config, cameraDt);
   const rawSpeedZoom = cameraIntent.useSpeedZoom && !suppressDashSpeedCamera
     ? getSpeedZoomState(player, config)
     : { ratio: 0, zoom: cameraIntent.holdZoom ? clamp(run.cameraZoom ?? baseCameraZoom, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX) : baseCameraZoom, speed: 0 };
@@ -15762,6 +15769,11 @@ function syncRuntimeDebugDataset(state) {
   dataset.cameraSpeedHoldReturning = String(Boolean(state.run?.cameraSpeedHoldReturning));
   dataset.cameraIntent = state.run?.cameraIntent || "";
   dataset.cameraIntentPriority = String(Number(state.run?.cameraIntentPriority ?? 0));
+  dataset.cameraFallActive = String(Boolean(state.run?.cameraFallActive));
+  dataset.cameraFallHeld = String(Boolean(state.run?.cameraFallHeld));
+  dataset.cameraFallRatio = String(Number(state.run?.cameraFallRatio ?? 0).toFixed(3));
+  dataset.cameraFallHoldTimer = String(Number(state.run?.cameraFallHoldTimer ?? 0).toFixed(3));
+  dataset.cameraFallTargetYOffset = String(Number(state.run?.cameraFallTargetYOffset ?? 0).toFixed(1));
   dataset.cameraFocusX = String(Number(state.run?.cameraFocusX ?? 0).toFixed(3));
   dataset.cameraFocusY = String(Number(state.run?.cameraFocusY ?? 0).toFixed(3));
   dataset.cameraPlayerScreenX = String(Number(state.run?.cameraPlayerScreenX ?? 0).toFixed(3));
