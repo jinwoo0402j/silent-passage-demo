@@ -16,7 +16,7 @@ import {
   normalizeEditableLevelData,
   saveRunStartLevelId,
   saveLevelOverride,
-} from "./level-store.js?v=20260622-npc-v1";
+} from "./level-store.js?v=20260628-camera-lookahead-v22";
 import { clamp, deepClone } from "./utils.js";
 
 const GAME_DATA = await createGameDataWithExternalLevels(STATIC_GAME_DATA);
@@ -287,6 +287,24 @@ const CAMERA_TUNING_GROUPS = [
         help: "0.5가 화면 중앙. 낮으면 캐릭터가 왼쪽, 높으면 오른쪽에 선다.",
       },
       {
+        key: "lookAheadMinFocusX",
+        label: "Lookahead min X",
+        min: 0.08,
+        max: 0.5,
+        step: 0.01,
+        defaultValue: 0.24,
+        help: "Lower value lets the player sit farther left when looking right.",
+      },
+      {
+        key: "lookAheadMaxFocusX",
+        label: "Lookahead max X",
+        min: 0.5,
+        max: 0.92,
+        step: 0.01,
+        defaultValue: 0.76,
+        help: "Higher value lets the player sit farther right when looking left.",
+      },
+      {
         key: "neutralFocusY",
         label: "기본 초점 Y",
         min: 0.28,
@@ -372,6 +390,24 @@ const CAMERA_TUNING_GROUPS = [
         defaultValue: 0.12,
         help: "빠르게 떨어질 때 진행 방향 쪽 여백.",
       },
+      {
+        key: "inputLookAheadBoost",
+        label: "Input look boost",
+        min: 0,
+        max: 0.25,
+        step: 0.01,
+        defaultValue: 0,
+        help: "Extra horizontal lookahead while a movement direction is held.",
+      },
+      {
+        key: "inputDirectionLerp",
+        label: "Input turn response",
+        min: 0,
+        max: 40,
+        step: 0.1,
+        defaultValue: 8,
+        help: "How quickly the camera switches toward the held movement direction.",
+      },
     ],
   },
   {
@@ -412,6 +448,33 @@ const CAMERA_TUNING_GROUPS = [
         step: 0.01,
         defaultValue: 0.88,
         help: "속도만으로 내려갈 수 있는 최저 줌 배율.",
+      },
+      {
+        key: "speedCameraHoldMinRatio",
+        label: "Speed hold start",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        defaultValue: 0.12,
+        help: "Speed zoom ratio required before the camera hold latches.",
+      },
+      {
+        key: "speedCameraReleaseSpeed",
+        label: "Speed release",
+        min: 0,
+        max: 320,
+        step: 1,
+        defaultValue: 48,
+        help: "Camera stays zoomed out until camera speed falls below this.",
+      },
+      {
+        key: "speedCameraReturnLerp",
+        label: "Speed return",
+        min: 0,
+        max: 20,
+        step: 0.1,
+        defaultValue: 2.2,
+        help: "How slowly the held speed zoom returns after stopping.",
       },
       {
         key: "sprintZoom",
@@ -480,6 +543,105 @@ const CAMERA_TUNING_GROUPS = [
         step: 0.01,
         defaultValue: -0.14,
         help: "음수면 캐릭터를 위에 두고 아래쪽을 더 보여준다.",
+      },
+      {
+        key: "fallDownSpeedStart",
+        label: "낙하 초점 시작 속도",
+        min: 0,
+        max: 2400,
+        step: 10,
+        defaultValue: 240,
+        help: "아래로 떨어질 때 카메라가 아래 시야를 만들기 시작하는 속도.",
+      },
+      {
+        key: "fallDownSpeedFull",
+        label: "낙하 초점 최대 속도",
+        min: 1,
+        max: 3600,
+        step: 10,
+        defaultValue: 1120,
+        help: "낙하 카메라가 최대 아래 시야에 도달하는 속도.",
+      },
+      {
+        key: "fallDownFocusStartY",
+        label: "낙하 시작 초점 Y",
+        min: 0.06,
+        max: 0.72,
+        step: 0.01,
+        defaultValue: 0.46,
+        help: "낙하 반응 시작 시 화면에서 캐릭터가 놓이는 세로 위치.",
+      },
+      {
+        key: "fallDownFocusFullY",
+        label: "낙하 최대 초점 Y",
+        min: 0.06,
+        max: 0.72,
+        step: 0.01,
+        defaultValue: 0.38,
+        help: "값이 낮을수록 캐릭터를 위에 두고 아래쪽을 더 보여준다.",
+      },
+      {
+        key: "fallMinFocusY",
+        label: "낙하 최소 초점 Y",
+        min: 0.04,
+        max: 0.28,
+        step: 0.01,
+        defaultValue: 0.18,
+        help: "낙하 중 허용되는 가장 높은 캐릭터 배치. 낮을수록 아래를 더 극단적으로 보여준다.",
+      },
+      {
+        key: "fallCameraCenterOffset",
+        label: "fall center offset",
+        min: 0,
+        max: 1200,
+        step: 1,
+        defaultValue: 0,
+        help: "Moves the camera target below the player while falling.",
+      },
+      {
+        key: "keepPlayerVisibleMarginY",
+        label: "visible margin Y",
+        min: 0,
+        max: 600,
+        step: 1,
+        defaultValue: 0,
+        help: "Lower values allow the player to sit closer to the top edge.",
+      },
+      {
+        key: "fallFocusLerp",
+        label: "낙하 초점 반응",
+        min: 0,
+        max: 40,
+        step: 0.1,
+        defaultValue: 8.5,
+        help: "낙하 중 카메라 세로 초점이 따라가는 속도.",
+      },
+      {
+        key: "fallCatchUpLerp",
+        label: "낙하 추격 반응",
+        min: 0,
+        max: 60,
+        step: 0.1,
+        defaultValue: 12,
+        help: "낙하 속도가 빠를수록 추가로 빨라지는 카메라 추격 속도.",
+      },
+      {
+        key: "fallLandingCameraPull",
+        label: "착지면 당김",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        defaultValue: 0.22,
+        help: "아래 착지면이 감지될 때 카메라가 그쪽으로 당겨지는 정도.",
+      },
+      {
+        key: "fallLandingCameraMaxOffset",
+        label: "착지면 최대 당김",
+        min: 0,
+        max: 800,
+        step: 1,
+        defaultValue: 150,
+        help: "착지면을 향한 추가 카메라 당김의 최대 거리.",
       },
       {
         key: "directionSpeedThreshold",
@@ -1313,7 +1475,9 @@ function getEditorCameraFocusX(data, direction = 0) {
     return neutral;
   }
   const lookAhead = camera.sprintLookAhead ?? camera.walkLookAhead ?? 0.08;
-  return clamp(neutral - Math.sign(direction) * lookAhead, 0.24, 0.76);
+  const minFocusX = clamp(camera.lookAheadMinFocusX ?? 0.24, 0.08, 0.5);
+  const maxFocusX = clamp(camera.lookAheadMaxFocusX ?? 0.76, 0.5, 0.92);
+  return clamp(neutral - Math.sign(direction) * lookAhead, minFocusX, maxFocusX);
 }
 
 function getEditorCameraFocusY(data) {

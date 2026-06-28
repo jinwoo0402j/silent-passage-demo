@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260622-title-npc-v1";
+import { GAME_DATA } from "./level-data.js?v=20260628-camera-lookahead-v22";
 import {
   LEVEL_OVERRIDE_KEY,
   LEVEL_OVERRIDES_KEY,
@@ -8,7 +8,7 @@ import {
   extractEditableLevelData,
   saveLevelOverride,
   shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260622-npc-v1";
+} from "./level-store.js?v=20260628-camera-lookahead-v22";
 import {
   SPRINT_TUNING_FIELDS,
   SPRINT_TUNING_KEY,
@@ -17,7 +17,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260615-speedfx-v11";
+} from "./movement-tuning.js?v=20260628-camera-lookahead-v22";
 import {
   AUDIO_OPTION_CHANNELS,
   applyAudioOptions,
@@ -37,7 +37,7 @@ import {
   resetGameOptions,
   saveGameOptions,
 } from "./game-options.js?v=20260619-text-speed-v1";
-import { renderGame } from "./render.js?v=20260622-title-npc-v1";
+import { renderGame } from "./render.js?v=20260628-camera-lookahead-v22";
 import {
   restoreSavedGame,
   saveCurrentGame,
@@ -54,8 +54,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260622-title-npc-v1";
-import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260622-title-npc-v1";
+} from "./state.js?v=20260628-camera-lookahead-v22";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-lookahead-v22";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -275,6 +275,56 @@ const LEVEL_ZERO_MOVEMENT_TUNING = {
   recoilSpinLoopCount: 2,
 };
 
+function applyMovementTuningValues(data, tuning) {
+  if (!data?.player?.movement || !tuning) {
+    return;
+  }
+  applySprintTuning(data.player.movement, tuning, GAME_DATA.player.movement);
+  Object.entries(tuning).forEach(([key, value]) => {
+    if (key in data.player.movement) {
+      data.player.movement[key] = value;
+    }
+  });
+}
+
+function getUrlMovementPreset(params) {
+  const raw = String(params?.get("movementPreset") || params?.get("movement") || "").trim().toLowerCase();
+  if (raw === "level-zero" || raw === "lv0" || raw === "fast") {
+    return "level-zero";
+  }
+  return "";
+}
+
+function applyUrlMovementPreset(data, params) {
+  const preset = getUrlMovementPreset(params);
+  if (preset === "level-zero") {
+    applyMovementTuningValues(data, LEVEL_ZERO_MOVEMENT_TUNING);
+  }
+  document.documentElement.dataset.movementPreset = preset;
+}
+
+function applyRuntimeMovementOverrides(data, params) {
+  if (!data?.player?.movement) {
+    return;
+  }
+  applySprintTuning(
+    data.player.movement,
+    loadSprintTuning(data.player.movement),
+    data.player.movement,
+  );
+  applyUrlMovementPreset(data, params);
+}
+
+function installRuntimeLevelLoadHook(data, params) {
+  Object.defineProperty(data, "__afterRuntimeLevelLoad", {
+    value(nextData) {
+      applyRuntimeMovementOverrides(nextData, params);
+    },
+    enumerable: false,
+    configurable: true,
+  });
+}
+
 const dom = {
   canvas,
   ctx,
@@ -305,6 +355,12 @@ const dom = {
 function isUrlFlagEnabled(params, name) {
   const value = params.get(name);
   return value === "1" || value === "true" || value === name;
+}
+
+function shouldForceModernControls(params) {
+  return shouldStartFromUrlLevel()
+    || isUrlFlagEnabled(params, "modernControls")
+    || isUrlFlagEnabled(params, "keyboardControls");
 }
 
 const TITLE_SAVE_KEY = "yunhoe_save";
@@ -401,13 +457,15 @@ const runtimeData = createRuntimeGameData(BASE_GAME_DATA, null, {
   useUrlLevel: shouldStartFromUrlLevel(),
 });
 const baseSprintTuning = extractSprintTuning(runtimeData.player.movement);
-applySprintTuning(
-  runtimeData.player.movement,
-  loadSprintTuning(runtimeData.player.movement),
-  runtimeData.player.movement,
-);
+applyRuntimeMovementOverrides(runtimeData, urlParams);
+installRuntimeLevelLoadHook(runtimeData, urlParams);
 
 const state = createInitialState(runtimeData);
+state.forceModernControls = shouldForceModernControls(urlParams);
+if (state.forceModernControls) {
+  state.capsLockActive = false;
+}
+document.documentElement.dataset.forceModernControls = String(Boolean(state.forceModernControls));
 window.__faceOffState = state;
 window.__faceOffData = runtimeData;
 try {
@@ -1206,12 +1264,7 @@ function applyMovementTuningTestSnapshot(data, currentState, snapshot) {
 }
 
 function applyLevelZeroMovementTuning(data, currentState) {
-  applySprintTuning(data.player.movement, LEVEL_ZERO_MOVEMENT_TUNING, GAME_DATA.player.movement);
-  Object.entries(LEVEL_ZERO_MOVEMENT_TUNING).forEach(([key, value]) => {
-    if (!SPRINT_TUNING_FIELDS.some((field) => field.key === key)) {
-      data.player.movement[key] = value;
-    }
-  });
+  applyMovementTuningValues(data, LEVEL_ZERO_MOVEMENT_TUNING);
   syncMovementTuningToRun(currentState, data);
   return true;
 }
@@ -1304,6 +1357,7 @@ function resetPlayerToLevelStart(run, data) {
   player.recoilSpinTimer = 0;
   player.recoilFocusActive = false;
   player.recoilFocusBlend = 0;
+  player.weaponReloadHoldConsumed = false;
   player.armSwitchReloadHoldConsumed = false;
   player.recoilJumpChargeActive = false;
   player.recoilJumpChargeFocusSpent = 0;
@@ -1336,7 +1390,11 @@ function snapCameraToPlayer(currentDom, run, data) {
   run.cameraTargetZoom = zoom;
   run.cameraLookDirection = run.player.facing || 1;
   run.cameraLookAhead = 0;
+  run.cameraDownLookAhead = 0;
   run.cameraSpeedRatio = 0;
+  run.cameraSpeedRawRatio = 0;
+  run.cameraSpeedHoldRatio = 0;
+  run.cameraSpeedHoldReturning = false;
   run.cameraFallHoldTimer = 0;
   run.cameraFallRatio = 0;
   run.cameraFallTargetYOffset = 0;
@@ -1781,10 +1839,22 @@ function bindUi(currentDom, currentState, data) {
   };
   const clearPrimaryMouseButton = () => {
     currentState.mouse.primaryDown = false;
+    currentState.mouse.primaryJustPressed = false;
   };
   const releasePrimaryMouseButton = () => {
     currentState.mouse.primaryDown = false;
   };
+  const isPrimaryMouseCombatBlocked = () => (
+    currentState.scene === SCENES.EXPEDITION &&
+    !currentState.liveEdit.active &&
+    !isMapOverlayActive() &&
+    !currentState.run?.inventoryOverlay?.active &&
+    !currentState.run?.loot?.active &&
+    !isFaceOffVirtualCursorActive()
+  );
+  const isLegacyMouseControlsActive = () => Boolean(
+    currentState.capsLockActive && !currentState.forceModernControls
+  );
   const releaseMouseButtons = () => {
     currentState.mouse.primaryDown = false;
     currentState.mouse.secondaryDown = false;
@@ -1816,7 +1886,10 @@ function bindUi(currentDom, currentState, data) {
     }
     const primaryPressed = (event.buttons & 1) !== 0;
     const secondaryPressed = (event.buttons & 2) !== 0;
-    if (primaryPressed && !currentState.mouse.primaryDown) {
+    const blockPrimaryCombat = isPrimaryMouseCombatBlocked();
+    if (blockPrimaryCombat && primaryPressed) {
+      clearPrimaryMouseButton();
+    } else if (primaryPressed && !currentState.mouse.primaryDown) {
       pushInputTrace(currentState, "syncPrimaryEdge", {
         b: event.button,
         bs: event.buttons,
@@ -1848,7 +1921,7 @@ function bindUi(currentDom, currentState, data) {
       return false;
     }
 
-    if (!currentState.capsLockActive && !isFaceOffVirtualCursorActive()) {
+    if (!isLegacyMouseControlsActive() && !isFaceOffVirtualCursorActive()) {
       currentState.mouse.primaryDown = false;
       currentState.mouse.secondaryDown = false;
       currentState.mouse.primaryJustPressed = false;
@@ -1876,7 +1949,9 @@ function bindUi(currentDom, currentState, data) {
       markSecondaryMouseDown();
       requestAimPointerLock();
     }
-    if (primaryPressed) {
+    if (primaryPressed && isPrimaryMouseCombatBlocked()) {
+      clearPrimaryMouseButton();
+    } else if (primaryPressed) {
       markPrimaryMouseDown();
     }
     event.preventDefault();
@@ -2181,7 +2256,11 @@ function bindUi(currentDom, currentState, data) {
   currentDom.canvas.addEventListener("pointerdown", (event) => {
     syncMouseFromEvent(event);
     if (event.button === 0) {
-      markPrimaryMouseDown();
+      if (isPrimaryMouseCombatBlocked()) {
+        clearPrimaryMouseButton();
+      } else {
+        markPrimaryMouseDown();
+      }
     } else if (event.button === 2) {
       markSecondaryMouseDown();
     }
@@ -2209,7 +2288,11 @@ function bindUi(currentDom, currentState, data) {
   currentDom.canvas.addEventListener("mousedown", (event) => {
     syncMouseFromEvent(event);
     if (event.button === 0) {
-      markPrimaryMouseDown();
+      if (isPrimaryMouseCombatBlocked()) {
+        clearPrimaryMouseButton();
+      } else {
+        markPrimaryMouseDown();
+      }
     } else if (event.button === 2) {
       markSecondaryMouseDown();
     }

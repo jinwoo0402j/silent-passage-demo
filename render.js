@@ -7,7 +7,7 @@ import {
   getShelterUpgradeCost,
   getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260622-title-npc-v1";
+} from "./state.js?v=20260628-camera-lookahead-v2";
 import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
@@ -6544,7 +6544,7 @@ function drawDebugCameraOverlay(ctx, state, data) {
     SCREEN_HEIGHT - 56,
   );
   ctx.fillText(
-    `focus ${Number(run.cameraFocusX ?? 0.5).toFixed(2)}, ${Number(run.cameraFocusY ?? 0.5).toFixed(2)}   look ${Number(run.cameraLookDirection ?? 0).toFixed(2)}   ahead ${Number(run.cameraLookAhead ?? 0).toFixed(2)}   speed ${Number(run.cameraSpeedRatio ?? 0).toFixed(2)}`,
+    `focus ${Number(run.cameraFocusX ?? 0.5).toFixed(2)}, ${Number(run.cameraFocusY ?? 0.5).toFixed(2)}   look ${Number(run.cameraLookDirection ?? 0).toFixed(2)}   ahead ${Number(run.cameraLookAhead ?? 0).toFixed(2)}/${Number(run.cameraDownLookAhead ?? 0).toFixed(2)}   speed ${Number(run.cameraSpeedRatio ?? 0).toFixed(2)}`,
     34,
     SCREEN_HEIGHT - 34,
   );
@@ -7535,6 +7535,7 @@ function drawAimCursorHud(ctx, state, data) {
   if (
     state.scene !== SCENES.EXPEDITION ||
     !state.capsLockActive ||
+    state.forceModernControls ||
     !run ||
     mouse.onCanvas === false ||
     state.liveEdit?.active ||
