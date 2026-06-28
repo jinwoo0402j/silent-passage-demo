@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260628-camera-lookahead-v22";
+import { GAME_DATA } from "./level-data.js?v=20260628-camera-mouse-pan-removed";
 import {
   LEVEL_OVERRIDE_KEY,
   LEVEL_OVERRIDES_KEY,
@@ -8,7 +8,7 @@ import {
   extractEditableLevelData,
   saveLevelOverride,
   shouldUseLocalLevelOverrideFromUrl,
-} from "./level-store.js?v=20260628-camera-lookahead-v22";
+} from "./level-store.js?v=20260628-camera-mouse-pan-removed";
 import {
   SPRINT_TUNING_FIELDS,
   SPRINT_TUNING_KEY,
@@ -17,7 +17,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260628-camera-lookahead-v22";
+} from "./movement-tuning.js?v=20260628-camera-mouse-pan-removed";
 import {
   AUDIO_OPTION_CHANNELS,
   applyAudioOptions,
@@ -37,7 +37,7 @@ import {
   resetGameOptions,
   saveGameOptions,
 } from "./game-options.js?v=20260619-text-speed-v1";
-import { renderGame } from "./render.js?v=20260628-camera-lookahead-v22";
+import { renderGame } from "./render.js?v=20260628-camera-mouse-pan-removed";
 import {
   restoreSavedGame,
   saveCurrentGame,
@@ -54,8 +54,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260628-camera-lookahead-v22";
-import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-lookahead-v22";
+} from "./state.js?v=20260628-camera-mouse-pan-removed";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-mouse-pan-removed";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

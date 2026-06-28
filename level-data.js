@@ -406,12 +406,7 @@ export const GAME_DATA = {
       "braceZoom": 0.82,
       "directionLerp": 1.6,
       "focusLerp": 2.3,
-      "zoomLerp": 0.85,
-      "mousePanAlways": true,
-      "aimPanMaxX": 0.24,
-      "aimPanMaxY": 0.18,
-      "aimPanLerp": 4.2,
-      "aimPanReturnLerp": 3.4
+      "zoomLerp": 0.85
     },
     "duskAt": 90,
     "nightAt": 150,

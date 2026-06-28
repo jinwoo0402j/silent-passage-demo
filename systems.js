@@ -12,8 +12,8 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260628-camera-lookahead-v22";
-import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-lookahead-v22";
+} from "./state.js?v=20260628-camera-mouse-pan-removed";
+import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-mouse-pan-removed";
 import {
   clearSavedGame,
   hasSavedGame,
@@ -83,7 +83,6 @@ const INTERACTION_HOLD_SECONDS = 0.25;
 const FIRE_KEYS = ["KeyX"];
 const ARM_SWITCH_RELOAD_KEY = "KeyS";
 const ARM_SWITCH_RELOAD_HOLD_SECONDS = 0.35;
-const AIM_CAMERA_EDGE_MARGIN = 112;
 const FOCUS_MAX = 100;
 const FOCUS_DRAIN_PER_SECOND = 18;
 const FOCUS_RECOVER_PER_SECOND = 22;
@@ -1435,48 +1434,6 @@ function getRecoilCameraState(run, config) {
   };
 }
 
-function getAimEdgeAxis(position, size, margin = AIM_CAMERA_EDGE_MARGIN) {
-  const safeSize = Math.max(1, size);
-  const safeMargin = clamp(margin, 1, safeSize * 0.5);
-  if (position <= safeMargin) {
-    return -clamp((safeMargin - position) / safeMargin, 0, 1);
-  }
-  if (position >= safeSize - safeMargin) {
-    return clamp((position - (safeSize - safeMargin)) / safeMargin, 0, 1);
-  }
-  return 0;
-}
-
-function getAimCameraEdgePan(mouse = {}) {
-  return {
-    x: getAimEdgeAxis(mouse.screenX ?? CAMERA_SCREEN_WIDTH / 2, CAMERA_SCREEN_WIDTH),
-    y: getAimEdgeAxis(mouse.screenY ?? CAMERA_SCREEN_HEIGHT / 2, CAMERA_SCREEN_HEIGHT),
-  };
-}
-
-function updateAimCameraPan(run, config, viewportWidth, viewportHeight, dt, freezeActionCamera = false) {
-  const aim = run.recoilAim;
-  const active = Boolean(!freezeActionCamera && (aim?.aiming || config.mousePanAlways));
-  const maxX = viewportWidth * clamp(config.aimPanMaxX ?? 0.36, 0, 0.75);
-  const maxY = viewportHeight * clamp(config.aimPanMaxY ?? 0.27, 0, 0.55);
-  const targetX = active ? (aim.edgePanX ?? 0) * maxX : 0;
-  const targetY = active ? (aim.edgePanY ?? 0) * maxY : 0;
-  const lerpRate = active ? (config.aimPanLerp ?? 8.25) : (config.aimPanReturnLerp ?? 7.5);
-  const blend = Math.min(1, dt * lerpRate);
-  run.aimCameraPanX = lerp(run.aimCameraPanX ?? 0, targetX, blend);
-  run.aimCameraPanY = lerp(run.aimCameraPanY ?? 0, targetY, blend);
-  if (Math.abs(run.aimCameraPanX) < 0.5) {
-    run.aimCameraPanX = 0;
-  }
-  if (Math.abs(run.aimCameraPanY) < 0.5) {
-    run.aimCameraPanY = 0;
-  }
-  return {
-    x: run.aimCameraPanX,
-    y: run.aimCameraPanY,
-  };
-}
-
 function getCameraLookDirection(player, run, config) {
   if (player.dashTimer > 0 && config.dashAffectsCamera === false) {
     return run.cameraLookDirection || player.facing || 1;
@@ -2130,16 +2087,15 @@ function syncCamera(run, data, dt) {
 
   const viewportWidth = CAMERA_SCREEN_WIDTH / zoom;
   const viewportHeight = CAMERA_SCREEN_HEIGHT / zoom;
-  const aimPan = zoneFrame
-    ? { x: 0, y: 0 }
-    : updateAimCameraPan(run, config, viewportWidth, viewportHeight, cameraDt, freezeActionCamera);
+  run.aimCameraPanX = 0;
+  run.aimCameraPanY = 0;
   const targetX = zoneFrame
     ? zoneFrame.x + zoneFrame.width * 0.5 - viewportWidth * 0.5
-    : player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX + aimPan.x;
+    : player.x + player.width * 0.5 - viewportWidth * run.cameraFocusX;
   const fallTargetYOffset = applyFallCamera ? fallCamera.targetYOffset : 0;
   const targetY = zoneFrame
     ? zoneFrame.y + zoneFrame.height * 0.5 - viewportHeight * 0.5
-    : player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY + aimPan.y;
+    : player.y + player.height * 0.5 + fallTargetYOffset - viewportHeight * run.cameraFocusY;
   const maxX = Math.max(0, data.world.width - viewportWidth);
   const maxY = Math.max(0, data.world.height - viewportHeight);
   run.cameraTargetX = targetX;
@@ -6439,8 +6395,6 @@ function getRecoilAimFromShotDirection(player, shotDirX, shotDirY, options = {})
     targetY: origin.y + shotY * range,
     aimFacing,
     aimPitch,
-    edgePanX: 0,
-    edgePanY: 0,
     shotDirX: shotX,
     shotDirY: shotY,
     recoilDirX: recoilX,
@@ -7562,7 +7516,6 @@ function updateRecoilAim(run, data, state, dt) {
     (useLegacyControls(state) && state.mouse?.secondaryDown)
   ) && canAimWeapon(player));
   const active = Boolean(run.focusActive);
-  const edgePan = getAimCameraEdgePan(state.mouse);
   const aimFacing = Math.abs(shotDirX) > 0.08
     ? Math.sign(shotDirX)
     : (player.recoilAimFacing || player.facing || 1);
@@ -7599,8 +7552,6 @@ function updateRecoilAim(run, data, state, dt) {
     targetY: target.y,
     aimFacing,
     aimPitch,
-    edgePanX: edgePan.x,
-    edgePanY: edgePan.y,
     shotDirX,
     shotDirY,
     recoilDirX,

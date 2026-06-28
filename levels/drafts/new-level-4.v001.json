@@ -56,14 +56,9 @@
       "directionLerp": 1.6,
       "focusLerp": 2.3,
       "zoomLerp": 0.85,
-      "aimPanMaxX": 0.24,
-      "aimPanMaxY": 0.18,
-      "aimPanLerp": 4.2,
-      "aimPanReturnLerp": 3.4,
       "lookAheadEnabled": true,
       "dashAffectsCamera": false,
-      "braceAffectsCamera": false,
-      "mousePanAlways": true
+      "braceAffectsCamera": false
     }
   },
   "player": {
