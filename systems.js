@@ -1784,6 +1784,16 @@ function clearFallCameraState(run) {
   run.cameraFallTargetYOffset = 0;
 }
 
+function beginRecoilCameraReturn(player, run = null) {
+  if (!player) {
+    return;
+  }
+  player.recoilCameraReturning = true;
+  if (run) {
+    run.cameraFallHoldTimer = 0;
+  }
+}
+
 function updateRecoilCameraTimers(player, dt, run = null) {
   if (player.recoilCameraHoldUntilLanding && player.onGround) {
     releaseRecoilCameraAfterLanding(player, run);
@@ -1796,7 +1806,7 @@ function updateRecoilCameraTimers(player, dt, run = null) {
     if (player.recoilCameraHoldUntilLanding && !player.onGround) {
       return;
     }
-    player.recoilCameraReturning = true;
+    beginRecoilCameraReturn(player, run);
   }
 }
 
@@ -1806,8 +1816,7 @@ function releaseRecoilCameraAfterLanding(player, run = null) {
   }
   player.recoilCameraHoldUntilLanding = false;
   player.recoilCameraTimer = 0;
-  player.recoilCameraReturning = true;
-  clearFallCameraState(run);
+  beginRecoilCameraReturn(player, run);
 }
 
 function getCameraTargetZoom(player, config, fallCamera = null, speedZoomOverride = null) {
@@ -1959,23 +1968,26 @@ function syncCamera(run, data, dt) {
     || (isBraceCameraState(player) && config.braceAffectsCamera === false)
   );
   const recoilCamera = freezeActionCamera ? null : getRecoilCameraState(run, config);
+  const recoilReturning = !freezeActionCamera && Boolean(player.recoilCameraReturning);
   const fallCamera = updateFallCameraState(run, player, data, config, cameraDt);
   const recoilFallFollow = Boolean(
     recoilCamera &&
     player.recoilCameraHoldUntilLanding &&
     fallCamera.ratio > 0
   );
-  const applyFallCamera = !freezeActionCamera && fallCamera.ratio > 0 && (
+  const applyFallCamera = !freezeActionCamera && !recoilReturning && fallCamera.ratio > 0 && (
     recoilFallFollow ||
     (!recoilCamera && (fallCamera.active || player.onGround))
   );
-  const speedDownCameraRatio = (!freezeActionCamera && !recoilCamera && fallCamera.ratio <= 0)
+  const speedDownCameraRatio = (!freezeActionCamera && !recoilCamera && !recoilReturning && fallCamera.ratio <= 0)
     ? getSpeedDownCameraRatio(player, config)
     : 0;
   const targetLookDirection = freezeActionCamera
     ? (run.cameraLookDirection || player.facing || 1)
     : recoilCamera && Math.abs(recoilCamera.directionX) > 0.08
       ? Math.sign(recoilCamera.directionX)
+    : recoilReturning
+      ? (run.cameraLookDirection || player.facing || 1)
     : getCameraLookDirection(player, run, config);
   const directionLerpRate = isCameraInputLookActive(player, config)
     ? (config.inputDirectionLerp ?? config.directionLerp ?? 6)
@@ -1986,17 +1998,23 @@ function syncCamera(run, data, dt) {
 
   const lookAhead = freezeActionCamera
     ? (run.cameraLookAhead ?? 0)
+    : recoilReturning
+      ? 0
     : recoilCamera
       ? Math.abs(recoilCamera.directionX) * recoilCamera.horizontalLookAhead
       : getCameraLookAhead(player, config);
   const focusXMin = clamp(config.lookAheadMinFocusX ?? 0.24, 0.08, 0.5);
   const focusXMax = clamp(config.lookAheadMaxFocusX ?? 0.76, 0.5, 0.92);
+  const neutralFocusX = config.neutralFocusX ?? 0.5;
+  const neutralFocusY = config.neutralFocusY ?? 0.5;
   const targetFocusX = zoneFrame
     ? 0.5
     : freezeActionCamera
-    ? clamp(run.cameraFocusX ?? (config.neutralFocusX ?? 0.5), focusXMin, focusXMax)
+    ? clamp(run.cameraFocusX ?? neutralFocusX, focusXMin, focusXMax)
+    : recoilReturning
+    ? clamp(neutralFocusX, focusXMin, focusXMax)
     : clamp(
-      (config.neutralFocusX ?? 0.5) - focusLookDirection * lookAhead,
+      neutralFocusX - focusLookDirection * lookAhead,
       focusXMin,
       focusXMax,
     );
@@ -2010,7 +2028,7 @@ function syncCamera(run, data, dt) {
   );
   const recoilTargetFocusY = recoilCamera
     ? clamp(
-      (config.neutralFocusY ?? 0.5) - recoilCamera.directionY * recoilCamera.verticalLookAhead,
+      neutralFocusY - recoilCamera.directionY * recoilCamera.verticalLookAhead,
       recoilFallFollow ? minFocusY : 0.28,
       0.72,
     )
@@ -2018,7 +2036,9 @@ function syncCamera(run, data, dt) {
   const targetFocusY = zoneFrame
     ? 0.5
     : freezeActionCamera
-    ? clamp(run.cameraFocusY ?? (config.neutralFocusY ?? 0.5), 0.28, 0.72)
+    ? clamp(run.cameraFocusY ?? neutralFocusY, 0.28, 0.72)
+    : recoilReturning
+    ? clamp(neutralFocusY, 0.28, 0.72)
     : recoilCamera
       ? recoilFallFollow
         ? Math.min(recoilTargetFocusY, fallTargetFocusY)
@@ -2048,14 +2068,20 @@ function syncCamera(run, data, dt) {
   run.cameraFocusX = lerp(run.cameraFocusX ?? targetFocusX, targetFocusX, focusLerp);
   run.cameraFocusY = lerp(run.cameraFocusY ?? targetFocusY, targetFocusY, verticalFocusLerp);
 
-  const rawSpeedZoom = freezeActionCamera
-    ? { ratio: 0, zoom: clamp(run.cameraZoom ?? (config.zoom ?? 1), CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX), speed: 0 }
+  const baseCameraZoom = clamp(config.zoom ?? 1, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX);
+  const rawSpeedZoom = freezeActionCamera || recoilReturning
+    ? { ratio: 0, zoom: freezeActionCamera ? clamp(run.cameraZoom ?? baseCameraZoom, CAMERA_ABSOLUTE_ZOOM_MIN, CAMERA_ABSOLUTE_ZOOM_MAX) : baseCameraZoom, speed: 0 }
     : getSpeedZoomState(player, config);
-  const speedZoom = freezeActionCamera
+  const speedZoom = freezeActionCamera || recoilReturning
     ? rawSpeedZoom
     : updateSpeedCameraHoldState(run, player, config, cameraDt, rawSpeedZoom);
+  if (recoilReturning) {
+    clearSpeedCameraState(run);
+  }
   const targetZoom = freezeActionCamera
     ? rawSpeedZoom.zoom
+    : recoilReturning
+      ? baseCameraZoom
     : getCameraTargetZoom(player, config, fallCamera, speedZoom);
   const zoomLerp = Math.min(1, cameraDt * (config.zoomLerp ?? 4.2));
   const linearRecoilCameraReturn = !freezeActionCamera && Boolean(player.recoilCameraReturning);
@@ -2073,7 +2099,8 @@ function syncCamera(run, data, dt) {
     const zoomDone = Math.abs(nextZoom - targetZoom) <= 0.001;
     const focusDone = Math.abs((run.cameraFocusX ?? targetFocusX) - targetFocusX) <= 0.004 &&
       Math.abs((run.cameraFocusY ?? targetFocusY) - targetFocusY) <= 0.004;
-    if (zoomDone && focusDone) {
+    const fallDone = fallCamera.ratio <= 0.01 && fallCamera.targetYOffset <= 0.5;
+    if (zoomDone && focusDone && fallDone) {
       nextZoom = targetZoom;
       player.recoilCameraReturning = false;
     }
