@@ -941,6 +941,11 @@
       outline: none;
     }
 
+    body.is-shelter-dialogue-active .shelter-audio-toggle {
+      opacity: 0;
+      pointer-events: none;
+    }
+
     @keyframes waterShimmer {
       from {
         transform: translateX(-8%) skewX(-9deg);
@@ -1129,6 +1134,124 @@
       font-size: 13px;
     }
 
+    .panel-body.is-workshop {
+      align-content: stretch;
+      gap: 16px;
+      color: rgba(236, 233, 223, 0.68);
+    }
+
+    .workshop-summary {
+      display: grid;
+      gap: 4px;
+      color: rgba(236, 233, 223, 0.62);
+    }
+
+    .workshop-summary strong {
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    .workshop-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+      gap: 14px;
+    }
+
+    .workshop-column {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+
+    .workshop-heading {
+      color: rgba(232, 182, 107, 0.78);
+      font: 12px/1 Consolas, "D2Coding", monospace;
+      text-transform: uppercase;
+    }
+
+    .part-card,
+    .slot-card {
+      border: 1px solid rgba(236, 233, 223, 0.12);
+      background: rgba(6, 5, 4, 0.24);
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .part-card.is-attached,
+    .slot-card.is-filled {
+      border-color: rgba(232, 182, 107, 0.28);
+      background: rgba(232, 182, 107, 0.07);
+    }
+
+    .part-card.is-empty,
+    .slot-card.is-empty {
+      color: rgba(236, 233, 223, 0.38);
+    }
+
+    .part-card-header,
+    .slot-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: rgba(236, 233, 223, 0.86);
+    }
+
+    .part-name,
+    .slot-label {
+      color: var(--ink);
+      font: 13px/1.2 Consolas, "D2Coding", monospace;
+    }
+
+    .part-slot,
+    .part-risk {
+      color: rgba(232, 182, 107, 0.64);
+      font: 11px/1 Consolas, "D2Coding", monospace;
+      white-space: nowrap;
+    }
+
+    .part-description {
+      color: rgba(236, 233, 223, 0.56);
+      line-height: 1.45;
+    }
+
+    .part-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .part-stat {
+      border: 1px solid rgba(236, 233, 223, 0.1);
+      color: rgba(236, 233, 223, 0.62);
+      padding: 4px 6px;
+      font: 11px/1 Consolas, "D2Coding", monospace;
+    }
+
+    .workshop-button {
+      justify-self: start;
+      border: 1px solid rgba(232, 182, 107, 0.34);
+      background: rgba(232, 182, 107, 0.1);
+      color: rgba(236, 233, 223, 0.86);
+      cursor: pointer;
+      font: 12px/1 Consolas, "D2Coding", monospace;
+      padding: 8px 10px;
+    }
+
+    .workshop-button:hover,
+    .workshop-button:focus-visible {
+      border-color: rgba(232, 182, 107, 0.64);
+      background: rgba(232, 182, 107, 0.18);
+      outline: none;
+    }
+
+    @media (max-width: 720px) {
+      .workshop-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .panel-record-meta {
       color: rgba(232, 182, 107, 0.72);
     }
@@ -1155,6 +1278,249 @@
       border-color: rgba(232, 182, 107, 0.64);
       background: rgba(232, 182, 107, 0.18);
       outline: none;
+    }
+
+    .shelter-dialogue-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 24;
+      display: none;
+      pointer-events: none;
+      --shelter-dialogue-alpha: 1;
+      --shelter-door-cover: 0;
+      --shelter-door-fade: 0;
+      --shelter-door-frame: 0;
+      --shelter-door-center: 0;
+      background:
+        linear-gradient(90deg, rgba(2, 7, 10, 0.5), rgba(2, 7, 10, 0.14) 36%, transparent 52%),
+        linear-gradient(180deg, transparent 0 52%, rgba(0, 0, 0, 0.34) 78%, rgba(0, 0, 0, 0.72) 100%);
+      overflow: hidden;
+    }
+
+    .shelter-dialogue-overlay.is-open {
+      display: block;
+    }
+
+    .shelter-dialogue-art {
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center center;
+      opacity: 0.98;
+      filter: saturate(1.02) brightness(0.96);
+      transform: scale(1.014);
+    }
+
+    .shelter-dialogue-art[hidden] {
+      display: none;
+    }
+
+    .shelter-dialogue-stage {
+      position: absolute;
+      inset: 0;
+      color: var(--ink);
+      pointer-events: auto;
+    }
+
+    .shelter-dialogue-speaker {
+      position: absolute;
+      left: 74px;
+      bottom: 238px;
+      display: none;
+      color: rgba(232, 182, 107, 0.74);
+      font: 600 12px "Noto Serif KR", "KoPubBatang", "KoPub Batang", "NanumMyeongjo", "Nanum Myeongjo", Batang, serif;
+      letter-spacing: 0;
+      text-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.84),
+        0 4px 12px rgba(0, 0, 0, 0.76);
+    }
+
+    .shelter-dialogue-line {
+      position: absolute;
+      left: 50%;
+      bottom: 62px;
+      width: min(1000px, calc(100vw - 160px));
+      min-height: 36px;
+      color: #fffaf1;
+      font: 25px/1.35 "Noto Serif KR", "KoPubBatang", "KoPub Batang", "NanumMyeongjo", "Nanum Myeongjo", Batang, serif;
+      font-weight: 700;
+      text-align: center;
+      text-shadow:
+        0 2px 0 rgba(0, 0, 0, 0.82),
+        0 0 10px rgba(0, 0, 0, 0.72),
+        0 3px 12px rgba(0, 0, 0, 0.68);
+      -webkit-text-stroke: 0.55px rgba(0, 0, 0, 0.82);
+      transform: translateX(-50%);
+      opacity: var(--shelter-dialogue-alpha);
+      white-space: pre-line;
+    }
+
+    .shelter-dialogue-result {
+      display: none;
+      position: absolute;
+      left: 74px;
+      bottom: 154px;
+      gap: 7px;
+      width: fit-content;
+      color: rgba(245, 248, 251, 0.72);
+      font: 500 15px/1.35 "Noto Serif KR", "KoPubBatang", "KoPub Batang", "NanumMyeongjo", "Nanum Myeongjo", Batang, serif;
+      text-shadow:
+        0 2px 0 rgba(0, 0, 0, 0.78),
+        0 4px 10px rgba(0, 0, 0, 0.68);
+      opacity: var(--shelter-dialogue-alpha);
+    }
+
+    .shelter-dialogue-result.is-visible {
+      display: grid;
+    }
+
+    .shelter-dialogue-choices {
+      position: absolute;
+      left: 74px;
+      bottom: 184px;
+      display: grid;
+      gap: 7px;
+      width: min(420px, calc(100vw - 120px));
+      padding: 18px 0 14px;
+      background:
+        radial-gradient(circle at 112px 46px, rgba(0, 0, 0, 0.46), rgba(0, 0, 0, 0.25) 42%, transparent 100%),
+        linear-gradient(90deg, rgba(1, 5, 8, 0.36), rgba(1, 5, 8, 0.13) 55%, transparent);
+      opacity: var(--shelter-dialogue-alpha);
+    }
+
+    .shelter-dialogue-choice {
+      width: fit-content;
+      max-width: 100%;
+      border: 0;
+      border-left: 2px solid transparent;
+      background: transparent;
+      color: rgba(245, 248, 251, 0.68);
+      cursor: pointer;
+      font: 500 16px/1.35 "Noto Serif KR", "KoPubBatang", "KoPub Batang", "NanumMyeongjo", "Nanum Myeongjo", Batang, serif;
+      padding: 2px 10px 2px 14px;
+      text-align: left;
+      text-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.78),
+        0 3px 8px rgba(0, 0, 0, 0.62);
+    }
+
+    .shelter-dialogue-choice::before {
+      content: "  ";
+      white-space: pre;
+    }
+
+    .shelter-dialogue-choice.is-selected,
+    .shelter-dialogue-choice:hover,
+    .shelter-dialogue-choice:focus-visible {
+      border-left-color: rgba(147, 234, 255, 0.82);
+      color: rgba(245, 248, 251, 0.98);
+      background: transparent;
+      font-size: 18px;
+      font-weight: 700;
+      outline: none;
+    }
+
+    .shelter-dialogue-choice.is-selected::before,
+    .shelter-dialogue-choice:hover::before,
+    .shelter-dialogue-choice:focus-visible::before {
+      content: "> ";
+    }
+
+    @media (max-width: 760px) {
+      .shelter-dialogue-art {
+        opacity: 0.72;
+      }
+
+      .shelter-dialogue-speaker {
+        left: 36px;
+        bottom: 220px;
+      }
+
+      .shelter-dialogue-line {
+        bottom: 54px;
+        width: calc(100vw - 56px);
+        font-size: 21px;
+      }
+
+      .shelter-dialogue-choices,
+      .shelter-dialogue-result {
+        left: 36px;
+      }
+
+      .shelter-dialogue-choices {
+        bottom: 154px;
+      }
+
+      .shelter-dialogue-choice {
+        font-size: 15px;
+      }
+    }
+
+    .shelter-door-transition {
+      position: absolute;
+      inset: 0;
+      z-index: 9;
+      pointer-events: none;
+      opacity: var(--shelter-door-fade);
+      background: #000;
+    }
+
+    .shelter-door-transition::before {
+      display: none;
+    }
+
+    .shelter-door-panel {
+      display: none;
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: calc(50% * var(--shelter-door-cover));
+      background:
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 74px),
+        linear-gradient(90deg, rgba(0, 4, 7, 0.98), rgba(7, 15, 20, 0.98) 76%, rgba(20, 34, 42, 0.98));
+    }
+
+    .shelter-door-panel.is-left {
+      left: 0;
+      box-shadow: inset -14px 0 18px rgba(116, 224, 255, 0.16);
+    }
+
+    .shelter-door-panel.is-right {
+      right: 0;
+      transform: scaleX(-1);
+      box-shadow: inset -14px 0 18px rgba(116, 224, 255, 0.16);
+    }
+
+    .shelter-door-frame {
+      display: none;
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 44px;
+      background: rgba(0, 0, 0, calc(var(--shelter-door-frame) * 0.48));
+    }
+
+    .shelter-door-frame.is-top {
+      top: 0;
+    }
+
+    .shelter-door-frame.is-bottom {
+      bottom: 0;
+    }
+
+    .shelter-door-center-line {
+      display: none;
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 2px;
+      background: rgba(126, 225, 255, calc(var(--shelter-door-center) * 0.2));
+      transform: translateX(-50%);
+      mix-blend-mode: screen;
     }
   </style>
 </head>
@@ -1213,6 +1579,22 @@
       <div id="droneBody" class="drone-body" aria-hidden="true"></div>
       <div class="drone-reticle" aria-hidden="true"></div>
       <div class="drone-vignette" aria-hidden="true"></div>
+      <div id="shelterDialogueOverlay" class="shelter-dialogue-overlay" aria-live="polite" aria-hidden="true">
+        <img id="shelterDialogueArt" class="shelter-dialogue-art" alt="" decoding="async" hidden>
+        <div id="shelterDoorTransition" class="shelter-door-transition" aria-hidden="true">
+          <div class="shelter-door-panel is-left"></div>
+          <div class="shelter-door-panel is-right"></div>
+          <div class="shelter-door-frame is-top"></div>
+          <div class="shelter-door-frame is-bottom"></div>
+          <div class="shelter-door-center-line"></div>
+        </div>
+        <div class="shelter-dialogue-stage">
+          <div id="shelterDialogueSpeaker" class="shelter-dialogue-speaker">TYPE-07A</div>
+          <div id="shelterDialogueLine" class="shelter-dialogue-line"></div>
+          <div id="shelterDialogueResult" class="shelter-dialogue-result"></div>
+          <div id="shelterDialogueChoices" class="shelter-dialogue-choices"></div>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -1229,12 +1611,16 @@
     </div>
   </section>
 
-  <script>
+  <script type="module">
+    import { GAME_DATA } from "./level-data.js?v=20260629-shelter-dialogue-adapter";
+    import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
+
     "use strict";
 
     // SAVE: shared with the title screen. Step 2/3 can add fields here, but the
     // localStorage key and base shape should stay compatible with index.html.
     const SAVE_KEY = "yunhoe_save";
+    const META_SAVE_KEY = "rulebound-extraction-meta-v1";
     const SHELTER_LAYOUT_KEY = "yunhoe_shelter_zone_layout_v3";
     const GAME_ENTRY_PATH = "./index.html";
     const SHELTER_BG_SRC = "./assets/backgrounds/shelter_bg.png?v=20260624-temp-art";
@@ -1260,6 +1646,178 @@
       exists: false,
       entryIntent: null
     };
+    const DEFAULT_META = Object.freeze({
+      trust: 0,
+      bankedMaterials: 0,
+      securedLoot: [],
+      upgrades: {},
+      unlockedAbilities: [],
+      storyFlags: [],
+      partInventory: [],
+      attachedParts: [],
+      seenDreamIds: [],
+      cgArchive: {
+        photos: [],
+        unlockedBackgroundIds: ["shelter-hub"]
+      },
+      lastOutcome: null,
+      completedRuns: 0
+    });
+    const PART_DEFINITIONS = Object.freeze({
+      "watchman-right-arm": {
+        id: "watchman-right-arm",
+        name: "Watchman Right Arm",
+        slot: "rightArm",
+        originLabel: "Rain Watchpost Sentry",
+        memoryResidue: 12,
+        corruption: 12,
+        purified: false,
+        statModifiers: {
+          recoilMultiplier: 0.88,
+          spreadMultiplier: 0.94,
+          humanoidDamageBonus: 4
+        },
+        description: "Recovered right-arm module. Lower recoil, tighter spread, better humanoid damage."
+      }
+    });
+    const PART_SLOT_LABELS = Object.freeze({
+      rightArm: "RIGHT ARM",
+      leftArm: "LEFT ARM",
+      core: "CORE",
+      body: "BODY"
+    });
+    const WORKSHOP_SLOT_ORDER = Object.freeze(["rightArm", "leftArm", "core"]);
+    const SHELTER_TALK_EMOTIONS = new Set(["neutral", "anxious", "warm", "tired", "hurt", "angry"]);
+    const SHELTER_HOME_EMOTION_ART_ASSETS = Object.freeze({
+      neutral: "shelterHomeNeutralCg",
+      anxious: "shelterHomeAnxiousCg",
+      warm: "shelterHomeWarmCg",
+      tired: "shelterHomeTiredCg",
+      hurt: "shelterHomeHurtCg",
+      angry: "shelterHomeAngryCg"
+    });
+    const SHELTER_HOME_BASE_ART_ASSET_KEYS = new Set([
+      "shelterFirstArrivalCg",
+      "shelterHomeCharmCg",
+      ...Object.values(SHELTER_HOME_EMOTION_ART_ASSETS)
+    ]);
+    const SHELTER_DIALOGUE_CONFIRM_KEYS = new Set(["Enter", " ", "z", "Z"]);
+    const SHELTER_DIALOGUE_UP_KEYS = new Set(["ArrowUp", "w", "W"]);
+    const SHELTER_DIALOGUE_DOWN_KEYS = new Set(["ArrowDown", "s", "S"]);
+    const SHELTER_DIALOGUE_TYPE_MIN_MS = 180;
+    const SHELTER_DIALOGUE_TYPE_MAX_MS = 2600;
+    const SHELTER_DIALOGUE_CHOICE_REVEAL_MS = 420;
+    const SHELTER_TALK_DOOR_TRANSITION_MS = 620;
+    const SHELTER_EVENT_BRIDGE_MS = 1150;
+    const SHELTER_TYPING_SOUND_MAX_CATCHUP = 4;
+    const SHELTER_TYPING_SOUND_DEFAULT_INTERVAL = 0.045;
+    const SHELTER_TYPING_SOUND_GAIN = 12;
+    const SHELTER_TYPING_SOUND_PRESETS = Object.freeze({
+      neutral: { base: 520, step: 13, volume: 0.036, interval: 0.045, duration: 0.034, tone: "triangle", filter: 1900 },
+      warm: { base: 460, step: 10, volume: 0.04, interval: 0.052, duration: 0.04, tone: "sine", filter: 1500 },
+      anxious: { base: 650, step: 18, volume: 0.029, interval: 0.038, duration: 0.028, tone: "triangle", filter: 2500 },
+      tired: { base: 380, step: 8, volume: 0.028, interval: 0.07, duration: 0.046, tone: "sine", filter: 1200 },
+      hurt: { base: 430, step: 9, volume: 0.026, interval: 0.085, duration: 0.042, tone: "triangle", filter: 1350 },
+      angry: { base: 700, step: 22, volume: 0.033, interval: 0.04, duration: 0.028, tone: "square", filter: 3000 }
+    });
+    const SHELTER_DIALOGUE_GENERIC_CHOICES = Object.freeze([
+      {
+        label: "상태는 괜찮아?",
+        intent: "check-condition",
+        emotion: "hurt",
+        reply: "괜찮다고 말하면 거짓말이야. 그래도 아직 움직일 수 있어."
+      },
+      {
+        label: "기억나는 게 있어?",
+        intent: "memory",
+        emotion: "tired",
+        reply: "파도 소리랑 흰 방 조각뿐이야. 이름은 아직 떠오르지 않아."
+      },
+      {
+        label: "조금 쉬자.",
+        intent: "rest",
+        emotion: "warm",
+        reply: "응. 명령이 아니라 쉬자는 말이라서, 조금 숨이 놓여."
+      },
+      {
+        label: "난 여기 있어.",
+        intent: "stay-close",
+        emotion: "warm",
+        reply: "그 말, 신호보다 더 잘 들려. 그러면 아직 혼자는 아니네."
+      },
+      {
+        label: "무서웠어?",
+        intent: "fear",
+        emotion: "anxious",
+        reply: "무서웠어. 깨어날 때마다 내가 어디까지 남았는지 먼저 확인하게 돼."
+      },
+      {
+        label: "이번엔 네가 골라.",
+        intent: "choice",
+        emotion: "neutral",
+        reply: "내가 골라도 된다면, 오늘은 무모하게 뛰어들고 싶지 않아."
+      },
+      {
+        label: "아버지 생각이 나?",
+        intent: "father",
+        emotion: "tired",
+        reply: "얼굴은 흐릿한데, 기다리던 목소리만 남아 있어. 그래서 더 아파."
+      },
+      {
+        label: "나가면 내가 볼게.",
+        intent: "watch",
+        emotion: "warm",
+        reply: "그럼 뒤를 맡길게. 네 신호가 있으면 발을 헛디디진 않을 것 같아."
+      },
+      {
+        label: "이름을 찾아보자.",
+        intent: "name",
+        emotion: "tired",
+        reply: "응. 번호 말고, 누가 불러주던 이름이 있었는지 알고 싶어."
+      },
+      {
+        label: "무리하지 마.",
+        intent: "care",
+        emotion: "hurt",
+        reply: "알겠어. 부품보다 마음이 먼저 삐걱거릴 때가 있거든."
+      },
+      {
+        label: "장산역이 신경 쓰여?",
+        intent: "jangsan",
+        emotion: "angry",
+        reply: "응. 아래에서 날 부르는 신호가 있어. 싫은데도 눈을 돌릴 수 없어."
+      },
+      {
+        label: "오늘은 여기서 멈추자.",
+        intent: "stop",
+        emotion: "warm",
+        reply: "좋아. 멈춰도 된다는 말이 이렇게 낯설 줄은 몰랐어."
+      },
+      {
+        label: "네가 사람이라면?",
+        intent: "personhood",
+        emotion: "tired",
+        reply: "사람이면 이런 질문에 바로 대답할 수 있었을까. 나는 아직 모르겠어."
+      },
+      {
+        label: "신호 계속 보낼게.",
+        intent: "signal",
+        emotion: "anxious",
+        reply: "끊기지 않게 해줘. 어둠 속에서는 그 소리 하나로 방향을 잡아."
+      },
+      {
+        label: "아픈 곳부터 말해줘.",
+        intent: "pain",
+        emotion: "hurt",
+        reply: "오른쪽 어깨랑 목 뒤가 둔해. 하지만 제일 아픈 건 깨어난 직후야."
+      },
+      {
+        label: "이번엔 지켜보자.",
+        intent: "observe",
+        emotion: "neutral",
+        reply: "응. 싸우기 전에 먼저 보자. 이번엔 살아서 돌아오는 쪽을 고를래."
+      }
+    ]);
 
     // ART HOOKS: every drawn element in this shell is a placeholder. Replace
     // these null hooks with loaded PNGs/sprites/sequences when final art exists.
@@ -1591,10 +2149,19 @@
     const panelTitle = document.getElementById("panelTitle");
     const panelBody = document.getElementById("panelBody");
     const closePanelButton = document.getElementById("closePanelButton");
+    const shelterDialogueOverlay = document.getElementById("shelterDialogueOverlay");
+    const shelterDialogueArt = document.getElementById("shelterDialogueArt");
+    const shelterDoorTransition = document.getElementById("shelterDoorTransition");
+    const shelterDialogueSpeaker = document.getElementById("shelterDialogueSpeaker");
+    const shelterDialogueLine = document.getElementById("shelterDialogueLine");
+    const shelterDialogueResult = document.getElementById("shelterDialogueResult");
+    const shelterDialogueChoices = document.getElementById("shelterDialogueChoices");
 
     let saveState = normalizeSave(loadSave() || DEFAULT_SAVE);
     let focusedIndex = 0;
     let activePanel = null;
+    let shelterDialogueState = createShelterDialogueState();
+    let shelterDialogueFrameId = 0;
     let childBehaviorIndex = 0;
     let childBehaviorTimer = 0;
     let childLineTimer = 0;
@@ -1623,6 +2190,28 @@
 
     function lerp(a, b, t) {
       return a + (b - a) * clamp(t, 0, 1);
+    }
+
+    function clonePlain(value, fallback) {
+      try {
+        return JSON.parse(JSON.stringify(value ?? fallback));
+      } catch {
+        return fallback;
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function isUrlFlagEnabled(name) {
+      const value = new URLSearchParams(window.location.search).get(name);
+      return value === "" || value === "1" || value === "true" || value === "yes";
     }
 
     function distance2d(a, b) {
@@ -2438,6 +3027,1081 @@
       return next;
     }
 
+    function normalizePartInstance(partLike) {
+      const id = typeof partLike === "string" ? partLike : String(partLike?.id || "");
+      const definition = PART_DEFINITIONS[id] || (partLike && typeof partLike === "object" ? partLike : null);
+      if (!definition?.id) {
+        return null;
+      }
+      const source = partLike && typeof partLike === "object" ? partLike : {};
+      return {
+        ...clonePlain(definition, {}),
+        ...clonePlain(source, {}),
+        id: definition.id,
+        name: definition.name || source.name || definition.id,
+        slot: definition.slot || source.slot || "core",
+        statModifiers: {
+          ...(definition.statModifiers || {}),
+          ...(source.statModifiers || {})
+        },
+        memoryResidue: Number(source.memoryResidue ?? definition.memoryResidue ?? definition.corruption ?? 0),
+        corruption: Number(source.corruption ?? definition.corruption ?? definition.memoryResidue ?? 0),
+        purified: Boolean(source.purified ?? definition.purified)
+      };
+    }
+
+    function normalizeMeta(raw) {
+      const parsed = raw && typeof raw === "object" ? raw : {};
+      return {
+        ...clonePlain(DEFAULT_META, {}),
+        ...clonePlain(parsed, {}),
+        securedLoot: Array.isArray(parsed.securedLoot) ? parsed.securedLoot.filter(Boolean) : [],
+        upgrades: parsed.upgrades && typeof parsed.upgrades === "object" ? parsed.upgrades : {},
+        unlockedAbilities: Array.isArray(parsed.unlockedAbilities) ? parsed.unlockedAbilities.map(String) : [],
+        storyFlags: Array.isArray(parsed.storyFlags) ? parsed.storyFlags.map(String) : [],
+        partInventory: Array.isArray(parsed.partInventory)
+          ? parsed.partInventory.map(normalizePartInstance).filter(Boolean)
+          : [],
+        attachedParts: Array.isArray(parsed.attachedParts)
+          ? parsed.attachedParts.map(normalizePartInstance).filter(Boolean)
+          : [],
+        seenDreamIds: Array.isArray(parsed.seenDreamIds) ? parsed.seenDreamIds.map(String) : [],
+        cgArchive: parsed.cgArchive && typeof parsed.cgArchive === "object"
+          ? parsed.cgArchive
+          : clonePlain(DEFAULT_META.cgArchive, {}),
+        completedRuns: Number.isFinite(parsed.completedRuns) ? parsed.completedRuns : 0
+      };
+    }
+
+    function loadMetaState() {
+      try {
+        const raw = localStorage.getItem(META_SAVE_KEY);
+        return normalizeMeta(raw ? JSON.parse(raw) : null);
+      } catch {
+        return normalizeMeta(null);
+      }
+    }
+
+    function syncWorkshopMetaDataset(meta) {
+      document.documentElement.dataset.shelterPartInventory = String(meta.partInventory.length);
+      document.documentElement.dataset.shelterAttachedParts = String(meta.attachedParts.length);
+    }
+
+    function saveMetaState(meta) {
+      const next = normalizeMeta(meta);
+      try {
+        localStorage.setItem(META_SAVE_KEY, JSON.stringify(next));
+      } catch (error) {
+        console.warn("shelter meta save failed", error);
+      }
+      syncWorkshopMetaDataset(next);
+      return next;
+    }
+
+    function resetMetaFromUrl() {
+      if (!isUrlFlagEnabled("resetMeta") && !isUrlFlagEnabled("resetShelter")) {
+        return false;
+      }
+      try {
+        localStorage.removeItem(META_SAVE_KEY);
+      } catch (error) {
+        console.warn("shelter meta reset failed", error);
+      }
+      document.documentElement.dataset.shelterMetaReset = "true";
+      return true;
+    }
+
+    function createShelterDialogueState() {
+      return {
+        active: false,
+        mode: "idle",
+        event: null,
+        node: null,
+        lineSegments: [],
+        lineIndex: 0,
+        choices: [],
+        choiceIndex: 0,
+        emotion: "neutral",
+        artAssetKey: "",
+        resultLines: [],
+        afterLine: "",
+        requestId: 0,
+        topicIndex: 0,
+        lineStartedAt: 0,
+        lineForcedComplete: false,
+        typingSound: null,
+        transition: null,
+        bridgeEvent: null,
+        bridgeDurationMs: 0,
+        closing: false
+      };
+    }
+
+    function normalizeShelterTalkEmotion(emotion, fallback = "neutral") {
+      return SHELTER_TALK_EMOTIONS.has(emotion) ? emotion : fallback;
+    }
+
+    function normalizeShelterArtAssetKey(assetKey = "") {
+      return typeof assetKey === "string" ? assetKey.trim() : "";
+    }
+
+    function getShelterScriptedEvents() {
+      return Array.isArray(GAME_DATA.shelter?.events)
+        ? GAME_DATA.shelter.events.filter((event) => event && typeof event === "object" && typeof event.id === "string")
+        : [];
+    }
+
+    function getShelterScriptedEvent(eventId) {
+      return getShelterScriptedEvents().find((event) => event.id === eventId) || null;
+    }
+
+    function getShelterScriptedEventNode(event, nodeId = "") {
+      const nodes = Array.isArray(event?.nodes) ? event.nodes : [];
+      const targetId = nodeId || event?.startNodeId || nodes[0]?.id || "";
+      return nodes.find((node) => node && typeof node === "object" && node.id === targetId) || nodes[0] || null;
+    }
+
+    function getShelterEventCompletionFlag(event) {
+      return event?.completionFlag || (event?.id ? `shelter-event:${event.id}` : "");
+    }
+
+    function getShelterEventBridgeConfig(event) {
+      const transition = event?.transition && typeof event.transition === "object" ? event.transition : {};
+      const node = getShelterScriptedEventNode(event, event?.startNodeId);
+      const line = String(transition.line || event?.transitionLine || event?.bridgeLine || "").trim();
+      const rawDuration = Number(transition.seconds ?? event?.transitionSeconds ?? event?.bridgeSeconds);
+      const durationMs = Number.isFinite(rawDuration)
+        ? clamp(rawDuration, 0.45, 3) * 1000
+        : SHELTER_EVENT_BRIDGE_MS;
+      return {
+        line,
+        durationMs,
+        emotion: normalizeShelterTalkEmotion(
+          transition.emotion || event?.transitionEmotion,
+          normalizeShelterTalkEmotion(node?.emotion, normalizeShelterTalkEmotion(event?.emotion, "neutral"))
+        ),
+        artAssetKey: normalizeShelterArtAssetKey(transition.backgroundAssetKey)
+          || normalizeShelterArtAssetKey(transition.artAssetKey)
+          || normalizeShelterArtAssetKey(event?.transitionAssetKey)
+          || getShelterEventStartArtAssetKey(event, node)
+      };
+    }
+
+    function hasMetaStoryFlag(meta, flag) {
+      return Boolean(flag && Array.isArray(meta?.storyFlags) && meta.storyFlags.includes(flag));
+    }
+
+    function addMetaStoryFlag(meta, flag) {
+      if (!flag) return false;
+      meta.storyFlags = Array.isArray(meta.storyFlags) ? meta.storyFlags : [];
+      if (meta.storyFlags.includes(flag)) return false;
+      meta.storyFlags.push(flag);
+      return true;
+    }
+
+    function canStartShelterScriptedEvent(meta, event, options = {}) {
+      if (!event?.id) return false;
+      const trigger = event.trigger && typeof event.trigger === "object" ? event.trigger : {};
+      if (options.autoOnly && trigger.autoStart !== true) return false;
+      const completionFlag = getShelterEventCompletionFlag(event);
+      if (event.once !== false && hasMetaStoryFlag(meta, completionFlag)) return false;
+      if (trigger.requiredStoryFlag && !hasMetaStoryFlag(meta, trigger.requiredStoryFlag)) return false;
+      if (trigger.missingStoryFlag && hasMetaStoryFlag(meta, trigger.missingStoryFlag)) return false;
+      return true;
+    }
+
+    function getNextShelterScriptedEvent(meta, options = {}) {
+      return getShelterScriptedEvents().find((event) => canStartShelterScriptedEvent(meta, event, options)) || null;
+    }
+
+    function getShelterEventStartArtAssetKey(event, node = null) {
+      return normalizeShelterArtAssetKey(node?.backgroundAssetKey)
+        || normalizeShelterArtAssetKey(node?.artAssetKey)
+        || normalizeShelterArtAssetKey(event?.backgroundAssetKey)
+        || normalizeShelterArtAssetKey(event?.artAssetKey);
+    }
+
+    function getShelterDialogueArtAssetKey(emotion, fallbackAssetKey = "") {
+      const fallback = normalizeShelterArtAssetKey(fallbackAssetKey);
+      if (fallback && !SHELTER_HOME_BASE_ART_ASSET_KEYS.has(fallback)) {
+        return fallback;
+      }
+      return normalizeShelterArtAssetKey(SHELTER_HOME_EMOTION_ART_ASSETS[normalizeShelterTalkEmotion(emotion, "neutral")])
+        || fallback;
+    }
+
+    function getShelterDialogueSegments(text = "") {
+      return String(text || "")
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    }
+
+    function resolveShelterArtSrc(assetKey = "") {
+      const source = GAME_DATA.art?.[assetKey]?.src;
+      return typeof source === "string" ? source : "";
+    }
+
+    function normalizeShelterEventChoice(choice, event) {
+      if (!choice || typeof choice !== "object") return null;
+      const label = String(choice.label || "").trim();
+      if (!label) return null;
+      return {
+        ...choice,
+        label,
+        intent: String(choice.intent || event?.title || event?.id || "scripted shelter event"),
+        reply: String(choice.reply || "").trim(),
+        emotion: normalizeShelterTalkEmotion(choice.emotion, normalizeShelterTalkEmotion(event?.emotion, "neutral")),
+        eventId: event?.id || ""
+      };
+    }
+
+    function getShelterNodeChoices(event, node) {
+      return Array.isArray(node?.choices)
+        ? node.choices.map((choice) => normalizeShelterEventChoice(choice, event)).filter(Boolean).slice(0, 3)
+        : [];
+    }
+
+    function getShelterGenericChoices() {
+      const total = SHELTER_DIALOGUE_GENERIC_CHOICES.length;
+      const start = (Math.floor(shelterDialogueState.topicIndex || 0) + Math.floor(shelterDialogueState.requestId || 0)) % total;
+      return [0, 1, 2].map((offset) => SHELTER_DIALOGUE_GENERIC_CHOICES[(start + offset) % total]);
+    }
+
+    function setShelterDialogueLine(text) {
+      shelterDialogueState.lineSegments = getShelterDialogueSegments(text);
+      if (!shelterDialogueState.lineSegments.length) {
+        shelterDialogueState.lineSegments = ["......"];
+      }
+      shelterDialogueState.lineIndex = 0;
+      markShelterDialogueLineStarted();
+    }
+
+    function getShelterCurrentDialogueLine() {
+      const lines = shelterDialogueState.lineSegments;
+      const index = clamp(Math.floor(shelterDialogueState.lineIndex || 0), 0, Math.max(0, lines.length - 1));
+      return lines[index] || "";
+    }
+
+    function getAudioClockSeconds() {
+      return performance.now() / 1000;
+    }
+
+    function getShelterTypingSoundPreset(emotion) {
+      return SHELTER_TYPING_SOUND_PRESETS[normalizeShelterTalkEmotion(emotion, "neutral")]
+        || SHELTER_TYPING_SOUND_PRESETS.neutral;
+    }
+
+    function shouldSkipShelterTypingChar(char) {
+      return !String(char || "").trim();
+    }
+
+    function isShelterTypingPunctuation(char) {
+      return /[.!?。！？…]$/u.test(String(char || ""));
+    }
+
+    function createShelterTypingNoiseBuffer(context, duration) {
+      const sampleCount = Math.max(1, Math.floor(context.sampleRate * duration));
+      const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
+      const channel = buffer.getChannelData(0);
+      for (let index = 0; index < sampleCount; index += 1) {
+        const decay = 1 - index / sampleCount;
+        channel[index] = (Math.random() * 2 - 1) * decay * decay;
+      }
+      return buffer;
+    }
+
+    function playShelterTypingSound(emotion, char, visibleCount = 0) {
+      if (shouldSkipShelterTypingChar(char)) return;
+      try {
+        const context = shelterAudio.context;
+        if (!context || !shelterAudio.master || shelterAudio.isMuted) return;
+        context.resume?.();
+        const preset = getShelterTypingSoundPreset(emotion);
+        const punctuation = isShelterTypingPunctuation(char);
+        const seed = ((String(char).codePointAt(0) || 0) + visibleCount * 17) % 7;
+        const volume = preset.volume * SHELTER_TYPING_SOUND_GAIN * (punctuation ? 0.82 : 1);
+        if (volume <= 0.0001) return;
+        document.documentElement.dataset.shelterLastTypingSound = `${emotion}:${visibleCount}:${char}`;
+        const now = context.currentTime;
+        const toneDuration = preset.duration * (punctuation ? 1.28 : 1);
+        const oscillator = context.createOscillator();
+        const toneFilter = context.createBiquadFilter();
+        const toneGain = context.createGain();
+        oscillator.type = preset.tone;
+        oscillator.frequency.setValueAtTime(
+          (punctuation ? preset.base * 0.78 : preset.base) + seed * preset.step,
+          now
+        );
+        toneFilter.type = "bandpass";
+        toneFilter.frequency.setValueAtTime(preset.filter, now);
+        toneFilter.Q.setValueAtTime(punctuation ? 2.4 : 3.2, now);
+        toneGain.gain.setValueAtTime(0.0001, now);
+        toneGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + 0.004);
+        toneGain.gain.exponentialRampToValueAtTime(0.0001, now + toneDuration);
+        oscillator.connect(toneFilter);
+        toneFilter.connect(toneGain);
+        toneGain.connect(shelterAudio.master);
+        oscillator.start(now);
+        oscillator.stop(now + toneDuration + 0.012);
+
+        const noiseDuration = Math.min(0.018, toneDuration);
+        const noise = context.createBufferSource();
+        const noiseFilter = context.createBiquadFilter();
+        const noiseGain = context.createGain();
+        noise.buffer = createShelterTypingNoiseBuffer(context, noiseDuration);
+        noiseFilter.type = "highpass";
+        noiseFilter.frequency.setValueAtTime(punctuation ? 720 : 1100, now);
+        noiseGain.gain.setValueAtTime(0.0001, now);
+        noiseGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume * 0.72), now + 0.003);
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDuration);
+        noise.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(shelterAudio.master);
+        noise.start(now);
+        noise.stop(now + noiseDuration + 0.004);
+      } catch {
+        // Browser audio can be blocked until a user gesture; dialogue still works.
+      }
+    }
+
+    function getShelterVisibleTypedCharacterCount(line, progress) {
+      const letters = Array.from(String(line || ""));
+      if (!letters.length) return 0;
+      return clamp(Math.ceil(letters.length * progress), 1, letters.length);
+    }
+
+    function updateShelterTypingSoundForLine(host, line, progress, emotion, lineKey) {
+      if (!host || typeof line !== "string" || !line) return;
+      const letters = Array.from(line);
+      const visibleCount = getShelterVisibleTypedCharacterCount(line, progress);
+      host.typingSound = host.typingSound && typeof host.typingSound === "object" ? host.typingSound : {};
+      if (host.typingSound.lineKey !== lineKey) {
+        host.typingSound = {
+          lineKey,
+          visibleCount: 0,
+          lastPlayedAt: 0
+        };
+      }
+      const previousCount = clamp(Math.floor(host.typingSound.visibleCount || 0), 0, letters.length);
+      if (visibleCount <= previousCount) {
+        host.typingSound.visibleCount = visibleCount;
+        return;
+      }
+      const delta = visibleCount - previousCount;
+      host.typingSound.visibleCount = visibleCount;
+      if (delta > SHELTER_TYPING_SOUND_MAX_CATCHUP) return;
+      const newLetters = letters.slice(previousCount, visibleCount);
+      const audibleChar = [...newLetters].reverse().find((char) => !shouldSkipShelterTypingChar(char));
+      if (!audibleChar) return;
+      const now = getAudioClockSeconds();
+      const preset = getShelterTypingSoundPreset(emotion);
+      const minInterval = Number.isFinite(preset.interval)
+        ? preset.interval
+        : SHELTER_TYPING_SOUND_DEFAULT_INTERVAL;
+      if (now - Number(host.typingSound.lastPlayedAt || 0) < minInterval) return;
+      host.typingSound.lastPlayedAt = now;
+      playShelterTypingSound(emotion, audibleChar, visibleCount);
+    }
+
+    function markShelterDialogueLineStarted() {
+      shelterDialogueState.lineStartedAt = performance.now();
+      shelterDialogueState.lineForcedComplete = false;
+      shelterDialogueState.typingSound = null;
+      scheduleShelterDialogueFrame();
+    }
+
+    function getShelterDialogueTypeDuration(line) {
+      const length = Array.from(String(line || "").trim()).length;
+      if (!length) return 0;
+      return clamp(
+        length / getShelterSubtitleCharsPerSecond() * 1000,
+        SHELTER_DIALOGUE_TYPE_MIN_MS,
+        SHELTER_DIALOGUE_TYPE_MAX_MS
+      );
+    }
+
+    function getShelterDialogueTypeProgress() {
+      if (shelterDialogueState.lineForcedComplete) return 1;
+      const duration = getShelterDialogueTypeDuration(getShelterCurrentDialogueLine());
+      if (duration <= 0) return 1;
+      return clamp(getShelterDialogueLineAge() / duration, 0, 1);
+    }
+
+    function getShelterDialogueLineAge() {
+      return Math.max(0, performance.now() - (Number.isFinite(shelterDialogueState.lineStartedAt) ? shelterDialogueState.lineStartedAt : 0));
+    }
+
+    function isShelterDialogueLineTypedComplete() {
+      if (shelterDialogueState.lineForcedComplete) return true;
+      const duration = getShelterDialogueTypeDuration(getShelterCurrentDialogueLine());
+      return duration <= 0 || getShelterDialogueLineAge() >= duration;
+    }
+
+    function getVisibleShelterDialogueLine() {
+      const line = getShelterCurrentDialogueLine();
+      if (!line || shelterDialogueState.lineForcedComplete) return line;
+      const letters = Array.from(line);
+      const progress = getShelterDialogueTypeProgress();
+      const visibleCount = clamp(Math.ceil(letters.length * progress), 1, letters.length);
+      return letters.slice(0, visibleCount).join("");
+    }
+
+    function canRevealShelterDialogueChoices() {
+      return Boolean(
+        shelterDialogueState.active
+        && shelterDialogueState.mode !== "result"
+        && shelterDialogueState.mode !== "bridge"
+        && shelterDialogueState.afterLine !== "event-result"
+        && shelterDialogueState.choices.length
+        && shelterDialogueState.lineIndex >= Math.max(0, shelterDialogueState.lineSegments.length - 1)
+        && isShelterDialogueLineTypedComplete()
+        && getShelterDialogueLineAge() >= getShelterDialogueTypeDuration(getShelterCurrentDialogueLine()) + SHELTER_DIALOGUE_CHOICE_REVEAL_MS
+      );
+    }
+
+    function easeShelterDoorTransition(value) {
+      const t = clamp(value, 0, 1);
+      return t * t * (3 - 2 * t);
+    }
+
+    function beginShelterDialogueTransition(direction = "in") {
+      shelterDialogueState.transition = {
+        direction: direction === "out" ? "out" : "in",
+        startedAt: performance.now(),
+        duration: SHELTER_TALK_DOOR_TRANSITION_MS
+      };
+      scheduleShelterDialogueFrame();
+    }
+
+    function getShelterDialogueTransitionProgress() {
+      const transition = shelterDialogueState.transition;
+      if (!transition || typeof transition !== "object") return null;
+      const duration = Number.isFinite(transition.duration) ? Math.max(200, transition.duration) : SHELTER_TALK_DOOR_TRANSITION_MS;
+      const progress = clamp((performance.now() - Number(transition.startedAt || 0)) / duration, 0, 1);
+      return {
+        direction: transition.direction === "out" ? "out" : "in",
+        progress,
+        complete: progress >= 1
+      };
+    }
+
+    function updateShelterDoorTransitionVisual() {
+      const transition = getShelterDialogueTransitionProgress();
+      if (!transition) {
+        shelterDialogueOverlay.style.setProperty("--shelter-door-cover", "0");
+        shelterDialogueOverlay.style.setProperty("--shelter-door-fade", "0");
+        shelterDialogueOverlay.style.setProperty("--shelter-door-frame", "0");
+        shelterDialogueOverlay.style.setProperty("--shelter-door-center", "0");
+        document.documentElement.dataset.shelterDoorTransition = "";
+        return false;
+      }
+      const eased = easeShelterDoorTransition(transition.progress);
+      const fadeAlpha = transition.direction === "out" ? eased : 1 - eased;
+      shelterDialogueOverlay.style.setProperty("--shelter-door-cover", "0");
+      shelterDialogueOverlay.style.setProperty("--shelter-door-fade", fadeAlpha.toFixed(3));
+      shelterDialogueOverlay.style.setProperty("--shelter-door-frame", "0");
+      shelterDialogueOverlay.style.setProperty("--shelter-door-center", "0");
+      document.documentElement.dataset.shelterDoorTransition = `${transition.direction}:fade:${fadeAlpha.toFixed(3)}`;
+      if (!transition.complete) return true;
+      if (transition.direction === "out") {
+        finalizeShelterDialogueClose();
+        return false;
+      }
+      shelterDialogueState.transition = null;
+      updateShelterDoorTransitionVisual();
+      return false;
+    }
+
+    function getShelterBridgeDurationMs() {
+      if (shelterDialogueState.mode !== "bridge") return 0;
+      return Math.max(
+        Number.isFinite(shelterDialogueState.bridgeDurationMs) ? shelterDialogueState.bridgeDurationMs : SHELTER_EVENT_BRIDGE_MS,
+        getShelterDialogueTypeDuration(getShelterCurrentDialogueLine()) + 200
+      );
+    }
+
+    function getShelterBridgeAgeMs() {
+      return Math.max(0, performance.now() - (Number.isFinite(shelterDialogueState.lineStartedAt) ? shelterDialogueState.lineStartedAt : 0));
+    }
+
+    function isShelterBridgeComplete() {
+      return shelterDialogueState.mode === "bridge" && getShelterBridgeAgeMs() >= getShelterBridgeDurationMs();
+    }
+
+    function getShelterBridgeAlpha() {
+      if (shelterDialogueState.mode !== "bridge") return 1;
+      const duration = getShelterBridgeDurationMs();
+      if (duration <= 0) return 1;
+      const age = getShelterBridgeAgeMs();
+      const fadeIn = clamp(age / 280, 0, 1);
+      const fadeOut = clamp((duration - age) / 220, 0, 1);
+      return Math.min(fadeIn, fadeOut);
+    }
+
+    function updateShelterBridgeVisual() {
+      const alpha = getShelterBridgeAlpha();
+      shelterDialogueOverlay.style.setProperty("--shelter-dialogue-alpha", alpha.toFixed(3));
+      shelterDialogueOverlay.classList.toggle("is-bridge", shelterDialogueState.mode === "bridge");
+      document.documentElement.dataset.shelterDialogueAlpha = alpha.toFixed(3);
+    }
+
+    function finishShelterBridge() {
+      const event = shelterDialogueState.bridgeEvent;
+      if (event) {
+        startShelterScriptedDialogue(event);
+      } else {
+        closeShelterDialogue(true);
+      }
+    }
+
+    function scheduleShelterDialogueFrame() {
+      if (!shelterDialogueState.active || shelterDialogueFrameId) return;
+      shelterDialogueFrameId = window.requestAnimationFrame(() => {
+        shelterDialogueFrameId = 0;
+        if (!shelterDialogueState.active) return;
+        if (isShelterBridgeComplete()) {
+          finishShelterBridge();
+          return;
+        }
+        renderShelterDialogue();
+        if (shelterDialogueState.transition) {
+          scheduleShelterDialogueFrame();
+        } else if (shelterDialogueState.mode === "bridge" && !isShelterBridgeComplete()) {
+          scheduleShelterDialogueFrame();
+        } else if (!isShelterDialogueLineTypedComplete()) {
+          scheduleShelterDialogueFrame();
+        } else if (
+          shelterDialogueState.choices.length
+          && shelterDialogueState.afterLine !== "event-result"
+          && getShelterDialogueLineAge() < getShelterDialogueTypeDuration(getShelterCurrentDialogueLine()) + SHELTER_DIALOGUE_CHOICE_REVEAL_MS
+        ) {
+          scheduleShelterDialogueFrame();
+        }
+      });
+    }
+
+    function setShelterDialogueArt(assetKey = "") {
+      shelterDialogueState.artAssetKey = normalizeShelterArtAssetKey(assetKey);
+    }
+
+    function renderShelterDialogue() {
+      const active = Boolean(shelterDialogueState.active);
+      shelterDialogueOverlay.classList.toggle("is-open", active);
+      shelterDialogueOverlay.setAttribute("aria-hidden", active ? "false" : "true");
+      document.body.classList.toggle("is-shelter-dialogue-active", active);
+      if (active) {
+        updateShelterDoorTransitionVisual();
+      } else {
+        updateShelterDoorTransitionVisual();
+      }
+      if (!shelterDialogueState.active) {
+        shelterDialogueOverlay.classList.remove("is-open");
+        shelterDialogueOverlay.classList.remove("is-bridge");
+        shelterDialogueOverlay.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("is-shelter-dialogue-active");
+        document.documentElement.dataset.activeShelterDialogue = "";
+        document.documentElement.dataset.shelterDialogueAlpha = "";
+        childActor.dataset.emotion = "";
+        return;
+      }
+      const choicesVisible = canRevealShelterDialogueChoices();
+      updateShelterBridgeVisual();
+      document.documentElement.dataset.activeShelterDialogue = active
+        ? (choicesVisible ? "choices" : shelterDialogueState.mode)
+        : "";
+      childActor.dataset.emotion = active ? shelterDialogueState.emotion : "";
+      if (!active) {
+        return;
+      }
+
+      shelterDialogueSpeaker.textContent = shelterDialogueState.event?.title || "TYPE-07A";
+      const currentLine = getShelterCurrentDialogueLine();
+      const typeProgress = getShelterDialogueTypeProgress();
+      const lineKey = [
+        shelterDialogueState.mode,
+        shelterDialogueState.event?.id || shelterDialogueState.bridgeEvent?.id || "free",
+        shelterDialogueState.node?.id || "",
+        shelterDialogueState.lineIndex || 0,
+        shelterDialogueState.emotion || "neutral",
+        currentLine
+      ].join("|");
+      updateShelterTypingSoundForLine(
+        shelterDialogueState,
+        currentLine,
+        typeProgress,
+        shelterDialogueState.emotion,
+        lineKey
+      );
+      shelterDialogueLine.textContent = getVisibleShelterDialogueLine();
+      const showResult = shelterDialogueState.mode === "result" && shelterDialogueState.resultLines.length > 0;
+      shelterDialogueResult.classList.toggle("is-visible", showResult);
+      shelterDialogueResult.innerHTML = showResult ? shelterDialogueState.resultLines
+        .map((line) => `<div>${escapeHtml(line)}</div>`)
+        .join("") : "";
+
+      const artSrc = resolveShelterArtSrc(shelterDialogueState.artAssetKey);
+      if (artSrc) {
+        if (shelterDialogueArt.getAttribute("src") !== artSrc) {
+          shelterDialogueArt.src = artSrc;
+        }
+        shelterDialogueArt.hidden = false;
+      } else {
+        shelterDialogueArt.hidden = true;
+        shelterDialogueArt.removeAttribute("src");
+      }
+
+      shelterDialogueChoices.innerHTML = "";
+      if ((shelterDialogueState.mode === "choices" || choicesVisible) && shelterDialogueState.choices.length) {
+        shelterDialogueState.choices.forEach((choice, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `shelter-dialogue-choice${index === shelterDialogueState.choiceIndex ? " is-selected" : ""}`;
+          button.textContent = choice.label || "";
+          button.addEventListener("click", () => selectShelterDialogueChoice(index));
+          shelterDialogueChoices.appendChild(button);
+        });
+        shelterDialogueChoices.querySelector(".is-selected")?.focus({ preventScroll: true });
+      }
+    }
+
+    function startShelterBridgeDialogue(event, bridge) {
+      if (!event?.id || !bridge?.line) return false;
+      shelterDialogueState = {
+        ...createShelterDialogueState(),
+        active: true,
+        mode: "bridge",
+        bridgeEvent: event,
+        bridgeDurationMs: bridge.durationMs,
+        choices: [],
+        emotion: normalizeShelterTalkEmotion(bridge.emotion, "neutral")
+      };
+      setShelterDialogueArt(getShelterDialogueArtAssetKey(shelterDialogueState.emotion, bridge.artAssetKey));
+      setShelterDialogueLine(bridge.line);
+      renderShelterDialogue();
+      scheduleShelterDialogueFrame();
+      return true;
+    }
+
+    function startShelterScriptedDialogue(event, options = {}) {
+      const node = getShelterScriptedEventNode(event, event?.startNodeId);
+      if (!event?.id || !node) return false;
+      shelterDialogueState = {
+        ...createShelterDialogueState(),
+        active: true,
+        mode: "line",
+        event,
+        node,
+        choices: getShelterNodeChoices(event, node),
+        emotion: normalizeShelterTalkEmotion(node.emotion, normalizeShelterTalkEmotion(event.emotion, "neutral"))
+      };
+      const baseArt = getShelterEventStartArtAssetKey(event, node);
+      setShelterDialogueArt(getShelterDialogueArtAssetKey(shelterDialogueState.emotion, baseArt));
+      setShelterDialogueLine(String(node.line || event.title || "").trim() || "......");
+      if (options.transition !== false) {
+        beginShelterDialogueTransition("in");
+      }
+      renderShelterDialogue();
+      return true;
+    }
+
+    function startShelterGenericDialogue() {
+      shelterDialogueState = {
+        ...createShelterDialogueState(),
+        active: true,
+        mode: "line",
+        choices: getShelterGenericChoices(),
+        emotion: "neutral"
+      };
+      setShelterDialogueArt(getShelterDialogueArtAssetKey("neutral", "shelterHomeCharmCg"));
+      setShelterDialogueLine("……말해도 돼. 듣고 있어.");
+      beginShelterDialogueTransition("in");
+      renderShelterDialogue();
+      return true;
+    }
+
+    function startShelterDialogue(options = {}) {
+      if (activePanel) {
+        closePanel();
+      }
+      const meta = loadMetaState();
+      const event = getNextShelterScriptedEvent(meta, { autoOnly: Boolean(options.autoOnly) });
+      if (event) {
+        const bridge = getShelterEventBridgeConfig(event);
+        if (options.autoOnly && bridge.line) {
+          return startShelterBridgeDialogue(event, bridge);
+        }
+        return startShelterScriptedDialogue(event);
+      }
+      return options.autoOnly ? false : startShelterGenericDialogue();
+    }
+
+    function createShelterEventResult(choice, event, changed) {
+      const effects = choice?.effects && typeof choice.effects === "object" ? choice.effects : {};
+      const lines = [];
+      if (Number.isFinite(effects.trust) && Number(effects.trust) !== 0) {
+        const trustDelta = Math.round(Number(effects.trust) * 100);
+        lines.push(`신뢰도 ${trustDelta > 0 ? "+" : ""}${trustDelta}`);
+      }
+      if (changed || choice?.endEvent !== false) {
+        lines.push("기록 갱신");
+      }
+      return lines.length ? lines : ["변화 없음"];
+    }
+
+    function applyShelterEventChoiceEffects(choice) {
+      if (!choice?.eventId) return { meta: loadMetaState(), changed: false };
+      const meta = loadMetaState();
+      let changed = false;
+      const effects = choice.effects && typeof choice.effects === "object" ? choice.effects : {};
+      if (Number.isFinite(effects.trust)) {
+        meta.trust = clamp(Number(meta.trust || 0) + Number(effects.trust), -1, 1);
+        changed = true;
+      }
+      if (Array.isArray(effects.storyFlags)) {
+        effects.storyFlags.forEach((flag) => {
+          changed = addMetaStoryFlag(meta, String(flag || "")) || changed;
+        });
+      }
+      const event = getShelterScriptedEvent(choice.eventId);
+      if (event && choice.endEvent !== false && !choice.nextNodeId) {
+        changed = addMetaStoryFlag(meta, getShelterEventCompletionFlag(event)) || changed;
+      }
+      return { meta: changed ? saveMetaState(meta) : meta, changed };
+    }
+
+    function commitShelterGenericChoice(choice) {
+      shelterDialogueState.requestId += 1;
+      shelterDialogueState.topicIndex = (shelterDialogueState.topicIndex + 1) % SHELTER_DIALOGUE_GENERIC_CHOICES.length;
+      shelterDialogueState.mode = "line";
+      shelterDialogueState.choices = [];
+      shelterDialogueState.choiceIndex = 0;
+      shelterDialogueState.afterLine = "generic-choices";
+      shelterDialogueState.resultLines = [];
+      shelterDialogueState.emotion = normalizeShelterTalkEmotion(choice.emotion, "neutral");
+      setShelterDialogueArt(getShelterDialogueArtAssetKey(shelterDialogueState.emotion, "shelterHomeCharmCg"));
+      setShelterDialogueLine(choice.reply || "......");
+      renderShelterDialogue();
+    }
+
+    function commitShelterEventChoice(choice) {
+      const event = getShelterScriptedEvent(choice.eventId);
+      if (!event) return;
+      const nextNode = choice.nextNodeId ? getShelterScriptedEventNode(event, choice.nextNodeId) : null;
+      const nextEmotion = normalizeShelterTalkEmotion(choice.emotion, normalizeShelterTalkEmotion(nextNode?.emotion, shelterDialogueState.emotion));
+      const artAssetKey = normalizeShelterArtAssetKey(choice.backgroundAssetKey)
+        || normalizeShelterArtAssetKey(choice.artAssetKey)
+        || getShelterEventStartArtAssetKey(event, nextNode)
+        || shelterDialogueState.artAssetKey;
+
+      shelterDialogueState.mode = "line";
+      shelterDialogueState.choiceIndex = 0;
+      shelterDialogueState.resultLines = [];
+      shelterDialogueState.emotion = nextEmotion;
+      setShelterDialogueArt(getShelterDialogueArtAssetKey(nextEmotion, artAssetKey));
+
+      if (nextNode) {
+        shelterDialogueState.event = event;
+        shelterDialogueState.node = nextNode;
+        shelterDialogueState.choices = getShelterNodeChoices(event, nextNode);
+        shelterDialogueState.afterLine = "";
+        setShelterDialogueLine(String(nextNode.line || choice.reply || "").trim() || "......");
+        renderShelterDialogue();
+        return;
+      }
+
+      const { changed } = applyShelterEventChoiceEffects(choice);
+      shelterDialogueState.choices = [];
+      shelterDialogueState.afterLine = "event-result";
+      shelterDialogueState.resultLines = createShelterEventResult(choice, event, changed);
+      setShelterDialogueLine(String(choice.reply || "").trim() || "......");
+      renderShelterDialogue();
+    }
+
+    function selectShelterDialogueChoice(index = shelterDialogueState.choiceIndex) {
+      const choices = shelterDialogueState.choices;
+      if (
+        !shelterDialogueState.active
+        || !(shelterDialogueState.mode === "choices" || canRevealShelterDialogueChoices())
+        || !choices.length
+      ) return;
+      const choice = choices[clamp(Math.floor(index || 0), 0, choices.length - 1)];
+      if (!choice) return;
+      if (choice.eventId) {
+        commitShelterEventChoice(choice);
+      } else {
+        commitShelterGenericChoice(choice);
+      }
+    }
+
+    function finalizeShelterDialogueClose() {
+      if (shelterDialogueFrameId) {
+        window.cancelAnimationFrame(shelterDialogueFrameId);
+        shelterDialogueFrameId = 0;
+      }
+      shelterDialogueState = createShelterDialogueState();
+      renderShelterDialogue();
+      if (currentZoneId === "living") {
+        setFocusedHotspot(focusedIndex, true);
+      } else {
+        updateZoneUi();
+      }
+    }
+
+    function closeShelterDialogue(force = false) {
+      if (!shelterDialogueState.active || force) {
+        finalizeShelterDialogueClose();
+        return;
+      }
+      if (shelterDialogueState.transition?.direction === "out") {
+        return;
+      }
+      shelterDialogueState.closing = true;
+      beginShelterDialogueTransition("out");
+      renderShelterDialogue();
+    }
+
+    function advanceShelterDialogueLine() {
+      if (!shelterDialogueState.active) return;
+      if (shelterDialogueState.transition) return;
+      if (shelterDialogueState.mode === "bridge") {
+        finishShelterBridge();
+        return;
+      }
+      if (shelterDialogueState.mode === "choices" || canRevealShelterDialogueChoices()) {
+        selectShelterDialogueChoice();
+        return;
+      }
+      if (shelterDialogueState.mode === "result") {
+        closeShelterDialogue();
+        return;
+      }
+      if (!isShelterDialogueLineTypedComplete()) {
+        shelterDialogueState.lineForcedComplete = true;
+        renderShelterDialogue();
+        return;
+      }
+      const maxIndex = Math.max(0, shelterDialogueState.lineSegments.length - 1);
+      if (shelterDialogueState.lineIndex < maxIndex) {
+        shelterDialogueState.lineIndex += 1;
+        markShelterDialogueLineStarted();
+        renderShelterDialogue();
+        return;
+      }
+      if (shelterDialogueState.afterLine === "event-result") {
+        shelterDialogueState.mode = "result";
+        shelterDialogueState.afterLine = "";
+        renderShelterDialogue();
+        return;
+      }
+      if (shelterDialogueState.afterLine === "generic-choices") {
+        shelterDialogueState.mode = "choices";
+        shelterDialogueState.afterLine = "";
+        if (!shelterDialogueState.choices.length) {
+          shelterDialogueState.choices = getShelterGenericChoices();
+        }
+        shelterDialogueState.choiceIndex = 0;
+        renderShelterDialogue();
+        return;
+      }
+      if (shelterDialogueState.choices.length) {
+        shelterDialogueState.mode = "choices";
+        renderShelterDialogue();
+        return;
+      }
+      closeShelterDialogue();
+    }
+
+    function handleShelterDialogueKey(event) {
+      if (!shelterDialogueState.active) return false;
+      if (shelterDialogueState.transition) return true;
+      if (event.key === "Escape") {
+        closeShelterDialogue();
+        return true;
+      }
+      if ((shelterDialogueState.mode === "choices" || canRevealShelterDialogueChoices()) && shelterDialogueState.choices.length) {
+        if (SHELTER_DIALOGUE_UP_KEYS.has(event.key)) {
+          shelterDialogueState.choiceIndex = (shelterDialogueState.choiceIndex + shelterDialogueState.choices.length - 1) % shelterDialogueState.choices.length;
+          renderShelterDialogue();
+          return true;
+        }
+        if (SHELTER_DIALOGUE_DOWN_KEYS.has(event.key)) {
+          shelterDialogueState.choiceIndex = (shelterDialogueState.choiceIndex + 1) % shelterDialogueState.choices.length;
+          renderShelterDialogue();
+          return true;
+        }
+      }
+      if (SHELTER_DIALOGUE_CONFIRM_KEYS.has(event.key)) {
+        advanceShelterDialogueLine();
+        return true;
+      }
+      return true;
+    }
+
+    function queueShelterAutoDialogue() {
+      const params = new URLSearchParams(window.location.search);
+      const entry = params.get("entry") || "";
+      if (entry !== "new" && entry !== "return") return;
+      const delay = params.get("arrival") === SHELTER_ARRIVAL.queryValue
+        ? SHELTER_ARRIVAL.holdMs + SHELTER_ARRIVAL.fadeMs + 120
+        : 260;
+      window.setTimeout(() => {
+        if (!activePanel && !shelterDialogueState.active) {
+          startShelterDialogue({ autoOnly: true });
+        }
+      }, delay);
+    }
+
+    function getSlotLabel(slot) {
+      return PART_SLOT_LABELS[slot] || String(slot || "SLOT").toUpperCase();
+    }
+
+    function getPartStatLines(part) {
+      const stats = part?.statModifiers || {};
+      const lines = [];
+      if (Number.isFinite(stats.recoilMultiplier)) {
+        lines.push(`recoil x${Number(stats.recoilMultiplier).toFixed(2)}`);
+      }
+      if (Number.isFinite(stats.spreadMultiplier)) {
+        lines.push(`spread x${Number(stats.spreadMultiplier).toFixed(2)}`);
+      }
+      if (Number.isFinite(stats.humanoidDamageBonus)) {
+        lines.push(`humanoid +${Number(stats.humanoidDamageBonus)}`);
+      }
+      if (Number.isFinite(stats.magazineBonus)) {
+        lines.push(`mag +${Number(stats.magazineBonus)}`);
+      }
+      return lines;
+    }
+
+    function renderPartStats(part) {
+      const stats = getPartStatLines(part);
+      if (!stats.length) {
+        return "";
+      }
+      return `<div class="part-stats">${stats.map((line) => `<span class="part-stat">${escapeHtml(line)}</span>`).join("")}</div>`;
+    }
+
+    function getAttachedPart(meta, slot) {
+      return meta.attachedParts.find((part) => part.slot === slot) || null;
+    }
+
+    function getMemoryDrift(meta) {
+      return meta.attachedParts.reduce((total, part) => total + Math.max(0, Number(part.memoryResidue ?? part.corruption ?? 0)), 0);
+    }
+
+    function attachWorkshopPart(partId) {
+      const meta = loadMetaState();
+      const part = normalizePartInstance(meta.partInventory.find((entry) => entry.id === partId));
+      if (!part) {
+        return null;
+      }
+      meta.attachedParts = meta.attachedParts.filter((entry) => entry.slot !== part.slot);
+      meta.attachedParts.push(part);
+      return saveMetaState(meta);
+    }
+
+    function detachWorkshopSlot(slot) {
+      const meta = loadMetaState();
+      meta.attachedParts = meta.attachedParts.filter((entry) => entry.slot !== slot);
+      return saveMetaState(meta);
+    }
+
+    function renderWorkshopSlots(meta) {
+      return WORKSHOP_SLOT_ORDER.map((slot) => {
+        const part = getAttachedPart(meta, slot);
+        if (!part) {
+          return `
+            <article class="slot-card is-empty">
+              <div class="slot-card-header">
+                <span class="slot-label">${escapeHtml(getSlotLabel(slot))}</span>
+                <span class="part-slot">EMPTY</span>
+              </div>
+              <div class="part-description">No module installed.</div>
+            </article>
+          `;
+        }
+        return `
+          <article class="slot-card is-filled">
+            <div class="slot-card-header">
+              <span class="slot-label">${escapeHtml(getSlotLabel(slot))}</span>
+              <span class="part-risk">MR ${Math.round(part.memoryResidue ?? part.corruption ?? 0)}</span>
+            </div>
+            <div class="part-name">${escapeHtml(part.name)}</div>
+            ${renderPartStats(part)}
+            <button class="workshop-button" type="button" data-workshop-action="detach" data-slot="${escapeHtml(slot)}">DETACH</button>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderWorkshopInventory(meta) {
+      if (!meta.partInventory.length) {
+        return `
+          <article class="part-card is-empty">
+            <div class="part-name">No recovered parts</div>
+            <div class="part-description">Recovered modules appear here after expedition.</div>
+          </article>
+        `;
+      }
+      return meta.partInventory.map((part) => {
+        const attached = Boolean(getAttachedPart(meta, part.slot)?.id === part.id);
+        return `
+          <article class="part-card${attached ? " is-attached" : ""}">
+            <div class="part-card-header">
+              <span class="part-name">${escapeHtml(part.name)}</span>
+              <span class="part-slot">${escapeHtml(getSlotLabel(part.slot))}</span>
+            </div>
+            <div class="part-description">${escapeHtml(part.description || part.originLabel || "Recovered module.")}</div>
+            ${renderPartStats(part)}
+            <button class="workshop-button" type="button" data-workshop-action="attach" data-part-id="${escapeHtml(part.id)}"${attached ? " disabled" : ""}>${attached ? "ATTACHED" : "ATTACH"}</button>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderPartWorkshopPanel(statusText = "") {
+      const meta = loadMetaState();
+      syncWorkshopMetaDataset(meta);
+      activePanel = "WORKSHOP";
+      panelTitle.textContent = "WORKSHOP / PARTS";
+      panelBody.className = "panel-body is-workshop";
+      panelBody.innerHTML = `
+        <div class="workshop-summary">
+          <strong>Recovered modules ${meta.partInventory.length} / Attached ${meta.attachedParts.length}</strong>
+          <span>Memory drift ${Math.round(getMemoryDrift(meta))}${statusText ? ` / ${escapeHtml(statusText)}` : ""}</span>
+        </div>
+        <div class="workshop-grid">
+          <section class="workshop-column">
+            <div class="workshop-heading">slots</div>
+            ${renderWorkshopSlots(meta)}
+          </section>
+          <section class="workshop-column">
+            <div class="workshop-heading">inventory</div>
+            ${renderWorkshopInventory(meta)}
+          </section>
+        </div>
+      `;
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      document.documentElement.dataset.activeShelterPanel = "WORKSHOP";
+      panelBody.querySelectorAll("[data-workshop-action='attach']").forEach((button) => {
+        button.addEventListener("click", () => {
+          const partId = button.dataset.partId || "";
+          const next = attachWorkshopPart(partId);
+          const part = next?.attachedParts.find((entry) => entry.id === partId);
+          renderPartWorkshopPanel(part ? `${part.name} installed` : "install failed");
+        });
+      });
+      panelBody.querySelectorAll("[data-workshop-action='detach']").forEach((button) => {
+        button.addEventListener("click", () => {
+          detachWorkshopSlot(button.dataset.slot || "");
+          renderPartWorkshopPanel("slot cleared");
+        });
+      });
+      panelBody.querySelector("button:not([disabled])")?.focus();
+    }
+
     function createStageEntryUrl(state) {
       const params = new URLSearchParams();
       params.set("directLevel", "1");
@@ -2697,6 +4361,7 @@
     function openStubPanel(title, extraHtml = "") {
       activePanel = title;
       panelTitle.textContent = `${title} — (not built)`;
+      panelBody.className = "panel-body";
       panelBody.innerHTML = extraHtml || "<div>STEP 1 shell stub.</div>";
       modal.classList.add("is-open");
       modal.setAttribute("aria-hidden", "false");
@@ -2718,7 +4383,7 @@
     }
 
     function openRepair() {
-      openStubPanel("REPAIR");
+      renderPartWorkshopPanel();
     }
 
     function enterStageFromShelter() {
@@ -2770,7 +4435,7 @@
     }
 
     function talkToChild() {
-      openStubPanel("TALK");
+      startShelterDialogue();
     }
 
     function lookOutside() {
@@ -2804,6 +4469,12 @@
     // the focused object or the current zone prompt.
     document.addEventListener("keydown", (event) => {
       shelterAudio.ensureStarted();
+      if (shelterDialogueState.active) {
+        if (handleShelterDialogueKey(event)) {
+          event.preventDefault();
+        }
+        return;
+      }
       if (zoneLayoutEditMode) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -2870,6 +4541,7 @@
       document.documentElement.dataset.viewport = `${window.innerWidth}x${window.innerHeight}`;
     });
 
+    resetMetaFromUrl();
     setupShelterBackground();
     applyArrivalFade();
     syncSaveDrivenVisuals();
@@ -2880,6 +4552,7 @@
     renderZoneMinimap();
     setActiveZoneSurface(ZONES.living);
     updateZoneUi();
+    queueShelterAutoDialogue();
     startRoomLifeLoop();
     document.documentElement.dataset.shelterReady = "true";
     document.documentElement.dataset.assetFallback = "loading:shelter_bg.png";
