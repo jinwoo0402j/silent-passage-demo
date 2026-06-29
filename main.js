@@ -55,7 +55,7 @@ import {
   normalizePartInstance,
   saveMetaState,
 } from "./state.js?v=20260628-camera-priority-controller-v23";
-import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260628-camera-priority-controller-v23";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260629-shelter-return-v3";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

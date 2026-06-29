@@ -78,6 +78,26 @@ const LEGACY_ARM_SWITCH_KEYS = ["MouseMiddle"];
 const LEGACY_RELOAD_KEYS = ["KeyR"];
 const CAPSLOCK_DASH_TAP_SECONDS = 0.28;
 const BULLET_TIME_KEYS = [];
+const TITLE_SAVE_KEY = "yunhoe_save";
+const SHELTER_ENTRY_PATH = "./shelter.html";
+const SHELTER_RETURN_ARRIVAL = "drone-wake";
+const DEFAULT_TITLE_SAVE = Object.freeze({
+  deaths: 0,
+  sanity: 100,
+  reachedLettingGoEnding: false,
+  managers: {
+    N: "active",
+    E: "active",
+    S: "active",
+    W: "active",
+    C: "active",
+  },
+  stage: 1,
+  cycle: 1,
+  day: 1,
+  exists: true,
+  entryIntent: "continue",
+});
 const FOCUS_KEYS = ["KeyC"];
 const INTERACTION_HOLD_SECONDS = 0.25;
 const FIRE_KEYS = ["KeyX"];
@@ -13442,6 +13462,63 @@ function getShelterRouteBlockReason(run) {
   return run.timePhase === "night" ? "" : SHELTER_NIGHT_LOCK_MESSAGE;
 }
 
+function readTitleSaveForShelterReturn() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TITLE_SAVE_KEY) || "null");
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function syncTitleSaveForShelterReturn(state, reason = "return") {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const previous = readTitleSaveForShelterReturn() || {};
+  const run = state?.run || null;
+  const previousDeaths = Math.max(0, Math.floor(Number(previous.deaths) || 0));
+  const deaths = previousDeaths + (reason === "failure" ? 1 : 0);
+  const cycle = Math.max(1, Math.floor(Number(run?.day ?? previous.cycle ?? previous.day ?? deaths + 1) || 1));
+  const next = {
+    ...DEFAULT_TITLE_SAVE,
+    ...previous,
+    deaths,
+    sanity: clamp(Math.floor(Number(run?.sanity ?? previous.sanity ?? 100) || 0), 0, 100),
+    stage: Math.max(1, Math.floor(Number(previous.stage) || 1)),
+    cycle,
+    day: Math.max(1, Math.floor(Number(run?.day ?? previous.day ?? cycle) || cycle)),
+    exists: true,
+    entryIntent: "continue",
+    lastShelterReturnAt: Date.now(),
+    lastShelterReturnReason: reason,
+  };
+  try {
+    window.localStorage.setItem(TITLE_SAVE_KEY, JSON.stringify(next));
+  } catch {}
+}
+
+function createShelterReturnUrl(reason = "return") {
+  const params = new URLSearchParams();
+  params.set("entry", reason === "failure" ? "recover" : "return");
+  params.set("arrival", SHELTER_RETURN_ARRIVAL);
+  params.set("from", "expedition");
+  return `${SHELTER_ENTRY_PATH}?${params.toString()}`;
+}
+
+function redirectToShelterPage(state, reason = "return") {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  syncTitleSaveForShelterReturn(state, reason);
+  document.documentElement.dataset.shelterExternalReturn = reason;
+  window.location.href = createShelterReturnUrl(reason);
+  return true;
+}
+
 function setRunNotice(run, message, duration = 1.8) {
   if (!run || !message) {
     return;
@@ -14220,14 +14297,14 @@ function transitionToRouteExit(state, data, routeExit, options = {}) {
       setStatus(state, blockReason);
       return;
     }
-  }
-  const result = transitionToLevel(state, data, routeExit.toLevelId, routeExit.toEntranceId || "start", {
-    persist: !shelterRoute,
-    message: shelterRoute ? "?쇰궃泥?吏꾩엯." : undefined,
-  });
-  if (shelterRoute && result) {
     beginShelterRest(state, data, fromLevelId, routeExit.returnEntranceId || "start");
+    redirectToShelterPage(state, "return");
+    return;
   }
+  transitionToLevel(state, data, routeExit.toLevelId, routeExit.toEntranceId || "start", {
+    persist: true,
+    message: undefined,
+  });
 }
 
 function leaveShelterRest(state, data) {
@@ -15739,8 +15816,7 @@ function updateResults(state) {
   setStatus(state, isMovementLab(state.data) ? "寃곌낵 ?붾㈃. C/Z" : "洹??寃곌낵. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     playGameSfx("uiConfirm", { cooldownMs: 120 });
-    state.scene = SCENES.SHELTER;
-    state.sceneTimer = 0;
+    redirectToShelterPage(state, "return");
   }
 }
 
@@ -15748,8 +15824,7 @@ function updateGameOver(state) {
   setStatus(state, isMovementLab(state.data) ? "?ㅽ뙣 ?붾㈃. C/Z" : "???ㅽ뙣. C/Z");
   if (consumeEitherPress(state, CONFIRM_KEYS) || consumeEitherPress(state, INTERACT_KEYS)) {
     playGameSfx("uiConfirm", { cooldownMs: 120 });
-    state.scene = SCENES.SHELTER;
-    state.sceneTimer = 0;
+    redirectToShelterPage(state, "failure");
   }
 }
 

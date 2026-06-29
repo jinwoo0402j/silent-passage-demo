@@ -607,7 +607,6 @@
 
     body.is-arriving .hud,
     body.is-arriving .zone-minimap,
-    body.is-arriving .zone-prompt,
     body.is-arriving #hotspotLayer {
       opacity: 0;
       pointer-events: none;
@@ -633,23 +632,6 @@
       border: 1px solid rgba(236, 233, 223, 0.08);
     }
 
-    .hotspot::after {
-      content: attr(data-label);
-      position: absolute;
-      left: 50%;
-      top: -12px;
-      transform: translate(-50%, -100%);
-      padding: 5px 8px;
-      border: 1px solid rgba(236, 233, 223, 0.16);
-      background: rgba(13, 12, 10, 0.76);
-      color: rgba(236, 233, 223, 0.78);
-      font: 12px/1.2 Consolas, "D2Coding", monospace;
-      white-space: nowrap;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 520ms ease 260ms, transform 520ms ease 260ms;
-    }
-
     .hotspot.is-near,
     .hotspot.is-focused,
     .hotspot:focus-visible {
@@ -658,13 +640,6 @@
       box-shadow: 0 0 30px rgba(232, 182, 107, 0.24), inset 0 0 28px rgba(232, 182, 107, 0.08);
       transform: translate(-50%, -50%) scale(1.035);
       outline: none;
-    }
-
-    .hotspot.is-near::after,
-    .hotspot.is-focused::after,
-    .hotspot:focus-visible::after {
-      opacity: 1;
-      transform: translate(-50%, -108%);
     }
 
     .hotspot.is-zone-hidden {
@@ -924,29 +899,6 @@
 
     .zone-map-cell.is-current::after {
       color: rgba(248, 228, 176, 0.86);
-    }
-
-    .zone-prompt {
-      position: absolute;
-      left: 50%;
-      bottom: clamp(20px, 4vh, 48px);
-      z-index: 12;
-      min-width: 180px;
-      transform: translateX(-50%);
-      padding: 8px 12px;
-      border: 1px solid rgba(236, 233, 223, 0.12);
-      background: rgba(8, 7, 6, 0.38);
-      color: rgba(236, 233, 223, 0.58);
-      font: 12px/1.2 Consolas, "D2Coding", monospace;
-      text-align: center;
-      opacity: 0;
-      transition: opacity 420ms ease, transform 420ms ease;
-      pointer-events: none;
-    }
-
-    .zone-prompt.is-visible {
-      opacity: 1;
-      transform: translateX(-50%) translateY(-4px);
     }
 
     .drone-body {
@@ -1258,7 +1210,6 @@
 
       <div id="hotspotLayer" aria-label="shelter objects"></div>
       <div id="zoneMinimap" class="zone-minimap" aria-label="shelter zone map"></div>
-      <div id="zonePrompt" class="zone-prompt" aria-live="polite"></div>
       <div id="droneBody" class="drone-body" aria-hidden="true"></div>
       <div class="drone-reticle" aria-hidden="true"></div>
       <div class="drone-vignette" aria-hidden="true"></div>
@@ -1380,8 +1331,7 @@
         kind: "placeholder",
         placeholderTitle: "ENTRANCE / CITY EXIT",
         placeholderSubtitle: "REPLACE: bg_entrance.png / corridor + sealed door layers",
-        action: "departToCity",
-        prompt: "E  DEPART"
+        action: "departToCity"
       },
       workshop: {
         id: "workshop",
@@ -1393,8 +1343,7 @@
         kind: "placeholder",
         placeholderTitle: "SMALL ROOM 2 / WORKSHOP",
         placeholderSubtitle: "REPLACE: bg_workshop.png / bench + drone layers",
-        action: "openWorkshopZone",
-        prompt: "E  WORKSHOP"
+        action: "openWorkshopZone"
       },
       kitchen: {
         id: "kitchen",
@@ -1406,8 +1355,7 @@
         kind: "placeholder",
         placeholderTitle: "KITCHEN / CHILD LIFE",
         placeholderSubtitle: "REPLACE: bg_kitchen.png / table + care routine layers",
-        action: "talkToChild",
-        prompt: "E  TALK"
+        action: "talkToChild"
       },
       bedroom: {
         id: "bedroom",
@@ -1419,8 +1367,7 @@
         kind: "placeholder",
         placeholderTitle: "BEDROOM / COT",
         placeholderSubtitle: "REPLACE: bg_bedroom.png / cot alcove layers",
-        action: "sleepSave",
-        prompt: "E  SLEEP"
+        action: "sleepSave"
       },
       records: {
         id: "records",
@@ -1432,8 +1379,7 @@
         kind: "placeholder",
         placeholderTitle: "RECORD TERMINAL",
         placeholderSubtitle: "REPLACE: bg_records.png / terminal room layers",
-        action: "openRecords",
-        prompt: "E  RECORDS"
+        action: "openRecords"
       },
       balcony_living: {
         id: "balcony_living",
@@ -1445,8 +1391,7 @@
         kind: "placeholder",
         placeholderTitle: "EAST BALCONY / GREENHOUSE",
         placeholderSubtitle: "REPLACE: bg_balcony.png / flooded-city view layers",
-        action: "lookOutside",
-        prompt: "E  LOOK"
+        action: "lookOutside"
       },
       balcony_kitchen: {
         id: "balcony_kitchen",
@@ -1458,8 +1403,7 @@
         kind: "placeholder",
         placeholderTitle: "WEST BALCONY / PLANTS",
         placeholderSubtitle: "REPLACE: bg_balcony.png / planters + city view layers",
-        action: "lookOutside",
-        prompt: "E  LOOK"
+        action: "lookOutside"
       },
       balcony_bed: {
         id: "balcony_bed",
@@ -1471,8 +1415,7 @@
         kind: "placeholder",
         placeholderTitle: "WEST BALCONY UPPER / PLANTS",
         placeholderSubtitle: "REPLACE: bg_balcony.png / quiet flooded view layers",
-        action: "lookOutside",
-        prompt: "E  LOOK"
+        action: "lookOutside"
       },
       bathroom: {
         id: "bathroom",
@@ -1484,8 +1427,7 @@
         kind: "placeholder",
         placeholderTitle: "BATHROOM / WATER CATCH",
         placeholderSubtitle: "REPLACE: bg_bathroom.png / water collection layers",
-        action: "drawWater",
-        prompt: "E  WATER"
+        action: "drawWater"
       }
     });
     const DEFAULT_ZONE_MAPS = Object.freeze(Object.fromEntries(
@@ -1638,7 +1580,6 @@
     const zoneTransitionImage = document.getElementById("zoneTransitionImage");
     const zoneTransitionPlaceholder = document.getElementById("zoneTransitionPlaceholder");
     const zoneMinimap = document.getElementById("zoneMinimap");
-    const zonePrompt = document.getElementById("zonePrompt");
     const droneBody = document.getElementById("droneBody");
     const roomLife = document.getElementById("roomLife");
     const childActor = document.getElementById("childActor");
@@ -2121,11 +2062,6 @@
       });
       roomLife?.classList.toggle("is-zone-muted", !showLivingHotspots);
 
-      if (zonePrompt) {
-        const prompt = zone.prompt || "";
-        zonePrompt.textContent = prompt;
-        zonePrompt.classList.toggle("is-visible", Boolean(prompt));
-      }
     }
 
     function zoneCenter(zone) {
