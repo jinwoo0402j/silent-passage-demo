@@ -251,6 +251,7 @@ const LEVEL_ZERO_MOVEMENT_TUNING = {
   braceDetectPaddingX: 24,
   braceDetectPaddingY: 24,
   braceHoldStartSpeed: 24,
+  braceHoldMaxDurationMs: 300,
   braceHoldAccel: 780,
   braceHoldFallSpeed: 130,
   braceHoldMoveMultiplier: 0.82,
@@ -1293,6 +1294,7 @@ function resetPlayerToLevelStart(run, data) {
   player.hoverBoostActive = false;
   player.wallSliding = false;
   player.wallRunActive = false;
+  player.wallRunTimer = 0;
   player.braceHolding = false;
   player.braceHoldActive = false;
   player.braceReleaseTimer = 0;

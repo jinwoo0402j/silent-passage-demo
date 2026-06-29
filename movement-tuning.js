@@ -26,6 +26,7 @@ export const SPRINT_TUNING_FIELDS = [
   { key: "braceDetectPaddingX", label: "Brace Detect X", min: 0, max: 96, step: 1 },
   { key: "braceDetectPaddingY", label: "Brace Detect Y", min: 0, max: 96, step: 1 },
   { key: "braceHoldStartSpeed", label: "Brace Start Speed", min: 0, max: 300, step: 1 },
+  { key: "braceHoldMaxDurationMs", label: "Brace Hold Limit", min: 100, max: 300, step: 10 },
   { key: "braceHoldAccel", label: "Brace Fall Accel", min: 0, max: 1200, step: 10 },
   { key: "braceHoldFallSpeed", label: "Brace Max Fall", min: 0, max: 600, step: 1 },
   { key: "braceHoldMoveMultiplier", label: "Brace Move Mult", min: 0, max: 1.5, step: 0.01 },

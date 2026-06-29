@@ -874,6 +874,7 @@ export const GAME_DATA = {
       "braceDetectPaddingX": 24,
       "braceDetectPaddingY": 24,
       "braceHoldStartSpeed": 24,
+      "braceHoldMaxDurationMs": 300,
       "braceHoldAccel": 520,
       "braceHoldFallSpeed": 96,
       "braceHoldMoveMultiplier": 0.68,
