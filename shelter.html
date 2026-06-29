@@ -677,12 +677,115 @@
       left: clamp(18px, 3vw, 38px);
       bottom: clamp(18px, 3vw, 34px);
       z-index: 12;
-      width: clamp(168px, 16vw, 218px);
-      aspect-ratio: 1.32;
+      width: clamp(210px, 20vw, 286px);
+      aspect-ratio: 1.42;
       padding: 8px;
       border: 1px solid rgba(236, 233, 223, 0.12);
       background: rgba(8, 7, 6, 0.34);
       transition: opacity 420ms ease;
+    }
+
+    .floor-plan-layer {
+      position: absolute;
+      inset: 8px;
+      pointer-events: none;
+    }
+
+    .floor-plan-link-layer {
+      position: absolute;
+      inset: 8px;
+      pointer-events: none;
+    }
+
+    .floor-plan-link {
+      position: absolute;
+      height: 1px;
+      background: rgba(143, 174, 122, 0.18);
+      opacity: 0.42;
+      transform-origin: 0 50%;
+      transition: opacity 180ms ease, background 180ms ease, box-shadow 180ms ease;
+    }
+
+    .floor-plan-link.is-active {
+      background: rgba(232, 182, 107, 0.5);
+      box-shadow: 0 0 8px rgba(232, 182, 107, 0.28);
+      opacity: 0.86;
+    }
+
+    .floor-plan-shape {
+      position: absolute;
+      box-sizing: border-box;
+      border: 1px solid rgba(236, 233, 223, 0.14);
+      background: rgba(236, 233, 223, 0.022);
+    }
+
+    .floor-plan-shape.is-wall {
+      border: 2px solid rgba(236, 233, 223, 0.28);
+      background: transparent;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.38);
+    }
+
+    .floor-plan-shape.is-corridor {
+      border-color: rgba(236, 233, 223, 0.18);
+      background: rgba(236, 233, 223, 0.05);
+    }
+
+    .floor-plan-shape.is-utility {
+      border-color: rgba(175, 212, 225, 0.2);
+      background: rgba(155, 205, 220, 0.06);
+    }
+
+    .floor-plan-shape.is-grid {
+      background:
+        linear-gradient(rgba(236, 233, 223, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(236, 233, 223, 0.07) 1px, transparent 1px),
+        rgba(236, 233, 223, 0.025);
+      background-size: 8px 8px;
+    }
+
+    .floor-plan-shape.is-elevator::before,
+    .floor-plan-shape.is-elevator::after {
+      content: "";
+      position: absolute;
+      inset: 13% 18%;
+      border-top: 1px solid rgba(236, 233, 223, 0.24);
+      transform: rotate(45deg);
+      transform-origin: center;
+    }
+
+    .floor-plan-shape.is-elevator::after {
+      transform: rotate(-45deg);
+    }
+
+    .floor-plan-shape.is-stairs {
+      background:
+        repeating-linear-gradient(0deg, rgba(236, 233, 223, 0.18) 0 1px, transparent 1px 6px),
+        rgba(236, 233, 223, 0.03);
+    }
+
+    .floor-plan-shape.is-door {
+      border: 0;
+      border-left: 1px solid rgba(236, 233, 223, 0.24);
+      border-bottom: 1px solid rgba(236, 233, 223, 0.18);
+      border-radius: 0 0 0 100%;
+      background: transparent;
+    }
+
+    .floor-plan-shape.is-fixture {
+      border-color: rgba(176, 218, 230, 0.28);
+      border-radius: 999px;
+      background: rgba(176, 218, 230, 0.055);
+    }
+
+    .floor-plan-shape::after {
+      content: attr(data-label);
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: rgba(236, 233, 223, 0.24);
+      font: 700 7px/1 Consolas, "D2Coding", monospace;
+      letter-spacing: 0;
     }
 
     .zone-map-cell {
@@ -696,8 +799,102 @@
       transition: opacity 240ms ease, border-color 240ms ease, background 240ms ease, box-shadow 240ms ease;
     }
 
+    .zone-map-cell[data-zone-id="living"],
+    .zone-map-cell[data-zone-id="kitchen"] {
+      background: rgba(232, 182, 107, 0.12);
+      border-color: rgba(232, 182, 107, 0.2);
+    }
+
+    .zone-map-cell[data-zone-id="bathroom"] {
+      background: rgba(155, 205, 220, 0.12);
+      border-color: rgba(155, 205, 220, 0.24);
+    }
+
+    .zone-map-cell[data-zone-id^="balcony"] {
+      background:
+        linear-gradient(rgba(236, 233, 223, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(236, 233, 223, 0.06) 1px, transparent 1px),
+        rgba(236, 233, 223, 0.025);
+      background-size: 8px 8px;
+    }
+
+    .zone-minimap.is-editing {
+      border-color: rgba(232, 182, 107, 0.42);
+      background: rgba(12, 10, 8, 0.58);
+      box-shadow: 0 0 22px rgba(232, 182, 107, 0.1);
+    }
+
+    .zone-layout-tools {
+      position: absolute;
+      left: -1px;
+      bottom: calc(100% + 6px);
+      display: flex;
+      gap: 4px;
+      opacity: 0.72;
+      transition: opacity 180ms ease;
+    }
+
+    .zone-minimap:hover .zone-layout-tools,
+    .zone-minimap.is-editing .zone-layout-tools {
+      opacity: 1;
+    }
+
+    .zone-layout-tool {
+      appearance: none;
+      height: 18px;
+      padding: 0 6px;
+      border: 1px solid rgba(236, 233, 223, 0.14);
+      background: rgba(8, 7, 6, 0.76);
+      color: rgba(236, 233, 223, 0.58);
+      font: 700 8px/1 Consolas, "D2Coding", monospace;
+      letter-spacing: 0;
+      cursor: pointer;
+    }
+
+    .zone-layout-tool:hover,
+    .zone-layout-tool:focus-visible {
+      border-color: rgba(232, 182, 107, 0.48);
+      color: rgba(236, 233, 223, 0.9);
+      outline: none;
+    }
+
+    .zone-layout-tool.is-active {
+      border-color: rgba(232, 182, 107, 0.72);
+      background: rgba(232, 182, 107, 0.18);
+      color: rgba(255, 238, 196, 0.95);
+    }
+
+    .zone-layout-tool:disabled {
+      opacity: 0.36;
+      cursor: default;
+    }
+
+    .zone-minimap.is-editing .zone-map-cell {
+      cursor: grab;
+    }
+
+    .zone-map-cell.is-dragging {
+      z-index: 4;
+      cursor: grabbing;
+      opacity: 1;
+      border-color: rgba(232, 182, 107, 0.88);
+      background: rgba(232, 182, 107, 0.26);
+      box-shadow: 0 0 18px rgba(232, 182, 107, 0.28);
+      transition: none;
+    }
+
     .zone-map-cell.is-room {
       opacity: 0.62;
+    }
+
+    .zone-map-cell.is-routeable {
+      opacity: 0.76;
+      cursor: pointer;
+    }
+
+    .zone-map-cell.is-routeable:not(.is-adjacent):not(.is-current) {
+      border-color: rgba(236, 233, 223, 0.24);
+      background: rgba(236, 233, 223, 0.055);
     }
 
     .zone-map-cell.is-adjacent {
@@ -1087,6 +1284,7 @@
     // SAVE: shared with the title screen. Step 2/3 can add fields here, but the
     // localStorage key and base shape should stay compatible with index.html.
     const SAVE_KEY = "yunhoe_save";
+    const SHELTER_LAYOUT_KEY = "yunhoe_shelter_zone_layout_v3";
     const GAME_ENTRY_PATH = "./index.html";
     const SHELTER_BG_SRC = "./assets/backgrounds/shelter_bg.png?v=20260624-temp-art";
     const SHELTER_ARRIVAL = Object.freeze({
@@ -1158,16 +1356,16 @@
       droneScaleRange: 0.08
     });
 
-    // FLOOR-PLAN LAYOUT: approximate LH 79m2 apartment schematic until the
-    // exact plan image is available in-repo. Rects are minimap percentages.
+    // FLOOR-PLAN LAYOUT: based on the shelter concept plan. Rects are minimap
+    // percentages and stay draggable/savable in edit mode.
     // See ART_HOOKS.shelter.zones above for the future separated-layer swap.
     const ZONES = Object.freeze({
       living: {
         id: "living",
         label: "LIVING",
         short: "LIV",
-        map: { x: 38, y: 42, w: 28, h: 26 },
-        adjacent: ["entrance", "balcony_living", "workshop", "kitchen", "bedroom"],
+        map: { x: 49, y: 47, w: 35, h: 32 },
+        adjacent: ["entrance", "balcony_living", "kitchen", "bedroom"],
         artKey: "living",
         kind: "image",
         action: null
@@ -1176,7 +1374,7 @@
         id: "entrance",
         label: "ENTRANCE",
         short: "ENT",
-        map: { x: 8, y: 48, w: 18, h: 18 },
+        map: { x: 45, y: 80, w: 16, h: 16 },
         adjacent: ["living"],
         artKey: "entrance",
         kind: "placeholder",
@@ -1187,13 +1385,13 @@
       },
       workshop: {
         id: "workshop",
-        label: "WORKSHOP",
+        label: "SMALL ROOM 2",
         short: "WRK",
-        map: { x: 70, y: 34, w: 24, h: 32 },
-        adjacent: ["living"],
+        map: { x: 22, y: 12, w: 25, h: 21 },
+        adjacent: ["kitchen", "balcony_bed"],
         artKey: "workshop",
         kind: "placeholder",
-        placeholderTitle: "WORKSHOP / DRONE CRADLE",
+        placeholderTitle: "SMALL ROOM 2 / WORKSHOP",
         placeholderSubtitle: "REPLACE: bg_workshop.png / bench + drone layers",
         action: "openWorkshopZone",
         prompt: "E  WORKSHOP"
@@ -1202,8 +1400,8 @@
         id: "kitchen",
         label: "KITCHEN",
         short: "KIT",
-        map: { x: 36, y: 72, w: 24, h: 16 },
-        adjacent: ["living", "records", "balcony_kitchen"],
+        map: { x: 22, y: 34, w: 35, h: 23 },
+        adjacent: ["living", "workshop", "records", "bathroom", "balcony_kitchen", "balcony_bed"],
         artKey: "kitchen",
         kind: "placeholder",
         placeholderTitle: "KITCHEN / CHILD LIFE",
@@ -1215,8 +1413,8 @@
         id: "bedroom",
         label: "BEDROOM",
         short: "BED",
-        map: { x: 8, y: 22, w: 22, h: 20 },
-        adjacent: ["living", "balcony_bed"],
+        map: { x: 60, y: 12, w: 23, h: 24 },
+        adjacent: ["living", "balcony_living"],
         artKey: "bedroom",
         kind: "placeholder",
         placeholderTitle: "BEDROOM / COT",
@@ -1226,10 +1424,10 @@
       },
       records: {
         id: "records",
-        label: "RECORDS",
+        label: "SMALL ROOM",
         short: "REC",
-        map: { x: 64, y: 70, w: 22, h: 18 },
-        adjacent: ["kitchen", "bathroom"],
+        map: { x: 20, y: 58, w: 27, h: 20 },
+        adjacent: ["kitchen"],
         artKey: "records",
         kind: "placeholder",
         placeholderTitle: "RECORD TERMINAL",
@@ -1239,39 +1437,39 @@
       },
       balcony_living: {
         id: "balcony_living",
-        label: "LIVING BALCONY",
+        label: "EAST BALCONY",
         short: "BAL",
-        map: { x: 40, y: 24, w: 26, h: 10 },
-        adjacent: ["living"],
+        map: { x: 84, y: 12, w: 10, h: 67 },
+        adjacent: ["living", "bedroom"],
         artKey: "balcony_living",
         kind: "placeholder",
-        placeholderTitle: "LIVING BALCONY / GREENHOUSE",
+        placeholderTitle: "EAST BALCONY / GREENHOUSE",
         placeholderSubtitle: "REPLACE: bg_balcony.png / flooded-city view layers",
         action: "lookOutside",
         prompt: "E  LOOK"
       },
       balcony_kitchen: {
         id: "balcony_kitchen",
-        label: "KITCHEN BALCONY",
+        label: "WEST BALCONY",
         short: "BAL",
-        map: { x: 36, y: 91, w: 24, h: 8 },
-        adjacent: ["kitchen"],
+        map: { x: 8, y: 37, w: 12, h: 25 },
+        adjacent: ["kitchen", "balcony_bed"],
         artKey: "balcony_kitchen",
         kind: "placeholder",
-        placeholderTitle: "KITCHEN BALCONY / PLANTS",
+        placeholderTitle: "WEST BALCONY / PLANTS",
         placeholderSubtitle: "REPLACE: bg_balcony.png / planters + city view layers",
         action: "lookOutside",
         prompt: "E  LOOK"
       },
       balcony_bed: {
         id: "balcony_bed",
-        label: "BEDROOM BALCONY",
+        label: "WEST BALCONY UPPER",
         short: "BAL",
-        map: { x: 8, y: 8, w: 22, h: 9 },
-        adjacent: ["bedroom"],
+        map: { x: 8, y: 12, w: 12, h: 25 },
+        adjacent: ["workshop", "kitchen", "balcony_kitchen"],
         artKey: "balcony_bed",
         kind: "placeholder",
-        placeholderTitle: "BEDROOM BALCONY / PLANTS",
+        placeholderTitle: "WEST BALCONY UPPER / PLANTS",
         placeholderSubtitle: "REPLACE: bg_balcony.png / quiet flooded view layers",
         action: "lookOutside",
         prompt: "E  LOOK"
@@ -1280,8 +1478,8 @@
         id: "bathroom",
         label: "BATHROOM",
         short: "BTH",
-        map: { x: 88, y: 70, w: 10, h: 18 },
-        adjacent: ["records"],
+        map: { x: 48, y: 12, w: 10, h: 23 },
+        adjacent: ["kitchen"],
         artKey: "bathroom",
         kind: "placeholder",
         placeholderTitle: "BATHROOM / WATER CATCH",
@@ -1290,18 +1488,41 @@
         prompt: "E  WATER"
       }
     });
+    const DEFAULT_ZONE_MAPS = Object.freeze(Object.fromEntries(
+      Object.values(ZONES).map((zone) => [zone.id, { ...zone.map }])
+    ));
+    const FLOOR_PLAN_SHAPES = Object.freeze([
+      { id: "home-shell", label: "", kind: "wall", x: 20, y: 12, w: 64, h: 67 },
+      { id: "common-shell", label: "", kind: "wall", x: 18, y: 80, w: 78, h: 18 },
+      { id: "left-shaft", label: "", kind: "wall", x: 8, y: 12, w: 12, h: 50 },
+      { id: "right-shaft", label: "", kind: "wall", x: 84, y: 12, w: 10, h: 67 },
+      { id: "bath-core", label: "", kind: "utility", x: 48, y: 12, w: 10, h: 23 },
+      { id: "bath-tub", label: "", kind: "fixture", x: 50, y: 16, w: 7, h: 4 },
+      { id: "bath-sink", label: "", kind: "fixture", x: 49, y: 26, w: 3.5, h: 3.5 },
+      { id: "entry-corridor", label: "", kind: "corridor", x: 42, y: 81, w: 23, h: 17 },
+      { id: "elevator", label: "ELV", kind: "elevator", x: 20, y: 83, w: 21, h: 13 },
+      { id: "stairs", label: "STR", kind: "stairs", x: 69, y: 83, w: 23, h: 13 },
+      { id: "door-entry", label: "", kind: "door", x: 53, y: 77, w: 8, h: 10 },
+      { id: "door-workshop", label: "", kind: "door", x: 25, y: 31, w: 7, h: 9 },
+      { id: "door-bath", label: "", kind: "door", x: 48, y: 32, w: 7, h: 9 },
+      { id: "door-bedroom", label: "", kind: "door", x: 57, y: 35, w: 8, h: 9 },
+      { id: "door-records", label: "", kind: "door", x: 42, y: 55, w: 7, h: 9 },
+      { id: "balcony-tile-left-upper", label: "", kind: "grid", x: 8, y: 12, w: 12, h: 25 },
+      { id: "balcony-tile-left-lower", label: "", kind: "grid", x: 8, y: 37, w: 12, h: 25 },
+      { id: "balcony-tile-right", label: "", kind: "grid", x: 84, y: 12, w: 10, h: 67 }
+    ]);
 
     const ZONE_LOOK_POINTS = Object.freeze({
-      living: { x: 0.5, y: 0.54 },
-      entrance: { x: 0.24, y: 0.56 },
-      workshop: { x: 0.72, y: 0.54 },
-      kitchen: { x: 0.5, y: 0.68 },
-      bedroom: { x: 0.28, y: 0.42 },
-      records: { x: 0.66, y: 0.7 },
-      balcony_living: { x: 0.52, y: 0.36 },
-      balcony_kitchen: { x: 0.48, y: 0.78 },
-      balcony_bed: { x: 0.28, y: 0.3 },
-      bathroom: { x: 0.76, y: 0.7 }
+      living: { x: 0.62, y: 0.62 },
+      entrance: { x: 0.5, y: 0.88 },
+      workshop: { x: 0.34, y: 0.24 },
+      kitchen: { x: 0.4, y: 0.52 },
+      bedroom: { x: 0.72, y: 0.24 },
+      records: { x: 0.34, y: 0.68 },
+      balcony_living: { x: 0.9, y: 0.46 },
+      balcony_kitchen: { x: 0.14, y: 0.5 },
+      balcony_bed: { x: 0.14, y: 0.24 },
+      bathroom: { x: 0.53, y: 0.24 }
     });
 
     // DIEGETIC HOTSPOTS: positions are percentages over the background art.
@@ -1440,6 +1661,12 @@
     let zoneTransitionFrameId = 0;
     let currentZoneId = "living";
     let zoneTransitionState = null;
+    let zoneLayoutEditMode = false;
+    let zoneLayoutDirty = false;
+    let zoneLayoutDrag = null;
+    let zoneLinkLayer = null;
+    let zoneRouteQueue = [];
+    let zoneRouteTargetId = "";
     let lastReactiveLineAt = -Infinity;
     const droneLook = {
       x: 0.5,
@@ -1473,6 +1700,272 @@
     function easeInOutCubic(t) {
       const n = clamp(t, 0, 1);
       return n < 0.5 ? 4 * n * n * n : 1 - Math.pow(-2 * n + 2, 3) / 2;
+    }
+
+    function roundLayoutValue(value) {
+      return Math.round(value * 10) / 10;
+    }
+
+    function normalizeZoneMap(raw, fallback) {
+      const base = fallback || { x: 0, y: 0, w: 12, h: 12 };
+      const w = clamp(Number(raw?.w ?? base.w), 6, 94);
+      const h = clamp(Number(raw?.h ?? base.h), 5, 94);
+      return {
+        x: roundLayoutValue(clamp(Number(raw?.x ?? base.x), 0, 100 - w)),
+        y: roundLayoutValue(clamp(Number(raw?.y ?? base.y), 0, 100 - h)),
+        w: roundLayoutValue(w),
+        h: roundLayoutValue(h)
+      };
+    }
+
+    function readSavedZoneLayout() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(SHELTER_LAYOUT_KEY) || "null");
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function applyZoneLayout(layout) {
+      Object.values(ZONES).forEach((zone) => {
+        const fallback = DEFAULT_ZONE_MAPS[zone.id];
+        const next = normalizeZoneMap(layout?.[zone.id], fallback);
+        zone.map.x = next.x;
+        zone.map.y = next.y;
+        zone.map.w = next.w;
+        zone.map.h = next.h;
+      });
+    }
+
+    function captureZoneLayout() {
+      return Object.fromEntries(Object.values(ZONES).map((zone) => [
+        zone.id,
+        normalizeZoneMap(zone.map, DEFAULT_ZONE_MAPS[zone.id])
+      ]));
+    }
+
+    function saveZoneLayout(source = "manual") {
+      try {
+        localStorage.setItem(SHELTER_LAYOUT_KEY, JSON.stringify(captureZoneLayout()));
+        zoneLayoutDirty = false;
+        document.documentElement.dataset.shelterLayoutSaved = source;
+      } catch (error) {
+        console.warn("shelter layout save failed", error);
+        document.documentElement.dataset.shelterLayoutSaved = "failed";
+      }
+      updateZoneLayoutTools();
+    }
+
+    function resetZoneLayout() {
+      applyZoneLayout(DEFAULT_ZONE_MAPS);
+      zoneLayoutDirty = false;
+      try {
+        localStorage.removeItem(SHELTER_LAYOUT_KEY);
+      } catch {}
+      renderZoneMinimap();
+      updateZoneUi();
+      document.documentElement.dataset.shelterLayoutSaved = "reset";
+    }
+
+    function applyMapToCell(cell, map) {
+      cell.style.left = `${map.x}%`;
+      cell.style.top = `${map.y}%`;
+      cell.style.width = `${map.w}%`;
+      cell.style.height = `${map.h}%`;
+    }
+
+    function setZoneLayoutEditMode(enabled) {
+      zoneLayoutEditMode = Boolean(enabled);
+      document.documentElement.dataset.shelterLayoutEdit = zoneLayoutEditMode ? "true" : "false";
+      if (!zoneLayoutEditMode && zoneLayoutDirty) {
+        saveZoneLayout("edit-close");
+      }
+      zoneMinimap?.classList.toggle("is-editing", zoneLayoutEditMode);
+      updateZoneLayoutTools();
+      updateZoneUi();
+    }
+
+    function updateZoneLayoutTools() {
+      if (!zoneMinimap) return;
+      zoneMinimap.classList.toggle("is-editing", zoneLayoutEditMode);
+      const editButton = zoneMinimap.querySelector("[data-layout-action='edit']");
+      const saveButton = zoneMinimap.querySelector("[data-layout-action='save']");
+      const resetButton = zoneMinimap.querySelector("[data-layout-action='reset']");
+      if (editButton) {
+        editButton.textContent = zoneLayoutEditMode ? "DONE" : "EDIT";
+        editButton.classList.toggle("is-active", zoneLayoutEditMode);
+        editButton.setAttribute("aria-pressed", zoneLayoutEditMode ? "true" : "false");
+      }
+      if (saveButton) {
+        saveButton.disabled = !zoneLayoutDirty;
+      }
+      if (resetButton) {
+        resetButton.disabled = false;
+      }
+    }
+
+    function createZoneLayoutTools() {
+      const tools = document.createElement("div");
+      tools.className = "zone-layout-tools";
+      [
+        ["edit", "EDIT"],
+        ["save", "SAVE"],
+        ["reset", "RST"]
+      ].forEach(([action, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "zone-layout-tool";
+        button.dataset.layoutAction = action;
+        button.textContent = label;
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (action === "edit") {
+            setZoneLayoutEditMode(!zoneLayoutEditMode);
+          } else if (action === "save") {
+            saveZoneLayout("button");
+          } else {
+            resetZoneLayout();
+          }
+        });
+        tools.append(button);
+      });
+      return tools;
+    }
+
+    function createFloorPlanLayer() {
+      const layer = document.createElement("div");
+      layer.className = "floor-plan-layer";
+      FLOOR_PLAN_SHAPES.forEach((shape) => {
+        const item = document.createElement("div");
+        item.className = `floor-plan-shape is-${shape.kind}`;
+        item.dataset.shapeId = shape.id;
+        item.dataset.label = shape.label || "";
+        item.style.left = `${shape.x}%`;
+        item.style.top = `${shape.y}%`;
+        item.style.width = `${shape.w}%`;
+        item.style.height = `${shape.h}%`;
+        layer.append(item);
+      });
+      return layer;
+    }
+
+    function getZoneConnectionPairs() {
+      const seen = new Set();
+      const pairs = [];
+      Object.values(ZONES).forEach((zone) => {
+        zone.adjacent.forEach((adjacentId) => {
+          if (!ZONES[adjacentId]) return;
+          const key = [zone.id, adjacentId].sort().join("__");
+          if (seen.has(key)) return;
+          seen.add(key);
+          pairs.push([zone.id, adjacentId]);
+        });
+      });
+      return pairs;
+    }
+
+    function createZoneConnectionLayer() {
+      const layer = document.createElement("div");
+      layer.className = "floor-plan-link-layer";
+      getZoneConnectionPairs().forEach(([from, to]) => {
+        const link = document.createElement("div");
+        link.className = "floor-plan-link";
+        link.dataset.fromZone = from;
+        link.dataset.toZone = to;
+        layer.append(link);
+      });
+      return layer;
+    }
+
+    function updateZoneConnectionLayer() {
+      if (!zoneLinkLayer) return;
+      const bounds = zoneLinkLayer.getBoundingClientRect();
+      const width = Math.max(1, bounds.width);
+      const height = Math.max(1, bounds.height);
+      zoneLinkLayer.querySelectorAll(".floor-plan-link").forEach((link) => {
+        const fromZone = zoneById(link.dataset.fromZone);
+        const toZone = zoneById(link.dataset.toZone);
+        const from = zoneCenter(fromZone);
+        const to = zoneCenter(toZone);
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const dxPx = dx / 100 * width;
+        const dyPx = dy / 100 * height;
+        const length = Math.hypot(dxPx, dyPx) / width * 100;
+        const angle = Math.atan2(dyPx, dxPx) * 180 / Math.PI;
+        link.style.left = `${from.x}%`;
+        link.style.top = `${from.y}%`;
+        link.style.width = `${length}%`;
+        link.style.transform = `rotate(${angle}deg)`;
+        link.classList.toggle(
+          "is-active",
+          currentZoneId === fromZone.id || currentZoneId === toZone.id
+        );
+      });
+    }
+
+    function beginZoneMapDrag(event, zone, cell) {
+      if (!zoneLayoutEditMode || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const bounds = zoneMinimap.getBoundingClientRect();
+      zoneLayoutDrag = {
+        zoneId: zone.id,
+        pointerId: event.pointerId,
+        cell,
+        bounds,
+        startX: event.clientX,
+        startY: event.clientY,
+        startMap: { ...zone.map },
+        moved: false
+      };
+      cell.classList.add("is-dragging");
+      cell.setPointerCapture?.(event.pointerId);
+      document.documentElement.dataset.shelterLayoutDragging = zone.id;
+    }
+
+    function updateZoneMapDrag(event) {
+      const drag = zoneLayoutDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const zone = zoneById(drag.zoneId);
+      const dx = (event.clientX - drag.startX) / Math.max(1, drag.bounds.width) * 100;
+      const dy = (event.clientY - drag.startY) / Math.max(1, drag.bounds.height) * 100;
+      const next = normalizeZoneMap({
+        ...drag.startMap,
+        x: drag.startMap.x + dx,
+        y: drag.startMap.y + dy
+      }, DEFAULT_ZONE_MAPS[zone.id]);
+      zone.map.x = next.x;
+      zone.map.y = next.y;
+      zone.map.w = next.w;
+      zone.map.h = next.h;
+      drag.moved = drag.moved || Math.abs(dx) > 0.25 || Math.abs(dy) > 0.25;
+      zoneLayoutDirty = true;
+      applyMapToCell(drag.cell, zone.map);
+      updateZoneConnectionLayer();
+      updateZoneLayoutTools();
+    }
+
+    function finishZoneMapDrag(event) {
+      const drag = zoneLayoutDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      drag.cell.classList.remove("is-dragging");
+      drag.cell.releasePointerCapture?.(event.pointerId);
+      if (drag.moved) {
+        drag.cell.dataset.justDragged = "true";
+        window.setTimeout(() => {
+          delete drag.cell.dataset.justDragged;
+        }, 0);
+        saveZoneLayout("drop");
+      }
+      zoneLayoutDrag = null;
+      document.documentElement.dataset.shelterLayoutDragging = "";
+      updateZoneUi();
     }
 
     function zoneById(zoneId) {
@@ -1574,6 +2067,10 @@
     function renderZoneMinimap() {
       if (!zoneMinimap) return;
       zoneMinimap.innerHTML = "";
+      zoneMinimap.append(createFloorPlanLayer());
+      zoneLinkLayer = createZoneConnectionLayer();
+      zoneMinimap.append(zoneLinkLayer);
+      zoneMinimap.append(createZoneLayoutTools());
       Object.values(ZONES).forEach((zone) => {
         const cell = document.createElement("button");
         cell.type = "button";
@@ -1582,15 +2079,23 @@
         cell.dataset.short = zone.short || zone.label.slice(0, 3).toUpperCase();
         cell.title = zone.label;
         cell.setAttribute("aria-label", zone.label);
-        cell.style.left = `${zone.map.x}%`;
-        cell.style.top = `${zone.map.y}%`;
-        cell.style.width = `${zone.map.w}%`;
-        cell.style.height = `${zone.map.h}%`;
-        cell.addEventListener("click", () => {
-          if (canMoveToZone(zone.id)) beginZoneTransition(zone.id);
+        applyMapToCell(cell, zone.map);
+        cell.addEventListener("pointerdown", (event) => beginZoneMapDrag(event, zone, cell));
+        cell.addEventListener("pointermove", updateZoneMapDrag);
+        cell.addEventListener("pointerup", finishZoneMapDrag);
+        cell.addEventListener("pointercancel", finishZoneMapDrag);
+        cell.addEventListener("click", (event) => {
+          if (zoneLayoutEditMode || cell.dataset.justDragged === "true") {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          if (canRouteToZone(zone.id)) beginZoneRoute(zone.id);
         });
         zoneMinimap.append(cell);
       });
+      updateZoneLayoutTools();
+      updateZoneConnectionLayer();
     }
 
     function updateZoneUi() {
@@ -1601,10 +2106,13 @@
 
       zoneMinimap?.querySelectorAll(".zone-map-cell").forEach((cell) => {
         const zoneId = cell.dataset.zoneId;
+        const routeable = canRouteToZone(zoneId);
         cell.classList.toggle("is-current", zoneId === zone.id);
         cell.classList.toggle("is-adjacent", zone.adjacent.includes(zoneId));
-        cell.disabled = zoneId !== zone.id && !zone.adjacent.includes(zoneId);
+        cell.classList.toggle("is-routeable", routeable);
+        cell.disabled = !zoneLayoutEditMode && zoneId !== zone.id && !routeable;
       });
+      updateZoneConnectionLayer();
 
       const showLivingHotspots = zone.id === "living";
       getHotspotButtons().forEach((button) => {
@@ -1630,6 +2138,53 @@
     function canMoveToZone(zoneId) {
       if (zoneId === currentZoneId) return false;
       return zoneById(currentZoneId).adjacent.includes(zoneId);
+    }
+
+    function findZoneRoute(fromZoneId, toZoneId) {
+      if (fromZoneId === toZoneId || !ZONES[fromZoneId] || !ZONES[toZoneId]) {
+        return null;
+      }
+      const queue = [[fromZoneId]];
+      const seen = new Set([fromZoneId]);
+      while (queue.length) {
+        const route = queue.shift();
+        const zone = zoneById(route[route.length - 1]);
+        for (const nextZoneId of zone.adjacent) {
+          if (seen.has(nextZoneId) || !ZONES[nextZoneId]) continue;
+          const nextRoute = [...route, nextZoneId];
+          if (nextZoneId === toZoneId) return nextRoute;
+          seen.add(nextZoneId);
+          queue.push(nextRoute);
+        }
+      }
+      return null;
+    }
+
+    function canRouteToZone(zoneId) {
+      if (zoneId === currentZoneId) return false;
+      return Boolean(findZoneRoute(currentZoneId, zoneId));
+    }
+
+    function clearZoneRoute() {
+      zoneRouteQueue = [];
+      zoneRouteTargetId = "";
+      document.documentElement.dataset.shelterZoneRoute = "";
+    }
+
+    function continueZoneRoute() {
+      if (zoneTransitionState || !zoneRouteQueue.length) return;
+      const nextZoneId = zoneRouteQueue.shift();
+      beginZoneTransition(nextZoneId, { preserveRoute: true });
+    }
+
+    function beginZoneRoute(targetZoneId) {
+      if (zoneTransitionState || targetZoneId === currentZoneId) return false;
+      const route = findZoneRoute(currentZoneId, targetZoneId);
+      if (!route || route.length < 2) return false;
+      zoneRouteQueue = route.slice(2);
+      zoneRouteTargetId = targetZoneId;
+      document.documentElement.dataset.shelterZoneRoute = route.join(">");
+      return beginZoneTransition(route[1], { preserveRoute: true });
     }
 
     function directionVectorForKey(key) {
@@ -1669,10 +2224,16 @@
       zoneTransitionState = null;
       document.documentElement.dataset.shelterZoneTransition = "";
       updateZoneUi();
+      if (zoneRouteQueue.length) {
+        window.setTimeout(continueZoneRoute, 90);
+      } else if (zoneRouteTargetId === currentZoneId) {
+        clearZoneRoute();
+      }
     }
 
-    function beginZoneTransition(nextZoneId) {
+    function beginZoneTransition(nextZoneId, options = {}) {
       if (zoneTransitionState || nextZoneId === currentZoneId) return false;
+      if (!options.preserveRoute) clearZoneRoute();
       const fromZone = zoneById(currentZoneId);
       const toZone = zoneById(nextZoneId);
       const startedAt = performance.now();
@@ -2307,6 +2868,13 @@
     // the focused object or the current zone prompt.
     document.addEventListener("keydown", (event) => {
       shelterAudio.ensureStarted();
+      if (zoneLayoutEditMode) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setZoneLayoutEditMode(false);
+        }
+        return;
+      }
       if (activePanel) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -2369,6 +2937,7 @@
     setupShelterBackground();
     applyArrivalFade();
     syncSaveDrivenVisuals();
+    applyZoneLayout(readSavedZoneLayout());
     createDustMotes();
     startChildLifeLoop();
     renderHotspots();
