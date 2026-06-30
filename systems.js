@@ -101,6 +101,8 @@ const DEFAULT_TITLE_SAVE = Object.freeze({
 const FOCUS_KEYS = ["KeyC"];
 const INTERACTION_HOLD_SECONDS = 0.25;
 const FIRE_KEYS = ["KeyX"];
+const DEFAULT_WALL_ACTION_LIMIT_MS = 300;
+const WALL_RUN_CLIMB_HEIGHT_MULTIPLIER = 5;
 const ARM_SWITCH_RELOAD_KEY = "KeyS";
 const ARM_SWITCH_RELOAD_HOLD_SECONDS = 0.35;
 const FOCUS_MAX = 100;
@@ -116,7 +118,7 @@ const RECOIL_JUMP_CHARGE_STEPS = 5;
 const RECOIL_JUMP_CHARGE_COST_FALLOFF = 0.5;
 const RECOIL_JUMP_CHARGE_MAX_MULTIPLIER = 2;
 const RECOIL_JUMP_FOCUS_COST_SCALE = 0.5;
-const RECOIL_JUMP_FOCUS_DRAIN_MULTIPLIER = 4.63;
+const RECOIL_JUMP_FOCUS_DRAIN_MULTIPLIER = 2.26;
 const RECOIL_JUMP_INPUT_START_STEP_RATIO = 0.12;
 const RECOIL_JUMP_FORCE_MULTIPLIER = 0.75;
 const RECOIL_JUMP_MIN_STAGE_FORCE_RATIO = 0.5;
@@ -2474,6 +2476,12 @@ function getJumpMaxHeight(data, config) {
   return (jumpVelocity * jumpVelocity) / (2 * gravity);
 }
 
+function getJumpMaxHoldSeconds(data, config) {
+  const jumpVelocity = Math.abs(config?.jumpVelocity ?? data?.player?.jumpVelocity ?? 0);
+  const gravity = Math.max(1, Number(data?.world?.gravity ?? 1));
+  return jumpVelocity / gravity;
+}
+
 function getSprintTargetSpeed(player, config, moveAxis, runHeld) {
   if (
     !runHeld ||
@@ -2846,6 +2854,68 @@ function getBraceWallId(wall) {
     ?? `${wall.x}:${wall.y}:${wall.width}:${wall.height}`;
 }
 
+function formatWallContactCoord(value) {
+  return Number.isFinite(value) ? String(Math.round(value * 100) / 100) : String(value);
+}
+
+function getWallContactFaceX(wall, wallDirection) {
+  if (!wall) {
+    return null;
+  }
+  return wallDirection > 0 ? wall.x : wall.x + wall.width;
+}
+
+function areVerticalWallSpansConnected(a, b) {
+  return (
+    a.y <= b.y + b.height + EPSILON &&
+    b.y <= a.y + a.height + EPSILON
+  );
+}
+
+function getWallContactId(wall, wallDirection = 0, collisionPlatforms = null) {
+  if (!wall) {
+    return null;
+  }
+  const direction = Math.sign(wallDirection) || 0;
+  if (direction === 0) {
+    return wall.id
+      ?? wall.dynamicEntityId
+      ?? `${wall.kind || wall.type || "wall"}:${wall.x}:${wall.y}:${wall.width}:${wall.height}`;
+  }
+
+  const faceX = getWallContactFaceX(wall, direction);
+  const platforms = Array.isArray(collisionPlatforms) ? collisionPlatforms : [wall];
+  const group = [wall];
+  const visited = new Set([wall]);
+  const pending = [wall];
+
+  while (pending.length) {
+    const current = pending.pop();
+    for (const candidate of platforms) {
+      if (!candidate || visited.has(candidate)) {
+        continue;
+      }
+      if (Math.abs(getWallContactFaceX(candidate, direction) - faceX) > EPSILON) {
+        continue;
+      }
+      if (!areVerticalWallSpansConnected(current, candidate)) {
+        continue;
+      }
+      visited.add(candidate);
+      group.push(candidate);
+      pending.push(candidate);
+    }
+  }
+
+  const minY = Math.min(...group.map((entry) => entry.y));
+  const maxY = Math.max(...group.map((entry) => entry.y + entry.height));
+  return `wall-group:${direction}:${formatWallContactCoord(faceX)}:${formatWallContactCoord(minY)}:${formatWallContactCoord(maxY)}`;
+}
+
+function setWallContact(contacts, wall, wallDirection, collisionPlatforms) {
+  contacts.wallContactId = getWallContactId(wall, wallDirection, collisionPlatforms);
+}
+
 function isPlayerInsideBraceWall(player, wall) {
   return Boolean(wall && rectsOverlap(player, wall));
 }
@@ -3079,6 +3149,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
     wallRight: false,
     groundEntityId: null,
     wallEntityId: null,
+    wallContactId: null,
     landingSpeed: 0,
     dashBlocked: false,
     dashCornerCorrected: false,
@@ -3115,6 +3186,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       player.x = resolvedX;
       contacts.wallRight = true;
       contacts.wallEntityId = platform.dynamicEntityId ?? null;
+      setWallContact(contacts, platform, 1, collisionPlatforms);
     } else if (previousX >= platform.x + platform.width - EPSILON) {
       if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config, slopePlatforms)) {
         slopeSeamPlatform = platform;
@@ -3132,6 +3204,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
       player.x = resolvedX;
       contacts.wallLeft = true;
       contacts.wallEntityId = platform.dynamicEntityId ?? null;
+      setWallContact(contacts, platform, -1, collisionPlatforms);
     } else {
       const pushLeft = player.x + player.width - platform.x;
       const pushRight = platform.x + platform.width - player.x;
@@ -3152,6 +3225,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
         player.x -= pushLeft;
         contacts.wallRight = true;
         contacts.wallEntityId = platform.dynamicEntityId ?? null;
+        setWallContact(contacts, platform, 1, collisionPlatforms);
       } else {
         if (isSlopePlatformSeamPassThrough(player, platform, data, "right", config, slopePlatforms)) {
           slopeSeamPlatform = platform;
@@ -3169,6 +3243,7 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
         player.x += pushRight;
         contacts.wallLeft = true;
         contacts.wallEntityId = platform.dynamicEntityId ?? null;
+        setWallContact(contacts, platform, -1, collisionPlatforms);
       }
     }
     player.vx = 0;
@@ -3177,12 +3252,14 @@ function resolvePlayerCollisionStep(player, data, dt, config, run = null) {
   if (player.x <= 0) {
     player.x = 0;
     contacts.wallLeft = true;
+    contacts.wallContactId = "world:left";
     contacts.dashBlocked = true;
     player.vx = Math.max(0, player.vx);
   }
   if (player.x + player.width >= data.world.width) {
     player.x = data.world.width - player.width;
     contacts.wallRight = true;
+    contacts.wallContactId = "world:right";
     contacts.dashBlocked = true;
     player.vx = Math.min(0, player.vx);
   }
@@ -3342,6 +3419,7 @@ function mergePlayerCollisionContacts(total, step) {
     total.slopeDownhillDirection = step.slopeDownhillDirection;
   }
   total.wallEntityId = step.wallEntityId ?? total.wallEntityId;
+  total.wallContactId = step.wallContactId ?? total.wallContactId;
   if (step.landingSpeed !== 0) {
     total.landingSpeed = step.landingSpeed;
   }
@@ -3355,6 +3433,7 @@ function resolvePlayerCollisions(player, data, dt, config, run = null) {
     wallRight: false,
     groundEntityId: null,
     wallEntityId: null,
+    wallContactId: null,
     landingSpeed: 0,
     dashBlocked: false,
     dashCornerCorrected: false,
@@ -3461,9 +3540,22 @@ function resetPlayerAfterWater(run, data) {
   player.onGround = false;
   player.wasOnGround = false;
   player.wallDirection = 0;
+  player.wallContactId = null;
   player.wallSliding = false;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallRunActive = false;
+  player.wallRunTimer = 0;
+  player.wallRunStartY = null;
+  player.wallRunClimbLimit = 0;
+  player.wallRunTimedOutDirection = 0;
+  player.wallRunTimedOutWallId = null;
+  player.wallRunLockedTargets = [];
+  player.wallRunWallId = null;
   player.braceHolding = false;
+  player.braceHoldTimer = 0;
+  player.braceTimedOutWallId = null;
   player.braceHoldActive = false;
   player.dashTimer = 0;
   player.slideTimer = 0;
@@ -3700,11 +3792,17 @@ function recallPlayerToLastSafeGround(run, data) {
   player.sprintJumpCarryTimer = 0;
   player.sprintJumpCarrySpeed = 0;
   player.wallDirection = 0;
+  player.wallContactId = null;
   player.wallSliding = false;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
+  player.wallRunTimedOutDirection = 0;
+  player.wallRunTimedOutWallId = null;
+  player.wallRunLockedTargets = [];
+  player.braceTimedOutWallId = null;
   player.canInteract = true;
   clearAirDashHover(player);
   clearHover(player);
@@ -5935,11 +6033,13 @@ function clearZipLine(player) {
 }
 
 function clearBraceHold(player) {
+  lockBraceWall(player, player.braceHoldWallId);
   player.braceHolding = false;
   player.braceHoldWallId = null;
   player.braceHoldDirection = 0;
   player.braceHoldLaunchDirection = 0;
   player.braceHoldSpeed = 0;
+  player.braceHoldTimer = 0;
 }
 
 function endBraceHoldWithCooldown(player, config, wallId = player.braceHoldWallId) {
@@ -5951,9 +6051,183 @@ function endBraceHoldWithCooldown(player, config, wallId = player.braceHoldWallI
 }
 
 function clearWallRun(player) {
+  lockWallRunDirection(player);
   player.wallRunActive = false;
   player.wallRunDirection = 0;
   player.wallRunSpeed = 0;
+  player.wallRunTimer = 0;
+  player.wallRunStartY = null;
+  player.wallRunClimbLimit = 0;
+  player.wallRunWallId = null;
+}
+
+function getWallActionLimitSeconds(config, key) {
+  const rawMs = Number(config?.[key] ?? DEFAULT_WALL_ACTION_LIMIT_MS);
+  const limitMs = Number.isFinite(rawMs) ? rawMs : DEFAULT_WALL_ACTION_LIMIT_MS;
+  return Math.max(0, limitMs / 1000);
+}
+
+function getCharacterHeight(player) {
+  const standHeight = Number(player?.standHeight);
+  const currentHeight = Number(player?.height);
+  const fallbackHeight = Number.isFinite(currentHeight) && currentHeight > 0 ? currentHeight : 0;
+  return Number.isFinite(standHeight) && standHeight > 0
+    ? standHeight
+    : fallbackHeight;
+}
+
+function getWallRunClimbLimit(player) {
+  const characterHeight = getCharacterHeight(player);
+  return Math.max(0, characterHeight * WALL_RUN_CLIMB_HEIGHT_MULTIPLIER);
+}
+
+function hasReachedWallRunClimbLimit(player) {
+  if (
+    !Number.isFinite(player.wallRunStartY) ||
+    !Number.isFinite(player.wallRunClimbLimit) ||
+    player.wallRunClimbLimit <= 0
+  ) {
+    return false;
+  }
+  return Math.max(0, player.wallRunStartY - player.y) >= player.wallRunClimbLimit - EPSILON;
+}
+
+function clampWallRunClimbHeight(player) {
+  if (
+    !Number.isFinite(player.wallRunStartY) ||
+    !Number.isFinite(player.wallRunClimbLimit) ||
+    player.wallRunClimbLimit <= 0
+  ) {
+    return;
+  }
+  const limitY = player.wallRunStartY - player.wallRunClimbLimit;
+  if (Number.isFinite(limitY) && player.y < limitY) {
+    player.y = limitY;
+  }
+}
+
+function getCoastUpSpeedForHeight(height, data, gravityStepSeconds = 0) {
+  const gravity = Math.max(1, Number(data?.world?.gravity ?? 1));
+  const gravityStep = gravity * Math.max(0, gravityStepSeconds);
+  return Math.sqrt(Math.max(0, 2 * gravity * Math.max(0, height) + gravityStep * gravityStep));
+}
+
+function getWallRunLockKey(wallDirection, wallId) {
+  return wallDirection !== 0 && wallId ? `${wallDirection}:${wallId}` : null;
+}
+
+function clearWallRunLocks(player) {
+  player.wallRunTimedOutDirection = 0;
+  player.wallRunTimedOutWallId = null;
+  player.wallRunLockedTargets = [];
+}
+
+function isSameDirectionWallRunTimedOut(player, wallDirection, wallId) {
+  const lockKey = getWallRunLockKey(wallDirection, wallId);
+  if (!lockKey) {
+    return false;
+  }
+  const lockedTargets = Array.isArray(player.wallRunLockedTargets) ? player.wallRunLockedTargets : [];
+  return Boolean(
+    lockedTargets.includes(lockKey) ||
+    (
+      player.wallRunTimedOutDirection === wallDirection &&
+      player.wallRunTimedOutWallId === wallId
+    )
+  );
+}
+
+function lockWallRunDirection(player) {
+  const direction = player.wallRunDirection || player.wallDirection || 0;
+  const wallId = player.wallRunWallId || player.wallContactId || null;
+  const lockKey = getWallRunLockKey(direction, wallId);
+  if (player.wallRunActive && !player.onGround && lockKey) {
+    const lockedTargets = Array.isArray(player.wallRunLockedTargets) ? player.wallRunLockedTargets : [];
+    if (!lockedTargets.includes(lockKey)) {
+      lockedTargets.push(lockKey);
+    }
+    player.wallRunLockedTargets = lockedTargets;
+    player.wallRunTimedOutDirection = direction;
+    player.wallRunTimedOutWallId = wallId;
+  }
+}
+
+function isBraceTimedOutForWall(player, wall) {
+  const wallId = getBraceWallId(wall);
+  return Boolean(wallId && player.braceTimedOutWallId === wallId);
+}
+
+function lockBraceWall(player, wallId = player.braceHoldWallId) {
+  if (player.braceHolding && !player.onGround && wallId) {
+    player.braceTimedOutWallId = wallId;
+  }
+}
+
+function syncPlayerWallContact(player, contacts) {
+  player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+  player.wallContactId = player.wallDirection !== 0 ? contacts.wallContactId ?? null : null;
+}
+
+function refreshWallActionTimeoutLocks(player, activeBraceWall = null) {
+  if (player.onGround) {
+    clearWallRunLocks(player);
+    player.braceTimedOutWallId = null;
+    return;
+  }
+
+  if (
+    player.wallRunTimedOutDirection !== 0 &&
+    player.wallDirection !== 0 &&
+    player.wallDirection !== player.wallRunTimedOutDirection
+  ) {
+    clearWallRunLocks(player);
+  }
+
+  const activeBraceWallId = getBraceWallId(activeBraceWall);
+  if (
+    activeBraceWallId &&
+    player.braceTimedOutWallId &&
+    player.braceTimedOutWallId !== activeBraceWallId
+  ) {
+    player.braceTimedOutWallId = null;
+  }
+}
+
+function expireBraceHold(player, wallId = player.braceHoldWallId) {
+  lockBraceWall(player, wallId);
+  clearBraceHold(player);
+}
+
+function shouldStopWallRunUpwardCoast(player, data, config) {
+  const wallRunTimer = Math.max(0, Number(player.wallRunTimer) || 0);
+  const jumpMaxHoldSeconds = getJumpMaxHoldSeconds(data, config);
+  return !Number.isFinite(jumpMaxHoldSeconds) || wallRunTimer <= jumpMaxHoldSeconds + EPSILON;
+}
+
+function stopWallRunUpwardCoast(player, data, config) {
+  if (!shouldStopWallRunUpwardCoast(player, data, config)) {
+    return;
+  }
+  if (player.vy < 0) {
+    player.vy = 0;
+  }
+  player.wallRunBoostActive = false;
+}
+
+function expireWallRun(player, data, config) {
+  lockWallRunDirection(player);
+  stopWallRunUpwardCoast(player, data, config);
+  clearWallRun(player);
+}
+
+function coastOutWallRunAtClimbLimit(player) {
+  lockWallRunDirection(player);
+  clearWallRun(player);
+}
+
+function endWallRunAtWallEnd(player, data, config) {
+  stopWallRunUpwardCoast(player, data, config);
+  clearWallRun(player);
 }
 
 function clearHover(player) {
@@ -8036,6 +8310,7 @@ function performRecoilShot(player, run, data, config, state = null, options = {}
   player.wallSliding = false;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.canInteract = false;
@@ -8200,6 +8475,7 @@ function stopAirDashOnTerrainCollision(player) {
   player.sprintJumpCarrySpeed = retainAirDashInertia(player.sprintJumpCarrySpeed);
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.dashStartedAirborne = false;
@@ -8419,6 +8695,7 @@ function performWallJump(player, run, config, wallDirection) {
   player.onGround = false;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   grantVerticalMomentum(player, run, config, 0.22, "wallJump");
   spawnParticles(run, player.x + player.width / 2, player.y + player.height / 2, 8, "#cde9ff");
   playGameSfx("wallJump", { cooldownMs: 60 });
@@ -8444,6 +8721,7 @@ function enterBraceHold(player, run, data, config, wall, moveAxis) {
     config.braceHoldStartSpeed ?? 0,
     config.runSpeed ?? 0,
   );
+  player.braceHoldTimer = getWallActionLimitSeconds(config, "braceHoldMaxDurationMs");
   player.vx = launchDirection * player.braceHoldSpeed;
   player.vy = 0;
   player.facing = launchDirection;
@@ -8452,6 +8730,7 @@ function enterBraceHold(player, run, data, config, wall, moveAxis) {
   player.jumpBufferTimer = 0;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.wallJumpLockTimer = 0;
@@ -8467,6 +8746,14 @@ function enterBraceHold(player, run, data, config, wall, moveAxis) {
 }
 
 function updateBraceHold(player, data, config, wall, dt, moveAxis) {
+  const currentTimer = Number.isFinite(player.braceHoldTimer) && player.braceHoldTimer > 0
+    ? player.braceHoldTimer
+    : getWallActionLimitSeconds(config, "braceHoldMaxDurationMs");
+  player.braceHoldTimer = Math.max(0, currentTimer - dt);
+  if (currentTimer > 0 && player.braceHoldTimer === 0) {
+    return false;
+  }
+
   player.braceHoldSpeed = Math.min(
     config.braceHoldMaxSpeed ?? config.wallRunMaxSpeed ?? 920,
     Math.max(
@@ -8487,18 +8774,24 @@ function updateBraceHold(player, data, config, wall, dt, moveAxis) {
   player.onGround = false;
   player.canInteract = false;
   player.braceHoldActive = true;
+  return true;
 }
 
-function enterWallRun(player, run, data, config, wallDirection) {
+function enterWallRun(player, run, data, config, wallDirection, wallId = null) {
   clearBraceHold(player);
   clearSlide(player);
   clearHover(player);
   clearRecoilSpin(player);
   player.wallRunActive = true;
   player.wallRunDirection = wallDirection;
+  player.wallRunWallId = wallId || player.wallContactId || player.wallGraceWallId || null;
   player.wallRunSpeed = Math.max(player.wallRunSpeed || 0, config.wallRunStartSpeed ?? 0, Math.max(0, -player.vy));
+  player.wallRunTimer = 0;
+  player.wallRunStartY = player.y;
+  player.wallRunClimbLimit = getWallRunClimbLimit(player);
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.jumpBufferTimer = 0;
@@ -8510,15 +8803,39 @@ function enterWallRun(player, run, data, config, wallDirection) {
   playGameSfx("wallJump", { cooldownMs: 90 });
 }
 
-function updateWallRun(player, config, dt) {
+function updateWallRun(player, data, config, dt) {
+  player.wallRunTimer = Math.max(0, Number(player.wallRunTimer) || 0) + Math.max(0, dt);
+  if (!Number.isFinite(player.wallRunStartY)) {
+    player.wallRunStartY = player.y;
+  }
+  const climbLimit = Number.isFinite(player.wallRunClimbLimit) && player.wallRunClimbLimit > 0
+    ? player.wallRunClimbLimit
+    : getWallRunClimbLimit(player);
+  player.wallRunClimbLimit = climbLimit;
+  const climbedHeight = Math.max(0, player.wallRunStartY - player.y);
+  const remainingClimb = climbLimit - climbedHeight;
+  if (climbLimit > 0 && remainingClimb <= 0) {
+    return "limit-stop";
+  }
+
   const wallBoost = 1 + getVerticalMomentumBoost(player, config, "verticalMomentumWallBoost", 0.16);
   player.wallRunSpeed = Math.min(
     (config.wallRunMaxSpeed ?? 0) * wallBoost,
     player.wallRunSpeed + (config.wallRunAccel ?? 0) * dt
   );
+  const wallRunHorizontalSpeed = player.wallRunDirection * Math.max((config.runSpeed ?? 0) * 0.22 * wallBoost, 88);
+  const coastUpSpeed = getCoastUpSpeedForHeight(remainingClimb, data, dt);
+  if (climbLimit > 0 && player.wallRunSpeed >= coastUpSpeed) {
+    player.wallRunSpeed = coastUpSpeed;
+    player.vy = -coastUpSpeed;
+    player.vx = wallRunHorizontalSpeed;
+    player.onGround = false;
+    return "limit-coast";
+  }
   player.vy = -player.wallRunSpeed;
-  player.vx = player.wallRunDirection * Math.max((config.runSpeed ?? 0) * 0.22 * wallBoost, 88);
+  player.vx = wallRunHorizontalSpeed;
   player.onGround = false;
+  return "active";
 }
 
 function launchFromWallRun(player, run, config) {
@@ -8531,6 +8848,7 @@ function launchFromWallRun(player, run, config) {
   player.jumpBufferTimer = 0;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.wallRunBoostActive = true;
@@ -8580,6 +8898,7 @@ function performBraceVault(player, run, config, wall, moveAxis) {
   player.jumpBufferTimer = 0;
   player.wallGraceTimer = 0;
   player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSlideGraceTimer = 0;
   player.wallSlideGraceDirection = 0;
   player.braceReleaseTimer = 0.16;
@@ -8694,6 +9013,7 @@ function updatePlayer(run, data, state, dt, input) {
   const heldBraceWall = getBraceWallById(data, player.braceHoldWallId, run);
   const wasSprintActive = Boolean(player.sprintActive || player.sprintCharge > 0.55);
   const jumpReleased = !jumpHeld && player.jumpHeldLastFrame;
+  refreshWallActionTimeoutLocks(player, activeBraceWall);
 
   player.dashInvulnerable = config.dashInvulnerable;
   player.slideInvulnerable = config.slideInvulnerable ?? true;
@@ -8804,9 +9124,11 @@ function updatePlayer(run, data, state, dt, input) {
   if (!player.onGround && player.wallDirection !== 0) {
     player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
     player.wallGraceDirection = player.wallDirection;
+    player.wallGraceWallId = player.wallContactId;
   } else if (player.onGround) {
     player.wallGraceTimer = 0;
     player.wallGraceDirection = 0;
+    player.wallGraceWallId = null;
     player.wallSlideGraceTimer = 0;
     player.wallSlideGraceDirection = 0;
   }
@@ -8979,12 +9301,26 @@ function updatePlayer(run, data, state, dt, input) {
       : player.wallGraceTimer > 0
         ? player.wallGraceDirection
         : 0;
+  const wallJumpSourceWallId =
+    player.wallRunActive && player.wallRunWallId
+      ? player.wallRunWallId
+      : player.wallDirection !== 0
+      ? player.wallContactId
+      : player.wallGraceTimer > 0
+        ? player.wallGraceWallId
+        : null;
   const pressingTowardWall =
     wallJumpSourceDirection !== 0 &&
     moveAxis === wallJumpSourceDirection;
+  const sameDirectionWallRunLocked = isSameDirectionWallRunTimedOut(
+    player,
+    wallJumpSourceDirection,
+    wallJumpSourceWallId,
+  );
   const wantsWallRun =
     !player.onGround &&
     wallJumpSourceDirection !== 0 &&
+    !sameDirectionWallRunLocked &&
     pressingTowardWall &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
@@ -9069,6 +9405,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.onGround = false;
     player.wallSliding = false;
     player.wallDirection = 0;
+    player.wallContactId = null;
     if (player.dashWindupTimer === 0) {
       startDashBurst(player, config);
     }
@@ -9105,8 +9442,9 @@ function updatePlayer(run, data, state, dt, input) {
       armSprintAfterAirDash(player, config, moveAxis);
       player.onGround = contacts.onGround;
       player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
-      player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+      syncPlayerWallContact(player, contacts);
       player.wallSliding = false;
+      refreshWallActionTimeoutLocks(player, activeBraceWall);
       updateMovementVfx(run, data, dt);
       player.jumpHeldLastFrame = jumpHeld;
       setMovementState(player);
@@ -9127,14 +9465,17 @@ function updatePlayer(run, data, state, dt, input) {
     }
     player.onGround = contacts.onGround;
     player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
-    player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+    syncPlayerWallContact(player, contacts);
     player.wallSliding = false;
+    refreshWallActionTimeoutLocks(player, activeBraceWall);
     if (!airDashHitTerrain && !player.onGround && player.wallDirection !== 0) {
       player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
       player.wallGraceDirection = player.wallDirection;
+      player.wallGraceWallId = player.wallContactId;
     } else if (player.onGround || airDashHitTerrain) {
       player.wallGraceTimer = 0;
       player.wallGraceDirection = 0;
+      player.wallGraceWallId = null;
       player.wallSlideGraceTimer = 0;
       player.wallSlideGraceDirection = 0;
     }
@@ -9216,6 +9557,7 @@ function updatePlayer(run, data, state, dt, input) {
       player.braceConsumedWallId === getBraceWallId(activeBraceWall) &&
       player.braceCooldownTimer > 0
     ) &&
+    !isBraceTimedOutForWall(player, activeBraceWall) &&
     !player.onGround &&
     player.height === player.standHeight &&
     player.dashTimer === 0 &&
@@ -9243,7 +9585,14 @@ function updatePlayer(run, data, state, dt, input) {
       performBraceVault(player, run, config, braceWall, moveAxis);
       applySprintJumpCarry(player);
     } else if (jumpHeld) {
-      updateBraceHold(player, data, config, braceWall, dt, moveAxis);
+      if (!updateBraceHold(player, data, config, braceWall, dt, moveAxis)) {
+        expireBraceHold(player, getBraceWallId(braceWall));
+        player.canInteract = true;
+        updateMovementVfx(run, data, dt);
+        player.jumpHeldLastFrame = jumpHeld;
+        setMovementState(player);
+        return;
+      }
 
       const contacts = resolvePlayerCollisions(player, data, dt, config, run);
       const landed = !player.wasOnGround && contacts.onGround;
@@ -9251,8 +9600,9 @@ function updatePlayer(run, data, state, dt, input) {
       player.dashCornerCorrected = contacts.dashCornerCorrected;
       player.onGround = contacts.onGround;
       player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
-      player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+      syncPlayerWallContact(player, contacts);
       player.wallSliding = false;
+      refreshWallActionTimeoutLocks(player, activeBraceWall);
       const braceHitCollision = Boolean(
         contacts.hitHead ||
         contacts.onGround ||
@@ -9288,6 +9638,7 @@ function updatePlayer(run, data, state, dt, input) {
         endBraceHoldWithCooldown(player, config, getBraceWallId(braceWall));
         player.wallGraceTimer = 0;
         player.wallGraceDirection = 0;
+        player.wallGraceWallId = null;
         player.wallSlideGraceTimer = 0;
         player.wallSlideGraceDirection = 0;
         refillDashFromGround(player, config);
@@ -9304,16 +9655,22 @@ function updatePlayer(run, data, state, dt, input) {
 
   if (canWallRun) {
     if (!player.wallRunActive || player.wallRunDirection !== wallJumpSourceDirection) {
-      enterWallRun(player, run, data, config, wallJumpSourceDirection);
+      enterWallRun(player, run, data, config, wallJumpSourceDirection, wallJumpSourceWallId);
     }
   } else if (player.wallRunActive && jumpReleased) {
     launchFromWallRun(player, run, config);
   } else if (player.wallRunActive && !pressingTowardWall) {
-    clearWallRun(player);
+    endWallRunAtWallEnd(player, data, config);
   }
 
   if (player.wallRunActive) {
-    updateWallRun(player, config, dt);
+    const wallRunResult = updateWallRun(player, data, config, dt);
+    if (wallRunResult === "limit-coast") {
+      coastOutWallRunAtClimbLimit(player);
+    } else if (wallRunResult === "limit-stop") {
+      clampWallRunClimbHeight(player);
+      expireWallRun(player, data, config);
+    }
   } else if (canGroundJump) {
     const slideJumping = player.slideTimer > 0;
     const slideJumpBoostReady = slideJumping && isSlideJumpBoostReady(player, config);
@@ -9562,14 +9919,23 @@ function updatePlayer(run, data, state, dt, input) {
 
   player.onGround = contacts.onGround;
   player.standingOnDynamicId = contacts.onGround ? (contacts.groundEntityId ?? null) : null;
-  player.wallDirection = contacts.wallLeft ? -1 : contacts.wallRight ? 1 : 0;
+  syncPlayerWallContact(player, contacts);
   player.wallSliding = false;
+  refreshWallActionTimeoutLocks(player, activeBraceWall);
 
-  if (player.wallRunActive) {
-    if (player.wallDirection === 0 || player.onGround || contacts.hitHead) {
-      launchFromWallRun(player, run, config);
+  if (player.wallRunActive && hasReachedWallRunClimbLimit(player)) {
+    clampWallRunClimbHeight(player);
+    expireWallRun(player, data, config);
+  } else if (player.wallRunActive) {
+    if (player.onGround) {
+      clearWallRun(player);
+    } else if (player.wallDirection === 0) {
+      endWallRunAtWallEnd(player, data, config);
+    } else if (contacts.hitHead) {
+      endWallRunAtWallEnd(player, data, config);
     } else {
       player.wallRunDirection = player.wallDirection;
+      player.wallRunWallId = player.wallContactId || player.wallRunWallId || null;
       player.wallSliding = false;
     }
   }
@@ -9622,6 +9988,7 @@ function updatePlayer(run, data, state, dt, input) {
     player.coyoteTimer = config.coyoteTimeMs / 1000;
     player.wallGraceTimer = 0;
     player.wallGraceDirection = 0;
+    player.wallGraceWallId = null;
     player.wallSlideGraceTimer = 0;
     player.wallSlideGraceDirection = 0;
     clearBraceHold(player);
@@ -9656,6 +10023,7 @@ function updatePlayer(run, data, state, dt, input) {
     if (player.wallDirection !== 0) {
       player.wallGraceTimer = config.wallCoyoteTimeMs / 1000;
       player.wallGraceDirection = player.wallDirection;
+      player.wallGraceWallId = player.wallContactId;
     }
   }
 
@@ -12636,14 +13004,28 @@ function resetPlayerForLevelTransition(run, data, entranceId) {
   player.airDashHoverConsumed = false;
   player.hoverActive = false;
   player.hoverBoostActive = false;
+  player.wallDirection = 0;
+  player.wallContactId = null;
+  player.wallGraceTimer = 0;
+  player.wallGraceDirection = 0;
+  player.wallGraceWallId = null;
   player.wallSliding = false;
   player.wallRunActive = false;
+  player.wallRunTimer = 0;
+  player.wallRunStartY = null;
+  player.wallRunClimbLimit = 0;
+  player.wallRunWallId = null;
+  player.wallRunTimedOutDirection = 0;
+  player.wallRunTimedOutWallId = null;
+  player.wallRunLockedTargets = [];
   player.braceHolding = false;
   player.braceHoldWallId = null;
   player.braceHoldDirection = 0;
   player.braceHoldLaunchDirection = 0;
   player.braceHoldSpeed = 0;
+  player.braceHoldTimer = 0;
   player.braceConsumedWallId = null;
+  player.braceTimedOutWallId = null;
   player.braceCooldownTimer = 0;
   player.braceHoldActive = false;
   player.braceReleaseTimer = 0;
@@ -14536,6 +14918,7 @@ function updateZipLineRide(player, data, run, config, dt, jumpPressed) {
   player.wasOnGround = false;
   player.wallSliding = false;
   player.wallDirection = 0;
+  player.wallContactId = null;
   player.sprintActive = true;
   player.sprintCharge = 1;
   player.canInteract = false;
