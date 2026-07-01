@@ -12,7 +12,7 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260628-camera-priority-controller-v23";
+} from "./state.js?v=20260701-vault-echo-v3";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-priority-controller-v23";
 import {
   clearSavedGame,
@@ -22,7 +22,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260526-sfx-v1";
+} from "./save-game.js?v=20260701-vault-echo-v3";
 import {
   getAudioChannelVolume,
   registerAudioElement,
@@ -386,6 +386,8 @@ const AIR_DASH_HOVER_BRAKE = 420;
 const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
 const SHELTER_MUSIC_SRC = "./assets/audio/bloom-through-concrete.mp3";
 const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
+const VAULT_REWIND_STALKER_DELAY_SECONDS = 5;
+const VAULT_REWIND_STALKER_TRAIL_PADDING_SECONDS = 1.25;
 const NPC_DIALOGUE_MUSIC_VOLUME = 0.16;
 const NPC_DIALOGUE_MUSIC_FADE_SECONDS = 0.65;
 const NPC_DIALOGUE_CAMERA_LERP = 8.5;
@@ -8575,13 +8577,13 @@ function getVerticalMomentumRatio(player) {
 }
 
 function getVerticalMomentumStage(value) {
-  if (value >= 0.7) {
+  if (value >= 0.999) {
     return 3;
   }
-  if (value >= 0.35) {
+  if (value >= 2 / 3) {
     return 2;
   }
-  if (value > 0.04) {
+  if (value >= 1 / 3) {
     return 1;
   }
   return 0;
@@ -8596,7 +8598,195 @@ function getMomentumSpeedMultiplier(player, config) {
   return 1 + getVerticalMomentumRatio(player) * speedBoost;
 }
 
-function getMomentumSpeedBuildRatio(player, config) {
+function getMomentumAddForceMaxSpeedMultiplier(player, config) {
+  const stage = getVerticalMomentumStage(player.verticalMomentum ?? 0);
+  const fallbackStageBoost = Math.max(0, Number(config.verticalMomentumSpeedBoost ?? 0.22)) / 3;
+  const stageBoost = Math.max(0, Number(config.verticalMomentumStageSpeedBoost ?? fallbackStageBoost) || 0);
+  return 1 + stage * stageBoost;
+}
+
+function getHorizontalAddForce(player, config, speedCap) {
+  const accelerationSeconds = Math.max(0, Number(config.groundAccelerationSeconds ?? 0) || 0);
+  if (accelerationSeconds > 0 && speedCap > 0) {
+    return speedCap / accelerationSeconds;
+  }
+  const groundForce = Math.max(0, Number(config.groundAddForce ?? (config.groundAccel ?? 2400) * 0.58) || 0);
+  if (player.onGround) {
+    return groundForce;
+  }
+  const airMultiplier = Math.max(0, Number(config.airAddForceMultiplier ?? config.airControlMultiplier ?? 0.68) || 0);
+  return groundForce * airMultiplier;
+}
+
+function getHorizontalReleaseFriction(player, config) {
+  const groundFriction = Math.max(0, Number(config.groundReleaseFriction ?? (config.groundDecel ?? 3200) * 0.24) || 0);
+  if (player.onGround) {
+    return getStopInertiaDecel(player, config, groundFriction);
+  }
+  const airMultiplier = Math.max(0, Number(config.airReleaseFrictionMultiplier ?? config.airInertiaDecelMultiplier ?? 0.18) || 0);
+  return groundFriction * airMultiplier;
+}
+
+function clearHorizontalReleaseDeceleration(player) {
+  player.horizontalDecelTimer = 0;
+  player.horizontalDecelDuration = 0;
+  player.horizontalDecelStartSpeed = 0;
+  player.horizontalDecelDirection = 0;
+}
+
+function clearHorizontalTurn(player) {
+  player.horizontalTurnTimer = 0;
+  player.horizontalTurnDuration = 0;
+  player.horizontalTurnStartVx = 0;
+  player.horizontalTurnTargetVx = 0;
+  player.horizontalTurnDirection = 0;
+}
+
+function getHorizontalDecelerationDuration(player, config) {
+  const fallback = config.groundAccelerationSeconds ?? 0.6;
+  const field = player.onGround ? "groundDecelerationSeconds" : "airDecelerationSeconds";
+  const configured = Math.max(0.001, Number(config[field] ?? fallback) || fallback);
+  return Math.min(0.4, configured);
+}
+
+function getHorizontalTurnDuration(player, config) {
+  const fallback = config.groundDecelerationSeconds ?? config.groundAccelerationSeconds ?? 0.4;
+  const field = player.onGround ? "groundTurnSeconds" : "airTurnSeconds";
+  const configured = Math.max(0.001, Number(config[field] ?? fallback) || fallback);
+  return Math.min(0.4, configured);
+}
+
+function applyHorizontalReleaseDeceleration(player, config, dt) {
+  const speed = Math.abs(player.vx ?? 0);
+  if (speed <= 0.5) {
+    player.vx = 0;
+    clearHorizontalReleaseDeceleration(player);
+    clearHorizontalTurn(player);
+    return;
+  }
+
+  const direction = Math.sign(player.vx) || player.horizontalDecelDirection || player.facing || 1;
+  const duration = getHorizontalDecelerationDuration(player, config);
+  if (
+    player.horizontalDecelDirection !== direction ||
+    !Number.isFinite(player.horizontalDecelStartSpeed) ||
+    player.horizontalDecelStartSpeed <= 0 ||
+    speed > player.horizontalDecelStartSpeed + 1
+  ) {
+    player.horizontalDecelTimer = 0;
+    player.horizontalDecelDuration = duration;
+    player.horizontalDecelStartSpeed = speed;
+    player.horizontalDecelDirection = direction;
+  }
+
+  player.horizontalDecelDuration = duration;
+  player.horizontalDecelTimer = Math.min(
+    duration,
+    Math.max(0, Number(player.horizontalDecelTimer ?? 0)) + Math.max(0, dt),
+  );
+  const progress = clamp(player.horizontalDecelTimer / duration, 0, 1);
+  const easedProgress = progress * progress * (3 - 2 * progress);
+  const nextSpeed = player.horizontalDecelStartSpeed * (1 - easedProgress);
+  if (progress >= 1 || nextSpeed <= 0.5) {
+    player.vx = 0;
+    clearHorizontalReleaseDeceleration(player);
+    clearHorizontalTurn(player);
+    return;
+  }
+  player.vx = direction * nextSpeed;
+}
+
+function applyHorizontalTurnMovement(player, config, direction, speedCap, dt) {
+  const targetVx = direction * speedCap;
+  const duration = getHorizontalTurnDuration(player, config);
+  const shouldStartTurn = (
+    player.horizontalTurnDirection !== direction ||
+    !Number.isFinite(player.horizontalTurnDuration) ||
+    player.horizontalTurnDuration <= 0 ||
+    Math.sign(player.horizontalTurnTargetVx || 0) !== direction
+  );
+
+  if (shouldStartTurn) {
+    player.horizontalTurnTimer = 0;
+    player.horizontalTurnDuration = duration;
+    player.horizontalTurnStartVx = Number.isFinite(player.vx) ? player.vx : 0;
+    player.horizontalTurnTargetVx = targetVx;
+    player.horizontalTurnDirection = direction;
+  }
+
+  player.horizontalTurnDuration = duration;
+  player.horizontalTurnTargetVx = targetVx;
+  player.horizontalTurnTimer = Math.min(
+    duration,
+    Math.max(0, Number(player.horizontalTurnTimer ?? 0)) + Math.max(0, dt),
+  );
+  const progress = clamp(player.horizontalTurnTimer / duration, 0, 1);
+  const easedProgress = progress * progress * (3 - 2 * progress);
+  player.vx = lerp(player.horizontalTurnStartVx, targetVx, easedProgress);
+  if (progress >= 1 || Math.abs(player.vx - targetVx) <= 0.5) {
+    player.vx = targetVx;
+    clearHorizontalTurn(player);
+  }
+}
+
+function getHorizontalOverspeedDrag(player, config) {
+  const groundDrag = Math.max(0, Number(config.groundOverspeedDrag ?? (config.groundDecel ?? 3200) * 0.34) || 0);
+  if (player.onGround) {
+    return groundDrag;
+  }
+  const airMultiplier = Math.max(0, Number(config.airOverspeedDragMultiplier ?? config.airTurnDecelMultiplier ?? 0.52) || 0);
+  return groundDrag * airMultiplier;
+}
+
+function applyHorizontalAddForceMovement(player, config, moveAxis, targetSpeed, dt) {
+  const direction = Math.sign(moveAxis);
+  const speedCap = Math.max(0, Math.abs(targetSpeed));
+  if (direction === 0 || speedCap <= 0) {
+    clearHorizontalTurn(player);
+    applyHorizontalReleaseDeceleration(player, config, dt);
+    return;
+  }
+
+  clearHorizontalReleaseDeceleration(player);
+  const previousVx = Number.isFinite(player.vx) ? player.vx : 0;
+  const currentDirection = Math.sign(previousVx);
+  if (
+    player.horizontalTurnDirection === direction ||
+    (currentDirection !== 0 && currentDirection !== direction)
+  ) {
+    applyHorizontalTurnMovement(player, config, direction, speedCap, dt);
+    return;
+  }
+
+  clearHorizontalTurn(player);
+  let nextVx = previousVx + direction * getHorizontalAddForce(player, config, speedCap) * dt;
+  if (Math.sign(nextVx) === direction && Math.abs(nextVx) > speedCap) {
+    if (Math.sign(previousVx) === direction && Math.abs(previousVx) <= speedCap) {
+      nextVx = direction * speedCap;
+    } else {
+      nextVx = approach(nextVx, direction * speedCap, getHorizontalOverspeedDrag(player, config) * dt);
+    }
+  }
+  player.vx = nextVx;
+}
+
+function getMomentumBuildPerSecond(config) {
+  const stageSeconds = Math.max(0, Number(config.verticalMomentumStageSeconds ?? 0) || 0);
+  if (stageSeconds > 0) {
+    return 1 / (stageSeconds * 3);
+  }
+  return Math.max(0, Number(config.verticalMomentumSpeedBuild ?? 0.24));
+}
+
+function getMomentumSpeedBuildRatio(player, config, moveAxis = 0) {
+  if (
+    moveAxis !== 0 &&
+    player.height === player.standHeight &&
+    player.slideTimer <= 0 &&
+    !player.braceHolding
+  ) {
+    return 1;
+  }
   const runSpeed = Math.max(1, Number(config.runSpeed ?? 300));
   const sprintSpeed = Math.max(runSpeed + 1, Number(config.sprintSpeed ?? runSpeed * 1.7));
   const speed = Math.hypot(player.vx ?? 0, player.vy ?? 0);
@@ -8605,8 +8795,9 @@ function getMomentumSpeedBuildRatio(player, config) {
   return clamp((speed - startSpeed) / (fullSpeed - startSpeed), 0, 1);
 }
 
-function shouldBuildMomentumFromSpeed(player) {
-  return !player.onGround
+function shouldBuildMomentumFromSpeed(player, moveAxis = 0) {
+  return moveAxis !== 0
+    || !player.onGround
     || player.dashTimer > 0
     || player.slideTimer > 0
     || player.wallRunActive
@@ -8641,15 +8832,15 @@ function grantVerticalMomentum(player, run, config, amount, action) {
   }
 }
 
-function updateVerticalMomentum(player, config, dt) {
+function updateVerticalMomentum(player, config, dt, moveAxis = 0) {
   player.verticalMomentumFlashTimer = Math.max(0, (player.verticalMomentumFlashTimer ?? 0) - dt);
   player.verticalMomentumBoostActive = false;
   player.verticalMomentumTimer = Math.max(0, (player.verticalMomentumTimer ?? 0) - dt);
-  const speedBuildRatio = shouldBuildMomentumFromSpeed(player)
-    ? getMomentumSpeedBuildRatio(player, config)
+  const speedBuildRatio = shouldBuildMomentumFromSpeed(player, moveAxis)
+    ? getMomentumSpeedBuildRatio(player, config, moveAxis)
     : 0;
   if (speedBuildRatio > 0) {
-    const speedBuild = Math.max(0, Number(config.verticalMomentumSpeedBuild ?? 0.24));
+    const speedBuild = getMomentumBuildPerSecond(config);
     player.verticalMomentum = clamp((player.verticalMomentum ?? 0) + speedBuildRatio * speedBuild * dt, 0, 1);
     player.verticalMomentumTimer = Math.max(player.verticalMomentumTimer ?? 0, 0.18);
   }
@@ -9046,7 +9237,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
   updateRecoilCameraTimers(player, dt, run);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
-  updateVerticalMomentum(player, config, dt);
+  updateVerticalMomentum(player, config, dt, moveAxis);
   decaySlideTimer(player, config, dt);
   player.slideGroundGraceTimer = Math.max(0, (player.slideGroundGraceTimer ?? 0) - dt);
   player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
@@ -9719,40 +9910,8 @@ function updatePlayer(run, data, state, dt, input) {
     const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
       ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
       : baseTargetSpeed;
-    const momentumTargetSpeed = targetSpeed * getMomentumSpeedMultiplier(player, config);
-
-    const airControl = config.airControlMultiplier ?? 1;
-    const accel = player.onGround
-      ? config.groundAccel
-      : config.groundAccel * airControl;
-    const decel = player.onGround
-      ? config.groundDecel
-      : config.groundDecel * airControl;
-    const currentDirection = Math.sign(player.vx);
-    const targetDirection = Math.sign(momentumTargetSpeed);
-    const preservingAirInertia = (
-      !player.onGround &&
-      Math.abs(player.vx) > Math.abs(momentumTargetSpeed) &&
-      (moveAxis === 0 || currentDirection === targetDirection)
-    );
-    const reversingAirDirection = (
-      !player.onGround &&
-      moveAxis !== 0 &&
-      currentDirection !== 0 &&
-      targetDirection !== 0 &&
-      currentDirection !== targetDirection
-    );
-
-    const stopDecel = moveAxis === 0 && player.onGround
-      ? getStopInertiaDecel(player, config, decel)
-      : decel;
-    let horizontalChangeRate = moveAxis !== 0 ? accel : stopDecel;
-    if (preservingAirInertia) {
-      horizontalChangeRate = decel * (config.airInertiaDecelMultiplier ?? 0.18);
-    } else if (reversingAirDirection) {
-      horizontalChangeRate = decel * (config.airTurnDecelMultiplier ?? 0.52);
-    }
-    player.vx = approach(player.vx, momentumTargetSpeed, horizontalChangeRate * dt);
+    const addForceMaxSpeed = targetSpeed * getMomentumAddForceMaxSpeedMultiplier(player, config);
+    applyHorizontalAddForceMovement(player, config, moveAxis, addForceMaxSpeed, dt);
 
     if (
       player.onGround &&
@@ -12428,6 +12587,258 @@ function isVaultLockdownActive(run) {
   return Boolean(run?.vaultEscape?.lockdownActive && !run.vaultEscape.completed);
 }
 
+function createVaultRewindStalkerState() {
+  return {
+    active: false,
+    elapsed: 0,
+    delaySeconds: VAULT_REWIND_STALKER_DELAY_SECONDS,
+    path: [],
+    snapshot: null,
+    x: 0,
+    y: 0,
+    width: 48,
+    height: 80,
+    facing: 1,
+    renderState: null,
+    collisionCooldown: 0,
+    rewinds: 0,
+  };
+}
+
+function ensureVaultRewindStalker(run) {
+  if (!run?.vaultEscape) {
+    return null;
+  }
+  if (!run.vaultEscape.rewindStalker || typeof run.vaultEscape.rewindStalker !== "object") {
+    run.vaultEscape.rewindStalker = createVaultRewindStalkerState();
+  }
+  const stalker = run.vaultEscape.rewindStalker;
+  if (!Array.isArray(stalker.path)) {
+    stalker.path = [];
+  }
+  stalker.delaySeconds = Math.max(0.1, Number(stalker.delaySeconds ?? VAULT_REWIND_STALKER_DELAY_SECONDS));
+  return stalker;
+}
+
+function clearVaultRewindStalker(run) {
+  if (!run?.vaultEscape) {
+    return;
+  }
+  run.vaultEscape.rewindStalker = createVaultRewindStalkerState();
+}
+
+function captureVaultRewindPlayerSnapshot(player) {
+  return Object.fromEntries(
+    Object.entries(player || {}).filter(([, value]) => (
+      value === null ||
+      ["number", "string", "boolean"].includes(typeof value)
+    )),
+  );
+}
+
+function restoreVaultRewindPlayerSnapshot(run, snapshot) {
+  if (!run?.player || !snapshot) {
+    return false;
+  }
+  closeLootCrate(run);
+  Object.assign(run.player, deepClone(snapshot));
+  run.player.attackHits = new Set();
+  run.player.wallRunLockedTargets = [];
+  run.player.vx = Number(run.player.vx) || 0;
+  run.player.vy = Number(run.player.vy) || 0;
+  run.player.invulnTimer = Math.max(Number(run.player.invulnTimer) || 0, 0.45);
+  run.player.canInteract = true;
+  setMovementState(run.player);
+  return true;
+}
+
+function captureVaultRewindRenderState(run) {
+  const player = run.player;
+  return {
+    time: Number(run.time) || 0,
+    vx: Number(player.vx) || 0,
+    vy: Number(player.vy) || 0,
+    facing: player.facing || 1,
+    movementState: player.movementState || MOVEMENT_STATES.GROUNDED,
+    onGround: Boolean(player.onGround),
+    sprintActive: Boolean(player.sprintActive),
+    wallRunActive: Boolean(player.wallRunActive),
+    wallRunBoostActive: Boolean(player.wallRunBoostActive),
+    wallDirection: Number(player.wallDirection) || 0,
+    braceHolding: Boolean(player.braceHolding),
+    braceReleaseTimer: Math.max(0, Number(player.braceReleaseTimer) || 0),
+    slideTimer: Math.max(0, Number(player.slideTimer) || 0),
+    recoilShotActive: Boolean(player.recoilShotActive),
+    recoilShotAirborne: Boolean(player.recoilShotAirborne),
+    recoilShotPitch: Number(player.recoilShotPitch) || 0,
+    recoilShotFacing: player.recoilShotFacing || player.facing || 1,
+    recoilAimFacing: player.recoilAimFacing || player.facing || 1,
+    recoilSpinTimer: Math.max(0, Number(player.recoilSpinTimer) || 0),
+    recoilSpinDuration: Math.max(0.001, Number(player.recoilSpinDuration) || 0.22),
+    recoilSpinFacing: player.recoilSpinFacing || player.facing || 1,
+    recoilFocusActive: Boolean(player.recoilFocusActive),
+    recoilFocusBlend: Math.max(0, Number(player.recoilFocusBlend) || 0),
+    recoilAimPitch: Number(player.recoilAimPitch) || 0,
+  };
+}
+
+function captureVaultRewindPathPoint(run, t) {
+  const player = run.player;
+  return {
+    t: Math.max(0, Number(t) || 0),
+    x: player.x,
+    y: player.y,
+    width: player.width,
+    height: player.height,
+    facing: player.facing || 1,
+    movementState: player.movementState || MOVEMENT_STATES.GROUNDED,
+    renderState: captureVaultRewindRenderState(run),
+  };
+}
+
+function initializeVaultRewindStalker(run) {
+  const stalker = ensureVaultRewindStalker(run);
+  if (!stalker || !run.player) {
+    return;
+  }
+  const snapshot = captureVaultRewindPlayerSnapshot(run.player);
+  const initialPoint = captureVaultRewindPathPoint(run, 0);
+  Object.assign(stalker, {
+    active: false,
+    elapsed: 0,
+    delaySeconds: VAULT_REWIND_STALKER_DELAY_SECONDS,
+    path: [initialPoint],
+    snapshot,
+    x: initialPoint.x,
+    y: initialPoint.y,
+    width: initialPoint.width,
+    height: initialPoint.height,
+    facing: initialPoint.facing,
+    renderState: initialPoint.renderState,
+    collisionCooldown: 0,
+    rewinds: 0,
+  });
+}
+
+function sampleVaultRewindPath(path, targetTime) {
+  if (!path.length) {
+    return null;
+  }
+  if (targetTime <= path[0].t) {
+    return path[0];
+  }
+  for (let index = 1; index < path.length; index += 1) {
+    const next = path[index];
+    if (next.t < targetTime) {
+      continue;
+    }
+    const previous = path[index - 1];
+    const span = Math.max(0.001, next.t - previous.t);
+    const ratio = clamp((targetTime - previous.t) / span, 0, 1);
+    return {
+      t: targetTime,
+      x: lerp(previous.x, next.x, ratio),
+      y: lerp(previous.y, next.y, ratio),
+      width: lerp(previous.width, next.width, ratio),
+      height: lerp(previous.height, next.height, ratio),
+      facing: ratio < 0.5 ? previous.facing : next.facing,
+      movementState: ratio < 0.5 ? previous.movementState : next.movementState,
+      renderState: ratio < 0.5 ? previous.renderState : next.renderState,
+    };
+  }
+  return path[path.length - 1];
+}
+
+function pruneVaultRewindPath(stalker, targetTime) {
+  const keepAfter = targetTime - VAULT_REWIND_STALKER_TRAIL_PADDING_SECONDS;
+  while (stalker.path.length > 2 && stalker.path[1].t < keepAfter) {
+    stalker.path.shift();
+  }
+}
+
+function getVaultRewindStalkerCollisionRect(stalker) {
+  const insetX = Math.max(4, stalker.width * 0.16);
+  const insetY = Math.max(6, stalker.height * 0.08);
+  return {
+    x: stalker.x + insetX,
+    y: stalker.y + insetY,
+    width: Math.max(8, stalker.width - insetX * 2),
+    height: Math.max(12, stalker.height - insetY * 2),
+  };
+}
+
+function resetVaultRewindStalkerAfterRewind(run, stalker) {
+  const point = captureVaultRewindPathPoint(run, 0);
+  stalker.active = false;
+  stalker.elapsed = 0;
+  stalker.path = [point];
+  stalker.x = point.x;
+  stalker.y = point.y;
+  stalker.width = point.width;
+  stalker.height = point.height;
+  stalker.facing = point.facing;
+  stalker.renderState = point.renderState;
+  stalker.collisionCooldown = 0.35;
+}
+
+function triggerVaultRewindCollision(run, stalker) {
+  const collisionX = stalker.x + stalker.width * 0.5;
+  const collisionY = stalker.y + stalker.height * 0.5;
+  if (!restoreVaultRewindPlayerSnapshot(run, stalker.snapshot)) {
+    return false;
+  }
+  stalker.rewinds = Math.max(0, Math.floor(Number(stalker.rewinds) || 0)) + 1;
+  resetVaultRewindStalkerAfterRewind(run, stalker);
+  pushNotice(run, "Vault echo contact. Returned to vault start.");
+  spawnParticles(run, collisionX, collisionY, 18, "#a78bff");
+  spawnParticles(run, run.player.x + run.player.width * 0.5, run.player.y + run.player.height * 0.5, 16, "#93eaff");
+  playGameSfx("damage", { cooldownMs: 180 });
+  return true;
+}
+
+function updateVaultRewindStalker(run, dt) {
+  const stalker = ensureVaultRewindStalker(run);
+  if (!stalker || !run.player || !isVaultEscapeActive(run)) {
+    return;
+  }
+  if (!stalker.snapshot) {
+    initializeVaultRewindStalker(run);
+  }
+
+  stalker.elapsed = Math.max(0, Number(stalker.elapsed) || 0) + Math.max(0, dt);
+  stalker.collisionCooldown = Math.max(0, Number(stalker.collisionCooldown ?? 0) - dt);
+  stalker.path.push(captureVaultRewindPathPoint(run, stalker.elapsed));
+
+  const targetTime = stalker.elapsed - stalker.delaySeconds;
+  pruneVaultRewindPath(stalker, Math.max(0, targetTime));
+  if (targetTime < 0) {
+    stalker.active = false;
+    return;
+  }
+
+  const pose = sampleVaultRewindPath(stalker.path, targetTime);
+  if (!pose) {
+    stalker.active = false;
+    return;
+  }
+
+  stalker.active = true;
+  stalker.x = pose.x;
+  stalker.y = pose.y;
+  stalker.width = pose.width;
+  stalker.height = pose.height;
+  stalker.facing = pose.facing || stalker.facing || 1;
+  stalker.movementState = pose.movementState;
+  stalker.renderState = pose.renderState || null;
+
+  if (
+    stalker.collisionCooldown <= 0 &&
+    rectsOverlap(getVaultRewindStalkerCollisionRect(stalker), run.player)
+  ) {
+    triggerVaultRewindCollision(run, stalker);
+  }
+}
+
 export function beginVaultEscape(run, door) {
   if (!run?.vaultEscape || !door || isVaultEscapeActive(run) || run.vaultEscape.completed) {
     return false;
@@ -12448,6 +12859,7 @@ export function beginVaultEscape(run, door) {
   ), 0);
   run.vaultEscape.totalLoot = (run.vaultLoot || []).length;
   run.vaultEscape.totalValue = (run.vaultLoot || []).reduce((sum, loot) => sum + Math.max(0, Number(loot.value ?? 25)), 0);
+  initializeVaultRewindStalker(run);
   closeLootCrate(run);
   pushNotice(run, "Vault alarm armed. Grab supplies and escape.");
   spawnParticles(run, door.x + door.width / 2, door.y + door.height / 2, 18, "#ff7a66");
@@ -12466,6 +12878,7 @@ function beginVaultLockdown(run) {
   run.vaultEscape.lockdownDuration = Math.max(0.4, Number(run.vaultEscape.lockdownDuration ?? 1.6));
   run.vaultEscape.lockdownTimer = run.vaultEscape.lockdownDuration;
   run.vaultEscape.timeLeft = 0;
+  clearVaultRewindStalker(run);
   closeLootCrate(run);
   run.message = "LOCKDOWN. All exits sealed.";
   run.noticeTimer = Math.max(run.noticeTimer ?? 0, run.vaultEscape.lockdownDuration);
@@ -12515,6 +12928,7 @@ function updateVaultEscapeTimer(state, data, dt) {
     return false;
   }
   run.vaultEscape.timeLeft = Math.max(0, (run.vaultEscape.timeLeft ?? 0) - dt);
+  updateVaultRewindStalker(run, dt);
   updateVaultEscapeMusic(run);
   if (run.vaultEscape.timeLeft > 0) {
     return false;
@@ -15049,6 +15463,7 @@ function updateInteractions(state, data, canInteract) {
       run.vaultEscape.completed = true;
       run.vaultEscape.lockdownActive = false;
       run.vaultEscape.lockdownTimer = 0;
+      clearVaultRewindStalker(run);
     }
     pushNotice(run, "Escaped before lockdown.");
     playGameSfx("extractConfirm", { cooldownMs: 220 });
