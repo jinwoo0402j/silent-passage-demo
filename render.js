@@ -7,7 +7,7 @@ import {
   getShelterUpgradeCost,
   getShelterUpgradeLevel,
   hasUnlocked,
-} from "./state.js?v=20260701-addforce-mom-v4";
+} from "./state.js?v=20260701-vault-echo-v3";
 import { getShelterSubtitleCharsPerSecond } from "./game-options.js?v=20260619-text-speed-v1";
 import { clamp, formatOutcome, lerp } from "./utils.js";
 
@@ -2145,6 +2145,93 @@ function drawVaultSecurityObjects(ctx, run, theme, pulse = 0) {
   });
 }
 
+function createVaultRewindStalkerPlayer(stalker) {
+  const renderState = stalker.renderState || {};
+  return {
+    x: stalker.x,
+    y: stalker.y,
+    width: stalker.width,
+    height: stalker.height,
+    facing: renderState.facing || stalker.facing || 1,
+    vx: Number(renderState.vx) || 0,
+    vy: Number(renderState.vy) || 0,
+    movementState: renderState.movementState || stalker.movementState || MOVEMENT_STATES.GROUNDED,
+    onGround: Boolean(renderState.onGround),
+    sprintActive: Boolean(renderState.sprintActive),
+    wallRunActive: Boolean(renderState.wallRunActive),
+    wallRunBoostActive: Boolean(renderState.wallRunBoostActive),
+    wallDirection: Number(renderState.wallDirection) || 0,
+    braceHolding: Boolean(renderState.braceHolding),
+    braceReleaseTimer: Math.max(0, Number(renderState.braceReleaseTimer) || 0),
+    slideTimer: Math.max(0, Number(renderState.slideTimer) || 0),
+    recoilShotActive: Boolean(renderState.recoilShotActive),
+    recoilShotAirborne: Boolean(renderState.recoilShotAirborne),
+    recoilShotPitch: Number(renderState.recoilShotPitch) || 0,
+    recoilShotFacing: renderState.recoilShotFacing || renderState.facing || stalker.facing || 1,
+    recoilAimFacing: renderState.recoilAimFacing || renderState.facing || stalker.facing || 1,
+    recoilSpinTimer: Math.max(0, Number(renderState.recoilSpinTimer) || 0),
+    recoilSpinDuration: Math.max(0.001, Number(renderState.recoilSpinDuration) || 0.22),
+    recoilSpinFacing: renderState.recoilSpinFacing || renderState.facing || stalker.facing || 1,
+    recoilFocusActive: Boolean(renderState.recoilFocusActive),
+    recoilFocusBlend: Math.max(0, Number(renderState.recoilFocusBlend) || 0),
+    recoilAimPitch: Number(renderState.recoilAimPitch) || 0,
+    invulnTimer: 0,
+    lightActive: false,
+  };
+}
+
+function drawVaultRewindStalkerFallback(ctx, stalker, shimmer = 0.5) {
+  ctx.save();
+  ctx.globalAlpha = 0.56 + shimmer * 0.18;
+  ctx.fillStyle = "rgba(210, 214, 218, 0.82)";
+  ctx.fillRect(stalker.x, stalker.y, stalker.width, stalker.height);
+  ctx.fillStyle = "rgba(18, 22, 26, 0.74)";
+  const eyeY = stalker.y + Math.max(10, stalker.height * 0.25);
+  const eyeX = stalker.x + ((stalker.facing || 1) === 1 ? stalker.width - 18 : 8);
+  ctx.fillRect(eyeX, eyeY, 10, 10);
+  ctx.restore();
+}
+
+function drawVaultRewindStalker(ctx, run, data, pulse = 0) {
+  const stalker = run.vaultEscape?.rewindStalker;
+  if (!stalker?.active) {
+    return;
+  }
+
+  const cx = stalker.x + stalker.width * 0.5;
+  const shimmer = 0.55 + Math.sin(pulse * 10 + (stalker.rewinds ?? 0)) * 0.18;
+
+  ctx.save();
+  ctx.globalAlpha = 0.34 + shimmer * 0.12;
+  ctx.fillStyle = "rgba(10, 12, 14, 0.72)";
+  ctx.beginPath();
+  ctx.ellipse(cx, stalker.y + stalker.height + 4, stalker.width * 0.54, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  const echoPlayer = createVaultRewindStalkerPlayer(stalker);
+  const renderTime = Number(stalker.renderState?.time ?? run.time) || 0;
+  const pose = getPlayerPose(echoPlayer);
+  const frame = getPlayerSpriteFrame(echoPlayer, data, pose, renderTime);
+  if (frame) {
+    drawPlayerFrame(ctx, frame, echoPlayer, {
+      alpha: 0.7 + shimmer * 0.16,
+      filter: "grayscale(1) contrast(1.2) brightness(0.72)",
+      glowColor: "rgba(225, 228, 232, 0.42)",
+      glowBlur: 10 + shimmer * 8,
+    });
+  } else {
+    drawVaultRewindStalkerFallback(ctx, stalker, shimmer);
+  }
+
+  ctx.save();
+  ctx.fillStyle = `rgba(232, 234, 236, ${0.72 + shimmer * 0.16})`;
+  ctx.font = "800 11px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("ECHO", cx, stalker.y - 12);
+  ctx.restore();
+}
+
 function drawLootLeftArt(ctx, state, data, theme, x, y, width, height) {
   drawBeveledPanel(ctx, theme, x, y, width, height, {
     cut: 18,
@@ -3723,10 +3810,12 @@ function drawPlayerFrame(ctx, frame, player, options = {}) {
     fillTint = null,
     glowColor = null,
     glowBlur = 0,
+    filter = "none",
   } = options;
 
   ctx.save();
   ctx.globalAlpha = alpha;
+  ctx.filter = filter;
   ctx.translate(frame.footX, frame.footY);
   const facing = frame.facing || player.facing || 1;
   ctx.rotate(frame.rotation * facing);
@@ -8709,6 +8798,7 @@ function renderExpedition(ctx, state, data) {
 
   drawDroneTelegraphs(ctx, run);
   drawHumanoidEnemies(ctx, run);
+  drawVaultRewindStalker(ctx, run, data, state.pulse);
   drawHostileDrones(ctx, run);
   drawEnemyShots(ctx, run);
   drawRecoilFocusMapDim(ctx, run, data);

@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260701-addforce-mom-v4";
+import { GAME_DATA } from "./level-data.js?v=20260701-vault-echo-v3";
 import {
   LEVEL_OVERRIDE_KEY,
   LEVEL_OVERRIDES_KEY,
@@ -17,7 +17,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260701-addforce-mom-v4";
+} from "./movement-tuning.js?v=20260701-vault-echo-v3";
 import {
   AUDIO_OPTION_CHANNELS,
   applyAudioOptions,
@@ -37,13 +37,13 @@ import {
   resetGameOptions,
   saveGameOptions,
 } from "./game-options.js?v=20260619-text-speed-v1";
-import { renderGame } from "./render.js?v=20260628-camera-mouse-pan-removed";
+import { renderGame } from "./render.js?v=20260701-vault-echo-v3";
 import {
   restoreSavedGame,
   saveCurrentGame,
   shouldStartFromUrlLevel,
   startNewSavedRun,
-} from "./save-game.js?v=20260622-npc-v1";
+} from "./save-game.js?v=20260701-vault-echo-v3";
 import {
   MOVEMENT_STATES,
   SCENES,
@@ -54,8 +54,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260701-addforce-mom-v4";
-import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260701-addforce-mom-v4";
+} from "./state.js?v=20260701-vault-echo-v3";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260701-vault-echo-v3";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

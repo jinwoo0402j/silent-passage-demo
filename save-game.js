@@ -1,4 +1,4 @@
-import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260701-addforce-mom-v4";
+import { SCENES, createRunState, saveMetaState } from "./state.js?v=20260701-vault-echo-v3";
 import { getRunStartLevelId, loadRuntimeLevelData } from "./level-store.js?v=20260622-npc-v1";
 
 const SAVE_SLOT_KEY = "rulebound-local-profile-v1";

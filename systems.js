@@ -12,7 +12,7 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260701-addforce-mom-v4";
+} from "./state.js?v=20260701-vault-echo-v3";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-priority-controller-v23";
 import {
   clearSavedGame,
@@ -22,7 +22,7 @@ import {
   shouldStartFromUrlLevel,
   startNewSavedRun,
   updateAutoSave,
-} from "./save-game.js?v=20260526-sfx-v1";
+} from "./save-game.js?v=20260701-vault-echo-v3";
 import {
   getAudioChannelVolume,
   registerAudioElement,
@@ -386,6 +386,8 @@ const AIR_DASH_HOVER_BRAKE = 420;
 const SEARCH_MUSIC_SRC = "./assets/audio/search.mp3";
 const SHELTER_MUSIC_SRC = "./assets/audio/bloom-through-concrete.mp3";
 const VAULT_ESCAPE_MUSIC_SRC = "./assets/audio/escape.mp3";
+const VAULT_REWIND_STALKER_DELAY_SECONDS = 5;
+const VAULT_REWIND_STALKER_TRAIL_PADDING_SECONDS = 1.25;
 const NPC_DIALOGUE_MUSIC_VOLUME = 0.16;
 const NPC_DIALOGUE_MUSIC_FADE_SECONDS = 0.65;
 const NPC_DIALOGUE_CAMERA_LERP = 8.5;
@@ -12585,6 +12587,258 @@ function isVaultLockdownActive(run) {
   return Boolean(run?.vaultEscape?.lockdownActive && !run.vaultEscape.completed);
 }
 
+function createVaultRewindStalkerState() {
+  return {
+    active: false,
+    elapsed: 0,
+    delaySeconds: VAULT_REWIND_STALKER_DELAY_SECONDS,
+    path: [],
+    snapshot: null,
+    x: 0,
+    y: 0,
+    width: 48,
+    height: 80,
+    facing: 1,
+    renderState: null,
+    collisionCooldown: 0,
+    rewinds: 0,
+  };
+}
+
+function ensureVaultRewindStalker(run) {
+  if (!run?.vaultEscape) {
+    return null;
+  }
+  if (!run.vaultEscape.rewindStalker || typeof run.vaultEscape.rewindStalker !== "object") {
+    run.vaultEscape.rewindStalker = createVaultRewindStalkerState();
+  }
+  const stalker = run.vaultEscape.rewindStalker;
+  if (!Array.isArray(stalker.path)) {
+    stalker.path = [];
+  }
+  stalker.delaySeconds = Math.max(0.1, Number(stalker.delaySeconds ?? VAULT_REWIND_STALKER_DELAY_SECONDS));
+  return stalker;
+}
+
+function clearVaultRewindStalker(run) {
+  if (!run?.vaultEscape) {
+    return;
+  }
+  run.vaultEscape.rewindStalker = createVaultRewindStalkerState();
+}
+
+function captureVaultRewindPlayerSnapshot(player) {
+  return Object.fromEntries(
+    Object.entries(player || {}).filter(([, value]) => (
+      value === null ||
+      ["number", "string", "boolean"].includes(typeof value)
+    )),
+  );
+}
+
+function restoreVaultRewindPlayerSnapshot(run, snapshot) {
+  if (!run?.player || !snapshot) {
+    return false;
+  }
+  closeLootCrate(run);
+  Object.assign(run.player, deepClone(snapshot));
+  run.player.attackHits = new Set();
+  run.player.wallRunLockedTargets = [];
+  run.player.vx = Number(run.player.vx) || 0;
+  run.player.vy = Number(run.player.vy) || 0;
+  run.player.invulnTimer = Math.max(Number(run.player.invulnTimer) || 0, 0.45);
+  run.player.canInteract = true;
+  setMovementState(run.player);
+  return true;
+}
+
+function captureVaultRewindRenderState(run) {
+  const player = run.player;
+  return {
+    time: Number(run.time) || 0,
+    vx: Number(player.vx) || 0,
+    vy: Number(player.vy) || 0,
+    facing: player.facing || 1,
+    movementState: player.movementState || MOVEMENT_STATES.GROUNDED,
+    onGround: Boolean(player.onGround),
+    sprintActive: Boolean(player.sprintActive),
+    wallRunActive: Boolean(player.wallRunActive),
+    wallRunBoostActive: Boolean(player.wallRunBoostActive),
+    wallDirection: Number(player.wallDirection) || 0,
+    braceHolding: Boolean(player.braceHolding),
+    braceReleaseTimer: Math.max(0, Number(player.braceReleaseTimer) || 0),
+    slideTimer: Math.max(0, Number(player.slideTimer) || 0),
+    recoilShotActive: Boolean(player.recoilShotActive),
+    recoilShotAirborne: Boolean(player.recoilShotAirborne),
+    recoilShotPitch: Number(player.recoilShotPitch) || 0,
+    recoilShotFacing: player.recoilShotFacing || player.facing || 1,
+    recoilAimFacing: player.recoilAimFacing || player.facing || 1,
+    recoilSpinTimer: Math.max(0, Number(player.recoilSpinTimer) || 0),
+    recoilSpinDuration: Math.max(0.001, Number(player.recoilSpinDuration) || 0.22),
+    recoilSpinFacing: player.recoilSpinFacing || player.facing || 1,
+    recoilFocusActive: Boolean(player.recoilFocusActive),
+    recoilFocusBlend: Math.max(0, Number(player.recoilFocusBlend) || 0),
+    recoilAimPitch: Number(player.recoilAimPitch) || 0,
+  };
+}
+
+function captureVaultRewindPathPoint(run, t) {
+  const player = run.player;
+  return {
+    t: Math.max(0, Number(t) || 0),
+    x: player.x,
+    y: player.y,
+    width: player.width,
+    height: player.height,
+    facing: player.facing || 1,
+    movementState: player.movementState || MOVEMENT_STATES.GROUNDED,
+    renderState: captureVaultRewindRenderState(run),
+  };
+}
+
+function initializeVaultRewindStalker(run) {
+  const stalker = ensureVaultRewindStalker(run);
+  if (!stalker || !run.player) {
+    return;
+  }
+  const snapshot = captureVaultRewindPlayerSnapshot(run.player);
+  const initialPoint = captureVaultRewindPathPoint(run, 0);
+  Object.assign(stalker, {
+    active: false,
+    elapsed: 0,
+    delaySeconds: VAULT_REWIND_STALKER_DELAY_SECONDS,
+    path: [initialPoint],
+    snapshot,
+    x: initialPoint.x,
+    y: initialPoint.y,
+    width: initialPoint.width,
+    height: initialPoint.height,
+    facing: initialPoint.facing,
+    renderState: initialPoint.renderState,
+    collisionCooldown: 0,
+    rewinds: 0,
+  });
+}
+
+function sampleVaultRewindPath(path, targetTime) {
+  if (!path.length) {
+    return null;
+  }
+  if (targetTime <= path[0].t) {
+    return path[0];
+  }
+  for (let index = 1; index < path.length; index += 1) {
+    const next = path[index];
+    if (next.t < targetTime) {
+      continue;
+    }
+    const previous = path[index - 1];
+    const span = Math.max(0.001, next.t - previous.t);
+    const ratio = clamp((targetTime - previous.t) / span, 0, 1);
+    return {
+      t: targetTime,
+      x: lerp(previous.x, next.x, ratio),
+      y: lerp(previous.y, next.y, ratio),
+      width: lerp(previous.width, next.width, ratio),
+      height: lerp(previous.height, next.height, ratio),
+      facing: ratio < 0.5 ? previous.facing : next.facing,
+      movementState: ratio < 0.5 ? previous.movementState : next.movementState,
+      renderState: ratio < 0.5 ? previous.renderState : next.renderState,
+    };
+  }
+  return path[path.length - 1];
+}
+
+function pruneVaultRewindPath(stalker, targetTime) {
+  const keepAfter = targetTime - VAULT_REWIND_STALKER_TRAIL_PADDING_SECONDS;
+  while (stalker.path.length > 2 && stalker.path[1].t < keepAfter) {
+    stalker.path.shift();
+  }
+}
+
+function getVaultRewindStalkerCollisionRect(stalker) {
+  const insetX = Math.max(4, stalker.width * 0.16);
+  const insetY = Math.max(6, stalker.height * 0.08);
+  return {
+    x: stalker.x + insetX,
+    y: stalker.y + insetY,
+    width: Math.max(8, stalker.width - insetX * 2),
+    height: Math.max(12, stalker.height - insetY * 2),
+  };
+}
+
+function resetVaultRewindStalkerAfterRewind(run, stalker) {
+  const point = captureVaultRewindPathPoint(run, 0);
+  stalker.active = false;
+  stalker.elapsed = 0;
+  stalker.path = [point];
+  stalker.x = point.x;
+  stalker.y = point.y;
+  stalker.width = point.width;
+  stalker.height = point.height;
+  stalker.facing = point.facing;
+  stalker.renderState = point.renderState;
+  stalker.collisionCooldown = 0.35;
+}
+
+function triggerVaultRewindCollision(run, stalker) {
+  const collisionX = stalker.x + stalker.width * 0.5;
+  const collisionY = stalker.y + stalker.height * 0.5;
+  if (!restoreVaultRewindPlayerSnapshot(run, stalker.snapshot)) {
+    return false;
+  }
+  stalker.rewinds = Math.max(0, Math.floor(Number(stalker.rewinds) || 0)) + 1;
+  resetVaultRewindStalkerAfterRewind(run, stalker);
+  pushNotice(run, "Vault echo contact. Returned to vault start.");
+  spawnParticles(run, collisionX, collisionY, 18, "#a78bff");
+  spawnParticles(run, run.player.x + run.player.width * 0.5, run.player.y + run.player.height * 0.5, 16, "#93eaff");
+  playGameSfx("damage", { cooldownMs: 180 });
+  return true;
+}
+
+function updateVaultRewindStalker(run, dt) {
+  const stalker = ensureVaultRewindStalker(run);
+  if (!stalker || !run.player || !isVaultEscapeActive(run)) {
+    return;
+  }
+  if (!stalker.snapshot) {
+    initializeVaultRewindStalker(run);
+  }
+
+  stalker.elapsed = Math.max(0, Number(stalker.elapsed) || 0) + Math.max(0, dt);
+  stalker.collisionCooldown = Math.max(0, Number(stalker.collisionCooldown ?? 0) - dt);
+  stalker.path.push(captureVaultRewindPathPoint(run, stalker.elapsed));
+
+  const targetTime = stalker.elapsed - stalker.delaySeconds;
+  pruneVaultRewindPath(stalker, Math.max(0, targetTime));
+  if (targetTime < 0) {
+    stalker.active = false;
+    return;
+  }
+
+  const pose = sampleVaultRewindPath(stalker.path, targetTime);
+  if (!pose) {
+    stalker.active = false;
+    return;
+  }
+
+  stalker.active = true;
+  stalker.x = pose.x;
+  stalker.y = pose.y;
+  stalker.width = pose.width;
+  stalker.height = pose.height;
+  stalker.facing = pose.facing || stalker.facing || 1;
+  stalker.movementState = pose.movementState;
+  stalker.renderState = pose.renderState || null;
+
+  if (
+    stalker.collisionCooldown <= 0 &&
+    rectsOverlap(getVaultRewindStalkerCollisionRect(stalker), run.player)
+  ) {
+    triggerVaultRewindCollision(run, stalker);
+  }
+}
+
 export function beginVaultEscape(run, door) {
   if (!run?.vaultEscape || !door || isVaultEscapeActive(run) || run.vaultEscape.completed) {
     return false;
@@ -12605,6 +12859,7 @@ export function beginVaultEscape(run, door) {
   ), 0);
   run.vaultEscape.totalLoot = (run.vaultLoot || []).length;
   run.vaultEscape.totalValue = (run.vaultLoot || []).reduce((sum, loot) => sum + Math.max(0, Number(loot.value ?? 25)), 0);
+  initializeVaultRewindStalker(run);
   closeLootCrate(run);
   pushNotice(run, "Vault alarm armed. Grab supplies and escape.");
   spawnParticles(run, door.x + door.width / 2, door.y + door.height / 2, 18, "#ff7a66");
@@ -12623,6 +12878,7 @@ function beginVaultLockdown(run) {
   run.vaultEscape.lockdownDuration = Math.max(0.4, Number(run.vaultEscape.lockdownDuration ?? 1.6));
   run.vaultEscape.lockdownTimer = run.vaultEscape.lockdownDuration;
   run.vaultEscape.timeLeft = 0;
+  clearVaultRewindStalker(run);
   closeLootCrate(run);
   run.message = "LOCKDOWN. All exits sealed.";
   run.noticeTimer = Math.max(run.noticeTimer ?? 0, run.vaultEscape.lockdownDuration);
@@ -12672,6 +12928,7 @@ function updateVaultEscapeTimer(state, data, dt) {
     return false;
   }
   run.vaultEscape.timeLeft = Math.max(0, (run.vaultEscape.timeLeft ?? 0) - dt);
+  updateVaultRewindStalker(run, dt);
   updateVaultEscapeMusic(run);
   if (run.vaultEscape.timeLeft > 0) {
     return false;
@@ -15206,6 +15463,7 @@ function updateInteractions(state, data, canInteract) {
       run.vaultEscape.completed = true;
       run.vaultEscape.lockdownActive = false;
       run.vaultEscape.lockdownTimer = 0;
+      clearVaultRewindStalker(run);
     }
     pushNotice(run, "Escaped before lockdown.");
     playGameSfx("extractConfirm", { cooldownMs: 220 });

@@ -518,6 +518,21 @@ function createVaultEscapeState(data) {
     totalLoot,
     valueCollected: 0,
     totalValue,
+    rewindStalker: {
+      active: false,
+      elapsed: 0,
+      delaySeconds: 5,
+      path: [],
+      snapshot: null,
+      x: 0,
+      y: 0,
+      width: 48,
+      height: 80,
+      facing: 1,
+      renderState: null,
+      collisionCooldown: 0,
+      rewinds: 0,
+    },
   };
 }
 
