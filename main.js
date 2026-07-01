@@ -1,4 +1,4 @@
-import { GAME_DATA } from "./level-data.js?v=20260628-camera-mouse-pan-removed";
+import { GAME_DATA } from "./level-data.js?v=20260701-addforce-mom-v4";
 import {
   LEVEL_OVERRIDE_KEY,
   LEVEL_OVERRIDES_KEY,
@@ -17,7 +17,7 @@ import {
   extractSprintTuning,
   loadSprintTuning,
   saveSprintTuning,
-} from "./movement-tuning.js?v=20260628-camera-mouse-pan-removed";
+} from "./movement-tuning.js?v=20260701-addforce-mom-v4";
 import {
   AUDIO_OPTION_CHANNELS,
   applyAudioOptions,
@@ -54,8 +54,8 @@ import {
   ensureWeaponLoadoutState,
   normalizePartInstance,
   saveMetaState,
-} from "./state.js?v=20260628-camera-priority-controller-v23";
-import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260629-shelter-return-v3";
+} from "./state.js?v=20260701-addforce-mom-v4";
+import { activateTitleMenuSelection, beginVaultEscape, bindInput, playGameSfx, updateGame } from "./systems.js?v=20260701-addforce-mom-v4";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");

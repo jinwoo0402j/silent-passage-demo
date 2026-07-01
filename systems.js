@@ -12,7 +12,7 @@
   hasUnlocked,
   normalizeMetaUpgrades,
   saveMetaState,
-} from "./state.js?v=20260628-camera-priority-controller-v23";
+} from "./state.js?v=20260701-addforce-mom-v4";
 import { getLevelIds, loadRuntimeLevelData } from "./level-store.js?v=20260628-camera-priority-controller-v23";
 import {
   clearSavedGame,
@@ -8575,13 +8575,13 @@ function getVerticalMomentumRatio(player) {
 }
 
 function getVerticalMomentumStage(value) {
-  if (value >= 0.7) {
+  if (value >= 0.999) {
     return 3;
   }
-  if (value >= 0.35) {
+  if (value >= 2 / 3) {
     return 2;
   }
-  if (value > 0.04) {
+  if (value >= 1 / 3) {
     return 1;
   }
   return 0;
@@ -8596,7 +8596,195 @@ function getMomentumSpeedMultiplier(player, config) {
   return 1 + getVerticalMomentumRatio(player) * speedBoost;
 }
 
-function getMomentumSpeedBuildRatio(player, config) {
+function getMomentumAddForceMaxSpeedMultiplier(player, config) {
+  const stage = getVerticalMomentumStage(player.verticalMomentum ?? 0);
+  const fallbackStageBoost = Math.max(0, Number(config.verticalMomentumSpeedBoost ?? 0.22)) / 3;
+  const stageBoost = Math.max(0, Number(config.verticalMomentumStageSpeedBoost ?? fallbackStageBoost) || 0);
+  return 1 + stage * stageBoost;
+}
+
+function getHorizontalAddForce(player, config, speedCap) {
+  const accelerationSeconds = Math.max(0, Number(config.groundAccelerationSeconds ?? 0) || 0);
+  if (accelerationSeconds > 0 && speedCap > 0) {
+    return speedCap / accelerationSeconds;
+  }
+  const groundForce = Math.max(0, Number(config.groundAddForce ?? (config.groundAccel ?? 2400) * 0.58) || 0);
+  if (player.onGround) {
+    return groundForce;
+  }
+  const airMultiplier = Math.max(0, Number(config.airAddForceMultiplier ?? config.airControlMultiplier ?? 0.68) || 0);
+  return groundForce * airMultiplier;
+}
+
+function getHorizontalReleaseFriction(player, config) {
+  const groundFriction = Math.max(0, Number(config.groundReleaseFriction ?? (config.groundDecel ?? 3200) * 0.24) || 0);
+  if (player.onGround) {
+    return getStopInertiaDecel(player, config, groundFriction);
+  }
+  const airMultiplier = Math.max(0, Number(config.airReleaseFrictionMultiplier ?? config.airInertiaDecelMultiplier ?? 0.18) || 0);
+  return groundFriction * airMultiplier;
+}
+
+function clearHorizontalReleaseDeceleration(player) {
+  player.horizontalDecelTimer = 0;
+  player.horizontalDecelDuration = 0;
+  player.horizontalDecelStartSpeed = 0;
+  player.horizontalDecelDirection = 0;
+}
+
+function clearHorizontalTurn(player) {
+  player.horizontalTurnTimer = 0;
+  player.horizontalTurnDuration = 0;
+  player.horizontalTurnStartVx = 0;
+  player.horizontalTurnTargetVx = 0;
+  player.horizontalTurnDirection = 0;
+}
+
+function getHorizontalDecelerationDuration(player, config) {
+  const fallback = config.groundAccelerationSeconds ?? 0.6;
+  const field = player.onGround ? "groundDecelerationSeconds" : "airDecelerationSeconds";
+  const configured = Math.max(0.001, Number(config[field] ?? fallback) || fallback);
+  return Math.min(0.4, configured);
+}
+
+function getHorizontalTurnDuration(player, config) {
+  const fallback = config.groundDecelerationSeconds ?? config.groundAccelerationSeconds ?? 0.4;
+  const field = player.onGround ? "groundTurnSeconds" : "airTurnSeconds";
+  const configured = Math.max(0.001, Number(config[field] ?? fallback) || fallback);
+  return Math.min(0.4, configured);
+}
+
+function applyHorizontalReleaseDeceleration(player, config, dt) {
+  const speed = Math.abs(player.vx ?? 0);
+  if (speed <= 0.5) {
+    player.vx = 0;
+    clearHorizontalReleaseDeceleration(player);
+    clearHorizontalTurn(player);
+    return;
+  }
+
+  const direction = Math.sign(player.vx) || player.horizontalDecelDirection || player.facing || 1;
+  const duration = getHorizontalDecelerationDuration(player, config);
+  if (
+    player.horizontalDecelDirection !== direction ||
+    !Number.isFinite(player.horizontalDecelStartSpeed) ||
+    player.horizontalDecelStartSpeed <= 0 ||
+    speed > player.horizontalDecelStartSpeed + 1
+  ) {
+    player.horizontalDecelTimer = 0;
+    player.horizontalDecelDuration = duration;
+    player.horizontalDecelStartSpeed = speed;
+    player.horizontalDecelDirection = direction;
+  }
+
+  player.horizontalDecelDuration = duration;
+  player.horizontalDecelTimer = Math.min(
+    duration,
+    Math.max(0, Number(player.horizontalDecelTimer ?? 0)) + Math.max(0, dt),
+  );
+  const progress = clamp(player.horizontalDecelTimer / duration, 0, 1);
+  const easedProgress = progress * progress * (3 - 2 * progress);
+  const nextSpeed = player.horizontalDecelStartSpeed * (1 - easedProgress);
+  if (progress >= 1 || nextSpeed <= 0.5) {
+    player.vx = 0;
+    clearHorizontalReleaseDeceleration(player);
+    clearHorizontalTurn(player);
+    return;
+  }
+  player.vx = direction * nextSpeed;
+}
+
+function applyHorizontalTurnMovement(player, config, direction, speedCap, dt) {
+  const targetVx = direction * speedCap;
+  const duration = getHorizontalTurnDuration(player, config);
+  const shouldStartTurn = (
+    player.horizontalTurnDirection !== direction ||
+    !Number.isFinite(player.horizontalTurnDuration) ||
+    player.horizontalTurnDuration <= 0 ||
+    Math.sign(player.horizontalTurnTargetVx || 0) !== direction
+  );
+
+  if (shouldStartTurn) {
+    player.horizontalTurnTimer = 0;
+    player.horizontalTurnDuration = duration;
+    player.horizontalTurnStartVx = Number.isFinite(player.vx) ? player.vx : 0;
+    player.horizontalTurnTargetVx = targetVx;
+    player.horizontalTurnDirection = direction;
+  }
+
+  player.horizontalTurnDuration = duration;
+  player.horizontalTurnTargetVx = targetVx;
+  player.horizontalTurnTimer = Math.min(
+    duration,
+    Math.max(0, Number(player.horizontalTurnTimer ?? 0)) + Math.max(0, dt),
+  );
+  const progress = clamp(player.horizontalTurnTimer / duration, 0, 1);
+  const easedProgress = progress * progress * (3 - 2 * progress);
+  player.vx = lerp(player.horizontalTurnStartVx, targetVx, easedProgress);
+  if (progress >= 1 || Math.abs(player.vx - targetVx) <= 0.5) {
+    player.vx = targetVx;
+    clearHorizontalTurn(player);
+  }
+}
+
+function getHorizontalOverspeedDrag(player, config) {
+  const groundDrag = Math.max(0, Number(config.groundOverspeedDrag ?? (config.groundDecel ?? 3200) * 0.34) || 0);
+  if (player.onGround) {
+    return groundDrag;
+  }
+  const airMultiplier = Math.max(0, Number(config.airOverspeedDragMultiplier ?? config.airTurnDecelMultiplier ?? 0.52) || 0);
+  return groundDrag * airMultiplier;
+}
+
+function applyHorizontalAddForceMovement(player, config, moveAxis, targetSpeed, dt) {
+  const direction = Math.sign(moveAxis);
+  const speedCap = Math.max(0, Math.abs(targetSpeed));
+  if (direction === 0 || speedCap <= 0) {
+    clearHorizontalTurn(player);
+    applyHorizontalReleaseDeceleration(player, config, dt);
+    return;
+  }
+
+  clearHorizontalReleaseDeceleration(player);
+  const previousVx = Number.isFinite(player.vx) ? player.vx : 0;
+  const currentDirection = Math.sign(previousVx);
+  if (
+    player.horizontalTurnDirection === direction ||
+    (currentDirection !== 0 && currentDirection !== direction)
+  ) {
+    applyHorizontalTurnMovement(player, config, direction, speedCap, dt);
+    return;
+  }
+
+  clearHorizontalTurn(player);
+  let nextVx = previousVx + direction * getHorizontalAddForce(player, config, speedCap) * dt;
+  if (Math.sign(nextVx) === direction && Math.abs(nextVx) > speedCap) {
+    if (Math.sign(previousVx) === direction && Math.abs(previousVx) <= speedCap) {
+      nextVx = direction * speedCap;
+    } else {
+      nextVx = approach(nextVx, direction * speedCap, getHorizontalOverspeedDrag(player, config) * dt);
+    }
+  }
+  player.vx = nextVx;
+}
+
+function getMomentumBuildPerSecond(config) {
+  const stageSeconds = Math.max(0, Number(config.verticalMomentumStageSeconds ?? 0) || 0);
+  if (stageSeconds > 0) {
+    return 1 / (stageSeconds * 3);
+  }
+  return Math.max(0, Number(config.verticalMomentumSpeedBuild ?? 0.24));
+}
+
+function getMomentumSpeedBuildRatio(player, config, moveAxis = 0) {
+  if (
+    moveAxis !== 0 &&
+    player.height === player.standHeight &&
+    player.slideTimer <= 0 &&
+    !player.braceHolding
+  ) {
+    return 1;
+  }
   const runSpeed = Math.max(1, Number(config.runSpeed ?? 300));
   const sprintSpeed = Math.max(runSpeed + 1, Number(config.sprintSpeed ?? runSpeed * 1.7));
   const speed = Math.hypot(player.vx ?? 0, player.vy ?? 0);
@@ -8605,8 +8793,9 @@ function getMomentumSpeedBuildRatio(player, config) {
   return clamp((speed - startSpeed) / (fullSpeed - startSpeed), 0, 1);
 }
 
-function shouldBuildMomentumFromSpeed(player) {
-  return !player.onGround
+function shouldBuildMomentumFromSpeed(player, moveAxis = 0) {
+  return moveAxis !== 0
+    || !player.onGround
     || player.dashTimer > 0
     || player.slideTimer > 0
     || player.wallRunActive
@@ -8641,15 +8830,15 @@ function grantVerticalMomentum(player, run, config, amount, action) {
   }
 }
 
-function updateVerticalMomentum(player, config, dt) {
+function updateVerticalMomentum(player, config, dt, moveAxis = 0) {
   player.verticalMomentumFlashTimer = Math.max(0, (player.verticalMomentumFlashTimer ?? 0) - dt);
   player.verticalMomentumBoostActive = false;
   player.verticalMomentumTimer = Math.max(0, (player.verticalMomentumTimer ?? 0) - dt);
-  const speedBuildRatio = shouldBuildMomentumFromSpeed(player)
-    ? getMomentumSpeedBuildRatio(player, config)
+  const speedBuildRatio = shouldBuildMomentumFromSpeed(player, moveAxis)
+    ? getMomentumSpeedBuildRatio(player, config, moveAxis)
     : 0;
   if (speedBuildRatio > 0) {
-    const speedBuild = Math.max(0, Number(config.verticalMomentumSpeedBuild ?? 0.24));
+    const speedBuild = getMomentumBuildPerSecond(config);
     player.verticalMomentum = clamp((player.verticalMomentum ?? 0) + speedBuildRatio * speedBuild * dt, 0, 1);
     player.verticalMomentumTimer = Math.max(player.verticalMomentumTimer ?? 0, 0.18);
   }
@@ -9046,7 +9235,7 @@ function updatePlayer(run, data, state, dt, input) {
   player.recoilSpinTimer = Math.max(0, player.recoilSpinTimer - dt);
   updateRecoilCameraTimers(player, dt, run);
   player.sprintJumpCarryTimer = Math.max(0, player.sprintJumpCarryTimer - dt);
-  updateVerticalMomentum(player, config, dt);
+  updateVerticalMomentum(player, config, dt, moveAxis);
   decaySlideTimer(player, config, dt);
   player.slideGroundGraceTimer = Math.max(0, (player.slideGroundGraceTimer ?? 0) - dt);
   player.wallGraceTimer = Math.max(0, player.wallGraceTimer - dt);
@@ -9719,40 +9908,8 @@ function updatePlayer(run, data, state, dt, input) {
     const targetSpeed = player.sprintJumpCarryTimer > 0 && moveAxis !== 0
       ? moveAxis * Math.max(Math.abs(baseTargetSpeed), Math.abs(player.sprintJumpCarrySpeed))
       : baseTargetSpeed;
-    const momentumTargetSpeed = targetSpeed * getMomentumSpeedMultiplier(player, config);
-
-    const airControl = config.airControlMultiplier ?? 1;
-    const accel = player.onGround
-      ? config.groundAccel
-      : config.groundAccel * airControl;
-    const decel = player.onGround
-      ? config.groundDecel
-      : config.groundDecel * airControl;
-    const currentDirection = Math.sign(player.vx);
-    const targetDirection = Math.sign(momentumTargetSpeed);
-    const preservingAirInertia = (
-      !player.onGround &&
-      Math.abs(player.vx) > Math.abs(momentumTargetSpeed) &&
-      (moveAxis === 0 || currentDirection === targetDirection)
-    );
-    const reversingAirDirection = (
-      !player.onGround &&
-      moveAxis !== 0 &&
-      currentDirection !== 0 &&
-      targetDirection !== 0 &&
-      currentDirection !== targetDirection
-    );
-
-    const stopDecel = moveAxis === 0 && player.onGround
-      ? getStopInertiaDecel(player, config, decel)
-      : decel;
-    let horizontalChangeRate = moveAxis !== 0 ? accel : stopDecel;
-    if (preservingAirInertia) {
-      horizontalChangeRate = decel * (config.airInertiaDecelMultiplier ?? 0.18);
-    } else if (reversingAirDirection) {
-      horizontalChangeRate = decel * (config.airTurnDecelMultiplier ?? 0.52);
-    }
-    player.vx = approach(player.vx, momentumTargetSpeed, horizontalChangeRate * dt);
+    const addForceMaxSpeed = targetSpeed * getMomentumAddForceMaxSpeedMultiplier(player, config);
+    applyHorizontalAddForceMovement(player, config, moveAxis, addForceMaxSpeed, dt);
 
     if (
       player.onGround &&
